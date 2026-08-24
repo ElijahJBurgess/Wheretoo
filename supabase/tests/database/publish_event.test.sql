@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(14);
+select plan(23);
 
 insert into auth.users (id, email)
 values
@@ -184,7 +184,132 @@ values
     37.7936,
     -122.3958,
     'free'
+  ),
+  (
+    '20000000-0000-0000-0000-000000000009',
+    '10000000-0000-0000-0000-000000000001',
+    'clear',
+    'Blank Address Event',
+    'A sufficiently detailed description for blank address validation.',
+    'community',
+    now() + interval '2 days',
+    now() + interval '2 days 2 hours',
+    '   ',
+    'San Francisco',
+    'CA',
+    '94105',
+    'US',
+    'mapbox.blank-address-event',
+    37.7936,
+    -122.3958,
+    'free'
+  ),
+  (
+    '20000000-0000-0000-0000-000000000010',
+    '10000000-0000-0000-0000-000000000001',
+    'clear',
+    'Blank City Event',
+    'A sufficiently detailed description for blank city validation.',
+    'community',
+    now() + interval '2 days',
+    now() + interval '2 days 2 hours',
+    '1 Market Street',
+    E'\t',
+    'CA',
+    '94105',
+    'US',
+    'mapbox.blank-city-event',
+    37.7936,
+    -122.3958,
+    'free'
+  ),
+  (
+    '20000000-0000-0000-0000-000000000011',
+    '10000000-0000-0000-0000-000000000001',
+    'clear',
+    'Blank Postal Code Event',
+    'A sufficiently detailed description for blank postal validation.',
+    'community',
+    now() + interval '2 days',
+    now() + interval '2 days 2 hours',
+    '1 Market Street',
+    'San Francisco',
+    'CA',
+    E'\n',
+    'US',
+    'mapbox.blank-postal-event',
+    37.7936,
+    -122.3958,
+    'free'
+  ),
+  (
+    '20000000-0000-0000-0000-000000000012',
+    '10000000-0000-0000-0000-000000000001',
+    'clear',
+    'Blank Mapbox Feature Event',
+    'A sufficiently detailed description for blank Mapbox ID validation.',
+    'community',
+    now() + interval '2 days',
+    now() + interval '2 days 2 hours',
+    '1 Market Street',
+    'San Francisco',
+    'CA',
+    '94105',
+    'US',
+    E' \t ',
+    37.7936,
+    -122.3958,
+    'free'
+  ),
+  (
+    '20000000-0000-0000-0000-000000000013',
+    '10000000-0000-0000-0000-000000000001',
+    'flagged',
+    'Flagged Event',
+    'A sufficiently detailed description for a flagged event.',
+    'community',
+    now() + interval '2 days',
+    now() + interval '2 days 2 hours',
+    '1 Market Street',
+    'San Francisco',
+    'CA',
+    '94105',
+    'US',
+    'mapbox.flagged-event',
+    37.7936,
+    -122.3958,
+    'free'
+  ),
+  (
+    '20000000-0000-0000-0000-000000000014',
+    '10000000-0000-0000-0000-000000000001',
+    'removed',
+    'Removed Event',
+    'A sufficiently detailed description for a removed event.',
+    'community',
+    now() + interval '2 days',
+    now() + interval '2 days 2 hours',
+    '1 Market Street',
+    'San Francisco',
+    'CA',
+    '94105',
+    'US',
+    'mapbox.removed-event',
+    37.7936,
+    -122.3958,
+    'free'
   );
+
+select set_config('request.jwt.claim.sub', '', true);
+set local role anon;
+
+select throws_ok(
+  $$ select public.publish_event('20000000-0000-0000-0000-000000000002') $$,
+  '42501', 'permission denied for function publish_event',
+  'anonymous RPC execution is denied'
+);
+
+reset role;
 
 select set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000001', true);
 set local role authenticated;
@@ -229,6 +354,31 @@ select throws_ok(
   'P0001', 'EVENT_MODERATION_BLOCKED', 'blocked event is rejected'
 );
 
+select throws_ok(
+  $$ select public.publish_event('20000000-0000-0000-0000-000000000014') $$,
+  'P0001', 'EVENT_MODERATION_BLOCKED', 'removed event is rejected'
+);
+
+select throws_ok(
+  $$ select public.publish_event('20000000-0000-0000-0000-000000000009') $$,
+  'P0001', 'EVENT_INCOMPLETE', 'whitespace-only address is rejected'
+);
+
+select throws_ok(
+  $$ select public.publish_event('20000000-0000-0000-0000-000000000010') $$,
+  'P0001', 'EVENT_INCOMPLETE', 'whitespace-only city is rejected'
+);
+
+select throws_ok(
+  $$ select public.publish_event('20000000-0000-0000-0000-000000000011') $$,
+  'P0001', 'EVENT_INCOMPLETE', 'whitespace-only postal code is rejected'
+);
+
+select throws_ok(
+  $$ select public.publish_event('20000000-0000-0000-0000-000000000012') $$,
+  'P0001', 'EVENT_INCOMPLETE', 'whitespace-only Mapbox feature id is rejected'
+);
+
 select lives_ok(
   $$ select public.publish_event('20000000-0000-0000-0000-000000000002') $$,
   'valid free event publishes'
@@ -250,6 +400,21 @@ select results_eq(
   'publish persists first publication timestamp'
 );
 
+select lives_ok(
+  $$ select public.publish_event('20000000-0000-0000-0000-000000000013') $$,
+  'flagged event publishes without changing moderation'
+);
+
+select results_eq(
+  $$
+    select moderation_status
+    from public.events
+    where id = '20000000-0000-0000-0000-000000000013'
+  $$,
+  $$ values ('flagged'::text) $$,
+  'flagged moderation status persists through publish RPC'
+);
+
 reset role;
 select set_config('request.jwt.claim.sub', '', true);
 set local role anon;
@@ -262,6 +427,16 @@ select results_eq(
   $$,
   $$ values ('20000000-0000-0000-0000-000000000002'::uuid) $$,
   'successful publication is immediately visible anonymously'
+);
+
+select results_eq(
+  $$
+    select moderation_status
+    from public.events
+    where id = '20000000-0000-0000-0000-000000000013'
+  $$,
+  $$ values ('flagged'::text) $$,
+  'published flagged event remains anonymously visible'
 );
 
 reset role;

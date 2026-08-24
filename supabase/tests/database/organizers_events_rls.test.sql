@@ -1,7 +1,48 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(23);
+select plan(31);
+
+select results_eq(
+  $$
+    select coalesce(bool_or(privilege_type = 'EXECUTE'), false)
+    from pg_catalog.pg_proc as procedures
+    join pg_catalog.pg_namespace as namespaces on namespaces.oid = procedures.pronamespace
+    cross join lateral pg_catalog.aclexplode(
+      coalesce(procedures.proacl, pg_catalog.acldefault('f', procedures.proowner))
+    ) as privileges
+    where namespaces.nspname = 'public'
+      and procedures.proname = 'publish_event'
+      and pg_catalog.pg_get_function_identity_arguments(procedures.oid) = 'p_event_id uuid'
+      and privileges.grantee = 0
+  $$,
+  $$ values (false) $$,
+  'PUBLIC cannot execute publish_event'
+);
+
+select results_eq(
+  $$
+    select pg_catalog.has_function_privilege(
+      'anon',
+      'public.publish_event(uuid)',
+      'EXECUTE'
+    )
+  $$,
+  $$ values (false) $$,
+  'Anonymous cannot execute publish_event'
+);
+
+select results_eq(
+  $$
+    select pg_catalog.has_function_privilege(
+      'authenticated',
+      'public.publish_event(uuid)',
+      'EXECUTE'
+    )
+  $$,
+  $$ values (true) $$,
+  'Authenticated users can execute publish_event'
+);
 
 insert into auth.users (id, email)
 values
@@ -296,6 +337,59 @@ select throws_ok(
   '42501',
   'permission denied for table events',
   'Authenticated browser cannot directly update location'
+);
+
+select throws_ok(
+  $$
+    insert into public.events (id, organizer_id)
+    values (
+      '30000000-0000-0000-0000-000000000006',
+      '10000000-0000-0000-0000-000000000001'
+    )
+  $$,
+  '42501',
+  'permission denied for table events',
+  'Authenticated browser cannot directly insert event id'
+);
+
+select throws_ok(
+  $$
+    insert into public.events (organizer_id, status)
+    values ('10000000-0000-0000-0000-000000000001', 'draft')
+  $$,
+  '42501',
+  'permission denied for table events',
+  'Authenticated browser cannot directly insert status'
+);
+
+select throws_ok(
+  $$
+    insert into public.events (organizer_id, moderation_status)
+    values ('10000000-0000-0000-0000-000000000001', 'clear')
+  $$,
+  '42501',
+  'permission denied for table events',
+  'Authenticated browser cannot directly insert moderation_status'
+);
+
+select throws_ok(
+  $$
+    insert into public.events (organizer_id, published_at)
+    values ('10000000-0000-0000-0000-000000000001', now())
+  $$,
+  '42501',
+  'permission denied for table events',
+  'Authenticated browser cannot directly insert published_at'
+);
+
+select throws_ok(
+  $$
+    insert into public.events (organizer_id, location)
+    values ('10000000-0000-0000-0000-000000000001', null)
+  $$,
+  '42501',
+  'permission denied for table events',
+  'Authenticated browser cannot directly insert location'
 );
 
 reset role;
