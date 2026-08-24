@@ -11,6 +11,7 @@ import { eventRowToFormValues } from './event.api'
 import { EventDetailsStep } from './EventDetailsStep'
 import { EventReviewStep } from './EventReviewStep'
 import { EventScheduleLocationStep } from './EventScheduleLocationStep'
+import { UnsavedChangesDialog } from './UnsavedChangesDialog'
 import { useOwnedEvent, useSaveEventDraft } from './event.queries'
 import { eventDraftSchema } from './event.schemas'
 import type { EventFormValues, EventRow, NormalizedLocation } from './event.types'
@@ -22,9 +23,7 @@ const emptyEvent: EventFormValues = {
   admissionType: 'free', capacity: null,
 }
 
-function saveErrorMessage(error: unknown): string {
-  return error instanceof Error && error.message.trim() ? error.message : 'Check your connection, then try saving again.'
-}
+const draftSaveError = 'Draft could not be saved. Check your connection and try again.'
 
 export function EventEditorPage() {
   const { eventId: routeEventId } = useParams()
@@ -110,14 +109,13 @@ export function EventEditorPage() {
           return
         }
         const saved = await persist(formValues)
-        navigateApproved(
-          action === 'preview'
-            ? `/organizer/events/${saved.id}/preview`
-            : `/organizer/events/${saved.id}/edit`,
-          action === 'save' && isNew,
-        )
-      } catch (error) {
-        setServerError(saveErrorMessage(error))
+        if (action === 'preview') {
+          navigateApproved(`/organizer/events/${saved.id}/preview`)
+        } else if (isNew) {
+          navigateApproved(`/organizer/events/${saved.id}/edit`, true)
+        }
+      } catch {
+        setServerError(draftSaveError)
       } finally {
         activeActionRef.current = null
       }
@@ -181,14 +179,13 @@ export function EventEditorPage() {
         </form>
       </div>
       {blocker.state === 'blocked' ? (
-        <div aria-labelledby="leave-draft-title" aria-modal="true" className="event-leave-dialog" role="alertdialog">
-          <div className="event-leave-dialog__panel">
-            <p className="organizer-eyebrow">Unsaved draft</p>
-            <h2 id="leave-draft-title">Leave without saving?</h2>
-            <p>Your latest changes will be lost.</p>
-            <div><Button autoFocus onClick={() => blocker.reset()} variant="secondary">Stay</Button><Button onClick={() => { approvedNavigationRef.current = true; blocker.proceed() }}>Leave</Button></div>
-          </div>
-        </div>
+        <UnsavedChangesDialog
+          onLeave={() => {
+            approvedNavigationRef.current = true
+            blocker.proceed()
+          }}
+          onStay={() => blocker.reset()}
+        />
       ) : null}
     </section>
   )

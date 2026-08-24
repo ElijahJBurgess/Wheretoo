@@ -1,11 +1,13 @@
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EventRow } from './event.types'
 
-const { locationModuleLoaded, mutateAsync, refetch, useOwnedEvent, useSaveEventDraft, useSession } = vi.hoisted(() => ({
+const { closeDialog, locationModuleLoaded, mutateAsync, refetch, showModal, useOwnedEvent, useSaveEventDraft, useSession } = vi.hoisted(() => ({
+  closeDialog: vi.fn(),
   locationModuleLoaded: vi.fn(), mutateAsync: vi.fn(), refetch: vi.fn(), useOwnedEvent: vi.fn(),
+  showModal: vi.fn(),
   useSaveEventDraft: vi.fn(), useSession: vi.fn(),
 }))
 
@@ -18,6 +20,14 @@ vi.mock('./LocationSearchField', () => {
 })
 
 import { EventEditorPage } from './EventEditorPage'
+
+const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal')
+const originalClose = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'close')
+
+function restoreDialogMethod(name: 'close' | 'showModal', descriptor?: PropertyDescriptor) {
+  if (descriptor) Object.defineProperty(HTMLDialogElement.prototype, name, descriptor)
+  else delete HTMLDialogElement.prototype[name]
+}
 
 const row: EventRow = {
   id: 'event-1', organizer_id: 'organizer-1', status: 'draft', moderation_status: 'clear', title: 'Saved title',
@@ -40,6 +50,7 @@ type EditorQueryState = {
 function renderEditor(
   initialPath = '/organizer/events/new',
   query: EditorQueryState = { data: undefined, isPending: false, isError: false, refetch },
+  initialEntries: string[] = [initialPath],
 ) {
   useOwnedEvent.mockImplementation((requestedEventId: string) =>
     initialPath === '/organizer/events/new' && requestedEventId ? { ...query, data: row } : query,
@@ -49,15 +60,34 @@ function renderEditor(
     { path: '/organizer/events/:eventId/edit', element: <EventEditorPage /> },
     { path: '/organizer/events/:eventId/preview', element: <p>preview destination</p> },
     { path: '/away', element: <p>away destination</p> },
-  ], { initialEntries: [initialPath] })
+  ], { initialEntries, initialIndex: initialEntries.length - 1 })
   return { ...render(<RouterProvider router={router} />), router }
 }
 
 describe('EventEditorPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    Object.defineProperties(HTMLDialogElement.prototype, {
+      showModal: {
+        configurable: true,
+        value: showModal.mockImplementation(function (this: HTMLDialogElement) {
+          this.setAttribute('open', '')
+        }),
+      },
+      close: {
+        configurable: true,
+        value: closeDialog.mockImplementation(function (this: HTMLDialogElement) {
+          this.removeAttribute('open')
+        }),
+      },
+    })
     useSession.mockReturnValue({ status: 'authenticated', session: {}, user: { id: 'organizer-1' } })
     useSaveEventDraft.mockReturnValue({ isPending: false, mutateAsync })
+  })
+
+  afterEach(() => {
+    restoreDialogMethod('showModal', originalShowModal)
+    restoreDialogMethod('close', originalClose)
   })
 
   it('shows exactly three stages and does not load Mapbox or persist on step changes', async () => {
@@ -121,21 +151,48 @@ describe('EventEditorPage', () => {
     await user.clear(savedTitle)
     await user.type(savedTitle, 'Edited after save')
     await act(async () => { await router.navigate('/away') })
-    expect(screen.getByRole('alertdialog')).toHaveTextContent('Leave without saving?')
+    expect(screen.getByRole('dialog')).toHaveTextContent('Leave without saving?')
   })
 
   it('updates the same ID and retains values with a retry action after failure', async () => {
     const user = userEvent.setup()
-    mutateAsync.mockRejectedValueOnce(new Error('Network unavailable')).mockResolvedValueOnce({ ...row, title: 'Working title' })
+    const rawBackendMessage = 'new row violates row-level security policy for table "events"'
+    mutateAsync.mockRejectedValueOnce(new Error(rawBackendMessage)).mockResolvedValueOnce({ ...row, title: 'Working title' })
     renderEditor('/organizer/events/event-1/edit', { data: row, isPending: false, isError: false, refetch })
     const title = await screen.findByLabelText('Event title')
     await user.clear(title)
     await user.type(title, 'Working title')
     await user.click(screen.getByRole('button', { name: 'Save draft' }))
-    expect(await screen.findByText('Draft could not be saved')).toBeInTheDocument()
+    expect(await screen.findByText('Draft could not be saved. Check your connection and try again.')).toBeInTheDocument()
+    expect(screen.queryByText(rawBackendMessage)).not.toBeInTheDocument()
     expect(title).toHaveValue('Working title')
     await user.click(screen.getByRole('button', { name: 'Try saving again' }))
     expect(mutateAsync).toHaveBeenLastCalledWith(expect.objectContaining({ eventId: 'event-1', organizerId: 'organizer-1' }))
+  })
+
+  it('updates an existing draft without changing history and Back reaches the prior route', async () => {
+    const user = userEvent.setup()
+    mutateAsync.mockResolvedValue({ ...row, title: 'Canonical saved title' })
+    const editPath = '/organizer/events/event-1/edit'
+    const { router } = renderEditor(
+      editPath,
+      { data: row, isPending: false, isError: false, refetch },
+      ['/away', editPath],
+    )
+    const locationKeyBeforeSave = router.state.location.key
+    const title = await screen.findByLabelText('Event title')
+    await user.clear(title)
+    await user.type(title, 'Local edit')
+    await user.click(screen.getByRole('button', { name: 'Save draft' }))
+
+    expect(await screen.findByDisplayValue('Canonical saved title')).toBeInTheDocument()
+    expect(mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ eventId: 'event-1' }))
+    expect(router.state.location.pathname).toBe(editPath)
+    expect(router.state.location.key).toBe(locationKeyBeforeSave)
+    expect(router.state.historyAction).toBe('POP')
+
+    await act(async () => { await router.navigate(-1) })
+    expect(await screen.findByText('away destination')).toBeInTheDocument()
   })
 
   it('saves before preview when new or dirty, navigates directly when clean, and prevents rapid duplicate persistence', async () => {
@@ -173,23 +230,53 @@ describe('EventEditorPage', () => {
     expect(screen.getByText(/Paid event publishing is not available/)).toBeInTheDocument()
   })
 
-  it('blocks internal navigation while dirty, supports Stay and Leave, and cleans up beforeunload prevention', async () => {
+  it('uses a native modal dialog, treats Escape as Stay, restores focus, and proceeds only on Leave', async () => {
     const user = userEvent.setup()
     const { router, unmount } = renderEditor()
-    await user.type(screen.getByLabelText('Event title'), 'Unsaved')
+    const title = screen.getByLabelText('Event title')
+    await user.type(title, 'Unsaved')
+    title.focus()
     const event = new Event('beforeunload', { cancelable: true })
     window.dispatchEvent(event)
     expect(event.defaultPrevented).toBe(true)
     await act(async () => { await router.navigate('/away') })
-    expect(screen.getByRole('alertdialog')).toHaveTextContent('Leave without saving?')
+    const firstDialog = screen.getByRole('dialog')
+    expect(firstDialog.tagName).toBe('DIALOG')
+    expect(showModal).toHaveBeenCalledOnce()
+    expect(firstDialog).toHaveAttribute('open')
+    expect(screen.getByRole('button', { name: 'Stay' })).toHaveFocus()
     await user.click(screen.getByRole('button', { name: 'Stay' }))
     expect(router.state.location.pathname).toBe('/organizer/events/new')
+    expect(title).toHaveFocus()
+
+    title.focus()
+    await act(async () => { await router.navigate('/away') })
+    const escapeDialog = screen.getByRole('dialog')
+    fireEvent(escapeDialog, new Event('cancel', { cancelable: true }))
+    expect(router.state.location.pathname).toBe('/organizer/events/new')
+    expect(title).toHaveFocus()
+
     await act(async () => { await router.navigate('/away') })
     await user.click(screen.getByRole('button', { name: 'Leave' }))
     expect(await screen.findByText('away destination')).toBeInTheDocument()
+    expect(closeDialog).toHaveBeenCalled()
     unmount()
     const cleanEvent = new Event('beforeunload', { cancelable: true })
     window.dispatchEvent(cleanEvent)
     expect(cleanEvent.defaultPrevented).toBe(false)
+  })
+
+  it('keeps dialog semantics in environments without showModal support', async () => {
+    Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
+      configurable: true,
+      value: undefined,
+    })
+    const user = userEvent.setup()
+    const { router } = renderEditor()
+    await user.type(screen.getByLabelText('Event title'), 'Unsaved')
+    await act(async () => { await router.navigate('/away') })
+
+    expect(screen.getByRole('dialog')).toHaveAttribute('open')
+    expect(showModal).not.toHaveBeenCalled()
   })
 })

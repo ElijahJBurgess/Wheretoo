@@ -514,7 +514,8 @@ h3 {
 .event-editor__actions, .event-editor__primary-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.65rem; }
 .event-editor__actions { justify-content: space-between; padding-top: 1rem; border-top: 1px solid var(--color-border); }
 .event-editor__primary-actions { justify-content: flex-end; }
-.event-leave-dialog { position: fixed; z-index: 20; inset: 0; display: grid; place-items: center; padding: 1rem; background: rgb(25 22 44 / 58%); }
+.event-leave-dialog { width: min(calc(100% - 2rem), 27rem); max-width: none; border: 0; padding: 0; background: transparent; }
+.event-leave-dialog::backdrop { background: rgb(25 22 44 / 58%); }
 .event-leave-dialog__panel { width: min(100%, 27rem); border-radius: var(--radius-surface); padding: 1.5rem; background: var(--color-surface); box-shadow: 0 1.25rem 4rem rgb(25 22 44 / 24%); }
 .event-leave-dialog__panel h2 { margin-bottom: 0.45rem; }
 .event-leave-dialog__panel > p:not(.organizer-eyebrow) { color: var(--color-muted); }
