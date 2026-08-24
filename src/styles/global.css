@@ -292,6 +292,56 @@ h3 {
   padding-block: 2rem 4rem;
 }
 
+.auth-panel {
+  display: grid;
+  gap: 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-surface);
+  padding: 1.5rem;
+  background: var(--color-surface);
+}
+
+.auth-panel h1 {
+  margin-bottom: 0;
+  font-size: clamp(2rem, 8vw, 2.75rem);
+  line-height: 1;
+}
+
+.auth-panel__eyebrow,
+.auth-panel__alternate,
+.auth-panel__intro {
+  margin: 0;
+}
+
+.auth-panel__eyebrow {
+  color: var(--color-violet-deep);
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.auth-panel__intro,
+.auth-panel__alternate {
+  color: var(--color-muted);
+  line-height: 1.6;
+}
+
+.auth-panel__alternate {
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.auth-form {
+  display: grid;
+  gap: 1rem;
+  margin-block: 0.5rem;
+}
+
+.auth-form .ui-button {
+  width: 100%;
+}
+
 .product-mark {
   display: inline-flex;
   min-height: 2.75rem;
