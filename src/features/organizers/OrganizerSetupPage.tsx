@@ -56,6 +56,15 @@ function OrganizerSetupForm({ initialValues, userId }: OrganizerSetupFormProps) 
     defaultValues: initialValues,
   })
   const isSaving = isSubmitting || saveOrganizerMutation.isPending
+  const validationMessages = [
+    errors.displayName?.message,
+    errors.organizerType?.message,
+    errors.bio?.message,
+    errors.websiteUrl?.message,
+    errors.baseCity?.message,
+  ].filter((message): message is string => typeof message === 'string')
+  const summaryErrors = serverError ? [...validationMessages, serverError] : validationMessages
+  const summaryTitle = serverError ? 'Profile save failed' : 'Check the highlighted fields'
 
   const submit = handleSubmit(async (input) => {
     setServerError(null)
@@ -75,7 +84,7 @@ function OrganizerSetupForm({ initialValues, userId }: OrganizerSetupFormProps) 
       <p className="auth-panel__intro">
         Create the public identity people will see beside every event you publish.
       </p>
-      <FormErrorSummary errors={serverError ? [serverError] : []} title="Profile save failed" />
+      <FormErrorSummary errors={summaryErrors} title={summaryTitle} />
       <form className="auth-form" noValidate onSubmit={submit}>
         <Field error={errors.displayName?.message} label="Public organizer name" name="displayName">
           <input autoComplete="organization" {...register('displayName')} />

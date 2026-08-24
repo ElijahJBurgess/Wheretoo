@@ -32,6 +32,20 @@ describe('organizerInputSchema', () => {
     expect(organizerInputSchema.safeParse({ ...validInput, websiteUrl: 'bay city arts' }).success).toBe(false)
   })
 
+  it.each(['ftp://baycity.example', 'mailto:hello@baycity.example'])(
+    'rejects the unsupported website protocol in %s',
+    (websiteUrl) => {
+      expect(organizerInputSchema.safeParse({ ...validInput, websiteUrl }).success).toBe(false)
+    },
+  )
+
+  it.each(['', 'http://baycity.example', 'https://baycity.example'])(
+    'accepts the supported website value %s',
+    (websiteUrl) => {
+      expect(organizerInputSchema.safeParse({ ...validInput, websiteUrl }).success).toBe(true)
+    },
+  )
+
   it('rejects a display name shorter than two characters after trimming', () => {
     expect(organizerInputSchema.safeParse({ ...validInput, displayName: ' A ' }).success).toBe(false)
   })

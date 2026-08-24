@@ -60,9 +60,14 @@ describe('OrganizerSetupPage', () => {
     await user.type(screen.getByLabelText('Website'), 'not a website')
     await user.click(screen.getByRole('button', { name: 'Save organizer profile' }))
 
-    expect(await screen.findAllByRole('alert')).toHaveLength(2)
+    expect(await screen.findAllByRole('alert')).toHaveLength(3)
+    const summary = screen.getByText('Check the highlighted fields').closest('[role="alert"]')
+    expect(summary).toHaveTextContent('Too small')
+    expect(summary).toHaveTextContent('Invalid URL')
     expect(name).toHaveAttribute('aria-invalid', 'true')
+    expect(name).toHaveAttribute('aria-describedby', 'displayName-error')
     expect(screen.getByLabelText('Website')).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByLabelText('Website')).toHaveAttribute('aria-describedby', 'websiteUrl-error')
     expect(mutateAsync).not.toHaveBeenCalled()
   })
 
