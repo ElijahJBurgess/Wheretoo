@@ -1,0 +1,1 @@
+-- Seed data is intentionally deferred until organizer and event schemas exist.

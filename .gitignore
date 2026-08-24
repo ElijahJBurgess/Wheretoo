@@ -30,6 +30,8 @@ supabase/.temp/
 
 # Test coverage
 coverage/
+playwright-report/
+test-results/
 
 # TypeScript
 *.tsbuildinfo
