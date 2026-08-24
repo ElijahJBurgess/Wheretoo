@@ -18,8 +18,8 @@ const validValues: EventFormValues = {
   title: 'Night Market',
   description: 'An evening market featuring local food and neighborhood makers.',
   category: 'community',
-  startsAt: '2026-08-25T02:00:00.000Z',
-  endsAt: '2026-08-25T05:00:00.000Z',
+  startsAt: '2026-08-24T19:00',
+  endsAt: '2026-08-24T22:00',
   timezone: 'America/Los_Angeles',
   venueName: 'Civic Center Plaza',
   location: validLocation,
@@ -69,8 +69,9 @@ describe('eventDraftSchema', () => {
     ['capacity', 0],
     ['capacity', 1.5],
     ['capacity', 2_147_483_648],
-    ['startsAt', 'not-an-iso-date'],
+    ['startsAt', 'not-a-wall-time'],
     ['endsAt', '2026-08-25'],
+    ['startsAt', '2026-03-08T02:30'],
   ])('rejects database-incompatible %s values', (field, value) => {
     expect(eventDraftSchema.safeParse({ ...validValues, [field]: value }).success).toBe(false)
   })
@@ -126,11 +127,11 @@ describe('eventPublishSchema', () => {
 
   it.each([
     [{ startsAt: 'not-a-date' }, 'invalid start'],
-    [{ startsAt: '2026-08-24T12:00:00.000Z' }, 'start equal to now'],
-    [{ startsAt: '2026-08-24T11:59:59.999Z' }, 'past start'],
+    [{ startsAt: '2026-08-24T05:00' }, 'start equal to now'],
+    [{ startsAt: '2026-08-24T04:59' }, 'past start'],
     [{ endsAt: 'not-a-date' }, 'invalid end'],
     [{ endsAt: validValues.startsAt }, 'end equal to start'],
-    [{ endsAt: '2026-08-25T01:59:59.999Z' }, 'end before start'],
+    [{ endsAt: '2026-08-24T18:59' }, 'end before start'],
   ])('rejects %s (%s)', (...args) => {
     const [values] = args
     vi.useFakeTimers()

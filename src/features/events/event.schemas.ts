@@ -1,9 +1,12 @@
 import { z } from 'zod'
+import { losAngelesWallTimeToInstant } from './event.time'
 import { eventCategories } from './event.types'
 
-const optionalIsoDateTime = z.union([
+const optionalWallTime = z.union([
   z.literal(''),
-  z.iso.datetime({ offset: true, message: 'Use a valid date and time.' }),
+  z.string().refine((value) => losAngelesWallTimeToInstant(value) !== null, {
+    message: 'Use a valid Los Angeles date and time.',
+  }),
 ])
 
 const normalizedLocationSchema = z.object({
@@ -24,8 +27,8 @@ export const eventDraftSchema = z.object({
     .refine((value) => value.trim().length <= 120, 'Title must be 120 characters or fewer.'),
   description: z.string().max(5000, 'Description must be 5,000 characters or fewer.'),
   category: z.union([z.literal(''), z.enum(eventCategories)]),
-  startsAt: optionalIsoDateTime,
-  endsAt: optionalIsoDateTime,
+  startsAt: optionalWallTime,
+  endsAt: optionalWallTime,
   timezone: z.literal('America/Los_Angeles'),
   venueName: z
     .string()
@@ -84,16 +87,16 @@ export const eventPublishSchema = eventDraftSchema.superRefine((values, context)
     })
   }
 
-  const startsAt = Date.parse(values.startsAt)
-  const endsAt = Date.parse(values.endsAt)
-  if (!Number.isFinite(startsAt) || startsAt <= Date.now()) {
+  const startsAt = losAngelesWallTimeToInstant(values.startsAt)?.getTime()
+  const endsAt = losAngelesWallTimeToInstant(values.endsAt)?.getTime()
+  if (startsAt === undefined || startsAt <= Date.now()) {
     context.addIssue({
       code: 'custom',
       path: ['startsAt'],
       message: 'Choose a future start time.',
     })
   }
-  if (!Number.isFinite(endsAt) || !Number.isFinite(startsAt) || endsAt <= startsAt) {
+  if (endsAt === undefined || startsAt === undefined || endsAt <= startsAt) {
     context.addIssue({
       code: 'custom',
       path: ['endsAt'],

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, renderHook } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { createElement, type PropsWithChildren } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EventFormValues, EventRow } from './event.types'
@@ -39,7 +39,7 @@ import {
   publishEvent,
   saveEventDraft,
 } from './event.api'
-import { eventKeys, usePublishEvent, useSaveEventDraft } from './event.queries'
+import { eventKeys, useOwnedEvent, usePublishEvent, useSaveEventDraft } from './event.queries'
 
 const event: EventRow = {
   id: 'event-returned',
@@ -76,8 +76,8 @@ const values: EventFormValues = {
   title: 'Night Market',
   description: 'An evening market featuring local food and neighborhood makers.',
   category: 'community',
-  startsAt: '2026-08-25T02:00:00.000Z',
-  endsAt: '2026-08-25T05:00:00.000Z',
+  startsAt: '2026-08-24T19:00',
+  endsAt: '2026-08-24T22:00',
   timezone: 'America/Los_Angeles',
   venueName: '   ',
   location: {
@@ -165,6 +165,8 @@ describe('owned event API', () => {
       country_code: 'US',
       latitude: 37.7793,
       longitude: -122.4193,
+      starts_at: '2026-08-25T02:00:00.000Z',
+      ends_at: '2026-08-25T05:00:00.000Z',
     })
     expectSafePayload(payload)
     expect(mutationSelect).toHaveBeenCalledWith('*')
@@ -195,7 +197,7 @@ describe('owned event API', () => {
         ...values,
         title: ' ',
         description: '\t',
-        category: '',
+        category: '   ' as EventFormValues['category'],
         startsAt: '',
         endsAt: '   ',
         location: null,
@@ -229,6 +231,73 @@ describe('owned event API', () => {
       location: { ...values.location, addressLine2: '' },
     })
     expect(eventRowToFormValues({ ...event, region: 'NV' }).location).toBeNull()
+  })
+
+  it.each([
+    ['2026-01-15T20:30:00.000Z', '2026-01-15T12:30'],
+    ['2026-07-15T19:30:00.000Z', '2026-07-15T12:30'],
+  ])('round-trips a persisted %s instant through LA wall time', async (instant, wallTime) => {
+    const persisted = { ...event, starts_at: instant, ends_at: instant }
+    const mapped = eventRowToFormValues(persisted)
+    expect(mapped.startsAt).toBe(wallTime)
+    expect(mapped.endsAt).toBe(wallTime)
+
+    single.mockResolvedValue({ data: persisted, error: null })
+    await saveEventDraft({ eventId: 'event-returned', organizerId: 'organizer-1', values: mapped })
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({ starts_at: instant, ends_at: instant }),
+    )
+  })
+
+  it('round-trips nullable persisted schedule columns without inventing dates', async () => {
+    const persisted = { ...event, starts_at: null, ends_at: null }
+    const mapped = eventRowToFormValues(persisted)
+    expect(mapped.startsAt).toBe('')
+    expect(mapped.endsAt).toBe('')
+
+    single.mockResolvedValue({ data: persisted, error: null })
+    await saveEventDraft({ eventId: 'event-returned', organizerId: 'organizer-1', values: mapped })
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ starts_at: null, ends_at: null }))
+  })
+
+  it('round-trips instants immediately across the spring-forward gap', async () => {
+    const persisted = {
+      ...event,
+      starts_at: '2026-03-08T09:59:00.000Z',
+      ends_at: '2026-03-08T10:00:00.000Z',
+    }
+    const mapped = eventRowToFormValues(persisted)
+    expect(mapped.startsAt).toBe('2026-03-08T01:59')
+    expect(mapped.endsAt).toBe('2026-03-08T03:00')
+
+    single.mockResolvedValue({ data: persisted, error: null })
+    await saveEventDraft({ eventId: 'event-returned', organizerId: 'organizer-1', values: mapped })
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        starts_at: '2026-03-08T09:59:00.000Z',
+        ends_at: '2026-03-08T10:00:00.000Z',
+      }),
+    )
+  })
+
+  it('normalizes both fall-back occurrences to the documented earliest instant', async () => {
+    const persisted = {
+      ...event,
+      starts_at: '2026-11-01T08:30:00.000Z',
+      ends_at: '2026-11-01T09:30:00.000Z',
+    }
+    const mapped = eventRowToFormValues(persisted)
+    expect(mapped.startsAt).toBe('2026-11-01T01:30')
+    expect(mapped.endsAt).toBe('2026-11-01T01:30')
+
+    single.mockResolvedValue({ data: persisted, error: null })
+    await saveEventDraft({ eventId: 'event-returned', organizerId: 'organizer-1', values: mapped })
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        starts_at: '2026-11-01T08:30:00.000Z',
+        ends_at: '2026-11-01T08:30:00.000Z',
+      }),
+    )
   })
 
   it('publishes only through the RPC and returns its persisted row', async () => {
@@ -268,12 +337,13 @@ describe('owned event API', () => {
 describe('event query cache contracts', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    from.mockReturnValue({ insert, update })
+    from.mockReturnValue({ insert, update, select })
     insert.mockReturnValue({ select: mutationSelect })
     update.mockReturnValue({ eq: firstEq })
     firstEq.mockReturnValue({ eq: secondEq })
     secondEq.mockReturnValue({ select: mutationSelect })
     mutationSelect.mockReturnValue({ single })
+    select.mockReturnValue({ eq: firstEq })
   })
 
   function setupQueryClient() {
@@ -288,36 +358,86 @@ describe('event query cache contracts', () => {
     const { queryClient, wrapper } = setupQueryClient()
     queryClient.setQueryData(eventKeys.ownedList('organizer-1'), ['old'])
     queryClient.setQueryData(eventKeys.ownedList('organizer-2'), ['unrelated'])
-    queryClient.setQueryData(eventKeys.detail('unrelated'), 'unrelated detail')
+    queryClient.setQueryData(eventKeys.detail('organizer-2', 'unrelated'), 'unrelated detail')
     const { result } = renderHook(() => useSaveEventDraft(), { wrapper })
 
     await act(async () => {
       await result.current.mutateAsync({ eventId: null, organizerId: 'organizer-1', values })
     })
 
-    expect(queryClient.getQueryData(eventKeys.detail('event-returned'))).toEqual(event)
+    expect(queryClient.getQueryData(eventKeys.detail('organizer-1', 'event-returned'))).toEqual(event)
     expect(queryClient.getQueryState(eventKeys.ownedList('organizer-1'))?.isInvalidated).toBe(true)
     expect(queryClient.getQueryState(eventKeys.ownedList('organizer-2'))?.isInvalidated).toBe(false)
-    expect(queryClient.getQueryData(eventKeys.detail('unrelated'))).toBe('unrelated detail')
+    expect(queryClient.getQueryData(eventKeys.detail('organizer-2', 'unrelated'))).toBe(
+      'unrelated detail',
+    )
   })
 
-  it('publish invalidates only returned owner list and returned exact detail', async () => {
-    const published = { ...event, id: 'server-event-id', status: 'published' }
+  it('an account switch never reuses another organizer cached owned draft', async () => {
+    const organizerAEvent = { ...event, id: 'event-x', organizer_id: 'organizer-a' }
+    const { queryClient, wrapper } = setupQueryClient()
+    queryClient.setQueryData(eventKeys.detail('organizer-a', 'event-x'), organizerAEvent)
+    firstEq.mockReturnValueOnce({ eq: secondEq })
+    secondEq.mockReturnValueOnce({ maybeSingle })
+    maybeSingle.mockResolvedValue({ data: null, error: null })
+
+    const { result } = renderHook(() => useOwnedEvent('event-x', 'organizer-b'), { wrapper })
+
+    expect(result.current.data).toBeUndefined()
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data).toBeNull()
+    expect(queryClient.getQueryData(eventKeys.detail('organizer-a', 'event-x'))).toEqual(
+      organizerAEvent,
+    )
+    expect(firstEq).toHaveBeenCalledWith('id', 'event-x')
+    expect(secondEq).toHaveBeenCalledWith('organizer_id', 'organizer-b')
+  })
+
+  it('publish invalidates requested and returned owner-aware contracts only', async () => {
+    const published = {
+      ...event,
+      id: 'server-event-id',
+      organizer_id: 'organizer-2',
+      status: 'published',
+    }
     rpc.mockResolvedValue({ data: published, error: null })
     const { queryClient, wrapper } = setupQueryClient()
     queryClient.setQueryData(eventKeys.ownedList('organizer-1'), ['old'])
-    queryClient.setQueryData(eventKeys.ownedList('organizer-2'), ['unrelated'])
-    queryClient.setQueryData(eventKeys.detail('requested-event-id'), 'requested detail')
-    queryClient.setQueryData(eventKeys.detail('server-event-id'), 'returned detail')
-    const { result } = renderHook(() => usePublishEvent(), { wrapper })
+    queryClient.setQueryData(eventKeys.ownedList('organizer-2'), ['returned owner'])
+    queryClient.setQueryData(eventKeys.ownedList('organizer-3'), ['unrelated'])
+    queryClient.setQueryData(
+      eventKeys.detail('organizer-1', 'requested-event-id'),
+      'requested detail',
+    )
+    queryClient.setQueryData(
+      eventKeys.detail('organizer-2', 'server-event-id'),
+      'returned detail',
+    )
+    queryClient.setQueryData(eventKeys.detail('organizer-3', 'unrelated'), 'unrelated detail')
+    const { result } = renderHook(() => usePublishEvent('organizer-1'), { wrapper })
 
     await act(async () => {
       await result.current.mutateAsync('requested-event-id')
     })
 
     expect(queryClient.getQueryState(eventKeys.ownedList('organizer-1'))?.isInvalidated).toBe(true)
-    expect(queryClient.getQueryState(eventKeys.detail('server-event-id'))?.isInvalidated).toBe(true)
-    expect(queryClient.getQueryState(eventKeys.detail('requested-event-id'))?.isInvalidated).toBe(false)
-    expect(queryClient.getQueryState(eventKeys.ownedList('organizer-2'))?.isInvalidated).toBe(false)
+    expect(queryClient.getQueryState(eventKeys.ownedList('organizer-2'))?.isInvalidated).toBe(true)
+    expect(
+      queryClient.getQueryState(eventKeys.detail('organizer-1', 'requested-event-id'))
+        ?.isInvalidated,
+    ).toBe(true)
+    expect(
+      queryClient.getQueryState(eventKeys.detail('organizer-2', 'server-event-id'))?.isInvalidated,
+    ).toBe(true)
+    expect(queryClient.getQueryData(eventKeys.detail('organizer-1', 'requested-event-id'))).toBe(
+      'requested detail',
+    )
+    expect(queryClient.getQueryData(eventKeys.detail('organizer-2', 'server-event-id'))).toBe(
+      'returned detail',
+    )
+    expect(queryClient.getQueryState(eventKeys.ownedList('organizer-3'))?.isInvalidated).toBe(false)
+    expect(queryClient.getQueryData(eventKeys.detail('organizer-3', 'unrelated'))).toBe(
+      'unrelated detail',
+    )
   })
 })

@@ -1,5 +1,6 @@
 import { supabase } from '../../lib/supabase/client'
 import type { Database } from '../../lib/supabase/database.types'
+import { instantToLosAngelesWallTime, losAngelesWallTimeToIso } from './event.time'
 import { eventCategories } from './event.types'
 import type { EventCategory, EventFormValues, EventRow, NormalizedLocation } from './event.types'
 
@@ -30,6 +31,19 @@ type EventDraftPayload = Pick<
 
 function optionalText(value: string): string | null {
   return value.trim() === '' ? null : value
+}
+
+function wallTimeToDatabase(value: string): string | null {
+  if (value.trim() === '') {
+    return null
+  }
+
+  const instant = losAngelesWallTimeToIso(value)
+  if (instant === null) {
+    throw new Error('Event date must be a valid America/Los_Angeles wall time')
+  }
+
+  return instant
 }
 
 function isEventCategory(value: string | null): value is EventCategory {
@@ -75,9 +89,9 @@ function draftPayload(values: EventFormValues): EventDraftPayload {
   return {
     title: optionalText(values.title),
     description: optionalText(values.description),
-    category: values.category === '' ? null : values.category,
-    starts_at: optionalText(values.startsAt),
-    ends_at: optionalText(values.endsAt),
+    category: optionalText(values.category),
+    starts_at: wallTimeToDatabase(values.startsAt),
+    ends_at: wallTimeToDatabase(values.endsAt),
     timezone: values.timezone,
     venue_name: optionalText(values.venueName),
     address_line1: location === null ? null : optionalText(location.addressLine1),
@@ -131,8 +145,8 @@ export function eventRowToFormValues(event: EventRow): EventFormValues {
     title: event.title ?? '',
     description: event.description ?? '',
     category: isEventCategory(event.category) ? event.category : '',
-    startsAt: event.starts_at ?? '',
-    endsAt: event.ends_at ?? '',
+    startsAt: event.starts_at === null ? '' : instantToLosAngelesWallTime(event.starts_at),
+    endsAt: event.ends_at === null ? '' : instantToLosAngelesWallTime(event.ends_at),
     timezone: 'America/Los_Angeles',
     venueName: event.venue_name ?? '',
     location: rowLocation(event),

@@ -4,7 +4,8 @@ import { getOwnedEvent, listOwnedEvents, publishEvent, saveEventDraft } from './
 export const eventKeys = {
   all: ['events'] as const,
   ownedList: (organizerId: string) => ['events', 'owned', organizerId] as const,
-  detail: (eventId: string) => ['events', 'detail', eventId] as const,
+  detail: (organizerId: string, eventId: string) =>
+    ['events', 'detail', organizerId, eventId] as const,
 }
 
 export function useOwnedEvents(organizerId: string) {
@@ -17,7 +18,7 @@ export function useOwnedEvents(organizerId: string) {
 
 export function useOwnedEvent(eventId: string, organizerId: string) {
   return useQuery({
-    queryKey: eventKeys.detail(eventId),
+    queryKey: eventKeys.detail(organizerId, eventId),
     queryFn: () => getOwnedEvent(eventId, organizerId),
     enabled: eventId.length > 0 && organizerId.length > 0,
   })
@@ -28,29 +29,38 @@ export function useSaveEventDraft() {
 
   return useMutation({
     mutationFn: saveEventDraft,
-    onSuccess: async (event) => {
-      queryClient.setQueryData(eventKeys.detail(event.id), event)
+    onSuccess: async (event, input) => {
+      if (event.organizer_id === input.organizerId) {
+        queryClient.setQueryData(eventKeys.detail(input.organizerId, event.id), event)
+      }
       await queryClient.invalidateQueries({
-        queryKey: eventKeys.ownedList(event.organizer_id),
+        queryKey: eventKeys.ownedList(input.organizerId),
         exact: true,
       })
     },
   })
 }
 
-export function usePublishEvent() {
+export function usePublishEvent(organizerId: string) {
   const queryClient = useQueryClient()
 
   return useMutation({
     mutationFn: publishEvent,
-    onSuccess: async (event) => {
-      await Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: eventKeys.ownedList(event.organizer_id),
-          exact: true,
-        }),
-        queryClient.invalidateQueries({ queryKey: eventKeys.detail(event.id), exact: true }),
-      ])
+    onSuccess: async (event, requestedEventId) => {
+      const contracts = [
+        eventKeys.ownedList(organizerId),
+        eventKeys.detail(organizerId, requestedEventId),
+      ]
+      if (event.organizer_id !== organizerId) {
+        contracts.push(eventKeys.ownedList(event.organizer_id))
+      }
+      if (event.organizer_id !== organizerId || event.id !== requestedEventId) {
+        contracts.push(eventKeys.detail(event.organizer_id, event.id))
+      }
+
+      await Promise.all(
+        contracts.map((queryKey) => queryClient.invalidateQueries({ queryKey, exact: true })),
+      )
     },
   })
 }
