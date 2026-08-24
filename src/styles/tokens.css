@@ -1,0 +1,16 @@
+:root {
+  --color-canvas: #f7f7fb;
+  --color-surface: #ffffff;
+  --color-ink: #19162c;
+  --color-muted: #6f6a7d;
+  --color-violet: #6d4aff;
+  --color-violet-deep: #4d2fd4;
+  --color-border: #dedce8;
+  --color-success: #117a56;
+  --color-danger: #b42318;
+  --font-display: 'Space Grotesk Variable', sans-serif;
+  --font-body: 'Manrope Variable', sans-serif;
+  --radius-control: 0.75rem;
+  --radius-surface: 1.125rem;
+  --shadow-focus: 0 0 0 3px rgb(109 74 255 / 24%);
+}
