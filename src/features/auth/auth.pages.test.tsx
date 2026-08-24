@@ -111,4 +111,33 @@ describe('organizer auth pages', () => {
     })
     expect(await screen.findByText('events destination')).toBeInTheDocument()
   })
+
+  it('retains sign-in values and renders a server error', async () => {
+    const user = userEvent.setup()
+    signInOrganizer.mockRejectedValue(new Error('Invalid login credentials'))
+    renderSignIn()
+
+    await user.type(screen.getByLabelText('Email'), 'organizer@example.com')
+    await user.type(screen.getByLabelText('Password'), 'safe-password')
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    expect(await screen.findByText('Invalid login credentials')).toBeInTheDocument()
+    expect(screen.getByLabelText('Email')).toHaveValue('organizer@example.com')
+    expect(screen.getByLabelText('Password')).toHaveValue('safe-password')
+  })
+
+  it('disables sign-in while the request is pending', async () => {
+    const user = userEvent.setup()
+    let resolveSignIn!: () => void
+    signInOrganizer.mockReturnValue(new Promise<void>((resolve) => (resolveSignIn = resolve)))
+    renderSignIn()
+
+    await user.type(screen.getByLabelText('Email'), 'organizer@example.com')
+    await user.type(screen.getByLabelText('Password'), 'safe-password')
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    expect(screen.getByRole('button', { name: 'Signing in…' })).toBeDisabled()
+    resolveSignIn()
+    expect(await screen.findByText('events destination')).toBeInTheDocument()
+  })
 })

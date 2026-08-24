@@ -30,11 +30,18 @@ export function SessionProvider({ children }: PropsWithChildren) {
       }
     })
 
-    void supabase.auth.getSession().then(({ data: sessionData }) => {
-      if (active && !authEventReceived) {
-        setState(stateFromSession(sessionData.session))
-      }
-    })
+    void supabase.auth
+      .getSession()
+      .then(({ data: sessionData }) => {
+        if (active && !authEventReceived) {
+          setState(stateFromSession(sessionData.session))
+        }
+      })
+      .catch(() => {
+        if (active && !authEventReceived) {
+          setState(anonymousState)
+        }
+      })
 
     return () => {
       active = false

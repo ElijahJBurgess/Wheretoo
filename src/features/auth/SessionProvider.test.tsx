@@ -86,4 +86,41 @@ describe('SessionProvider', () => {
     await act(async () => resolveSession({ data: { session: null }, error: null }))
     expect(screen.getByText('authenticated:user-1')).toBeInTheDocument()
   })
+
+  it('becomes anonymous when the active initial session lookup rejects', async () => {
+    getSession.mockRejectedValue(new Error('Session storage unavailable'))
+
+    render(<SessionProvider><SessionProbe /></SessionProvider>)
+
+    expect(screen.getByText('loading')).toBeInTheDocument()
+    expect(await screen.findByText('anonymous')).toBeInTheDocument()
+  })
+
+  it('does not let a late initial rejection overwrite a newer auth event', async () => {
+    let rejectSession!: (reason: Error) => void
+    getSession.mockReturnValue(new Promise((_resolve, reject) => (rejectSession = reject)))
+    let authListener: ((event: AuthChangeEvent, nextSession: Session | null) => void) | undefined
+    onAuthStateChange.mockImplementation((listener) => {
+      authListener = listener
+      return { data: { subscription: { unsubscribe } } }
+    })
+
+    render(<SessionProvider><SessionProbe /></SessionProvider>)
+    act(() => authListener?.('SIGNED_IN', session))
+    expect(screen.getByText('authenticated:user-1')).toBeInTheDocument()
+
+    await act(async () => rejectSession(new Error('Late session failure')))
+    expect(screen.getByText('authenticated:user-1')).toBeInTheDocument()
+  })
+
+  it('handles an initial rejection after unmount without updating state', async () => {
+    let rejectSession!: (reason: Error) => void
+    getSession.mockReturnValue(new Promise((_resolve, reject) => (rejectSession = reject)))
+
+    const view = render(<SessionProvider><SessionProbe /></SessionProvider>)
+    view.unmount()
+
+    await act(async () => rejectSession(new Error('Unmounted session failure')))
+    expect(unsubscribe).toHaveBeenCalledOnce()
+  })
 })
