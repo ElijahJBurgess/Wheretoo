@@ -7,6 +7,8 @@ import { CheckEmailPage } from '../../features/auth/CheckEmailPage'
 import { SignInPage } from '../../features/auth/SignInPage'
 import { SignUpPage } from '../../features/auth/SignUpPage'
 import { signOut } from '../../features/auth/auth.api'
+import { EventEditorPage } from '../../features/events/EventEditorPage'
+import { OrganizerEventsPage } from '../../features/events/OrganizerEventsPage'
 import { OrganizerSetupPage } from '../../features/organizers/OrganizerSetupPage'
 import { RequireOrganizer } from './RequireOrganizer'
 import { RequireSession } from './RequireSession'
@@ -54,7 +56,15 @@ export const appRouter = createBrowserRouter([
             children: [
               {
                 path: '/organizer/events',
-                element: <h1>Your events</h1>,
+                element: <OrganizerEventsPage />,
+              },
+              {
+                path: '/organizer/events/new',
+                element: <EventEditorPage />,
+              },
+              {
+                path: '/organizer/events/:eventId/edit',
+                element: <EventEditorPage />,
               },
             ],
           },
