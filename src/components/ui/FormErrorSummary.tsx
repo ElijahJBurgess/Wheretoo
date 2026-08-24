@@ -12,8 +12,8 @@ export function FormErrorSummary({ errors, title = 'Check the highlighted fields
     <div className="ui-error-summary" role="alert">
       <p className="ui-error-summary__title">{title}</p>
       <ul>
-        {errors.map((error) => (
-          <li key={error}>{error}</li>
+        {errors.map((error, index) => (
+          <li key={`${index}-${error}`}>{error}</li>
         ))}
       </ul>
     </div>

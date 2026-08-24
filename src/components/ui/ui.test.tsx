@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { AsyncState } from './AsyncState'
 import { Button } from './Button'
 import { Field } from './Field'
@@ -54,5 +54,26 @@ describe('organizer UI primitives', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('Events could not load')
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
+  })
+
+  it('renders duplicate form messages without duplicate-key warnings', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    try {
+      render(<FormErrorSummary errors={['Required', 'Required']} />)
+
+      const isDuplicateKeyWarning = (call: unknown[]) =>
+        call.some(
+          (argument) =>
+            typeof argument === 'string' && argument.includes('Encountered two children with the same key'),
+        )
+      const duplicateKeyWarnings = consoleError.mock.calls.filter(isDuplicateKeyWarning)
+      const unrelatedErrors = consoleError.mock.calls.filter((call) => !isDuplicateKeyWarning(call))
+
+      expect(unrelatedErrors).toEqual([])
+      expect(duplicateKeyWarnings).toEqual([])
+    } finally {
+      consoleError.mockRestore()
+    }
   })
 })
