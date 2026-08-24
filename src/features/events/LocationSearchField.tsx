@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { SearchBox } from '@mapbox/search-js-react'
+import { useRef, useState } from 'react'
+import { SearchBox, type SearchBoxRefType } from '@mapbox/search-js-react'
 import { Button } from '../../components/ui/Button'
 import { publicEnv } from '../../lib/env'
 import {
@@ -9,6 +9,39 @@ import {
 import type { NormalizedLocation } from './event.types'
 
 const invalidLocationMessage = 'Choose a verified California address'
+const unavailableLocationMessage =
+  'Address search is unavailable. Check your connection and try again.'
+
+const searchBoxTheme = {
+  variables: {
+    border: '1px solid #dedce8',
+    borderRadius: '0.75rem',
+    boxShadow: 'none',
+    colorBackground: '#ffffff',
+    colorPrimary: '#4d2fd4',
+    colorText: '#19162c',
+    fontFamily: "'Manrope Variable', sans-serif",
+    unit: '1rem',
+  },
+  // Search JS scopes this CSS inside its component, so the 44px target cannot leak globally.
+  cssText: `
+    .Input {
+      height: 44px;
+      padding-right: 52px;
+    }
+
+    .ActionIcon {
+      width: 44px;
+      height: 44px;
+      right: 0;
+    }
+
+    .ActionIcon > button {
+      min-width: 44px;
+      min-height: 44px;
+    }
+  `,
+}
 
 type LocationSearchFieldProps = {
   error?: string
@@ -20,15 +53,34 @@ function formatLocation(location: NormalizedLocation): string {
   return `${location.addressLine1}, ${location.city}, ${location.region} ${location.postalCode}`
 }
 
+function locationKey(location: NormalizedLocation | null): string | null {
+  return location === null
+    ? null
+    : JSON.stringify([
+        location.mapboxFeatureId,
+        location.addressLine1,
+        location.addressLine2,
+        location.city,
+        location.region,
+        location.postalCode,
+        location.countryCode,
+        location.latitude,
+        location.longitude,
+      ])
+}
+
 export function LocationSearchField({ error, onChange, value }: LocationSearchFieldProps) {
-  const valueId = value?.mapboxFeatureId ?? null
+  const valueKey = locationKey(value)
   const [searchState, setSearchState] = useState(() => ({
-    ownerId: valueId,
+    ownerKey: valueKey,
     text: value === null ? '' : formatLocation(value),
   }))
   const [retrievalError, setRetrievalError] = useState<string | null>(null)
+  const searchBoxRef = useRef<SearchBoxRefType>(null)
+  const suppressNextVendorClearRef = useRef(false)
+
   const searchText =
-    searchState.ownerId === valueId
+    searchState.ownerKey === valueKey
       ? searchState.text
       : value === null
         ? ''
@@ -37,34 +89,63 @@ export function LocationSearchField({ error, onChange, value }: LocationSearchFi
   const errorId = displayedError ? 'event-location-error' : undefined
 
   function handleSearchChange(nextText: string) {
+    setRetrievalError(null)
+
     if (value !== null && nextText !== formatLocation(value)) {
-      setSearchState({ ownerId: null, text: nextText })
+      setSearchState({ ownerKey: null, text: nextText })
       setRetrievalError(invalidLocationMessage)
+      // Search JS emits `input('')` and then `clear` synchronously for the final deletion.
+      suppressNextVendorClearRef.current = nextText === ''
       onChange(null)
       return
     }
 
-    setSearchState({ ownerId: valueId, text: nextText })
+    suppressNextVendorClearRef.current = false
+    setSearchState({ ownerKey: valueKey, text: nextText })
   }
 
   function handleRetrieve(response: SearchBoxRetrieveResponse) {
     const location = normalizeSearchResult(response)
 
     if (location === null) {
+      suppressNextVendorClearRef.current = false
       setRetrievalError(invalidLocationMessage)
       onChange(null)
       return
     }
 
-    setSearchState({ ownerId: location.mapboxFeatureId, text: formatLocation(location) })
+    const nextKey = locationKey(location)
+    suppressNextVendorClearRef.current = false
+    setSearchState({ ownerKey: nextKey, text: formatLocation(location) })
     setRetrievalError(null)
     onChange(location)
   }
 
-  function handleClear() {
-    setSearchState({ ownerId: null, text: '' })
+  function clearField() {
+    setSearchState({ ownerKey: null, text: '' })
     setRetrievalError(null)
+    searchBoxRef.current?.focus()
+  }
+
+  function handleVendorClear() {
+    clearField()
+
+    if (suppressNextVendorClearRef.current) {
+      suppressNextVendorClearRef.current = false
+      return
+    }
+
     onChange(null)
+  }
+
+  function handleExternalClear() {
+    suppressNextVendorClearRef.current = false
+    clearField()
+    onChange(null)
+  }
+
+  function handleSuggestError() {
+    setRetrievalError(unavailableLocationMessage)
   }
 
   return (
@@ -82,8 +163,9 @@ export function LocationSearchField({ error, onChange, value }: LocationSearchFi
         accessToken={publicEnv.mapboxAccessToken}
         componentOptions={{ allowReverse: false }}
         onChange={handleSearchChange}
-        onClear={handleClear}
+        onClear={handleVendorClear}
         onRetrieve={handleRetrieve}
+        onSuggestError={handleSuggestError}
         options={{
           country: 'US',
           language: 'en',
@@ -92,6 +174,8 @@ export function LocationSearchField({ error, onChange, value }: LocationSearchFi
           types: 'address,poi',
         }}
         placeholder="Search for a California address"
+        ref={searchBoxRef}
+        theme={searchBoxTheme}
         value={searchText}
       />
 
@@ -106,7 +190,7 @@ export function LocationSearchField({ error, onChange, value }: LocationSearchFi
       ) : null}
 
       {searchText || value !== null ? (
-        <Button onClick={handleClear} variant="secondary">
+        <Button onClick={handleExternalClear} variant="secondary">
           Clear address
         </Button>
       ) : null}
