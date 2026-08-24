@@ -7,6 +7,8 @@ import { CheckEmailPage } from '../../features/auth/CheckEmailPage'
 import { SignInPage } from '../../features/auth/SignInPage'
 import { SignUpPage } from '../../features/auth/SignUpPage'
 import { signOut } from '../../features/auth/auth.api'
+import { OrganizerSetupPage } from '../../features/organizers/OrganizerSetupPage'
+import { RequireOrganizer } from './RequireOrganizer'
 import { RequireSession } from './RequireSession'
 
 function OrganizerShell() {
@@ -45,11 +47,16 @@ export const appRouter = createBrowserRouter([
         children: [
           {
             path: '/organizer/setup',
-            element: <h1>Set up your organizer profile</h1>,
+            element: <OrganizerSetupPage />,
           },
           {
-            path: '/organizer/events',
-            element: <h1>Your events</h1>,
+            element: <RequireOrganizer />,
+            children: [
+              {
+                path: '/organizer/events',
+                element: <h1>Your events</h1>,
+              },
+            ],
           },
         ],
       },
