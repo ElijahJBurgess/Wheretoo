@@ -66,16 +66,19 @@ function OrganizerSetupForm({ initialValues, userId }: OrganizerSetupFormProps) 
   const summaryErrors = serverError ? [...validationMessages, serverError] : validationMessages
   const summaryTitle = serverError ? 'Profile save failed' : 'Check the highlighted fields'
 
-  const submit = handleSubmit(async (input) => {
-    setServerError(null)
+  const submit = handleSubmit(
+    async (input) => {
+      setServerError(null)
 
-    try {
-      await saveOrganizerMutation.mutateAsync(input)
-      navigate('/organizer/events', { replace: true })
-    } catch (error) {
-      setServerError(errorMessage(error))
-    }
-  })
+      try {
+        await saveOrganizerMutation.mutateAsync(input)
+        navigate('/organizer/events', { replace: true })
+      } catch (error) {
+        setServerError(errorMessage(error))
+      }
+    },
+    () => setServerError(null),
+  )
 
   return (
     <section aria-labelledby="organizer-setup-title" className="auth-panel">

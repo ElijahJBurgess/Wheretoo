@@ -83,6 +83,28 @@ describe('OrganizerSetupPage', () => {
     expect(screen.getByLabelText('Short description')).toHaveValue('We host neighborhood art nights.')
   })
 
+  it('clears a stale save error when a resubmission has field validation errors', async () => {
+    const user = userEvent.setup()
+    mutateAsync.mockRejectedValue(new Error('Profile could not be saved'))
+    renderPage()
+
+    await user.type(screen.getByLabelText('Short description'), 'Keep this description.')
+    await user.click(screen.getByRole('button', { name: 'Save organizer profile' }))
+    expect(await screen.findByText('Profile could not be saved')).toBeInTheDocument()
+
+    const name = screen.getByLabelText('Public organizer name')
+    await user.clear(name)
+    await user.type(name, 'A')
+    await user.click(screen.getByRole('button', { name: 'Save organizer profile' }))
+
+    expect(await screen.findByText('Check the highlighted fields')).toBeInTheDocument()
+    expect(screen.queryByText('Profile save failed')).not.toBeInTheDocument()
+    expect(screen.queryByText('Profile could not be saved')).not.toBeInTheDocument()
+    expect(name).toHaveAttribute('aria-describedby', 'displayName-error')
+    expect(screen.getByLabelText('Short description')).toHaveValue('Keep this description.')
+    expect(mutateAsync).toHaveBeenCalledOnce()
+  })
+
   it('disables the save action while the mutation is pending', () => {
     useSaveOrganizer.mockReturnValue({ isPending: true, mutateAsync })
     renderPage()

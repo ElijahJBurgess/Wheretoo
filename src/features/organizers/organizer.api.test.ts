@@ -33,7 +33,7 @@ const input: OrganizerInput = {
   displayName: 'Bay City Arts',
   organizerType: '',
   bio: 'Neighborhood events made with care.',
-  websiteUrl: '',
+  websiteUrl: '   ',
   baseCity: '   ',
 }
 

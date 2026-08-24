@@ -39,12 +39,23 @@ describe('organizerInputSchema', () => {
     },
   )
 
+  it.each(['HTTP://baycity.example', 'HTTPS://baycity.example'])(
+    'rejects an uppercase website protocol in %s to match persistence constraints',
+    (websiteUrl) => {
+      expect(organizerInputSchema.safeParse({ ...validInput, websiteUrl }).success).toBe(false)
+    },
+  )
+
   it.each(['', 'http://baycity.example', 'https://baycity.example'])(
     'accepts the supported website value %s',
     (websiteUrl) => {
       expect(organizerInputSchema.safeParse({ ...validInput, websiteUrl }).success).toBe(true)
     },
   )
+
+  it('normalizes a whitespace-only optional website to empty', () => {
+    expect(organizerInputSchema.parse({ ...validInput, websiteUrl: '   ' }).websiteUrl).toBe('')
+  })
 
   it('rejects a display name shorter than two characters after trimming', () => {
     expect(organizerInputSchema.safeParse({ ...validInput, displayName: ' A ' }).success).toBe(false)
