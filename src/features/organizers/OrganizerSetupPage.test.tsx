@@ -87,7 +87,8 @@ describe('OrganizerSetupPage', () => {
 
   it('saves form values without ownership fields and navigates to events', async () => {
     const user = userEvent.setup()
-    mutateAsync.mockResolvedValue({ id: 'user-1' })
+    let resolveSave!: (organizer: { id: string }) => void
+    mutateAsync.mockReturnValue(new Promise((resolve) => (resolveSave = resolve)))
     renderPage()
 
     await user.selectOptions(screen.getByLabelText('Organizer type'), 'Community group')
@@ -101,6 +102,9 @@ describe('OrganizerSetupPage', () => {
       websiteUrl: '',
       baseCity: 'San Francisco',
     })
+    expect(screen.queryByText('events destination')).not.toBeInTheDocument()
+
+    resolveSave({ id: 'user-1' })
     expect(await screen.findByText('events destination')).toBeInTheDocument()
   })
 
