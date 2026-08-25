@@ -2,6 +2,7 @@ export type PublicEnv = {
   supabaseUrl: string
   supabasePublishableKey: string
   mapboxAccessToken: string
+  stripePublishableKey: string
 }
 
 export function readPublicEnv(source: Record<string, unknown>): PublicEnv {
@@ -19,6 +20,7 @@ export function readPublicEnv(source: Record<string, unknown>): PublicEnv {
     supabaseUrl: requireString('VITE_SUPABASE_URL'),
     supabasePublishableKey: requireString('VITE_SUPABASE_PUBLISHABLE_KEY'),
     mapboxAccessToken: requireString('VITE_MAPBOX_ACCESS_TOKEN'),
+    stripePublishableKey: requireString('VITE_STRIPE_PUBLISHABLE_KEY'),
   }
 }
 

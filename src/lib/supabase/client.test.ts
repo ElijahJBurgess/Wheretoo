@@ -10,6 +10,7 @@ const { createClient, configuredClient, runtimeEnv } = vi.hoisted(() => {
       supabaseUrl: 'https://runtime.example.supabase.co',
       supabasePublishableKey: 'runtime-publishable',
       mapboxAccessToken: 'pk.runtime-mapbox',
+      stripePublishableKey: 'pk_test_runtime',
     },
   }
 })
@@ -31,6 +32,7 @@ describe('Supabase client boundary', () => {
       supabaseUrl: 'https://factory.example.supabase.co',
       supabasePublishableKey: 'factory-publishable',
       mapboxAccessToken: 'pk.factory-mapbox',
+      stripePublishableKey: 'pk_test_factory',
     })
 
     expect(client).toBe(configuredClient)

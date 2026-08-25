@@ -12,7 +12,9 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:watch": "vitest",
     "test:e2e": "playwright test --config playwright.config.ts",
-    "supabase": "supabase"
+    "supabase": "supabase",
+    "test:functions": "deno task test",
+    "typecheck:functions": "deno task check"
   },
   "keywords": [],
   "author": "",
@@ -20,16 +22,19 @@
   "devEngines": {
     "packageManager": {
       "name": "pnpm",
-      "version": "^11.19.0",
+      "version": "11.19.0",
       "onFail": "download"
     }
   },
+  "packageManager": "pnpm@11.19.0",
   "type": "module",
   "dependencies": {
     "@fontsource-variable/manrope": "^5.3.0",
     "@fontsource-variable/space-grotesk": "^5.3.0",
     "@hookform/resolvers": "^5.9.1",
     "@mapbox/search-js-react": "^1.6.0",
+    "@stripe/connect-js": "3.4.6",
+    "@stripe/react-connect-js": "3.4.4",
     "@supabase/supabase-js": "^2.112.3",
     "@tanstack/react-query": "^5.102.2",
     "react": "^19.2.8",
@@ -48,6 +53,7 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.1.0",
+    "deno": "2.9.5",
     "eslint": "^10.9.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.4",

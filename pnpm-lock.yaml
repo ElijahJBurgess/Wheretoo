@@ -1,3 +1,202 @@
+---
+lockfileVersion: '9.0'
+
+importers:
+
+  .:
+    configDependencies: {}
+    packageManagerDependencies:
+      '@pnpm/exe':
+        specifier: 11.19.0
+        version: 11.19.0
+      pnpm:
+        specifier: 11.19.0
+        version: 11.19.0
+
+packages:
+
+  '@pnpm/exe@11.19.0':
+    resolution: {integrity: sha512-P1mw8BZaNkEpttlyzKsxTj7PVs94bMB4cQ8pJhgbrCTSBP7xCzKS3VlOwIInS7aS5by6KAbfO5Vs9yK/ekugrg==}
+    hasBin: true
+
+  '@pnpm/linux-arm64@11.19.0':
+    resolution: {integrity: sha512-c5AJqnsj0BMqMCOtctOzsCqyfY+afFe1kdM9F2FrNhYwtnQRMHoJy+51qfee4yuTPOVRyk3Yh1dwvyAadiznvA==}
+    cpu: [arm64]
+    os: [linux]
+
+  '@pnpm/linux-x64@11.19.0':
+    resolution: {integrity: sha512-KOKpA9o75SvmRQgWO+EqEpQzJg1b9uHk5y61PAx90sSpdYtKDPua2eBXBglzv8YK1xM3DsYXFEf7Scs+3HeDsA==}
+    cpu: [x64]
+    os: [linux]
+
+  '@pnpm/linuxstatic-arm64@11.19.0':
+    resolution: {integrity: sha512-Ci9WxgCInZc3F43R6BfaHevi+dYqaI5CLi6421egFsK649eHvYPytvu+zABhTNlYGNJbD8j9w+AUYInz/TPsyQ==}
+    cpu: [arm64]
+    os: [linux]
+    libc: [musl]
+
+  '@pnpm/linuxstatic-x64@11.19.0':
+    resolution: {integrity: sha512-GNMk96vNJ4uEWigekarjHofXNDFsTYRL0Mw2YlDkv/W+u0cn/UAVPHfd5aAfsf6Arel2ZQfxPUTXlpunFujWnA==}
+    cpu: [x64]
+    os: [linux]
+    libc: [musl]
+
+  '@pnpm/macos-arm64@11.19.0':
+    resolution: {integrity: sha512-I3Ee/GQlPxEOeBSzqxBNwcTHxVebjMiN2xLdTBS6OK2TAPzbWMIExjU5brxhr8rAk73p7mbv/a/2tFC/3gl6FA==}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@pnpm/win-arm64@11.19.0':
+    resolution: {integrity: sha512-rOiWuJ9wjaFY9ZDVPGVjpvjIQHZNB72rioxvuyzDKJ7dqKQ97VF27a4rmOtjhMB5u83cdDGEJ+OY+H1+TP+frw==}
+    cpu: [arm64]
+    os: [win32]
+
+  '@pnpm/win-x64@11.19.0':
+    resolution: {integrity: sha512-l26XeTxoGxfU+mVcZ5jFdP9hNe5yrOlLPSkAlwwpXPI1iyyU4JUSxm6Jdyxu1UAU1FerD/BvLK2vrlR6d9ogag==}
+    cpu: [x64]
+    os: [win32]
+
+  '@reflink/reflink-darwin-arm64@0.1.19':
+    resolution: {integrity: sha512-ruy44Lpepdk1FqDz38vExBY/PVUsjxZA+chd9wozjUH9JjuDT/HEaQYA6wYN9mf041l0yLVar6BCZuWABJvHSA==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@reflink/reflink-darwin-x64@0.1.19':
+    resolution: {integrity: sha512-By85MSWrMZa+c26TcnAy8SDk0sTUkYlNnwknSchkhHpGXOtjNDUOxJE9oByBnGbeuIE1PiQsxDG3Ud+IVV9yuA==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [darwin]
+
+  '@reflink/reflink-linux-arm64-gnu@0.1.19':
+    resolution: {integrity: sha512-7P+er8+rP9iNeN+bfmccM4hTAaLP6PQJPKWSA4iSk2bNvo6KU6RyPgYeHxXmzNKzPVRcypZQTpFgstHam6maVg==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
+  '@reflink/reflink-linux-arm64-musl@0.1.19':
+    resolution: {integrity: sha512-37iO/Dp6m5DDaC2sf3zPtx/hl9FV3Xze4xoYidrxxS9bgP3S8ALroxRK6xBG/1TtfXKTvolvp+IjrUU6ujIGmA==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [linux]
+    libc: [musl]
+
+  '@reflink/reflink-linux-x64-gnu@0.1.19':
+    resolution: {integrity: sha512-jbI8jvuYCaA3MVUdu8vLoLAFqC+iNMpiSuLbxlAgg7x3K5bsS8nOpTRnkLF7vISJ+rVR8W+7ThXlXlUQ93ulkw==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
+  '@reflink/reflink-linux-x64-musl@0.1.19':
+    resolution: {integrity: sha512-e9FBWDe+lv7QKAwtKOt6A2W/fyy/aEEfr0g6j/hWzvQcrzHCsz07BNQYlNOjTfeytrtLU7k449H1PI95jA4OjQ==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [linux]
+    libc: [musl]
+
+  '@reflink/reflink-win32-arm64-msvc@0.1.19':
+    resolution: {integrity: sha512-09PxnVIQcd+UOn4WAW73WU6PXL7DwGS6wPlkMhMg2zlHHG65F3vHepOw06HFCq+N42qkaNAc8AKIabWvtk6cIQ==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [win32]
+
+  '@reflink/reflink-win32-x64-msvc@0.1.19':
+    resolution: {integrity: sha512-E//yT4ni2SyhwP8JRjVGWr3cbnhWDiPLgnQ66qqaanjjnMiu3O/2tjCPQXlcGc/DEYofpDc9fvhv6tALQsMV9w==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [win32]
+
+  '@reflink/reflink@0.1.19':
+    resolution: {integrity: sha512-DmCG8GzysnCZ15bres3N5AHCmwBwYgp0As6xjhQ47rAUTUXxJiK+lLUxaGsX3hd/30qUpVElh05PbGuxRPgJwA==}
+    engines: {node: '>= 10'}
+
+  detect-libc@2.1.2:
+    resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
+    engines: {node: '>=8'}
+
+  pnpm@11.19.0:
+    resolution: {integrity: sha512-eIHz7VkNRyxKlV4riLISF5ERYGbcyIy8o4SeybYPG7qm0syyIfqR2k4cZb7yvL43k2Wup6xTnHv4be3DobItzg==}
+    engines: {node: '>=22.13'}
+    hasBin: true
+
+snapshots:
+
+  '@pnpm/exe@11.19.0':
+    dependencies:
+      '@reflink/reflink': 0.1.19
+      detect-libc: 2.1.2
+    optionalDependencies:
+      '@pnpm/linux-arm64': 11.19.0
+      '@pnpm/linux-x64': 11.19.0
+      '@pnpm/linuxstatic-arm64': 11.19.0
+      '@pnpm/linuxstatic-x64': 11.19.0
+      '@pnpm/macos-arm64': 11.19.0
+      '@pnpm/win-arm64': 11.19.0
+      '@pnpm/win-x64': 11.19.0
+
+  '@pnpm/linux-arm64@11.19.0':
+    optional: true
+
+  '@pnpm/linux-x64@11.19.0':
+    optional: true
+
+  '@pnpm/linuxstatic-arm64@11.19.0':
+    optional: true
+
+  '@pnpm/linuxstatic-x64@11.19.0':
+    optional: true
+
+  '@pnpm/macos-arm64@11.19.0':
+    optional: true
+
+  '@pnpm/win-arm64@11.19.0':
+    optional: true
+
+  '@pnpm/win-x64@11.19.0':
+    optional: true
+
+  '@reflink/reflink-darwin-arm64@0.1.19':
+    optional: true
+
+  '@reflink/reflink-darwin-x64@0.1.19':
+    optional: true
+
+  '@reflink/reflink-linux-arm64-gnu@0.1.19':
+    optional: true
+
+  '@reflink/reflink-linux-arm64-musl@0.1.19':
+    optional: true
+
+  '@reflink/reflink-linux-x64-gnu@0.1.19':
+    optional: true
+
+  '@reflink/reflink-linux-x64-musl@0.1.19':
+    optional: true
+
+  '@reflink/reflink-win32-arm64-msvc@0.1.19':
+    optional: true
+
+  '@reflink/reflink-win32-x64-msvc@0.1.19':
+    optional: true
+
+  '@reflink/reflink@0.1.19':
+    optionalDependencies:
+      '@reflink/reflink-darwin-arm64': 0.1.19
+      '@reflink/reflink-darwin-x64': 0.1.19
+      '@reflink/reflink-linux-arm64-gnu': 0.1.19
+      '@reflink/reflink-linux-arm64-musl': 0.1.19
+      '@reflink/reflink-linux-x64-gnu': 0.1.19
+      '@reflink/reflink-linux-x64-musl': 0.1.19
+      '@reflink/reflink-win32-arm64-msvc': 0.1.19
+      '@reflink/reflink-win32-x64-msvc': 0.1.19
+
+  detect-libc@2.1.2: {}
+
+  pnpm@11.19.0: {}
+
+---
 lockfileVersion: '9.0'
 
 settings:
@@ -20,6 +219,12 @@ importers:
       '@mapbox/search-js-react':
         specifier: ^1.6.0
         version: 1.6.0(mapbox-gl@3.29.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@stripe/connect-js':
+        specifier: 3.4.6
+        version: 3.4.6
+      '@stripe/react-connect-js':
+        specifier: 3.4.4
+        version: 3.4.4(@stripe/connect-js@3.4.6)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@supabase/supabase-js':
         specifier: ^2.112.3
         version: 2.112.3
@@ -69,6 +274,9 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^6.1.0
         version: 6.1.0(vite@8.2.2(@types/node@26.2.0))
+      deno:
+        specifier: 2.9.5
+        version: 2.9.5
       eslint:
         specifier: ^10.9.0
         version: 10.9.0
@@ -223,6 +431,38 @@ packages:
   '@csstools/css-tokenizer@4.0.0':
     resolution: {integrity: sha512-QxULHAm7cNu72w97JUNCBFODFaXpbDg+dP8b/oWFAZ2MTRppA3U00Y2L1HqaS4J6yBqxwa/Y3nMBaxVKbB/NsA==}
     engines: {node: '>=20.19.0'}
+
+  '@deno/darwin-arm64@2.9.5':
+    resolution: {integrity: sha512-SX98qSdBT1lw9x6NwGwx2xIayl1kRimdRnFohYlJ6nt3mLKzTKHHKQwQs5D2pEY7mbUGGbYe9brM2kfN75pPkg==}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@deno/darwin-x64@2.9.5':
+    resolution: {integrity: sha512-gbdlxWZuAZFiJiZtTT00Mv/aC7f/31+pyqJGQKlZr5X33WeTo5B0GG+efcX3P1UZceRKHuPEAQ1B/M2oRt8r9Q==}
+    cpu: [x64]
+    os: [darwin]
+
+  '@deno/linux-arm64-glibc@2.9.5':
+    resolution: {integrity: sha512-IuYjsz9PGl7CJcNXMuN27KNDB8Q40brK3SG3l+TXMDVW61ZKwcn0fQHBHnXFiiygEwI8by/fKnASEluhZB1atw==}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
+  '@deno/linux-x64-glibc@2.9.5':
+    resolution: {integrity: sha512-TDqcnoLe3jlgqYEQm7H7MK6q0JOth+o8iSZzknRODnVkJfPiNnjVn1M1Zc6vnp+ipkyb6Av1/CUlHgHtlq59Gw==}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
+  '@deno/win32-arm64@2.9.5':
+    resolution: {integrity: sha512-tTPrE/4SX7uaC8nJW47iNnibtjzk1y4zoiYjBBHE34vdkbb6LHopqH68BxyT61HZdfqXzOTEYjDVHhtmVZFy+w==}
+    cpu: [arm64]
+    os: [win32]
+
+  '@deno/win32-x64@2.9.5':
+    resolution: {integrity: sha512-LkcERsH0olOgevg9L9eootSr1U8ydyfnX1bS3mFqU+lGBeTYtlec5b/QF473WUOGVgPlWECrkxi4As5kEaFOzg==}
+    cpu: [x64]
+    os: [win32]
 
   '@ecies/ciphers@0.2.6':
     resolution: {integrity: sha512-patgsRPKGkhhoBjETV4XxD0En4ui5fbX0hzayqI3M8tvNMGUoUvmyYAIWwlxBc1KX5cturfqByYdj5bYGRpN9g==}
@@ -549,6 +789,16 @@ packages:
 
   '@standard-schema/utils@0.3.0':
     resolution: {integrity: sha512-e7Mew686owMaPJVNNLs55PUvgz371nKgwsc4vxE49zsODpJEnxgxRo2y/OKrqueavXgZNMDVj3DdHFlaSAeU8g==}
+
+  '@stripe/connect-js@3.4.6':
+    resolution: {integrity: sha512-fuC/U/ONDBMKwTBxKAnEBQH+m0x+Tze62/bV1ZDLT7oRnsJgddEnRi7FzdwIxz9pmFZhOJpSaikLIBw9g/1o1w==}
+
+  '@stripe/react-connect-js@3.4.4':
+    resolution: {integrity: sha512-LUtVcGwnkOU9SO1t6j/kAhc89tMCPpFzXz+LU+fhJkOVSDFy8lnidd+t0vNmkVvVU3o8wNVvWgUMxRHL/d1QhQ==}
+    peerDependencies:
+      '@stripe/connect-js': '>=3.4.6'
+      react: '>=16.8.0'
+      react-dom: '>=16.8.0'
 
   '@supabase/auth-js@2.112.3':
     resolution: {integrity: sha512-NA0rsgAlWZPvbhw8aUdmgfpHVgUAcd8zK5ov43l++o1bLIPXZhRiAlRobhwF5AatQuovpqxsMH50F4oyyV4XZw==}
@@ -904,6 +1154,10 @@ packages:
 
   deep-is@0.1.4:
     resolution: {integrity: sha512-oIPzksmTg4/MriiaYGO+okXDT7ztn/w3Eptv/+gSIdMdKsJo0u4CfYNFJPy+4SKMuCqGw2wxnA+URMg3t8a/bQ==}
+
+  deno@2.9.5:
+    resolution: {integrity: sha512-Jt/AcJiErtUW9krGwlwUDsm1coNtmfthiQ4JtSCF+JNkqohbeiJoRVkCr4FA4WQstyHuSJaON6PHCin0UCtlLg==}
+    hasBin: true
 
   dequal@2.0.3:
     resolution: {integrity: sha512-0je+qPKHEMohvfRTCEo3CrPG6cAzAYgmzKyxRiYSSDkS6eGJdyVJm7WaYA5ECaAD9wLB2T4EEeymA5aFVcYXCA==}
@@ -1797,6 +2051,24 @@ snapshots:
 
   '@csstools/css-tokenizer@4.0.0': {}
 
+  '@deno/darwin-arm64@2.9.5':
+    optional: true
+
+  '@deno/darwin-x64@2.9.5':
+    optional: true
+
+  '@deno/linux-arm64-glibc@2.9.5':
+    optional: true
+
+  '@deno/linux-x64-glibc@2.9.5':
+    optional: true
+
+  '@deno/win32-arm64@2.9.5':
+    optional: true
+
+  '@deno/win32-x64@2.9.5':
+    optional: true
+
   '@ecies/ciphers@0.2.6(@noble/ciphers@1.3.0)':
     dependencies:
       '@noble/ciphers': 1.3.0
@@ -1982,6 +2254,14 @@ snapshots:
   '@standard-schema/spec@1.1.0': {}
 
   '@standard-schema/utils@0.3.0': {}
+
+  '@stripe/connect-js@3.4.6': {}
+
+  '@stripe/react-connect-js@3.4.4(@stripe/connect-js@3.4.6)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+    dependencies:
+      '@stripe/connect-js': 3.4.6
+      react: 19.2.8
+      react-dom: 19.2.8(react@19.2.8)
 
   '@supabase/auth-js@2.112.3':
     dependencies:
@@ -2331,6 +2611,15 @@ snapshots:
   decimal.js@10.6.0: {}
 
   deep-is@0.1.4: {}
+
+  deno@2.9.5:
+    optionalDependencies:
+      '@deno/darwin-arm64': 2.9.5
+      '@deno/darwin-x64': 2.9.5
+      '@deno/linux-arm64-glibc': 2.9.5
+      '@deno/linux-x64-glibc': 2.9.5
+      '@deno/win32-arm64': 2.9.5
+      '@deno/win32-x64': 2.9.5
 
   dequal@2.0.3: {}
 

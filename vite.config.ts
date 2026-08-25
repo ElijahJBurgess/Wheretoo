@@ -15,7 +15,12 @@ export default defineConfig(({ mode }) => {
     test: {
       environment: 'jsdom',
       setupFiles: ['./src/test/setup.ts'],
-      exclude: [...configDefaults.exclude, 'tests/integration/**', 'tests/e2e/**'],
+      exclude: [
+        ...configDefaults.exclude,
+        'supabase/functions/**',
+        'tests/integration/**',
+        'tests/e2e/**',
+      ],
       globals: false,
     },
   }

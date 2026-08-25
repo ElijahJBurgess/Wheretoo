@@ -1,0 +1,9 @@
+{
+  "imports": {
+    "stripe": "npm:stripe@22.5.0"
+  },
+  "tasks": {
+    "test": "deno test --allow-env supabase/functions",
+    "check": "deno check supabase/functions/**/*.ts"
+  }
+}

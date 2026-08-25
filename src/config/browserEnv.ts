@@ -2,6 +2,7 @@ export const browserEnvKeys = [
   'VITE_SUPABASE_URL',
   'VITE_SUPABASE_PUBLISHABLE_KEY',
   'VITE_MAPBOX_ACCESS_TOKEN',
+  'VITE_STRIPE_PUBLISHABLE_KEY',
 ] as const
 
 type BrowserEnvKey = (typeof browserEnvKeys)[number]
