@@ -20,4 +20,19 @@ describe('selectBrowserEnv', () => {
       VITE_STRIPE_PUBLISHABLE_KEY: 'pk_test_browser',
     })
   })
+
+  it.each([
+    ['a live key', 'pk_live_example'],
+    ['a malformed value', 'not-a-stripe-publishable-key'],
+    ['a whitespace-prefixed test key', ' pk_test_example'],
+  ])('does not select %s for the browser bundle', (_description, stripePublishableKey) => {
+    expect(() =>
+      selectBrowserEnv({
+        VITE_SUPABASE_URL: 'https://project.supabase.co',
+        VITE_SUPABASE_PUBLISHABLE_KEY: 'publishable-key',
+        VITE_MAPBOX_ACCESS_TOKEN: 'mapbox-token',
+        VITE_STRIPE_PUBLISHABLE_KEY: stripePublishableKey,
+      }),
+    ).toThrow('Invalid VITE_STRIPE_PUBLISHABLE_KEY')
+  })
 })

@@ -79,4 +79,19 @@ describe('readPublicEnv', () => {
       }),
     ).toThrow('Missing VITE_STRIPE_PUBLISHABLE_KEY')
   })
+
+  it.each([
+    ['a live key', 'pk_live_example'],
+    ['a malformed value', 'not-a-stripe-publishable-key'],
+    ['a whitespace-prefixed test key', ' pk_test_example'],
+  ])('rejects %s', (_description, stripePublishableKey) => {
+    expect(() =>
+      readPublicEnv({
+        VITE_SUPABASE_URL: 'https://example.supabase.co',
+        VITE_SUPABASE_PUBLISHABLE_KEY: 'publishable',
+        VITE_MAPBOX_ACCESS_TOKEN: 'pk.mapbox',
+        VITE_STRIPE_PUBLISHABLE_KEY: stripePublishableKey,
+      }),
+    ).toThrow('Invalid VITE_STRIPE_PUBLISHABLE_KEY')
+  })
 })

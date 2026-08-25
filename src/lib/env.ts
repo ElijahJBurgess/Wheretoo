@@ -1,3 +1,5 @@
+import { requireTestStripePublishableKey } from '../config/browserEnv'
+
 export type PublicEnv = {
   supabaseUrl: string
   supabasePublishableKey: string
@@ -20,7 +22,7 @@ export function readPublicEnv(source: Record<string, unknown>): PublicEnv {
     supabaseUrl: requireString('VITE_SUPABASE_URL'),
     supabasePublishableKey: requireString('VITE_SUPABASE_PUBLISHABLE_KEY'),
     mapboxAccessToken: requireString('VITE_MAPBOX_ACCESS_TOKEN'),
-    stripePublishableKey: requireString('VITE_STRIPE_PUBLISHABLE_KEY'),
+    stripePublishableKey: requireTestStripePublishableKey(source.VITE_STRIPE_PUBLISHABLE_KEY),
   }
 }
 
