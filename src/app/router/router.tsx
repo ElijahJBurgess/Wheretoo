@@ -8,7 +8,9 @@ import { SignInPage } from '../../features/auth/SignInPage'
 import { SignUpPage } from '../../features/auth/SignUpPage'
 import { signOut } from '../../features/auth/auth.api'
 import { EventEditorPage } from '../../features/events/EventEditorPage'
+import { EventPreviewPage } from '../../features/events/EventPreviewPage'
 import { OrganizerEventsPage } from '../../features/events/OrganizerEventsPage'
+import { PublishedEventPage } from '../../features/events/PublishedEventPage'
 import { OrganizerSetupPage } from '../../features/organizers/OrganizerSetupPage'
 import { RequireOrganizer } from './RequireOrganizer'
 import { RequireSession } from './RequireSession'
@@ -65,6 +67,14 @@ export const appRouter = createBrowserRouter([
               {
                 path: '/organizer/events/:eventId/edit',
                 element: <EventEditorPage />,
+              },
+              {
+                path: '/organizer/events/:eventId/preview',
+                element: <EventPreviewPage />,
+              },
+              {
+                path: '/organizer/events/:eventId',
+                element: <PublishedEventPage />,
               },
             ],
           },
