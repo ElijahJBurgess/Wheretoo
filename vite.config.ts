@@ -1,6 +1,6 @@
 import react from '@vitejs/plugin-react'
 import { loadEnv } from 'vite'
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
 import { browserEnvKeys, selectBrowserEnv } from './src/config/browserEnv.ts'
 
 export default defineConfig(({ mode }) => {
@@ -15,6 +15,7 @@ export default defineConfig(({ mode }) => {
     test: {
       environment: 'jsdom',
       setupFiles: ['./src/test/setup.ts'],
+      exclude: [...configDefaults.exclude, 'tests/integration/**'],
       globals: false,
     },
   }
