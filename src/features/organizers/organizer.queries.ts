@@ -7,11 +7,22 @@ export const organizerKeys = {
   detail: (userId: string) => ['organizer', userId] as const,
 }
 
+const freshJwtRetryLimit = 20
+
+export function shouldRetryOrganizerQuery(failureCount: number, error: unknown): boolean {
+  const message = typeof error === 'object' && error !== null && 'message' in error
+    ? (error as { message?: unknown }).message
+    : undefined
+  return failureCount < freshJwtRetryLimit && message === 'JWT issued at future'
+}
+
 export function useOrganizer(userId: string) {
   return useQuery({
     queryKey: organizerKeys.detail(userId),
     queryFn: () => getOrganizer(userId),
     enabled: userId.length > 0,
+    retry: shouldRetryOrganizerQuery,
+    retryDelay: 1_000,
   })
 }
 

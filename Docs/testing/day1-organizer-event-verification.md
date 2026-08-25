@@ -93,21 +93,21 @@ exact Auth users. Never use a wildcard or service-role key in the test.
 
 ### Current hosted result
 
-`pnpm test:integration` passed against the confirmed development project: 1 file / 1 test. The
-project's public email signup limit blocked creation of the pair, so the final run provisioned
+The latest review-fix rerun passed against the confirmed development project: 3 files / 7 tests.
+The project's public email signup limit blocked creation of the pair, so the run provisioned
 exactly two confirmed disposable users through the official Admin API outside Vitest. The
-admin key was fetched into an unprinted shell variable and was never passed to the test; the
-test received only the publishable key and disposable user credentials.
+admin key was fetched into an unprinted shell variable and was never passed to the tests; the
+tests received only the publishable key and disposable user credentials.
 
-The first real attempt exposed a brief hosted clock skew: one newly issued token was rejected
-as `JWT issued at future`. After confirming the database/API/local clocks differed by only a
-few seconds, the harness added a five-second post-sign-in buffer. The next run passed the full
-flow in 7.49 seconds.
+An earlier real attempt exposed a brief hosted clock skew: one newly issued token was rejected
+as `JWT issued at future`. A fixed five-second post-sign-in delay was subsequently proven
+insufficient. The current harness instead uses the bounded exact-match readiness probe described
+above; the application organizer query independently applies the same narrow retry to the actual
+browser session.
 
-Before cleanup, the trap resolved only the two exact user IDs. It removed 1 event, 2 organizer
-rows, and 2 Auth users. A post-clean query returned zero remaining Auth, organizer, and event
-rows for those IDs. No Auth setting changed and no credential or disposable identifier was
-stored, printed, or committed.
+Before cleanup, the trap resolved only the two exact user IDs. A post-clean query returned zero
+remaining Auth, organizer, and event rows for those IDs. No Auth setting changed and no
+credential or disposable identifier was stored, printed, or committed.
 
 ## Linked database authorization and moderation proof
 
@@ -204,6 +204,15 @@ SearchBox, reviews, previews persisted data, sends exactly one publish request, 
 public-copy result, and reads the exact published event anonymously. The visual spec captures
 signup, setup, details, schedule, review, preview, and published states into Playwright's ignored
 test output for both viewports; raw screenshots and credentials must never be committed.
+
+The per-test timeout is 90 seconds so the browser journey remains above its bounded hosted
+readiness work. The organizer query itself retries only an exact `JWT issued at future` error,
+once per second for at most 20 failures; this retry runs through the actual browser Supabase
+session, while all other organizer-query failures remain immediately actionable. Playwright
+traces, video, and automatic failure screenshots are disabled so entered auth values cannot be
+retained. Explicit visual screenshots are written only by the visual spec to ignored test output.
+Recorded request failures replace hosted origins with an opaque SHA-256-derived label and redact
+query values/fragments before they enter an assertion message.
 
 If any required value is absent, configuration fails before browser launch and lists the missing
 variable names. Do not use a dummy Mapbox token, bypass verified location selection, or pass a

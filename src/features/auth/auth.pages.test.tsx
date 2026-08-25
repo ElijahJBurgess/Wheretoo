@@ -54,7 +54,9 @@ describe('organizer auth pages', () => {
     await user.type(screen.getByLabelText('Password'), '1234567')
     await user.click(screen.getByRole('button', { name: 'Create organizer account' }))
 
-    expect(await screen.findAllByRole('alert')).toHaveLength(3)
+    expect(await screen.findAllByRole('alert')).toHaveLength(4)
+    expect(screen.getByText('Check the highlighted fields')).toBeInTheDocument()
+    expect(screen.getAllByText('Too small: expected string to have >=2 characters')).toHaveLength(2)
     expect(screen.getByLabelText('Full name')).toHaveAttribute('aria-invalid', 'true')
     expect(signUpOrganizer).not.toHaveBeenCalled()
   })

@@ -25,6 +25,13 @@ export function SignUpPage() {
     defaultValues: { fullName: '', email: '', password: '' },
   })
 
+  const validationMessages = [
+    errors.fullName?.message,
+    errors.email?.message,
+    errors.password?.message,
+  ].filter((message): message is string => typeof message === 'string')
+  const summaryErrors = serverError ? [...validationMessages, serverError] : validationMessages
+
   const submit = handleSubmit(async (input) => {
     setServerError(null)
 
@@ -34,7 +41,7 @@ export function SignUpPage() {
     } catch (error) {
       setServerError(errorMessage(error))
     }
-  })
+  }, () => setServerError(null))
 
   return (
     <AuthLayout>
@@ -42,7 +49,10 @@ export function SignUpPage() {
         <p className="auth-panel__eyebrow">Organizer access</p>
         <h1 id="signup-title">Create organizer account</h1>
         <p className="auth-panel__intro">Start with your account. You’ll set up your public organizer profile next.</p>
-        <FormErrorSummary errors={serverError ? [serverError] : []} title="Account creation failed" />
+        <FormErrorSummary
+          errors={summaryErrors}
+          title={serverError ? 'Account creation failed' : 'Check the highlighted fields'}
+        />
         <form className="auth-form" noValidate onSubmit={submit}>
           <Field error={errors.fullName?.message} label="Full name" name="fullName">
             <input autoComplete="name" {...register('fullName')} />

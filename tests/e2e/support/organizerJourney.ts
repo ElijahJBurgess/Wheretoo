@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import { expect, type Page, type TestInfo } from '@playwright/test'
 import type { Database } from '../../../src/lib/supabase/database.types'
 import { waitForApiJwtAcceptance } from '../../shared/waitForApiJwtAcceptance'
+import { redactBrowserUrl } from '../../shared/browserEvidence'
 import { loadE2EEnv } from './e2eEnv'
 
 const env = loadE2EEnv()
@@ -12,13 +13,6 @@ export type OrganizerFixture = {
   displayName: string
 }
 
-function safeUrl(raw: string): string {
-  const url = new URL(raw)
-  const queryKeys = [...new Set(url.searchParams.keys())]
-  const query = queryKeys.length > 0 ? `?${queryKeys.map((key) => `${key}=<redacted>`).join('&')}` : ''
-  return `${url.origin}${url.pathname}${query}`
-}
-
 export function observeBrowserFailures(page: Page) {
   const failures: string[] = []
   page.on('console', (message) => {
@@ -27,7 +21,7 @@ export function observeBrowserFailures(page: Page) {
     }
   })
   page.on('requestfailed', (request) => {
-    failures.push(`request: ${request.failure()?.errorText ?? 'unknown'} ${safeUrl(request.url())}`)
+    failures.push(`request: ${request.failure()?.errorText ?? 'unknown'} ${redactBrowserUrl(request.url())}`)
   })
   return () => expect(failures).toEqual([])
 }

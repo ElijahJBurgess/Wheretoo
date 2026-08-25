@@ -20,7 +20,7 @@ export async function waitForApiJwtAcceptance(
   while (now() < deadline) {
     const result = await probe()
     if (result.error === null) return
-    if (!result.error.message.includes('JWT issued at future')) {
+    if (result.error.message !== 'JWT issued at future') {
       throw new Error(`Disposable organizer API readiness probe failed: ${result.error.message}`)
     }
     await sleep(pollMs)

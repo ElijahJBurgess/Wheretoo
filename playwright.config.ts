@@ -9,13 +9,14 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   retries: 0,
+  timeout: 90_000,
   reporter: [['line']],
   use: {
     baseURL: 'http://127.0.0.1:3000',
     contextOptions: { reducedMotion: 'reduce' },
-    screenshot: 'only-on-failure',
-    trace: 'retain-on-failure',
-    video: 'retain-on-failure',
+    screenshot: 'off',
+    trace: 'off',
+    video: 'off',
   },
   webServer: {
     command: 'pnpm dev',

@@ -28,6 +28,17 @@ describe('waitForApiJwtAcceptance', () => {
     expect(probe).toHaveBeenCalledTimes(1)
   })
 
+  it('does not retry a longer error that merely contains the clock-skew text', async () => {
+    const probe = vi.fn().mockResolvedValue({
+      error: { message: 'Request rejected: JWT issued at future while validating another claim' },
+    })
+
+    await expect(waitForApiJwtAcceptance(probe)).rejects.toThrow(
+      'Disposable organizer API readiness probe failed',
+    )
+    expect(probe).toHaveBeenCalledTimes(1)
+  })
+
   it('fails after the bounded acceptance window', async () => {
     let clock = 0
     const probe = vi.fn().mockResolvedValue({ error: { message: 'JWT issued at future' } })
