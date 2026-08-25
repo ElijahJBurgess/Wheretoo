@@ -2,7 +2,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(23);
+select plan(30);
 
 select results_eq(
   $$
@@ -352,6 +352,88 @@ select results_eq(
   $$,
   'the replacement save retains archived history without exposing it through the owned list'
 );
+
+select set_config('request.jwt.claim.sub', '11000000-0000-0000-0000-000000000001', true);
+set local role authenticated;
+
+select throws_ok(
+  $$
+    select *
+    from public.save_ticket_tiers(
+      '21000000-0000-0000-0000-000000000001',
+      '[{"unit_amount_minor":2200,"currency":"usd","quantity_total":12,"sort_order":1}]'::jsonb
+    )
+  $$,
+  'P0001', 'TIER_INVALID', 'a missing required tier name returns stable TIER_INVALID'
+);
+
+select throws_ok(
+  $$
+    select *
+    from public.save_ticket_tiers(
+      '21000000-0000-0000-0000-000000000001',
+      '[{"name":"General Admission","currency":"usd","quantity_total":12,"sort_order":1}]'::jsonb
+    )
+  $$,
+  'P0001', 'TIER_INVALID', 'a missing required unit amount returns stable TIER_INVALID'
+);
+
+select throws_ok(
+  $$
+    select *
+    from public.save_ticket_tiers(
+      '21000000-0000-0000-0000-000000000001',
+      '[{"name":"General Admission","unit_amount_minor":2200,"currency":"usd","sort_order":1}]'::jsonb
+    )
+  $$,
+  'P0001', 'TIER_INVALID', 'a missing required quantity returns stable TIER_INVALID'
+);
+
+select throws_ok(
+  $$
+    select *
+    from public.save_ticket_tiers(
+      '21000000-0000-0000-0000-000000000001',
+      '[{"name":"General Admission","unit_amount_minor":2200,"currency":"usd","quantity_total":12}]'::jsonb
+    )
+  $$,
+  'P0001', 'TIER_INVALID', 'a missing required sort order returns stable TIER_INVALID'
+);
+
+select throws_ok(
+  $$
+    select *
+    from public.save_ticket_tiers(
+      '21000000-0000-0000-0000-000000000001',
+      '[{"name":"General Admission","unit_amount_minor":2200,"currency":"usd","quantity_total":12,"sort_order":1,"status":"active"}]'::jsonb
+    )
+  $$,
+  'P0001', 'TIER_INVALID', 'client-supplied tier status is rejected with stable TIER_INVALID'
+);
+
+select throws_ok(
+  $$
+    select *
+    from public.save_ticket_tiers(
+      '21000000-0000-0000-0000-000000000001',
+      '[{"id":null,"name":"General Admission","unit_amount_minor":2200,"currency":"usd","quantity_total":12,"sort_order":1}]'::jsonb
+    )
+  $$,
+  'P0001', 'TIER_INVALID', 'an optional tier id must be omitted rather than supplied as null'
+);
+
+select throws_ok(
+  $$
+    select *
+    from public.save_ticket_tiers(
+      '21000000-0000-0000-0000-000000000001',
+      '[{"name":"General Admission","unit_amount_minor":2200,"quantity_total":12,"sort_order":1}]'::jsonb
+    )
+  $$,
+  'P0001', 'TIER_INVALID', 'a missing required currency returns stable TIER_INVALID'
+);
+
+reset role;
 
 select * from finish();
 rollback;
