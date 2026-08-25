@@ -118,7 +118,7 @@ export function EventPreviewPage() {
       <header className="event-preview__masthead">
         <div>
           <p className="organizer-eyebrow">Final check</p>
-          <h2 id="event-preview-title">Preview your event</h2>
+          <h1 id="event-preview-title">Preview your event</h1>
           <p>This preview uses the latest version saved in Whereto.</p>
         </div>
         <Link className="ui-button ui-button--secondary" to={`/organizer/events/${event.id}/edit`}>Edit draft</Link>

@@ -72,7 +72,7 @@ export function EventSummary({ event, organizer }: EventSummaryProps) {
       <div className="event-summary__content">
         <header className="event-summary__header">
           <p className="organizer-eyebrow">Persisted event preview</p>
-          <h1>{title}</h1>
+          <h2>{title}</h2>
           <p>Hosted by {organizer.display_name}</p>
         </header>
         <dl className="event-summary__facts">
@@ -85,7 +85,7 @@ export function EventSummary({ event, organizer }: EventSummaryProps) {
           <div className="event-summary__wide"><dt>Address</dt><dd>{fullAddress(event)}</dd></div>
         </dl>
         <section aria-labelledby="event-summary-description" className="event-summary__description">
-          <h2 id="event-summary-description">About this event</h2>
+          <h3 id="event-summary-description">About this event</h3>
           <p>{description}</p>
         </section>
       </div>
