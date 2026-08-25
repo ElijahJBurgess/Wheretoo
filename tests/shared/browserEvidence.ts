@@ -2,6 +2,15 @@ import { createHash } from 'node:crypto'
 
 const canonicalLocalOrigin = 'http://127.0.0.1:3000'
 
+export function isIgnorableBrowserRequestFailure(raw: string, errorText: string): boolean {
+  const url = new URL(raw)
+  return (
+    errorText === 'net::ERR_ABORTED' &&
+    url.hostname === 'api.mapbox.com' &&
+    url.pathname === '/events/v2'
+  )
+}
+
 export function redactBrowserUrl(raw: string): string {
   const url = new URL(raw)
   const originLabel = url.origin === canonicalLocalOrigin

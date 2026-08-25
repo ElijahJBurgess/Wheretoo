@@ -221,9 +221,24 @@ Auth users, their organizer rows, and their events remains an out-of-band admini
 
 ### Current browser-verification status
 
-On 2026-08-24, the safe Whereto-only environment search found no
-`VITE_MAPBOX_ACCESS_TOKEN`. The harness was statically collected as four cases (two specs across
-two projects), Chromium installed successfully, and TypeScript/lint covered the harness. The
-functional and visual browser runs, screenshots, mechanical layout sweep, and live font probes
-remain blocked until that one public token is supplied. No substitute token or location bypass
-was used.
+On 2026-08-24, the canonical credentialed Playwright run passed all four cases in 27 seconds:
+the functional and visual specs both passed under mobile Chromium at 390×844 and desktop
+Chromium at 1440×1000. The journey used the real Mapbox SearchBox suggestion and retrieval flow,
+saved and reloaded a persisted draft, previewed the stored row, published exactly once, and read
+the published event anonymously. Exact disposable cleanup returned zero events, organizers, and
+Auth users.
+
+The run captured and manually inspected 14 ignored screenshots covering signup, organizer setup,
+event details, schedule/location, review, persisted preview, and published confirmation in both
+viewports with reduced motion. No horizontal overflow, clipped content, overlapping controls,
+missing focus indication, undersized tested form/button targets, or unresolved accessibility-smoke
+failure remained. The approved organizer-reference relationships were present: light contained
+surfaces, deep-ink hierarchy, violet progress/actions, clear three-stage progression, compact form
+rhythm, and one dominant action. Consumer map, ticketing, flyer, analytics, and moderation features
+visible in future-facing references remained deliberately absent.
+
+The real run exposed and closed only milestone-scoped issues: keyboard focus evidence now uses
+actual tab navigation, mobile editor actions stack without overlap, long organizer-entered titles
+wrap without expanding or clipping preview columns, and the request-failure collector ignores only
+Mapbox's exact aborted `/events/v2` telemetry request while retaining all product/search failures.
+No raw screenshot, disposable credential, environment value, or hosted identifier is tracked.

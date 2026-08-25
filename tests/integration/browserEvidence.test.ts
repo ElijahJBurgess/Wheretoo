@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { redactBrowserUrl } from '../shared/browserEvidence'
+import { isIgnorableBrowserRequestFailure, redactBrowserUrl } from '../shared/browserEvidence'
 
 describe('redactBrowserUrl', () => {
   it('uses an opaque digest for hosted origins and redacts every query value', () => {
@@ -16,5 +16,28 @@ describe('redactBrowserUrl', () => {
     expect(redactBrowserUrl('http://127.0.0.1:3000/organizer/events')).toBe(
       '<local-app>/organizer/events',
     )
+  })
+})
+
+describe('isIgnorableBrowserRequestFailure', () => {
+  it('ignores only an aborted Mapbox telemetry request', () => {
+    expect(
+      isIgnorableBrowserRequestFailure(
+        'https://api.mapbox.com/events/v2?access_token=public-token',
+        'net::ERR_ABORTED',
+      ),
+    ).toBe(true)
+    expect(
+      isIgnorableBrowserRequestFailure(
+        'https://api.mapbox.com/search/searchbox/v1/suggest',
+        'net::ERR_ABORTED',
+      ),
+    ).toBe(false)
+    expect(
+      isIgnorableBrowserRequestFailure('https://api.mapbox.com/events/v2', 'net::ERR_FAILED'),
+    ).toBe(false)
+    expect(
+      isIgnorableBrowserRequestFailure('https://events.mapbox.com/events/v2', 'net::ERR_ABORTED'),
+    ).toBe(false)
   })
 })

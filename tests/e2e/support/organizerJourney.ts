@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import { expect, type Page, type TestInfo } from '@playwright/test'
 import type { Database } from '../../../src/lib/supabase/database.types'
 import { waitForApiJwtAcceptance } from '../../shared/waitForApiJwtAcceptance'
-import { redactBrowserUrl } from '../../shared/browserEvidence'
+import { isIgnorableBrowserRequestFailure, redactBrowserUrl } from '../../shared/browserEvidence'
 import { loadE2EEnv } from './e2eEnv'
 
 const env = loadE2EEnv()
@@ -21,7 +21,10 @@ export function observeBrowserFailures(page: Page) {
     }
   })
   page.on('requestfailed', (request) => {
-    failures.push(`request: ${request.failure()?.errorText ?? 'unknown'} ${redactBrowserUrl(request.url())}`)
+    const errorText = request.failure()?.errorText ?? 'unknown'
+    if (!isIgnorableBrowserRequestFailure(request.url(), errorText)) {
+      failures.push(`request: ${errorText} ${redactBrowserUrl(request.url())}`)
+    }
   })
   return () => expect(failures).toEqual([])
 }
@@ -123,7 +126,7 @@ export async function fillEventScheduleAndLocation(page: Page) {
   await expect(suggestion).toBeVisible({ timeout: 20_000 })
   await suggestion.click()
   await expect(page.getByText('Verified address', { exact: true })).toBeVisible()
-  await expect(page.getByText(/San Francisco, CA/i)).toBeVisible()
+  await expect(page.locator('.location-search-field__verified').getByText(/San Francisco, CA/i)).toBeVisible()
 }
 
 export async function anonymousEventById(eventId: string) {
@@ -159,7 +162,14 @@ export async function assertPageContract(
   if (requirePrimary) {
     const primaryBox = await primary.boundingBox()
     expect(primaryBox?.height).toBeGreaterThanOrEqual(44)
-    await primary.focus()
+    if (await primary.evaluate((element) => element === document.activeElement)) {
+      await page.keyboard.press('Shift+Tab')
+    }
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      if (await primary.evaluate((element) => element === document.activeElement)) break
+      await page.keyboard.press('Tab')
+    }
+    await expect(primary).toBeFocused()
     const focus = await primary.evaluate((element) => {
       const style = getComputedStyle(element)
       return { outlineStyle: style.outlineStyle, outlineWidth: parseFloat(style.outlineWidth) }

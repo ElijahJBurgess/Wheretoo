@@ -1498,19 +1498,19 @@ The test signs in a disposable organizer, completes setup when absent, creates a
 
 Use accessible role/label locators. Do not select by generated CSS classes.
 
-- [ ] **Step 3: Run E2E and make only milestone-scoped corrections**
+- [x] **Step 3: Run E2E and make only milestone-scoped corrections**
 
 Run: `pnpm test:e2e -- tests/e2e/organizer-publish.spec.ts`
 
 Expected: both mobile and desktop projects pass. If a failure reveals a product conflict, stop and surface it; do not expand scope.
 
-- [ ] **Step 4: Add visual assertions for the approved organizer family**
+- [x] **Step 4: Add visual assertions for the approved organizer family**
 
 Capture signup, organizer setup, event details, schedule/location, review, preview, and published confirmation. Inspect screenshots for typography, wrapping, overlap, horizontal overflow, focus visibility, step-rail accuracy, error placement, and one dominant CTA. Compare visual hierarchy to `Visual Reference /` without implementing map, ticket, flyer, analytics, or moderation features visible in references.
 
 Run the installed `frontend-visual-qa` skill after the UI is rendered. Test 390x844 and 1440x1000 viewports plus reduced motion.
 
-- [ ] **Step 5: Run the complete evidence gate**
+- [x] **Step 5: Run the complete evidence gate**
 
 ```bash
 pnpm typecheck
