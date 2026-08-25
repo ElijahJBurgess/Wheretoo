@@ -2,7 +2,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(61);
+select plan(83);
 
 select has_table('public', 'organizer_stripe_accounts', 'organizer Stripe accounts table exists');
 select has_table('public', 'platform_fee_rules', 'platform fee rules table exists');
@@ -378,7 +378,6 @@ select results_eq(
       'orders_stripe_balance_transaction_id_key',
       'orders_stripe_charge_id_key',
       'orders_stripe_checkout_session_id_key',
-      'orders_stripe_customer_id_key',
       'orders_stripe_payment_intent_id_key',
       'orders_stripe_transfer_id_key',
       'organizer_stripe_accounts_stripe_account_id_key',
@@ -388,6 +387,192 @@ select results_eq(
     ]::text[]) collate "C")
   $$,
   'Stripe IDs and Day 2 domain keys are uniquely constrained'
+);
+
+select results_eq(
+  $$
+    select jsonb_agg(
+      jsonb_build_array(
+        relations.relname,
+        constraints.conname,
+        pg_catalog.pg_get_constraintdef(constraints.oid, true)
+      )
+      order by relations.relname, constraints.conname
+    )
+    from pg_catalog.pg_constraint as constraints
+    join pg_catalog.pg_class as relations on relations.oid = constraints.conrelid
+    join pg_catalog.pg_namespace as namespaces on namespaces.oid = relations.relnamespace
+    where namespaces.nspname = 'public'
+      and constraints.conname in (
+        'order_items_subtotal_check',
+        'orders_application_fee_check',
+        'orders_currency_check',
+        'orders_fee_snapshot_check',
+        'orders_platform_product_fee_check',
+        'orders_status_check',
+        'orders_stripe_fee_estimate_check',
+        'orders_test_mode_check',
+        'orders_total_check',
+        'organizer_stripe_accounts_payouts_status_check',
+        'organizer_stripe_accounts_requirements_status_check',
+        'organizer_stripe_accounts_transfers_status_check',
+        'platform_fee_rules_currency_check',
+        'platform_fee_rules_fixed_check',
+        'platform_fee_rules_percent_check',
+        'platform_fee_rules_processing_estimate_check',
+        'platform_fee_rules_processing_treatment_check',
+        'platform_fee_rules_test_mode_check',
+        'refunds_status_check',
+        'stripe_webhook_events_processing_status_check',
+        'stripe_webhook_events_test_mode_check',
+        'ticket_tiers_currency_check',
+        'ticket_tiers_sort_order_check',
+        'ticket_tiers_status_check',
+        'ticket_tiers_unit_amount_check',
+        'tickets_status_check',
+        'tickets_status_timestamp_check'
+      )
+  $$,
+  $$
+    values ($json$[
+      ["order_items", "order_items_subtotal_check", "CHECK (subtotal_minor::numeric = (unit_amount_minor::numeric * quantity::numeric) AND subtotal_minor > 0)"],
+      ["orders", "orders_application_fee_check", "CHECK (application_fee_amount_minor::numeric = (platform_product_fee_minor::numeric + stripe_fee_estimate_minor::numeric) AND application_fee_amount_minor < subtotal_minor)"],
+      ["orders", "orders_currency_check", "CHECK (currency = 'usd'::text)"],
+      ["orders", "orders_fee_snapshot_check", "CHECK (platform_percent_bps >= 0 AND platform_percent_bps <= 10000 AND platform_fixed_minor >= 0 AND (processing_fee_treatment = ANY (ARRAY['stripe_fee_estimate'::text, 'platform_fee_only'::text])) AND (processing_fee_treatment = 'platform_fee_only'::text AND processing_estimate_percent_bps IS NULL AND processing_estimate_fixed_minor IS NULL OR processing_fee_treatment = 'stripe_fee_estimate'::text AND processing_estimate_percent_bps IS NOT NULL AND processing_estimate_percent_bps >= 0 AND processing_estimate_percent_bps <= 10000 AND processing_estimate_fixed_minor IS NOT NULL AND processing_estimate_fixed_minor >= 0))"],
+      ["orders", "orders_platform_product_fee_check", "CHECK (platform_product_fee_minor::numeric = (floor(subtotal_minor::numeric * platform_percent_bps::numeric / 10000::numeric) + platform_fixed_minor::numeric * quantity::numeric))"],
+      ["orders", "orders_status_check", "CHECK (status = ANY (ARRAY['creating_checkout'::text, 'checkout_open'::text, 'payment_processing'::text, 'paid'::text, 'expired'::text, 'payment_failed'::text, 'cancelled'::text, 'partially_refunded'::text, 'refunded'::text, 'requires_review'::text]))"],
+      ["orders", "orders_stripe_fee_estimate_check", "CHECK (processing_fee_treatment = 'platform_fee_only'::text AND stripe_fee_estimate_minor = 0 OR processing_fee_treatment = 'stripe_fee_estimate'::text AND stripe_fee_estimate_minor::numeric = (floor(subtotal_minor::numeric * processing_estimate_percent_bps::numeric / 10000::numeric) + processing_estimate_fixed_minor::numeric * quantity::numeric))"],
+      ["orders", "orders_test_mode_check", "CHECK (NOT livemode)"],
+      ["orders", "orders_total_check", "CHECK (total_minor::numeric = (subtotal_minor::numeric + tax_amount_minor::numeric))"],
+      ["organizer_stripe_accounts", "organizer_stripe_accounts_payouts_status_check", "CHECK (payouts_status = ANY (ARRAY['inactive'::text, 'pending'::text, 'active'::text, 'restricted'::text]))"],
+      ["organizer_stripe_accounts", "organizer_stripe_accounts_requirements_status_check", "CHECK (requirements_status = ANY (ARRAY['not_started'::text, 'pending'::text, 'action_required'::text, 'restricted'::text, 'clear'::text]))"],
+      ["organizer_stripe_accounts", "organizer_stripe_accounts_transfers_status_check", "CHECK (transfers_status = ANY (ARRAY['inactive'::text, 'pending'::text, 'active'::text, 'restricted'::text]))"],
+      ["platform_fee_rules", "platform_fee_rules_currency_check", "CHECK (currency = 'usd'::text)"],
+      ["platform_fee_rules", "platform_fee_rules_fixed_check", "CHECK (platform_fixed_minor >= 0)"],
+      ["platform_fee_rules", "platform_fee_rules_percent_check", "CHECK (platform_percent_bps >= 0 AND platform_percent_bps <= 10000)"],
+      ["platform_fee_rules", "platform_fee_rules_processing_estimate_check", "CHECK (processing_fee_treatment = 'platform_fee_only'::text AND processing_estimate_percent_bps IS NULL AND processing_estimate_fixed_minor IS NULL OR processing_fee_treatment = 'stripe_fee_estimate'::text AND processing_estimate_percent_bps IS NOT NULL AND processing_estimate_percent_bps >= 0 AND processing_estimate_percent_bps <= 10000 AND processing_estimate_fixed_minor IS NOT NULL AND processing_estimate_fixed_minor >= 0)"],
+      ["platform_fee_rules", "platform_fee_rules_processing_treatment_check", "CHECK (processing_fee_treatment = ANY (ARRAY['stripe_fee_estimate'::text, 'platform_fee_only'::text]))"],
+      ["platform_fee_rules", "platform_fee_rules_test_mode_check", "CHECK (NOT livemode)"],
+      ["refunds", "refunds_status_check", "CHECK (status = ANY (ARRAY['pending'::text, 'requires_action'::text, 'succeeded'::text, 'failed'::text, 'cancelled'::text]))"],
+      ["stripe_webhook_events", "stripe_webhook_events_processing_status_check", "CHECK (processing_status = ANY (ARRAY['processing'::text, 'processed'::text, 'failed'::text]))"],
+      ["stripe_webhook_events", "stripe_webhook_events_test_mode_check", "CHECK (NOT livemode)"],
+      ["ticket_tiers", "ticket_tiers_currency_check", "CHECK (currency = 'usd'::text)"],
+      ["ticket_tiers", "ticket_tiers_sort_order_check", "CHECK (sort_order >= 1 AND sort_order <= 3)"],
+      ["ticket_tiers", "ticket_tiers_status_check", "CHECK (status = ANY (ARRAY['draft'::text, 'active'::text, 'archived'::text]))"],
+      ["ticket_tiers", "ticket_tiers_unit_amount_check", "CHECK (unit_amount_minor >= 1 AND unit_amount_minor <= 99999999)"],
+      ["tickets", "tickets_status_check", "CHECK (status = ANY (ARRAY['valid'::text, 'refunded'::text, 'cancelled'::text]))"],
+      ["tickets", "tickets_status_timestamp_check", "CHECK (status = 'valid'::text AND refunded_at IS NULL AND cancelled_at IS NULL OR status = 'refunded'::text AND refunded_at IS NOT NULL AND cancelled_at IS NULL OR status = 'cancelled'::text AND refunded_at IS NULL AND cancelled_at IS NOT NULL)" ]
+    ]$json$::jsonb)
+  $$,
+  'critical check constraints have exact definitions'
+);
+
+select results_eq(
+  $$
+    select jsonb_agg(jsonb_build_array(constraints.conname, constraints.confdeltype) order by constraints.conname)
+    from pg_catalog.pg_constraint as constraints
+    join pg_catalog.pg_class as relations on relations.oid = constraints.conrelid
+    join pg_catalog.pg_namespace as namespaces on namespaces.oid = relations.relnamespace
+    where namespaces.nspname = 'public'
+      and relations.relname in (
+        'organizer_stripe_accounts', 'ticket_tiers', 'orders', 'order_items', 'tickets', 'refunds'
+      )
+      and constraints.contype = 'f'
+  $$,
+  $$
+    values ($json$[
+      ["order_items_order_id_fkey", "r"],
+      ["order_items_ticket_tier_id_fkey", "r"],
+      ["orders_event_id_fkey", "r"],
+      ["orders_fee_rule_id_fkey", "r"],
+      ["orders_last_stripe_event_id_fkey", "r"],
+      ["orders_organizer_id_fkey", "r"],
+      ["organizer_stripe_accounts_organizer_id_fkey", "r"],
+      ["refunds_order_id_fkey", "r"],
+      ["refunds_stripe_event_id_fkey", "r"],
+      ["ticket_tiers_event_id_fkey", "r"],
+      ["tickets_event_id_fkey", "r"],
+      ["tickets_order_id_fkey", "r"],
+      ["tickets_order_item_id_fkey", "r"],
+      ["tickets_organizer_id_fkey", "r"],
+      ["tickets_ticket_tier_id_fkey", "r"]
+    ]$json$::jsonb)
+  $$,
+  'all financial foreign keys use ON DELETE RESTRICT'
+);
+
+select results_eq(
+  $$
+    select jsonb_agg(jsonb_build_array(indexes.relname, pg_catalog.pg_get_indexdef(indexes.oid)) order by indexes.relname)
+    from pg_catalog.pg_class as indexes
+    join pg_catalog.pg_namespace as namespaces on namespaces.oid = indexes.relnamespace
+    join pg_catalog.pg_index as index_meta on index_meta.indexrelid = indexes.oid
+    where namespaces.nspname = 'public'
+      and indexes.relname in (
+        'platform_fee_rules_one_active_mode_currency_idx',
+        'ticket_tiers_event_status_sort_order_idx',
+        'ticket_tiers_active_inventory_idx',
+        'orders_organizer_event_status_idx',
+        'orders_reservation_expires_at_idx',
+        'orders_buyer_email_idx',
+        'order_items_ticket_tier_id_idx',
+        'tickets_order_id_idx',
+        'tickets_event_status_idx',
+        'stripe_webhook_events_processing_idx',
+        'refunds_order_id_idx'
+      )
+  $$,
+  $$
+    values ($json$[
+      ["order_items_ticket_tier_id_idx", "CREATE INDEX order_items_ticket_tier_id_idx ON public.order_items USING btree (ticket_tier_id)"],
+      ["orders_buyer_email_idx", "CREATE INDEX orders_buyer_email_idx ON public.orders USING btree (buyer_email)"],
+      ["orders_organizer_event_status_idx", "CREATE INDEX orders_organizer_event_status_idx ON public.orders USING btree (organizer_id, event_id, status)"],
+      ["orders_reservation_expires_at_idx", "CREATE INDEX orders_reservation_expires_at_idx ON public.orders USING btree (reservation_expires_at) WHERE (status = ANY (ARRAY['checkout_open'::text, 'payment_processing'::text]))"],
+      ["platform_fee_rules_one_active_mode_currency_idx", "CREATE UNIQUE INDEX platform_fee_rules_one_active_mode_currency_idx ON public.platform_fee_rules USING btree (livemode, currency) WHERE (effective_until IS NULL)"],
+      ["refunds_order_id_idx", "CREATE INDEX refunds_order_id_idx ON public.refunds USING btree (order_id)"],
+      ["stripe_webhook_events_processing_idx", "CREATE INDEX stripe_webhook_events_processing_idx ON public.stripe_webhook_events USING btree (processing_status, last_received_at)"],
+      ["ticket_tiers_active_inventory_idx", "CREATE INDEX ticket_tiers_active_inventory_idx ON public.ticket_tiers USING btree (event_id, id, quantity_total) WHERE (status = 'active'::text)"],
+      ["ticket_tiers_event_status_sort_order_idx", "CREATE INDEX ticket_tiers_event_status_sort_order_idx ON public.ticket_tiers USING btree (event_id, status, sort_order)"],
+      ["tickets_event_status_idx", "CREATE INDEX tickets_event_status_idx ON public.tickets USING btree (event_id, status)"],
+      ["tickets_order_id_idx", "CREATE INDEX tickets_order_id_idx ON public.tickets USING btree (order_id)"]
+    ]$json$::jsonb)
+  $$,
+  'operational indexes have exact columns and predicates'
+);
+
+select results_eq(
+  $$
+    select pg_catalog.pg_get_constraintdef(constraints.oid, true)
+    from pg_catalog.pg_constraint as constraints
+    join pg_catalog.pg_class as relations on relations.oid = constraints.conrelid
+    join pg_catalog.pg_namespace as namespaces on namespaces.oid = relations.relnamespace
+    where namespaces.nspname = 'public'
+      and relations.relname = 'platform_fee_rules'
+      and constraints.conname = 'platform_fee_rules_effective_range_excl'
+  $$,
+  $$
+    values (
+      'EXCLUDE USING gist (livemode WITH =, currency WITH =, '
+      || 'tstzrange(effective_from, COALESCE(effective_until, ''infinity''::timestamp with time zone), ''[)''::text) WITH &&)'
+    )
+  $$,
+  'fee rule effective windows have the exact non-overlap exclusion'
+);
+
+select is_empty(
+  $$
+    select constraints.conname
+    from pg_catalog.pg_constraint as constraints
+    join pg_catalog.pg_class as relations on relations.oid = constraints.conrelid
+    join pg_catalog.pg_namespace as namespaces on namespaces.oid = relations.relnamespace
+    where namespaces.nspname = 'public'
+      and relations.relname = 'orders'
+      and constraints.contype = 'u'
+      and constraints.conkey = array[
+        (select attnum from pg_catalog.pg_attribute where attrelid = relations.oid and attname = 'stripe_customer_id')
+      ]::smallint[]
+  $$,
+  'Stripe customer IDs are reusable and are not uniquely constrained per order'
 );
 
 select results_eq(
@@ -434,6 +619,432 @@ select throws_ok(
   '23514',
   null,
   'fee rule currency must be normalized lowercase USD'
+);
+
+insert into auth.users (id, email)
+values ('10000000-0000-0000-0000-000000000090', 'ticketing-schema-test@example.invalid');
+
+insert into public.organizers (id, display_name)
+values ('10000000-0000-0000-0000-000000000090', 'Ticketing Schema Test');
+
+insert into public.events (id, organizer_id, title)
+values (
+  '20000000-0000-0000-0000-000000000090',
+  '10000000-0000-0000-0000-000000000090',
+  'Ticketing Schema Fixture'
+);
+
+insert into public.ticket_tiers (
+  id, event_id, name, unit_amount_minor, quantity_total, status, sort_order
+)
+values (
+  '30000000-0000-0000-0000-000000000090',
+  '20000000-0000-0000-0000-000000000090',
+  'General Admission',
+  2000,
+  10,
+  'active',
+  1
+);
+
+insert into public.stripe_webhook_events (
+  stripe_event_id, event_type, stripe_created_at, payload_sha256
+)
+values (
+  'evt_ticketingschemafixture',
+  'checkout.session.completed',
+  now(),
+  repeat('a', 64)
+);
+
+insert into public.orders (
+  id, order_number, event_id, organizer_id, buyer_name, buyer_email, client_request_id,
+  confirmation_token_hash, quantity, currency, subtotal_minor, total_minor,
+  platform_product_fee_minor, application_fee_amount_minor,
+  expected_organizer_proceeds_minor, fee_rule_id, platform_percent_bps,
+  platform_fixed_minor, processing_fee_treatment
+)
+values (
+  '40000000-0000-0000-0000-000000000090',
+  'WT-SCHEMA-090',
+  '20000000-0000-0000-0000-000000000090',
+  '10000000-0000-0000-0000-000000000090',
+  'Schema Buyer',
+  'schema-buyer@example.invalid',
+  '60000000-0000-0000-0000-000000000090',
+  repeat('b', 64),
+  1,
+  'usd',
+  2000,
+  2000,
+  150,
+  150,
+  1850,
+  '00000000-0000-0000-0000-000000000500',
+  500,
+  50,
+  'platform_fee_only'
+);
+
+insert into public.order_items (
+  id, order_id, ticket_tier_id, tier_version, tier_name, unit_amount_minor,
+  quantity, subtotal_minor, currency
+)
+values (
+  '50000000-0000-0000-0000-000000000090',
+  '40000000-0000-0000-0000-000000000090',
+  '30000000-0000-0000-0000-000000000090',
+  1,
+  'General Admission',
+  2000,
+  1,
+  2000,
+  'usd'
+);
+
+select throws_ok(
+  $$
+    insert into public.organizer_stripe_accounts (
+      organizer_id, stripe_account_id, transfers_status
+    ) values (
+      '10000000-0000-0000-0000-000000000090', 'acct_invalidtransfers', 'unknown'
+    )
+  $$,
+  '23514',
+  null,
+  'invalid Connect transfer lifecycle state is rejected'
+);
+
+select throws_ok(
+  $$
+    insert into public.organizer_stripe_accounts (
+      organizer_id, stripe_account_id, requirements_status
+    ) values (
+      '10000000-0000-0000-0000-000000000090', 'acct_invalidrequirements', 'unknown'
+    )
+  $$,
+  '23514',
+  null,
+  'invalid Connect requirements lifecycle state is rejected'
+);
+
+select throws_ok(
+  $$
+    insert into public.ticket_tiers (
+      event_id, name, unit_amount_minor, quantity_total, status, sort_order
+    ) values (
+      '20000000-0000-0000-0000-000000000090', 'Invalid Tier', 2000, 10, 'unknown', 2
+    )
+  $$,
+  '23514',
+  null,
+  'invalid ticket tier lifecycle state is rejected'
+);
+
+select throws_ok(
+  $$
+    update public.orders
+    set status = 'unknown'
+    where id = '40000000-0000-0000-0000-000000000090'
+  $$,
+  '23514',
+  null,
+  'invalid order lifecycle state is rejected'
+);
+
+select throws_ok(
+  $$
+    insert into public.tickets (
+      order_id, order_item_id, event_id, organizer_id, ticket_tier_id, unit_sequence, status
+    ) values (
+      '40000000-0000-0000-0000-000000000090',
+      '50000000-0000-0000-0000-000000000090',
+      '20000000-0000-0000-0000-000000000090',
+      '10000000-0000-0000-0000-000000000090',
+      '30000000-0000-0000-0000-000000000090',
+      1,
+      'unknown'
+    )
+  $$,
+  '23514',
+  null,
+  'invalid ticket lifecycle state is rejected'
+);
+
+select throws_ok(
+  $$
+    update public.stripe_webhook_events
+    set processing_status = 'unknown'
+    where stripe_event_id = 'evt_ticketingschemafixture'
+  $$,
+  '23514',
+  null,
+  'invalid webhook lifecycle state is rejected'
+);
+
+select throws_ok(
+  $$
+    insert into public.refunds (
+      stripe_refund_id, order_id, amount_minor, currency, status,
+      reverse_transfer, refund_application_fee, stripe_event_id
+    ) values (
+      're_invalidstatus',
+      '40000000-0000-0000-0000-000000000090',
+      100,
+      'usd',
+      'unknown',
+      true,
+      false,
+      'evt_ticketingschemafixture'
+    )
+  $$,
+  '23514',
+  null,
+  'invalid refund lifecycle state is rejected'
+);
+
+select throws_ok(
+  $$
+    insert into public.platform_fee_rules (
+      livemode, currency, platform_percent_bps, platform_fixed_minor,
+      processing_fee_treatment, effective_from, effective_until
+    ) values (
+      false,
+      'usd',
+      500,
+      50,
+      'platform_fee_only',
+      '2026-08-25 00:00:01+00'::timestamptz,
+      '2026-08-26 00:00:00+00'::timestamptz
+    )
+  $$,
+  '23P01',
+  null,
+  'overlapping test fee windows are rejected'
+);
+
+select throws_ok(
+  $$
+    update public.orders
+    set platform_product_fee_minor = 151,
+        application_fee_amount_minor = 151,
+        expected_organizer_proceeds_minor = 1849
+    where id = '40000000-0000-0000-0000-000000000090'
+  $$,
+  '23514',
+  null,
+  'incorrect percentage plus fixed fee arithmetic is rejected'
+);
+
+select lives_ok(
+  $$
+    insert into public.orders (
+      order_number, event_id, organizer_id, buyer_name, buyer_email, client_request_id,
+      confirmation_token_hash, quantity, currency, subtotal_minor, total_minor,
+      platform_product_fee_minor, application_fee_amount_minor,
+      expected_organizer_proceeds_minor, fee_rule_id, platform_percent_bps,
+      platform_fixed_minor, processing_fee_treatment
+    ) values (
+      'WT-BOUNDARY-090',
+      '20000000-0000-0000-0000-000000000090',
+      '10000000-0000-0000-0000-000000000090',
+      'Boundary Buyer',
+      'boundary-buyer@example.invalid',
+      '60000000-0000-0000-0000-000000000091',
+      repeat('c', 64),
+      1,
+      'usd',
+      9223372036854775807,
+      9223372036854775807,
+      9222449699651090329,
+      9222449699651090329,
+      922337203685478,
+      '00000000-0000-0000-0000-000000000500',
+      9999,
+      0,
+      'platform_fee_only'
+    )
+  $$,
+  'fee arithmetic accepts the bigint boundary without intermediate overflow'
+);
+
+select lives_ok(
+  $$
+    insert into public.orders (
+      order_number, event_id, organizer_id, buyer_name, buyer_email, client_request_id,
+      confirmation_token_hash, quantity, currency, subtotal_minor, total_minor,
+      platform_product_fee_minor, application_fee_amount_minor,
+      expected_organizer_proceeds_minor, fee_rule_id, platform_percent_bps,
+      platform_fixed_minor, processing_fee_treatment, stripe_customer_id
+    ) values
+      (
+        'WT-CUSTOMER-091',
+        '20000000-0000-0000-0000-000000000090',
+        '10000000-0000-0000-0000-000000000090',
+        'Reusable Customer One',
+        'reusable-one@example.invalid',
+        '60000000-0000-0000-0000-000000000092',
+        repeat('d', 64),
+        1,
+        'usd',
+        2000,
+        2000,
+        150,
+        150,
+        1850,
+        '00000000-0000-0000-0000-000000000500',
+        500,
+        50,
+        'platform_fee_only',
+        'cus_reusablecustomer'
+      ),
+      (
+        'WT-CUSTOMER-092',
+        '20000000-0000-0000-0000-000000000090',
+        '10000000-0000-0000-0000-000000000090',
+        'Reusable Customer Two',
+        'reusable-two@example.invalid',
+        '60000000-0000-0000-0000-000000000093',
+        repeat('e', 64),
+        1,
+        'usd',
+        2000,
+        2000,
+        150,
+        150,
+        1850,
+        '00000000-0000-0000-0000-000000000500',
+        500,
+        50,
+        'platform_fee_only',
+        'cus_reusablecustomer'
+      )
+  $$,
+  'one Stripe customer can be reused across multiple orders'
+);
+
+select throws_ok(
+  $$
+    insert into public.tickets (
+      order_id, order_item_id, event_id, organizer_id, ticket_tier_id,
+      unit_sequence, status, refunded_at
+    ) values (
+      '40000000-0000-0000-0000-000000000090',
+      '50000000-0000-0000-0000-000000000090',
+      '20000000-0000-0000-0000-000000000090',
+      '10000000-0000-0000-0000-000000000090',
+      '30000000-0000-0000-0000-000000000090',
+      2,
+      'valid',
+      now()
+    )
+  $$,
+  '23514',
+  null,
+  'valid tickets reject a refunded timestamp'
+);
+
+select throws_ok(
+  $$
+    insert into public.tickets (
+      order_id, order_item_id, event_id, organizer_id, ticket_tier_id,
+      unit_sequence, status, cancelled_at
+    ) values (
+      '40000000-0000-0000-0000-000000000090',
+      '50000000-0000-0000-0000-000000000090',
+      '20000000-0000-0000-0000-000000000090',
+      '10000000-0000-0000-0000-000000000090',
+      '30000000-0000-0000-0000-000000000090',
+      3,
+      'valid',
+      now()
+    )
+  $$,
+  '23514',
+  null,
+  'valid tickets reject a cancelled timestamp'
+);
+
+select throws_ok(
+  $$
+    insert into public.tickets (
+      order_id, order_item_id, event_id, organizer_id, ticket_tier_id,
+      unit_sequence, status, refunded_at, cancelled_at
+    ) values (
+      '40000000-0000-0000-0000-000000000090',
+      '50000000-0000-0000-0000-000000000090',
+      '20000000-0000-0000-0000-000000000090',
+      '10000000-0000-0000-0000-000000000090',
+      '30000000-0000-0000-0000-000000000090',
+      4,
+      'refunded',
+      now(),
+      now()
+    )
+  $$,
+  '23514',
+  null,
+  'refunded tickets reject a cancelled timestamp'
+);
+
+select throws_ok(
+  $$
+    insert into public.tickets (
+      order_id, order_item_id, event_id, organizer_id, ticket_tier_id,
+      unit_sequence, status, refunded_at, cancelled_at
+    ) values (
+      '40000000-0000-0000-0000-000000000090',
+      '50000000-0000-0000-0000-000000000090',
+      '20000000-0000-0000-0000-000000000090',
+      '10000000-0000-0000-0000-000000000090',
+      '30000000-0000-0000-0000-000000000090',
+      5,
+      'cancelled',
+      now(),
+      now()
+    )
+  $$,
+  '23514',
+  null,
+  'cancelled tickets reject a refunded timestamp'
+);
+
+select lives_ok(
+  $$
+    insert into public.tickets (
+      order_id, order_item_id, event_id, organizer_id, ticket_tier_id,
+      unit_sequence, status, refunded_at
+    ) values (
+      '40000000-0000-0000-0000-000000000090',
+      '50000000-0000-0000-0000-000000000090',
+      '20000000-0000-0000-0000-000000000090',
+      '10000000-0000-0000-0000-000000000090',
+      '30000000-0000-0000-0000-000000000090',
+      6,
+      'refunded',
+      now()
+    )
+  $$,
+  'refunded tickets require only a refunded timestamp'
+);
+
+select lives_ok(
+  $$
+    insert into public.tickets (
+      order_id, order_item_id, event_id, organizer_id, ticket_tier_id,
+      unit_sequence, status, cancelled_at
+    ) values (
+      '40000000-0000-0000-0000-000000000090',
+      '50000000-0000-0000-0000-000000000090',
+      '20000000-0000-0000-0000-000000000090',
+      '10000000-0000-0000-0000-000000000090',
+      '30000000-0000-0000-0000-000000000090',
+      7,
+      'cancelled',
+      now()
+    )
+  $$,
+  'cancelled tickets require only a cancelled timestamp'
 );
 
 select * from finish();
