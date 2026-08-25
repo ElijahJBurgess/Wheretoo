@@ -111,7 +111,7 @@
 - Consumes: existing Git repository, Node 22, `supabase/config.toml`, and a human-confirmed non-production Supabase project identity.
 - Produces: `pnpm dev`, `pnpm test`, `pnpm lint`, `pnpm typecheck`, `pnpm build`, `pnpm supabase`; Vite on port 3000; a renderable `App` component.
 
-- [ ] **Step 1: Prove the linked project is safe before changing remote state**
+- [x] **Step 1: Prove the linked project is safe before changing remote state**
 
 Run read-only commands:
 
@@ -126,7 +126,7 @@ git status --short --branch
 
 Expected: Node reports major version 22; Git has no unrelated changes; the operator explicitly confirms the linked project reference and name are development, not production. Do not continue to any `db push` or `test db --linked` command without that confirmation.
 
-- [ ] **Step 2: Install the exact subsystem dependencies and let pnpm pin them**
+- [x] **Step 2: Install the exact subsystem dependencies and let pnpm pin them**
 
 ```bash
 pnpm init
@@ -151,7 +151,7 @@ Set these scripts in `package.json`:
 }
 ```
 
-- [ ] **Step 3: Add safe environment and artifact ignores**
+- [x] **Step 3: Add safe environment and artifact ignores**
 
 `.env.example` must contain names only:
 
@@ -175,7 +175,7 @@ test-results/
 supabase/.temp/
 ```
 
-- [ ] **Step 4: Write the failing application smoke test**
+- [x] **Step 4: Write the failing application smoke test**
 
 ```tsx
 // src/app/App.test.tsx
@@ -191,13 +191,13 @@ describe('App', () => {
 })
 ```
 
-- [ ] **Step 5: Run the test and observe the expected failure**
+- [x] **Step 5: Run the test and observe the expected failure**
 
 Run: `pnpm test -- src/app/App.test.tsx`
 
 Expected: FAIL because `src/app/App.tsx` does not exist or does not export `App`.
 
-- [ ] **Step 6: Add the minimal Vite app and test setup**
+- [x] **Step 6: Add the minimal Vite app and test setup**
 
 ```tsx
 // src/app/App.tsx
@@ -223,7 +223,7 @@ createRoot(document.getElementById('root')!).render(
 
 Configure Vitest with `environment: 'jsdom'`, `setupFiles: ['./src/test/setup.ts']`, and `globals: false`; import `@testing-library/jest-dom/vitest` from `src/test/setup.ts`. Configure strict TypeScript and ESLint without allowing `any`.
 
-- [ ] **Step 7: Correct the local Auth redirect allowlist**
+- [x] **Step 7: Correct the local Auth redirect allowlist**
 
 In `supabase/config.toml`, keep:
 
@@ -234,7 +234,7 @@ additional_redirect_urls = ["http://localhost:3000"]
 
 Create `supabase/seed.sql` with comments only; do not add fake users or events.
 
-- [ ] **Step 8: Verify the scaffold**
+- [x] **Step 8: Verify the scaffold**
 
 Run:
 
@@ -248,7 +248,7 @@ git diff --check
 
 Expected: one passing smoke test; typecheck, lint, build, and diff check exit 0.
 
-- [ ] **Step 9: Commit the scaffold**
+- [x] **Step 9: Commit the scaffold**
 
 ```bash
 git add .env.example .gitignore package.json pnpm-lock.yaml index.html vite.config.ts tsconfig.json tsconfig.app.json tsconfig.node.json eslint.config.js src/vite-env.d.ts src/main.tsx src/app/App.tsx src/app/App.test.tsx src/test/setup.ts supabase/config.toml supabase/seed.sql
@@ -267,7 +267,7 @@ git commit -m "chore: scaffold organizer application"
 - Consumes: Supabase PostgreSQL 17 and `auth.users(id)`.
 - Produces: `public.organizers`, `public.events`, `public.set_updated_at()`, `public.sync_event_location()`, constraints, and documented indexes.
 
-- [ ] **Step 1: Write the structural pgTAP test before the migration**
+- [x] **Step 1: Write the structural pgTAP test before the migration**
 
 The test must begin/rollback its transaction and assert the exact contract:
 
@@ -296,7 +296,7 @@ select * from finish();
 rollback;
 ```
 
-- [ ] **Step 2: Run the structural test and observe failure**
+- [x] **Step 2: Run the structural test and observe failure**
 
 If a Docker-compatible runtime is available, run `pnpm supabase start && pnpm supabase test db supabase/tests/database/organizers_events_schema.test.sql`.
 
@@ -304,7 +304,7 @@ If Docker is unavailable, record the local red-run as unavailable with the exact
 
 Expected with local execution before migration: FAIL because the tables do not exist. Expected without local execution: a documented Docker-only verification gap, not an implementation blocker.
 
-- [ ] **Step 3: Write the schema migration**
+- [x] **Step 3: Write the schema migration**
 
 Create the extension in `extensions`, tables in `public`, a shared timestamp trigger, and a location trigger. The migration must use these exact stable checks:
 
@@ -403,7 +403,7 @@ create index events_discovery_idx on public.events (status, moderation_status, s
 create index events_location_gix on public.events using gist (location);
 ```
 
-- [ ] **Step 4: Verify migration syntax and structural behavior**
+- [x] **Step 4: Verify migration syntax and structural behavior**
 
 Local Docker path:
 
@@ -422,7 +422,7 @@ pnpm supabase test db --linked supabase/tests/database/organizers_events_schema.
 
 Expected: dry-run lists only the new migration; migration succeeds; 16 pgTAP assertions pass. Record which path ran.
 
-- [ ] **Step 5: Commit schema and structural tests**
+- [x] **Step 5: Commit schema and structural tests**
 
 ```bash
 git add supabase/migrations/20260824010000_create_organizers_and_events.sql supabase/tests/database/organizers_events_schema.test.sql
@@ -442,7 +442,7 @@ git commit -m "feat: add organizer and event schema"
 - Consumes: `public.organizers`, `public.events`, `auth.uid()`.
 - Produces: operation-specific RLS policies and `public.publish_event(p_event_id uuid) returns public.events` with stable error messages.
 
-- [ ] **Step 1: Write RLS tests with two authenticated identities and anon**
+- [x] **Step 1: Write RLS tests with two authenticated identities and anon**
 
 Use fixed UUIDs inside a rolled-back test transaction, insert matching `auth.users`, and switch JWT identity with request settings:
 
@@ -469,7 +469,7 @@ The browser roles cannot directly update organizer_id, status, moderation_status
 
 End with `select * from finish(); rollback;`. Count the exact assertions and make `plan(n)` match before running.
 
-- [ ] **Step 2: Write publish-function tests before the security migration**
+- [x] **Step 2: Write publish-function tests before the security migration**
 
 Build fixtures through privileged test setup, then assume Organizer A for RPC calls. Assert exact messages:
 
@@ -493,7 +493,7 @@ select results_eq(
 
 Cover `EVENT_NOT_FOUND`, `EVENT_NOT_OWNED`, `EVENT_INCOMPLETE`, `EVENT_TIME_INVALID`, `EVENT_LOCATION_INVALID`, `EVENT_OUTSIDE_SERVICE_AREA`, `PAID_PUBLISHING_NOT_AVAILABLE`, and `EVENT_MODERATION_BLOCKED`; then prove successful publication, immediate anon visibility, and unchanged `id`/`published_at` on retry.
 
-- [ ] **Step 3: Run both tests and observe failure**
+- [x] **Step 3: Run both tests and observe failure**
 
 Run locally if available, otherwise on the confirmed linked development project after Task 2:
 
@@ -503,7 +503,7 @@ pnpm supabase test db --linked supabase/tests/database/organizers_events_rls.tes
 
 Expected: FAIL because grants, policies, and `publish_event` do not exist.
 
-- [ ] **Step 4: Add least-privilege grants and RLS policies**
+- [x] **Step 4: Add least-privilege grants and RLS policies**
 
 The migration must revoke broad defaults before granting exact access:
 
@@ -549,7 +549,7 @@ with check ((select auth.uid()) = organizer_id and status = 'draft');
 
 Do not add delete grants/policies or any client grant for lifecycle/moderation columns.
 
-- [ ] **Step 5: Add the idempotent publish function**
+- [x] **Step 5: Add the idempotent publish function**
 
 Use a locked row and exact stable messages. The implementation must preserve the first timestamp and leave moderation unchanged:
 
@@ -617,7 +617,7 @@ revoke all on function public.publish_event(uuid) from public, anon;
 grant execute on function public.publish_event(uuid) to authenticated;
 ```
 
-- [ ] **Step 6: Apply and verify the security migration**
+- [x] **Step 6: Apply and verify the security migration**
 
 ```bash
 pnpm supabase db push --dry-run --linked
@@ -628,7 +628,7 @@ pnpm supabase db lint --linked --level warning
 
 Expected: dry-run contains only the security migration; all named RLS/publish assertions pass; lint reports no security or function warnings requiring action. Use the local equivalents when Docker is available.
 
-- [ ] **Step 7: Commit security behavior and tests**
+- [x] **Step 7: Commit security behavior and tests**
 
 ```bash
 git add supabase/migrations/20260824010100_secure_organizer_event_publishing.sql supabase/tests/database/organizers_events_rls.test.sql supabase/tests/database/publish_event.test.sql
@@ -651,7 +651,7 @@ git commit -m "feat: secure immediate event publishing"
 - Consumes: applied development schema and three `VITE_` variables.
 - Produces: `readPublicEnv(source): PublicEnv`, singleton `supabase`, generated `Database` type, and `pnpm db:types`.
 
-- [ ] **Step 1: Write failing environment tests**
+- [x] **Step 1: Write failing environment tests**
 
 ```ts
 import { describe, expect, it } from 'vitest'
@@ -676,7 +676,7 @@ describe('readPublicEnv', () => {
 })
 ```
 
-- [ ] **Step 2: Observe failure, then implement the parser**
+- [x] **Step 2: Observe failure, then implement the parser**
 
 Run: `pnpm test -- src/lib/env.test.ts`
 
@@ -705,7 +705,7 @@ export function readPublicEnv(source: Record<string, unknown>): PublicEnv {
 export const publicEnv = readPublicEnv(import.meta.env)
 ```
 
-- [ ] **Step 3: Generate, do not hand-author, database types**
+- [x] **Step 3: Generate, do not hand-author, database types**
 
 Add:
 
@@ -715,7 +715,7 @@ Add:
 
 Run `pnpm db:types`. Expected: generated types include `organizers`, `events`, and `publish_event` with argument `p_event_id`.
 
-- [ ] **Step 4: Write and implement the client contract**
+- [x] **Step 4: Write and implement the client contract**
 
 Test `createWheretoClient(env)` separately from its singleton so configuration is observable without network calls. Implement:
 
@@ -733,7 +733,7 @@ export function createWheretoClient(env: PublicEnv) {
 export const supabase = createWheretoClient(publicEnv)
 ```
 
-- [ ] **Step 5: Verify and commit the boundary**
+- [x] **Step 5: Verify and commit the boundary**
 
 ```bash
 pnpm test -- src/lib/env.test.ts src/lib/supabase/client.test.ts
@@ -768,7 +768,7 @@ Expected: boundary tests pass and generated types compile without `any`.
 - Consumes: React children and `SessionProvider` from Task 6 (temporarily omit it until Task 6, then add it there).
 - Produces: accessible UI primitives, two layout shells, a stable `QueryClient`, and global Whereto visual tokens.
 
-- [ ] **Step 1: Write failing accessibility tests for controls**
+- [x] **Step 1: Write failing accessibility tests for controls**
 
 ```tsx
 it('links a field error to its input', () => {
@@ -783,7 +783,7 @@ it('marks the current real workflow step', () => {
 })
 ```
 
-- [ ] **Step 2: Observe failure, then implement focused primitives**
+- [x] **Step 2: Observe failure, then implement focused primitives**
 
 Run: `pnpm test -- src/components/ui/ui.test.tsx`
 
@@ -791,7 +791,7 @@ Expected: FAIL because the components do not exist.
 
 Implement semantic buttons, labels, alerts, loading/empty/error blocks, and an ordered-list `StepRail`. Do not create an application-wide component barrel.
 
-- [ ] **Step 3: Implement the approved visual tokens**
+- [x] **Step 3: Implement the approved visual tokens**
 
 Use exactly these CSS custom properties as the initial visual contract:
 
@@ -816,7 +816,7 @@ Use exactly these CSS custom properties as the initial visual contract:
 
 The signature element is a compact violet waypoint rail whose nodes correspond only to the three real editor stages. Keep other surfaces quiet, light, and structurally useful. Include `:focus-visible`, 44px minimum interactive targets, a mobile-first content width, and `@media (prefers-reduced-motion: reduce)`.
 
-- [ ] **Step 4: Add layouts and a stable query provider**
+- [x] **Step 4: Add layouts and a stable query provider**
 
 `AppProviders` must create its `QueryClient` once with lazy state:
 
@@ -831,7 +831,7 @@ export function AppProviders({ children }: PropsWithChildren) {
 
 `AuthLayout` contains the product mark and centered auth content. `OrganizerLayout` contains product mark, `Events`, and `Sign out`; it must not contain analytics, ticketing, payouts, or map navigation.
 
-- [ ] **Step 5: Verify and commit the design foundation**
+- [x] **Step 5: Verify and commit the design foundation**
 
 ```bash
 pnpm test -- src/components/ui/ui.test.tsx
@@ -869,7 +869,7 @@ Expected: accessibility tests and build pass; keyboard focus is visible in a bro
 - Consumes: typed `supabase`, UI primitives, React Router.
 - Produces: `signUpOrganizer(input): Promise<{ needsEmailConfirmation: boolean }>`, `signInOrganizer(input): Promise<void>`, `signOut(): Promise<void>`, `useSession(): SessionState`, and `RequireSession`.
 
-- [ ] **Step 1: Write failing schema tests and implement exact validation**
+- [x] **Step 1: Write failing schema tests and implement exact validation**
 
 ```ts
 export const signUpSchema = z.object({
@@ -886,7 +886,7 @@ export const signInSchema = z.object({
 
 Tests must reject a one-character name, invalid email, and seven-character signup password, while allowing a valid submission. Run red then green.
 
-- [ ] **Step 2: Write failing Auth API tests**
+- [x] **Step 2: Write failing Auth API tests**
 
 Mock only `supabase.auth`. Assert signup sends:
 
@@ -903,11 +903,11 @@ Mock only `supabase.auth`. Assert signup sends:
 
 Assert `needsEmailConfirmation` is `true` when the returned session is null and `false` when a session exists. Assert Supabase errors are thrown for the page to render.
 
-- [ ] **Step 3: Implement Auth API functions and observe green tests**
+- [x] **Step 3: Implement Auth API functions and observe green tests**
 
 Use direct event-handler calls to these functions; do not represent submit as state watched by an effect.
 
-- [ ] **Step 4: Write failing initial-session and subscription tests**
+- [x] **Step 4: Write failing initial-session and subscription tests**
 
 Test `loading -> authenticated` and `loading -> anonymous`, and verify the auth-state subscription is unsubscribed on unmount. The state contract is:
 
@@ -918,15 +918,15 @@ type SessionState =
   | { status: 'authenticated'; session: Session; user: User }
 ```
 
-- [ ] **Step 5: Implement `SessionProvider` and `RequireSession`**
+- [x] **Step 5: Implement `SessionProvider` and `RequireSession`**
 
 `RequireSession` renders a deterministic loading state, redirects anonymous users to `/auth/sign-in`, and renders `<Outlet />` only for authenticated state. Preserve the attempted location in router state.
 
-- [ ] **Step 6: Write failing page journey tests**
+- [x] **Step 6: Write failing page journey tests**
 
 Cover invalid fields, server error retention, disabled submit while pending, signup with immediate session -> `/organizer/setup`, signup without session -> `/auth/check-email`, and sign-in -> `/organizer/events`.
 
-- [ ] **Step 7: Implement auth pages and routes**
+- [x] **Step 7: Implement auth pages and routes**
 
 Use these exact routes and action copy:
 
@@ -938,7 +938,7 @@ Use these exact routes and action copy:
 
 No OAuth, password reset, social auth, or consumer account UI belongs in this task.
 
-- [ ] **Step 8: Verify and commit authentication**
+- [x] **Step 8: Verify and commit authentication**
 
 ```bash
 pnpm test -- src/features/auth src/app/router/RequireSession.test.tsx
@@ -971,7 +971,7 @@ Expected: all auth branches pass and initial auth loading never flashes protecte
 - Consumes: authenticated user ID, generated `organizers` row types, query client.
 - Produces: `OrganizerInput`, `getOrganizer(userId): Promise<Organizer | null>`, `saveOrganizer(userId, input): Promise<Organizer>`, `organizerKeys`, and `RequireOrganizer`.
 
-- [ ] **Step 1: Write failing organizer schema tests**
+- [x] **Step 1: Write failing organizer schema tests**
 
 Implement after red:
 
@@ -987,11 +987,11 @@ export const organizerInputSchema = z.object({
 
 Tests cover valid empty optionals, invalid website, too-short display name, and maximum lengths.
 
-- [ ] **Step 2: Write failing profile API tests**
+- [x] **Step 2: Write failing profile API tests**
 
 Assert `getOrganizer` maps PostgREST `PGRST116`/empty result to `null` but throws other errors. Assert `saveOrganizer` upserts exactly the authenticated ID, normalized nullable values, `country_code: 'US'`, and a non-null `onboarding_completed_at`; never accept an ID from form input.
 
-- [ ] **Step 3: Implement API and query contracts**
+- [x] **Step 3: Implement API and query contracts**
 
 ```ts
 export type Organizer = Database['public']['Tables']['organizers']['Row']
@@ -1005,15 +1005,15 @@ export const organizerKeys = {
 
 Keep query/mutation hooks in `organizer.queries.ts`; components must not import the Supabase client.
 
-- [ ] **Step 4: Write failing organizer guard tests**
+- [x] **Step 4: Write failing organizer guard tests**
 
 Cover loading state, no row -> `/organizer/setup`, incomplete row -> `/organizer/setup`, completed row -> protected outlet, and setup route remaining accessible during incomplete onboarding without a redirect loop.
 
-- [ ] **Step 5: Implement `RequireOrganizer` and setup screen**
+- [x] **Step 5: Implement `RequireOrganizer` and setup screen**
 
 Initialize public organizer name from `user.user_metadata.full_name` only as a convenience. Authorization and persisted ownership continue to use `user.id`. On success, update/invalidate `organizerKeys.detail(user.id)` and navigate to `/organizer/events`.
 
-- [ ] **Step 6: Verify and commit organizer onboarding**
+- [x] **Step 6: Verify and commit organizer onboarding**
 
 ```bash
 pnpm test -- src/features/organizers src/app/router/RequireOrganizer.test.tsx
@@ -1041,7 +1041,7 @@ Expected: profile ownership payload and every guard branch pass.
 - Consumes: generated `events` row/insert/update types and typed Supabase client.
 - Produces: `EventCategory`, `PublishEventErrorCode`, `EventFormValues`, `NormalizedLocation`, `EventRow`, `eventDraftSchema`, `eventPublishSchema`, `eventRowToFormValues`, `listOwnedEvents`, `getOwnedEvent`, `saveEventDraft`, `publishEvent`, and `eventKeys`.
 
-- [ ] **Step 1: Write failing draft/publish schema tests**
+- [x] **Step 1: Write failing draft/publish schema tests**
 
 Define category/error unions and form values once:
 
@@ -1096,13 +1096,13 @@ export type EventFormValues = {
 
 `eventDraftSchema` enforces safe maxima and positive optional capacity while allowing incomplete fields. `eventPublishSchema` additionally requires title 3-120, description 20-5000, category, future start, later end, verified location, CA/US, Bay Area bounds, and free admission. Tests freeze time with Vitest and cover every stable publish error category.
 
-- [ ] **Step 2: Observe schema failure and implement minimal schemas**
+- [x] **Step 2: Observe schema failure and implement minimal schemas**
 
 Run: `pnpm test -- src/features/events/event.schemas.test.ts`
 
 Expected before implementation: FAIL. After implementation: all boundary cases pass. Keep server validation authoritative even though equivalent client feedback exists.
 
-- [ ] **Step 3: Write failing owned-event API tests**
+- [x] **Step 3: Write failing owned-event API tests**
 
 Use a mocked typed query builder to assert:
 
@@ -1116,7 +1116,7 @@ no API payload includes status, moderation_status, published_at, location, artwo
 publishEvent calls rpc('publish_event', { p_event_id: eventId }).
 ```
 
-- [ ] **Step 4: Implement APIs with exact signatures**
+- [x] **Step 4: Implement APIs with exact signatures**
 
 ```ts
 export async function listOwnedEvents(organizerId: string): Promise<EventRow[]>
@@ -1132,7 +1132,7 @@ export async function publishEvent(eventId: string): Promise<EventRow>
 
 Use `.select().single()` after insert/update and throw typed feature errors. `eventRowToFormValues` is the only database-row-to-form mapper used by the editor and preview validation. Never broaden a mutation query beyond both event ID and organizer ID.
 
-- [ ] **Step 5: Add stable query keys and mutation invalidation contract**
+- [x] **Step 5: Add stable query keys and mutation invalidation contract**
 
 ```ts
 export const eventKeys = {
@@ -1144,7 +1144,7 @@ export const eventKeys = {
 
 Saving invalidates the owned list and seeds the detail cache. Publishing invalidates the owned list and exact detail. Do not invalidate unrelated query families.
 
-- [ ] **Step 6: Verify and commit the event data layer**
+- [x] **Step 6: Verify and commit the event data layer**
 
 ```bash
 pnpm test -- src/features/events/event.schemas.test.ts src/features/events/event.api.test.ts
@@ -1170,7 +1170,7 @@ Expected: mapping, ownership filters, and schema boundary tests pass.
 - Consumes: Mapbox `SearchBoxRetrieveResponse`, `publicEnv.mapboxAccessToken`.
 - Produces: `normalizeSearchResult(response): NormalizedLocation | null` and `LocationSearchField({ value, onChange, error })`.
 
-- [ ] **Step 1: Write failing normalization tests from realistic fixtures**
+- [x] **Step 1: Write failing normalization tests from realistic fixtures**
 
 Include fixtures for a valid San Francisco address, missing coordinates, non-US result, non-CA result, and a result without full postal context. The valid expected result is:
 
@@ -1188,21 +1188,21 @@ Include fixtures for a valid San Francisco address, missing coordinates, non-US 
 }
 ```
 
-- [ ] **Step 2: Observe failure and implement the pure adapter**
+- [x] **Step 2: Observe failure and implement the pure adapter**
 
 Run: `pnpm test -- src/lib/mapbox/normalizeSearchResult.test.ts`
 
 Expected: FAIL before the function exists. Implement it without React or form dependencies, return `null` for unverifiable results, and never accept typed freeform text as a verified location.
 
-- [ ] **Step 3: Write failing field behavior tests**
+- [x] **Step 3: Write failing field behavior tests**
 
 Mock `SearchBox`; assert `onRetrieve` calls `onChange(normalized)`, clear calls `onChange(null)`, invalid retrieval renders `Choose a verified California address`, and the current verified address is visible outside the third-party input.
 
-- [ ] **Step 4: Implement a controlled, lazy-loadable location field**
+- [x] **Step 4: Implement a controlled, lazy-loadable location field**
 
 Use the official `SearchBox` component with `accessToken`, proximity centered near San Francisco, and `options` constrained to US address/POI results. The event editor will import this file with `lazy(() => import(...))` so Mapbox Search JS is fetched only when the location stage renders.
 
-- [ ] **Step 5: Verify and commit the adapter**
+- [x] **Step 5: Verify and commit the adapter**
 
 ```bash
 pnpm test -- src/lib/mapbox/normalizeSearchResult.test.ts src/features/events/LocationSearchField.test.tsx
@@ -1232,15 +1232,15 @@ Expected: valid results normalize exactly and freeform/unsupported results canno
 - Consumes: `useSession`, organizer guard, event query/mutation hooks, schemas, `LocationSearchField`, UI primitives.
 - Produces: owned-event list, `/organizer/events/new`, `/organizer/events/:eventId/edit`, and the persisted draft lifecycle.
 
-- [ ] **Step 1: Write failing event-list state tests**
+- [x] **Step 1: Write failing event-list state tests**
 
 Cover loading, retryable error, empty state with `Create event`, draft/published status labels, and navigation to new/edit/detail routes. The list displays only title or `Untitled event`, status, start time when present, and last-updated time; no analytics or ticket counts.
 
-- [ ] **Step 2: Implement the smallest event list**
+- [x] **Step 2: Implement the smallest event list**
 
 Read the organizer ID from authenticated session, invoke `useOwnedEvents`, and render `AsyncState` branches. Do not fetch organizer and events sequentially inside the page; the guard already owns organizer readiness.
 
-- [ ] **Step 3: Write failing editor tests for persistence semantics**
+- [x] **Step 3: Write failing editor tests for persistence semantics**
 
 Cover:
 
@@ -1256,13 +1256,13 @@ Unsaved changes block internal navigation and beforeunload.
 Paid may be selected as a visible foundation but Review says paid publishing is unavailable.
 ```
 
-- [ ] **Step 4: Implement one form owner and three presentational steps**
+- [x] **Step 4: Implement one form owner and three presentational steps**
 
 `EventEditorPage` owns `useForm<EventFormValues>`, active-step UI state, dirty navigation protection, load/reset, and save handler. Step components receive `register`, exact field errors, and controlled values/callbacks; they do not call APIs.
 
 Derive current step validity and saved/unsaved labels during render. Do not mirror them into effect-managed state. Keep mutation calls in `handleSaveDraft`.
 
-- [ ] **Step 5: Lazy-load Mapbox only on the location step**
+- [x] **Step 5: Lazy-load Mapbox only on the location step**
 
 ```tsx
 const LocationSearchField = lazy(() => import('./LocationSearchField'))
@@ -1274,7 +1274,7 @@ const LocationSearchField = lazy(() => import('./LocationSearchField'))
 
 Export `LocationSearchField` as default from its file for the analyzable dynamic import.
 
-- [ ] **Step 6: Implement route-safe first-save navigation**
+- [x] **Step 6: Implement route-safe first-save navigation**
 
 After a successful first insert, call:
 
@@ -1284,7 +1284,7 @@ navigate(`/organizer/events/${saved.id}/edit`, { replace: true })
 
 Then reset the form to saved values so `isDirty` becomes false. Later saves remain on the same URL. `Preview` first saves when dirty, then navigates only after persistence succeeds.
 
-- [ ] **Step 7: Verify and commit the draft workflow**
+- [x] **Step 7: Verify and commit the draft workflow**
 
 ```bash
 pnpm test -- src/features/events/OrganizerEventsPage.test.tsx src/features/events/EventEditorPage.test.tsx
@@ -1315,7 +1315,7 @@ Expected: tests prove persistence is explicit and reloading uses the stored row.
 - Consumes: persisted event query, organizer query, `eventPublishSchema`, `publishEvent`, event query keys.
 - Produces: `/organizer/events/:eventId/preview`, `/organizer/events/:eventId`, consistent `EventSummary`, `getPublishErrorMessage(error): string`, and domain recovery copy.
 
-- [ ] **Step 1: Write failing stable error-copy tests**
+- [x] **Step 1: Write failing stable error-copy tests**
 
 Implement an exhaustive record:
 
@@ -1336,27 +1336,27 @@ Unknown infrastructure errors map to `Publishing failed. Try again.` and preserv
 
 Implement `getPublishErrorMessage(error: unknown)` by checking whether a Supabase error's `message` is one of the eight `PublishEventErrorCode` values, then indexing `publishErrorCopy`; never cast an arbitrary message directly to the union.
 
-- [ ] **Step 2: Write failing persisted-preview tests**
+- [x] **Step 2: Write failing persisted-preview tests**
 
 Assert preview queries by route ID, displays title/organizer/date/time/timezone/category/free status/venue/exact address/description, renders the deliberate artwork placeholder, and does not use editor form context. Assert no map, ticket selector, RSVP, AI artwork, or animation picker exists.
 
-- [ ] **Step 3: Implement `EventSummary` and preview state handling**
+- [x] **Step 3: Implement `EventSummary` and preview state handling**
 
 `EventSummary` receives typed `event` and `organizer` props only. Fetch independent persisted event and organizer data concurrently through enabled TanStack queries when both IDs are known; do not issue duplicate Supabase calls from presentational components.
 
-- [ ] **Step 4: Write failing publish interaction tests**
+- [x] **Step 4: Write failing publish interaction tests**
 
 Cover client-invalid draft disables Publish with field guidance, click calls RPC exactly once while pending, RPC error displays mapped recovery copy, success invalidates owned-list/detail queries and navigates to `/organizer/events/:eventId`, and a rapid double click does not create a second call.
 
-- [ ] **Step 5: Implement immediate publish in the click handler**
+- [x] **Step 5: Implement immediate publish in the click handler**
 
 The handler must parse the persisted row with `eventPublishSchema`, call `publishEvent(event.id)`, update caches, and navigate only after the returned persisted row has `status === 'published'`. Do not add pending-review copy or an approval state.
 
-- [ ] **Step 6: Write and implement published confirmation states**
+- [x] **Step 6: Write and implement published confirmation states**
 
 The page shows `Published`, the persisted `published_at`, and `This event is publicly available.` for a published event. Draft IDs redirect to edit; missing/RLS-hidden IDs show authorization-safe not found; blocked/removed owned events remain readable to the organizer and display their operational status without exposing an admin action.
 
-- [ ] **Step 7: Verify and commit preview/publish behavior**
+- [x] **Step 7: Verify and commit preview/publish behavior**
 
 ```bash
 pnpm test -- src/features/events/publishErrors.test.ts src/features/events/EventPreviewPage.test.tsx src/features/events/PublishedEventPage.test.tsx
@@ -1383,7 +1383,7 @@ Expected: persisted preview and immediate-publish tests pass, with no queue lang
 - Consumes: confirmed development URL/publishable key, disposable Organizer A/B credentials supplied through non-`VITE_` test-process variables, applied migrations.
 - Produces: `pnpm test:integration` proof that the browser-accessible API enforces the milestone contract.
 
-- [ ] **Step 1: Define non-browser integration environment variables**
+- [x] **Step 1: Define non-browser integration environment variables**
 
 Use only the Node test process:
 
@@ -1398,7 +1398,7 @@ TEST_ORGANIZER_B_PASSWORD
 
 Add them to the runbook, never `.env.example`, because they are verification credentials rather than frontend configuration. Ensure `.env.test.local` remains ignored.
 
-- [ ] **Step 2: Write the failing anonymous visibility test**
+- [x] **Step 2: Write the failing anonymous visibility test**
 
 Create three clients with `persistSession: false`: Organizer A, Organizer B, and anonymous. The test must:
 
@@ -1415,7 +1415,7 @@ retry publish and compare identical ID and published_at;
 
 Use a title prefix containing a generated UUID for cleanup identification. Never use a service-role key in this test.
 
-- [ ] **Step 3: Observe failure, implement the test harness, and run against development**
+- [x] **Step 3: Observe failure, implement the test harness, and run against development**
 
 Add `"test:integration": "vitest run tests/integration"` to scripts. Run:
 
@@ -1425,7 +1425,7 @@ pnpm test:integration
 
 Expected: PASS only when migrations and RLS are correctly active in the confirmed development project. If signup confirmation prevents programmatic creation, provision the two disposable identities manually in the development Auth dashboard and keep their credentials outside Git.
 
-- [ ] **Step 4: Verify moderation with transactional linked pgTAP**
+- [x] **Step 4: Verify moderation with transactional linked pgTAP**
 
 The runbook must use the already-authored database tests, not add an organizer-facing moderation feature:
 
@@ -1435,7 +1435,7 @@ pnpm supabase test db --linked supabase/tests/database/organizers_events_rls.tes
 
 Expected: `flagged` is anonymously readable; `blocked` and `removed` are not; owner access remains. pgTAP rolls back its fixtures.
 
-- [ ] **Step 5: Document local Docker parity without blocking completion**
+- [x] **Step 5: Document local Docker parity without blocking completion**
 
 The runbook includes:
 
@@ -1448,7 +1448,7 @@ pnpm supabase stop
 
 Mark these as pending with the observed Docker error if Docker remains unavailable; do not mark the authored tests as passing locally.
 
-- [ ] **Step 6: Verify and commit integration proof**
+- [x] **Step 6: Verify and commit integration proof**
 
 ```bash
 pnpm test:integration
@@ -1476,7 +1476,7 @@ Expected: development integration proof passes without elevated browser credenti
 - Consumes: completed SPA, disposable development organizer credentials, Vite port 3000, approved visual references.
 - Produces: repeatable functional/visual browser proof for mobile and desktop.
 
-- [ ] **Step 1: Configure Playwright for deterministic local execution**
+- [x] **Step 1: Configure Playwright for deterministic local execution**
 
 ```ts
 export default defineConfig({
@@ -1492,7 +1492,7 @@ export default defineConfig({
 
 Install Chromium with `pnpm exec playwright install chromium`.
 
-- [ ] **Step 2: Write the functional E2E journey before fixing uncovered behavior**
+- [x] **Step 2: Write the functional E2E journey before fixing uncovered behavior**
 
 The test signs in a disposable organizer, completes setup when absent, creates a unique event, saves, reloads the page, verifies values survived, previews, publishes, and sees `This event is publicly available.`. It also intercepts/observes the anonymous REST request or runs the integration assertion from Task 12 for the same event ID.
 
@@ -1527,7 +1527,7 @@ git status --short
 
 Expected: all environment-available checks exit 0. Explicitly list local `supabase start/reset/test` as unrun if Docker is unavailable; that gap does not erase successful linked-development verification.
 
-- [ ] **Step 6: Scan scope and secrets before the final commit**
+- [x] **Step 6: Scan scope and secrets before the final commit**
 
 ```bash
 rg -n "sk_live_|sk_test_|service_role|SUPABASE_SERVICE_ROLE_KEY|STRIPE_SECRET|OPENAI_API_KEY|RESEND_API_KEY|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY" . --hidden -g '!node_modules/**' -g '!.git/**'
@@ -1536,14 +1536,14 @@ rg -n "checkout|ticket tier|QR|AI flyer|analytics|approval queue|pending approva
 
 Expected: secret scan returns no credential values; scope scan returns no implemented out-of-scope feature or approval-queue state. Legitimate explanatory copy such as paid publishing unavailable is reviewed manually.
 
-- [ ] **Step 7: Commit final browser verification**
+- [x] **Step 7: Commit final browser verification**
 
 ```bash
 git add playwright.config.ts tests/e2e package.json pnpm-lock.yaml Docs/testing/day1-organizer-event-verification.md
 git commit -m "test: prove organizer publish journey"
 ```
 
-- [ ] **Step 8: Prepare the completion report without pushing unless authorized**
+- [x] **Step 8: Prepare the completion report without pushing unless authorized**
 
 Report:
 
