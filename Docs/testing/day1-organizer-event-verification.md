@@ -76,6 +76,11 @@ The test uses independent clients and does not share TanStack Query state. In th
 private detail cache keys remain owner-aware as `eventKeys.detail(organizerId, eventId)`; this
 integration proof does not weaken or substitute for that account-switch isolation rule.
 
+Fresh Auth sessions are probed against the Data API before fixture writes. The harness retries
+only the hosted `JWT issued at future` response for at most 20 seconds and fails immediately for
+every other response. This replaces a fixed five-second delay, which a later verification run
+proved could still race temporary hosted clock skew.
+
 Disposable users may be created through public `signUp` using generated passwords held only
 in the shell process. If project signup limits prevent that path, create exactly two confirmed
 disposable users through the dashboard-equivalent official Admin API outside the test process.
@@ -168,3 +173,48 @@ git diff --check
 ```
 
 `pnpm typecheck` checks both the application build graph and the Node integration test source.
+
+## Playwright organizer journey
+
+The browser harness uses the same six `TEST_*` variables as the integration suite plus one
+client-safe map search value:
+
+```text
+VITE_MAPBOX_ACCESS_TOKEN
+```
+
+`playwright.config.ts` maps Organizer A to `mobile-chromium` (Pixel 7 emulation at 390×844)
+and Organizer B to `desktop-chromium` (1440×1000). Both projects emulate reduced motion, run
+serially against a fresh local Vite server at `http://127.0.0.1:3000`, and pass only the
+publishable Supabase key and public Mapbox token to Vite. Chromium may be installed with:
+
+```bash
+pnpm exec playwright install chromium
+```
+
+Then run:
+
+```bash
+pnpm test:e2e
+```
+
+The functional spec signs in, completes organizer setup, saves a uniquely titled draft,
+verifies route replacement and reload persistence, retrieves a real address through Mapbox
+SearchBox, reviews, previews persisted data, sends exactly one publish request, confirms the
+public-copy result, and reads the exact published event anonymously. The visual spec captures
+signup, setup, details, schedule, review, preview, and published states into Playwright's ignored
+test output for both viewports; raw screenshots and credentials must never be committed.
+
+If any required value is absent, configuration fails before browser launch and lists the missing
+variable names. Do not use a dummy Mapbox token, bypass verified location selection, or pass a
+service-role/secret key to Playwright or Vite. Provisioning and cleanup of exactly two disposable
+Auth users, their organizer rows, and their events remains an out-of-band administrator action.
+
+### Current browser-verification status
+
+On 2026-08-24, the safe Whereto-only environment search found no
+`VITE_MAPBOX_ACCESS_TOKEN`. The harness was statically collected as four cases (two specs across
+two projects), Chromium installed successfully, and TypeScript/lint covered the harness. The
+functional and visual browser runs, screenshots, mechanical layout sweep, and live font probes
+remain blocked until that one public token is supplied. No substitute token or location bypass
+was used.

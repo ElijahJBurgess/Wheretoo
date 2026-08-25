@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { createClient } from '@supabase/supabase-js'
 import { afterAll, describe, expect, it } from 'vitest'
 import type { Database } from '../../src/lib/supabase/database.types'
+import { waitForApiJwtAcceptance } from '../shared/waitForApiJwtAcceptance'
 import { loadIntegrationTestEnv } from './testEnv'
 
 const env = loadIntegrationTestEnv()
@@ -22,8 +23,6 @@ const anonymous = createTestClient()
 
 type TestClient = typeof organizerA
 
-const freshJwtClockSkewBufferMs = 5_000
-
 function assertNoError(error: { message: string } | null, operation: string): asserts error is null {
   if (error) {
     throw new Error(`${operation}: ${error.message}`)
@@ -37,11 +36,6 @@ async function signIn(client: TestClient, email: string, password: string) {
   expect(data.user).not.toBeNull()
 
   return data.user!
-}
-
-async function waitForApiJwtClockSkew() {
-  // The hosted Auth issuer can be a few seconds ahead of the API verifier immediately after sign-in.
-  await new Promise((resolve) => setTimeout(resolve, freshJwtClockSkewBufferMs))
 }
 
 async function ensureOwnOrganizer(client: TestClient, userId: string, displayName: string) {
@@ -93,7 +87,10 @@ describe('public event visibility and organizer isolation', () => {
     ])
     expect(userA.id).not.toBe(userB.id)
 
-    await waitForApiJwtClockSkew()
+    await Promise.all([
+      waitForApiJwtAcceptance(() => organizerA.from('organizers').select('id').limit(0)),
+      waitForApiJwtAcceptance(() => organizerB.from('organizers').select('id').limit(0)),
+    ])
 
     await Promise.all([
       ensureOwnOrganizer(organizerA, userA.id, `Organizer A ${runId}`),
