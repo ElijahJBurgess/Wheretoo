@@ -2,7 +2,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(30);
+select plan(33);
 
 select results_eq(
   $$
@@ -123,6 +123,44 @@ select results_eq(
   $$ select pg_catalog.has_function_privilege('anon', 'public.get_public_event_ticketing(uuid)', 'EXECUTE') $$,
   $$ values (true) $$,
   'anonymous consumers can execute the safe public projection RPC'
+);
+
+select results_eq(
+  $$
+    select pg_catalog.to_regprocedure('public.lock_event_ticketing_operation(uuid)') is not null
+  $$,
+  $$ values (true) $$,
+  'the shared event ticketing transaction lock is available to service-owned functions'
+);
+
+select results_eq(
+  $$
+    select coalesce(
+      pg_catalog.has_function_privilege(
+        'anon',
+        pg_catalog.to_regprocedure('public.lock_event_ticketing_operation(uuid)'),
+        'EXECUTE'
+      ),
+      false
+    )
+  $$,
+  $$ values (false) $$,
+  'anonymous callers cannot acquire the shared event ticketing transaction lock'
+);
+
+select results_eq(
+  $$
+    select coalesce(
+      pg_catalog.has_function_privilege(
+        'authenticated',
+        pg_catalog.to_regprocedure('public.lock_event_ticketing_operation(uuid)'),
+        'EXECUTE'
+      ),
+      false
+    )
+  $$,
+  $$ values (false) $$,
+  'authenticated browser callers cannot acquire the shared event ticketing transaction lock'
 );
 
 insert into auth.users (id, email)
