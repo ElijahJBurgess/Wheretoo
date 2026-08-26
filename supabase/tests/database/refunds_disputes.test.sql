@@ -2,7 +2,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(47);
+select plan(51);
 
 select has_table('public', 'disputes', 'durable Stripe dispute state table exists');
 select col_is_unique(
@@ -541,6 +541,45 @@ select is(
 set local role service_role;
 
 select * from public.server_record_webhook_receipt(
+  'evt_disputeunderreview', 'charge.dispute.updated', false,
+  'du_1MtJUT2eZvKYlo2CNaw2HvEv',
+  '2025-08-27.basil', '2026-08-25 13:05:00+00', repeat('a', 64)
+);
+
+select lives_ok(
+  $$
+    select public.server_apply_dispute(
+      'evt_disputeunderreview', (select id from disputed_order),
+      'du_1MtJUT2eZvKYlo2CNaw2HvEv', 'ch_disputedorder', 'under_review',
+      2000, 'usd', 'succeeded'
+    )
+  $$,
+  'a distinct same-second event can advance dispute state monotonically'
+);
+
+reset role;
+
+select results_eq(
+  $$
+    select disputes.status, disputes.last_stripe_event_id,
+      disputes.last_stripe_event_created_at, orders.failure_code,
+      orders.last_stripe_event_id
+    from public.disputes as disputes
+    join public.orders as orders on orders.id = disputes.order_id
+    where disputes.stripe_dispute_id = 'du_1MtJUT2eZvKYlo2CNaw2HvEv'
+  $$,
+  $$ values (
+    'under_review'::text, 'evt_disputeunderreview'::text,
+    '2026-08-25 13:05:00+00'::timestamptz,
+    'DISPUTE_UNDER_REVIEW_RECOVERY_SUCCEEDED'::text,
+    'evt_disputeunderreview'::text
+  ) $$,
+  'same-second monotonic advancement persists deterministic dispute and order truth'
+);
+
+set local role service_role;
+
+select * from public.server_record_webhook_receipt(
   'evt_disputewon', 'charge.dispute.closed', false,
   'du_1MtJUT2eZvKYlo2CNaw2HvEv',
   '2025-08-27.basil', '2026-08-25 13:06:00+00', repeat('2', 64)
@@ -599,7 +638,7 @@ select * from public.server_record_webhook_receipt(
   '2025-08-27.basil', '2026-08-25 13:05:30+00', repeat('0', 64)
 );
 
-select throws_ok(
+select lives_ok(
   $$
     select public.server_apply_dispute(
       'evt_staledispute', (select id from disputed_order),
@@ -607,24 +646,68 @@ select throws_ok(
       2000, 'usd', 'failed'
     )
   $$,
-  'P0001', 'DISPUTE_STATE_REGRESSION',
-  'an older dispute event cannot regress accepted status or recovery truth'
+  'an older dispute event is acknowledged as an idempotent no-op'
 );
 
 reset role;
 
 select results_eq(
   $$
-    select status, recovery_status, last_stripe_event_id,
-      last_stripe_event_created_at
-    from public.disputes
-    where stripe_dispute_id = 'du_1MtJUT2eZvKYlo2CNaw2HvEv'
+    select disputes.status, disputes.recovery_status, disputes.last_stripe_event_id,
+      disputes.last_stripe_event_created_at, receipts.processing_status,
+      receipts.processed_at is not null, receipts.error_code
+    from public.disputes as disputes
+    join public.stripe_webhook_events as receipts
+      on receipts.stripe_event_id = 'evt_staledispute'
+    where disputes.stripe_dispute_id = 'du_1MtJUT2eZvKYlo2CNaw2HvEv'
   $$,
   $$ values (
     'won'::text, 'succeeded'::text, 'evt_disputewon'::text,
-    '2026-08-25 13:06:00+00'::timestamptz
+    '2026-08-25 13:06:00+00'::timestamptz,
+    'processed'::text, true, 'DISPUTE_STATE_IGNORED'::text
   ) $$,
-  'rejected stale delivery leaves durable dispute truth unchanged'
+  'ignored stale delivery preserves truth and reaches a terminal receipt state'
+);
+
+set local role service_role;
+
+select * from public.server_record_webhook_receipt(
+  'evt_regressivedispute', 'charge.dispute.updated', false,
+  'du_1MtJUT2eZvKYlo2CNaw2HvEv',
+  '2025-08-27.basil', '2026-08-25 13:06:30+00', repeat('b', 64)
+);
+
+select lives_ok(
+  $$
+    select public.server_apply_dispute(
+      'evt_regressivedispute', (select id from disputed_order),
+      'du_1MtJUT2eZvKYlo2CNaw2HvEv', 'ch_disputedorder', 'under_review',
+      2000, 'usd', 'succeeded'
+    )
+  $$,
+  'a newer but lower dispute state is acknowledged as an idempotent no-op'
+);
+
+reset role;
+
+select results_eq(
+  $$
+    select disputes.status, disputes.last_stripe_event_id,
+      orders.failure_code, orders.last_stripe_event_id,
+      receipts.processing_status, receipts.processed_at is not null,
+      receipts.error_code
+    from public.disputes as disputes
+    join public.orders as orders on orders.id = disputes.order_id
+    join public.stripe_webhook_events as receipts
+      on receipts.stripe_event_id = 'evt_regressivedispute'
+    where disputes.stripe_dispute_id = 'du_1MtJUT2eZvKYlo2CNaw2HvEv'
+  $$,
+  $$ values (
+    'won'::text, 'evt_disputewon'::text,
+    'DISPUTE_WON_RECOVERY_SUCCEEDED'::text, 'evt_disputewon'::text,
+    'processed'::text, true, 'DISPUTE_STATE_IGNORED'::text
+  ) $$,
+  'ignored lower state preserves dispute, order, ticket, and receipt truth'
 );
 
 set local role service_role;
