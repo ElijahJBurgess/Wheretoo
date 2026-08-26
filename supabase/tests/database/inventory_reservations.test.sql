@@ -2,7 +2,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(64);
+select plan(69);
 
 select has_schema('private', 'private service function schema exists');
 
@@ -278,7 +278,8 @@ select results_eq(
     values ((array[
       'order_id:uuid', 'organizer_id:uuid', 'subtotal_minor:bigint', 'currency:text',
       'application_fee_amount_minor:bigint', 'stripe_account_id:text',
-      'checkout_expires_at:timestamp with time zone', 'existing_checkout_session_id:text'
+      'checkout_expires_at:timestamp with time zone', 'existing_checkout_session_id:text',
+      'integration_identifier:text', 'create_request_digest:text'
     ]::text[]) collate "C")
   $$,
   'reserve checkout returns only the exact service projection'
@@ -297,7 +298,8 @@ select results_eq(
     values ((array[
       'order_id:uuid', 'organizer_id:uuid', 'subtotal_minor:bigint', 'currency:text',
       'application_fee_amount_minor:bigint', 'stripe_account_id:text',
-      'checkout_expires_at:timestamp with time zone', 'existing_checkout_session_id:text'
+      'checkout_expires_at:timestamp with time zone', 'existing_checkout_session_id:text',
+      'integration_identifier:text', 'create_request_digest:text'
     ]::text[]) collate "C")
   $$,
   'server reserve wrapper returns only the exact service projection'
@@ -467,6 +469,40 @@ select ok(
 
 select results_eq(
   $$
+    select stripe_destination_account_id,
+      stripe_checkout_integration_identifier = 'whereto_checkout_' || translate(
+        substr(replace(id::text, '-', ''), 1, 8),
+        '0123456789abcdef', 'abcdefghijklmnop'
+      ),
+      stripe_checkout_request_digest ~ '^[a-f0-9]{64}$'
+    from public.orders where id = (select order_id from first_reservation)
+  $$,
+  $$ values (
+    'acct_inventoryreservation'::text, true, true
+  ) $$,
+  'the order persists its destination, deterministic eight-letter identifier, and canonical digest'
+);
+
+select throws_ok(
+  $$
+    update public.orders set stripe_destination_account_id = 'acct_attacker'
+    where id = (select order_id from first_reservation)
+  $$,
+  'P0001', 'CHECKOUT_SNAPSHOT_IMMUTABLE',
+  'the persisted destination snapshot cannot be rewritten'
+);
+
+select throws_ok(
+  $$
+    update public.orders set checkout_expires_at = checkout_expires_at + interval '1 second'
+    where id = (select order_id from first_reservation)
+  $$,
+  'P0001', 'CHECKOUT_SNAPSHOT_IMMUTABLE',
+  'the persisted deterministic Checkout expiry cannot be rewritten'
+);
+
+select results_eq(
+  $$
     select buyer_name, buyer_email, confirmation_token_hash, quantity,
       subtotal_minor, platform_product_fee_minor, application_fee_amount_minor,
       expected_organizer_proceeds_minor, status
@@ -528,6 +564,10 @@ select is(
   'no clear confirmation token is stored in PostgreSQL'
 );
 
+update public.organizer_stripe_accounts
+set stripe_account_id = 'acct_inventoryrotated', last_synced_at = now()
+where organizer_id = '15000000-0000-0000-0000-000000000001';
+
 create temporary table retried_reservation on commit drop as
 select *
 from public.server_reserve_checkout(
@@ -549,6 +589,20 @@ select results_eq(
   $$ select order_id, application_fee_amount_minor from retried_reservation $$,
   $$ select order_id, application_fee_amount_minor from first_reservation $$,
   'retrying the same client request returns the same order and fee snapshot'
+);
+
+select results_eq(
+  $$
+    select stripe_account_id, checkout_expires_at, integration_identifier,
+      create_request_digest
+    from retried_reservation
+  $$,
+  $$
+    select stripe_account_id, checkout_expires_at, integration_identifier,
+      create_request_digest
+    from first_reservation
+  $$,
+  'a retry returns the complete historical create snapshot after Connect rotates'
 );
 
 select throws_ok(
@@ -807,7 +861,6 @@ from public.server_reserve_checkout(
 
 update public.orders
 set created_at = now() - interval '2 hours',
-  checkout_expires_at = now() - interval '1 hour',
   reservation_expires_at = now() - interval '30 minutes'
 where id in (
   select order_id from stale_final_reservation
@@ -1107,7 +1160,19 @@ from public.server_reserve_checkout(
 select public.server_attach_checkout_session(
   (select order_id from attached_reservation),
   'cs_test_inventoryattachment',
-  statement_timestamp() + interval '30 minutes'
+  (select checkout_expires_at from attached_reservation)
+);
+
+select throws_ok(
+  $$
+    select public.server_attach_checkout_session(
+      (select order_id from attached_reservation),
+      'cs_test_wrongexpiry',
+      (select checkout_expires_at + interval '1 second' from attached_reservation)
+    )
+  $$,
+  'P0001', 'CHECKOUT_SNAPSHOT_MISMATCH',
+  'attachment cannot replace the deterministic persisted Session expiry'
 );
 
 select results_eq(
@@ -1146,7 +1211,7 @@ select throws_ok(
     select public.server_attach_checkout_session(
       (select order_id from attached_reservation),
       'cs_test_differentattachment',
-      statement_timestamp() + interval '30 minutes'
+      (select checkout_expires_at from attached_reservation)
     )
   $$,
   'P0001', 'CHECKOUT_ALREADY_EXISTS',
@@ -1223,7 +1288,6 @@ from public.server_reserve_checkout(
 
 update public.orders
 set created_at = now() - interval '2 hours',
-  checkout_expires_at = now() - interval '1 hour',
   reservation_expires_at = now() - interval '30 minutes'
 where id = (select order_id from expiring_reservation);
 
@@ -1260,7 +1324,6 @@ from public.server_reserve_checkout(
 
 update public.orders
 set status = 'payment_processing', created_at = now() - interval '2 hours',
-  checkout_expires_at = now() - interval '1 hour',
   reservation_expires_at = now() - interval '30 minutes'
 where id = (select order_id from processing_reservation);
 

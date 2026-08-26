@@ -139,7 +139,9 @@ select * from public.server_reserve_checkout(
 select public.server_attach_checkout_session(
   (select id from public.orders
     where client_request_id = '48000000-0000-4000-8000-000000000001'),
-  'cs_test_ConcurrencyAbCdEf01', statement_timestamp() + interval '30 minutes'
+  'cs_test_ConcurrencyAbCdEf01',
+  (select checkout_expires_at from public.orders
+    where client_request_id = '48000000-0000-4000-8000-000000000001')
 );
 select * from public.server_reserve_checkout(
   '28000000-0000-4000-8000-000000000001',
@@ -150,7 +152,9 @@ select * from public.server_reserve_checkout(
 select public.server_attach_checkout_session(
   (select id from public.orders
     where client_request_id = '48000000-0000-4000-8000-000000000002'),
-  'cs_test_MutationRaceAbCd02', statement_timestamp() + interval '30 minutes'
+  'cs_test_MutationRaceAbCd02',
+  (select checkout_expires_at from public.orders
+    where client_request_id = '48000000-0000-4000-8000-000000000002')
 );
 select * from public.server_record_webhook_receipt(
   'evt_ConcurrencyOneAb', 'checkout.session.completed', false,

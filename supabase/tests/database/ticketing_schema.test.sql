@@ -62,7 +62,8 @@ select columns_are(
     'stripe_checkout_session_id', 'stripe_payment_intent_id', 'stripe_charge_id',
     'stripe_transfer_id', 'stripe_application_fee_id', 'stripe_balance_transaction_id',
     'stripe_customer_id', 'last_stripe_event_id', 'reconciliation_status', 'failure_code',
-    'created_at', 'updated_at'
+    'created_at', 'updated_at', 'stripe_destination_account_id',
+    'stripe_checkout_integration_identifier', 'stripe_checkout_request_digest'
   ],
   'order columns are exact'
 );
@@ -187,7 +188,9 @@ select results_eq(
       'stripe_payment_intent_id:text', 'stripe_charge_id:text', 'stripe_transfer_id:text',
       'stripe_application_fee_id:text', 'stripe_balance_transaction_id:text',
       'stripe_customer_id:text', 'last_stripe_event_id:text', 'reconciliation_status:text',
-      'failure_code:text', 'created_at:timestamp with time zone', 'updated_at:timestamp with time zone'
+      'failure_code:text', 'created_at:timestamp with time zone', 'updated_at:timestamp with time zone',
+      'stripe_destination_account_id:text', 'stripe_checkout_integration_identifier:text',
+      'stripe_checkout_request_digest:text'
     ]::text[]) collate "C")
   $$,
   'order column types are exact and all money uses bigint'

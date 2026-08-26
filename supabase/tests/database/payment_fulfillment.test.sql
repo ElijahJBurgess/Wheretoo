@@ -157,7 +157,8 @@ begin
   ) as reservation;
 
   perform public.server_attach_checkout_session(
-    v_order_id, p_session_id, statement_timestamp() + interval '30 minutes'
+    v_order_id, p_session_id,
+    (select orders.checkout_expires_at from public.orders as orders where orders.id = v_order_id)
   );
   return v_order_id;
 end;
@@ -240,6 +241,10 @@ select * from public.server_record_webhook_receipt(
   'cs_test_primaryfulfillment', '2025-08-27.basil',
   '2026-08-25 12:01:00+00', repeat('d', 64)
 );
+
+update public.organizer_stripe_accounts
+set stripe_account_id = 'acct_fulfillmentrotated', last_synced_at = now()
+where organizer_id = '16000000-0000-4000-8000-000000000001';
 
 select throws_ok(
   $$
@@ -373,6 +378,10 @@ select results_eq(
   $$ values ('paid'::text, true) $$,
   'an exact paid Stripe snapshot fulfills the persisted order'
 );
+
+update public.organizer_stripe_accounts
+set stripe_account_id = 'acct_fulfillmentowner', last_synced_at = now()
+where organizer_id = '16000000-0000-4000-8000-000000000001';
 
 select results_eq(
   $$
@@ -720,7 +729,6 @@ values (pg_temp.create_checkout_order(
 
 update public.orders
 set created_at = now() - interval '2 hours',
-  checkout_expires_at = now() - interval '1 hour',
   reservation_expires_at = now() - interval '30 minutes'
 where id = (select id from late_order);
 

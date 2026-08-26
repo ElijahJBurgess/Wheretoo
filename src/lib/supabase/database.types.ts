@@ -283,8 +283,11 @@ export type Database = {
           stripe_application_fee_id: string | null
           stripe_balance_transaction_id: string | null
           stripe_charge_id: string | null
+          stripe_checkout_integration_identifier: string
+          stripe_checkout_request_digest: string
           stripe_checkout_session_id: string | null
           stripe_customer_id: string | null
+          stripe_destination_account_id: string
           stripe_fee_estimate_minor: number
           stripe_payment_intent_id: string | null
           stripe_transfer_id: string | null
@@ -330,8 +333,11 @@ export type Database = {
           stripe_application_fee_id?: string | null
           stripe_balance_transaction_id?: string | null
           stripe_charge_id?: string | null
+          stripe_checkout_integration_identifier: string
+          stripe_checkout_request_digest: string
           stripe_checkout_session_id?: string | null
           stripe_customer_id?: string | null
+          stripe_destination_account_id: string
           stripe_fee_estimate_minor?: number
           stripe_payment_intent_id?: string | null
           stripe_transfer_id?: string | null
@@ -377,8 +383,11 @@ export type Database = {
           stripe_application_fee_id?: string | null
           stripe_balance_transaction_id?: string | null
           stripe_charge_id?: string | null
+          stripe_checkout_integration_identifier?: string
+          stripe_checkout_request_digest?: string
           stripe_checkout_session_id?: string | null
           stripe_customer_id?: string | null
+          stripe_destination_account_id?: string
           stripe_fee_estimate_minor?: number
           stripe_payment_intent_id?: string | null
           stripe_transfer_id?: string | null
@@ -1032,6 +1041,13 @@ export type Database = {
         Args: { p_order_id: string; p_reason: string }
         Returns: string
       }
+      server_consume_checkout_rate_limit: {
+        Args: { p_identity_hash: string }
+        Returns: {
+          allowed: boolean
+          retry_after_seconds: number
+        }[]
+      }
       server_expire_checkout_reservations: {
         Args: { p_now: string }
         Returns: number
@@ -1059,6 +1075,21 @@ export type Database = {
           order_id: string
           order_status: string
           ticket_id: string
+        }[]
+      }
+      server_get_checkout_preflight: {
+        Args: { p_event_id: string; p_tier_id: string }
+        Returns: {
+          organizer_id: string
+          stripe_account_id: string
+        }[]
+      }
+      server_lookup_checkout_cancellation: {
+        Args: { p_token_hash: string }
+        Returns: {
+          order_id: string
+          status: string
+          stripe_checkout_session_id: string
         }[]
       }
       server_mark_payment_failed: {
@@ -1122,8 +1153,10 @@ export type Database = {
         Returns: {
           application_fee_amount_minor: number
           checkout_expires_at: string
+          create_request_digest: string
           currency: string
           existing_checkout_session_id: string
+          integration_identifier: string
           order_id: string
           organizer_id: string
           stripe_account_id: string

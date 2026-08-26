@@ -110,29 +110,34 @@ function validateSession(
   return { status: value.status };
 }
 
-async function defaultFindOrder(
+export async function defaultFindOrder(
   tokenHash: string,
+  client = getServiceClient(),
 ): Promise<CancellationOrder | null> {
-  const { data, error } = await getServiceClient().from("orders")
-    .select("id,status,stripe_checkout_session_id")
-    .eq("confirmation_token_hash", tokenHash)
-    .eq("livemode", false)
-    .maybeSingle();
+  const { data, error } = await client.rpc(
+    "server_lookup_checkout_cancellation",
+    { p_token_hash: tokenHash },
+  );
   if (error !== null) throw new CheckoutHttpError(500, "INTERNAL_ERROR");
-  if (data === null) return null;
+  if (!Array.isArray(data)) throw new CheckoutHttpError(500, "INTERNAL_ERROR");
+  if (data.length === 0) return null;
+  if (data.length !== 1 || !isRecord(data[0])) {
+    throw new CheckoutHttpError(500, "INTERNAL_ERROR");
+  }
+  const row = data[0];
   if (
-    typeof data.id !== "string" || !UUID_PATTERN.test(data.id) ||
-    typeof data.status !== "string" || !ORDER_STATUSES.has(data.status) ||
-    (data.stripe_checkout_session_id !== null &&
-      (typeof data.stripe_checkout_session_id !== "string" ||
-        !SESSION_PATTERN.test(data.stripe_checkout_session_id)))
+    typeof row.order_id !== "string" || !UUID_PATTERN.test(row.order_id) ||
+    typeof row.status !== "string" || !ORDER_STATUSES.has(row.status) ||
+    (row.stripe_checkout_session_id !== null &&
+      (typeof row.stripe_checkout_session_id !== "string" ||
+        !SESSION_PATTERN.test(row.stripe_checkout_session_id)))
   ) {
     throw new CheckoutHttpError(500, "INTERNAL_ERROR");
   }
   return {
-    orderId: data.id,
-    status: data.status,
-    stripeCheckoutSessionId: data.stripe_checkout_session_id,
+    orderId: row.order_id,
+    status: row.status,
+    stripeCheckoutSessionId: row.stripe_checkout_session_id,
   };
 }
 

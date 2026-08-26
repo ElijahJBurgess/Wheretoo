@@ -72,6 +72,8 @@ export interface ReservationSnapshot {
   stripeAccountId: string;
   checkoutExpiresAt: string;
   existingCheckoutSessionId: string | null;
+  integrationIdentifier: string;
+  createRequestDigest: string;
 }
 
 export interface StripeCreateCheckoutDependencies {
@@ -98,8 +100,6 @@ export interface StripeCreateCheckoutDependencies {
     expiresAt: string,
   ): Promise<void>;
   releaseReservation(orderId: string, reason: string): Promise<void>;
-  integrationSuffix(): string;
-  nowEpochSeconds(): number;
 }
 
 interface ExpectedSession {
@@ -287,6 +287,8 @@ function reservationFromRpc(value: unknown): ReservationSnapshot {
   const stripeAccountId = value.stripe_account_id;
   const checkoutExpiresAt = value.checkout_expires_at;
   const existingCheckoutSessionId = value.existing_checkout_session_id;
+  const integrationIdentifier = value.integration_identifier;
+  const createRequestDigest = value.create_request_digest;
   if (
     typeof orderId !== "string" || !UUID_PATTERN.test(orderId) ||
     typeof organizerId !== "string" || !UUID_PATTERN.test(organizerId) ||
@@ -297,7 +299,11 @@ function reservationFromRpc(value: unknown): ReservationSnapshot {
     !Number.isFinite(Date.parse(checkoutExpiresAt)) ||
     (existingCheckoutSessionId !== null &&
       (typeof existingCheckoutSessionId !== "string" ||
-        !SESSION_PATTERN.test(existingCheckoutSessionId)))
+        !SESSION_PATTERN.test(existingCheckoutSessionId))) ||
+    typeof integrationIdentifier !== "string" ||
+    !INTEGRATION_IDENTIFIER_PATTERN.test(integrationIdentifier) ||
+    typeof createRequestDigest !== "string" ||
+    !/^[a-f0-9]{64}$/.test(createRequestDigest)
   ) {
     throw new CheckoutHttpError(500, "INTERNAL_ERROR");
   }
@@ -310,6 +316,8 @@ function reservationFromRpc(value: unknown): ReservationSnapshot {
     stripeAccountId,
     checkoutExpiresAt,
     existingCheckoutSessionId,
+    integrationIdentifier,
+    createRequestDigest,
   };
 }
 
@@ -433,7 +441,8 @@ function validateSession(
     value.success_url !== expected.successUrl ||
     value.cancel_url !== expected.cancelUrl ||
     typeof value.integration_identifier !== "string" ||
-    !INTEGRATION_IDENTIFIER_PATTERN.test(value.integration_identifier) ||
+    value.integration_identifier !==
+      expected.reservation.integrationIdentifier ||
     !isExactMetadata(value.metadata, metadata) ||
     !isRecord(automaticTax) || automaticTax.enabled !== false ||
     !validStripeCheckoutUrl(value.url) || items.length !== 1 ||
@@ -459,11 +468,7 @@ function validateSession(
 
 function createParams(
   expected: ExpectedSession,
-  integrationSuffix: string,
 ): Stripe.Checkout.SessionCreateParams {
-  if (!/^[a-z]{8}$/.test(integrationSuffix)) {
-    throw new CheckoutHttpError(500, "INTERNAL_ERROR");
-  }
   const metadata = expectedMetadata(expected);
   return {
     mode: "payment",
@@ -472,7 +477,7 @@ function createParams(
     success_url: expected.successUrl,
     cancel_url: expected.cancelUrl,
     client_reference_id: expected.reservation.orderId,
-    integration_identifier: `whereto_checkout_${integrationSuffix}`,
+    integration_identifier: expected.reservation.integrationIdentifier,
     metadata,
     payment_intent_data: {
       application_fee_amount: expected.reservation.applicationFeeAmountMinor,
@@ -491,59 +496,53 @@ function createParams(
   };
 }
 
-const rateBuckets = new Map<string, { count: number; resetAt: number }>();
-
 export async function defaultAnonymousRateLimit(
   request: Request,
+  client = getServiceClient(),
 ): Promise<RateLimitResult> {
-  const now = Date.now();
   const rawIdentity = request.headers.get("cf-connecting-ip") ??
     request.headers.get("x-forwarded-for")?.split(",", 1)[0]?.trim() ??
     "unknown";
   const identity = hex(await sha256(new TextEncoder().encode(rawIdentity)));
-  const previous = rateBuckets.get(identity);
-  if (previous === undefined || previous.resetAt <= now) {
-    rateBuckets.set(identity, { count: 1, resetAt: now + 60_000 });
-    return { allowed: true };
+  const { data, error } = await client.rpc(
+    "server_consume_checkout_rate_limit",
+    { p_identity_hash: identity },
+  );
+  if (
+    error !== null || !Array.isArray(data) || data.length !== 1 ||
+    !isRecord(data[0]) || typeof data[0].allowed !== "boolean" ||
+    !Number.isInteger(data[0].retry_after_seconds)
+  ) {
+    throw new CheckoutHttpError(500, "INTERNAL_ERROR");
   }
-  if (previous.count >= 10) {
-    return {
-      allowed: false,
-      retryAfterSeconds: Math.max(
-        1,
-        Math.ceil((previous.resetAt - now) / 1_000),
-      ),
-    };
-  }
-  previous.count += 1;
-  return { allowed: true };
+  return data[0].allowed ? { allowed: true } : {
+    allowed: false,
+    retryAfterSeconds: Math.max(1, data[0].retry_after_seconds as number),
+  };
 }
 
-function defaultIntegrationSuffix(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(8));
-  return Array.from(bytes, (byte) => String.fromCharCode(97 + (byte % 26)))
-    .join(
-      "",
-    );
-}
-
-async function defaultRefreshConnect(
+export async function defaultRefreshConnect(
   eventId: string,
   tierId: string,
+  client = getServiceClient(),
 ): Promise<void> {
-  const client = getServiceClient();
-  const { data: tier, error: tierError } = await client.from("ticket_tiers")
-    .select("event_id").eq("id", tierId).eq("event_id", eventId).maybeSingle();
-  if (tierError !== null || tier === null) {
-    throw new CheckoutHttpError(409, "CONNECT_NOT_READY");
+  const { data, error } = await client.rpc("server_get_checkout_preflight", {
+    p_event_id: eventId,
+    p_tier_id: tierId,
+  });
+  if (error !== null) rpcFailure(error);
+  if (
+    !Array.isArray(data) || data.length !== 1 || !isRecord(data[0]) ||
+    typeof data[0].organizer_id !== "string" ||
+    !UUID_PATTERN.test(data[0].organizer_id) ||
+    typeof data[0].stripe_account_id !== "string" ||
+    !ACCOUNT_PATTERN.test(data[0].stripe_account_id)
+  ) {
+    throw new CheckoutHttpError(500, "INTERNAL_ERROR");
   }
-  const { data: event, error: eventError } = await client.from("events")
-    .select("organizer_id").eq("id", eventId).maybeSingle();
-  if (eventError !== null || event === null) {
-    throw new CheckoutHttpError(409, "CONNECT_NOT_READY");
-  }
+  const organizerId = data[0].organizer_id;
   const repository = createAccountRepository();
-  const accountId = await repository.findAccount(event.organizer_id);
+  const accountId = await repository.findAccount(organizerId);
   if (accountId === null) {
     throw new CheckoutHttpError(409, "CONNECT_NOT_READY");
   }
@@ -562,7 +561,7 @@ async function defaultRefreshConnect(
     throw new CheckoutHttpError(409, "CONNECT_NOT_READY");
   }
   await repository.persistStatus(
-    event.organizer_id,
+    organizerId,
     accountId,
     projection,
     new Date().toISOString(),
@@ -644,9 +643,40 @@ function defaultDependencies(): StripeCreateCheckoutDependencies {
     expireSession: (sessionId) => stripe.checkout.sessions.expire(sessionId),
     attachSession: defaultAttachSession,
     releaseReservation: defaultReleaseReservation,
-    integrationSuffix: defaultIntegrationSuffix,
-    nowEpochSeconds: () => Math.ceil(Date.now() / 1_000),
   };
+}
+
+async function canonicalRequestDigest(
+  reservation: ReservationSnapshot,
+  input: CreateCheckoutInput,
+  tokenHash: string,
+): Promise<string> {
+  const epoch = Date.parse(reservation.checkoutExpiresAt) / 1_000;
+  if (!Number.isSafeInteger(epoch)) {
+    throw new CheckoutHttpError(500, "INTERNAL_ERROR");
+  }
+  const canonical = [
+    "whereto-checkout-v2",
+    reservation.orderId,
+    input.eventId,
+    input.tierId,
+    input.clientRequestId,
+    tokenHash,
+    input.guestEmail,
+    reservation.currency,
+    String(reservation.subtotalMinor),
+    String(reservation.applicationFeeAmountMinor),
+    reservation.stripeAccountId,
+    String(epoch),
+    reservation.integrationIdentifier,
+  ].join(String.fromCharCode(31));
+  return hex(await sha256(new TextEncoder().encode(canonical)));
+}
+
+function isDefinitiveStripeNonCreation(error: unknown): boolean {
+  return isRecord(error) &&
+    (error.type === "StripeInvalidRequestError" ||
+      error.rawType === "invalid_request_error");
 }
 
 async function releaseAfterFailure(
@@ -689,6 +719,7 @@ export function createStripeCreateCheckoutHandler(
     const headers = getCorsHeaders(request, dependencies.appOrigin);
     let reservation: ReservationSnapshot | undefined;
     let sessionValue: unknown;
+    let shouldRelease = false;
     try {
       if (!headers.has("access-control-allow-origin")) {
         throw new CheckoutHttpError(403, "CORS_ORIGIN_DENIED");
@@ -720,6 +751,16 @@ export function createStripeCreateCheckoutHandler(
         throw new CheckoutHttpError(410, "CHECKOUT_EXPIRED");
       }
 
+      if (
+        await canonicalRequestDigest(
+          reservation,
+          input,
+          confirmation.tokenHash,
+        ) !== reservation.createRequestDigest
+      ) {
+        throw new CheckoutHttpError(500, "INTERNAL_ERROR");
+      }
+
       const expected: ExpectedSession = {
         reservation,
         input,
@@ -727,12 +768,7 @@ export function createStripeCreateCheckoutHandler(
           `${dependencies.appBaseUrl}/orders/${confirmation.clearToken}`,
         cancelUrl:
           `${dependencies.appBaseUrl}/events/${input.eventId}/checkout?cancel=${confirmation.clearToken}`,
-        stripeExpiresAt: reservation.existingCheckoutSessionId === null
-          ? Math.max(
-            Math.ceil(Date.parse(reservation.checkoutExpiresAt) / 1_000),
-            dependencies.nowEpochSeconds() + 1_800,
-          )
-          : Math.ceil(Date.parse(reservation.checkoutExpiresAt) / 1_000),
+        stripeExpiresAt: Date.parse(reservation.checkoutExpiresAt) / 1_000,
       };
       let validated: ValidatedSession;
       if (reservation.existingCheckoutSessionId !== null) {
@@ -748,26 +784,38 @@ export function createStripeCreateCheckoutHandler(
         return jsonResponse({ checkoutUrl: validated.url }, 200, headers);
       }
 
-      const params = createParams(expected, dependencies.integrationSuffix());
+      const params = createParams(expected);
       try {
         sessionValue = await dependencies.createSession(params, {
           idempotencyKey: `whereto-checkout-v1:${reservation.orderId}`,
         });
-      } catch {
+      } catch (error) {
+        shouldRelease = isDefinitiveStripeNonCreation(error);
         throw new CheckoutHttpError(502, "STRIPE_REQUEST_FAILED");
       }
-      validated = validateSession(sessionValue, expected);
+      try {
+        validated = validateSession(sessionValue, expected);
+      } catch (error) {
+        shouldRelease = true;
+        throw error;
+      }
       if (validated.status !== "open") {
+        shouldRelease = true;
         throw new CheckoutHttpError(502, "INVALID_STRIPE_SESSION");
       }
-      await dependencies.attachSession(
-        reservation.orderId,
-        validated.id,
-        new Date(validated.expiresAt * 1_000).toISOString(),
-      );
+      try {
+        await dependencies.attachSession(
+          reservation.orderId,
+          validated.id,
+          new Date(validated.expiresAt * 1_000).toISOString(),
+        );
+      } catch (error) {
+        shouldRelease = true;
+        throw error;
+      }
       return jsonResponse({ checkoutUrl: validated.url }, 200, headers);
     } catch (error) {
-      if (reservation !== undefined) {
+      if (reservation !== undefined && shouldRelease) {
         try {
           await releaseAfterFailure(dependencies, reservation, sessionValue);
         } catch {

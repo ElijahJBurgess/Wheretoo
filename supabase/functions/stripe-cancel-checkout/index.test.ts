@@ -3,6 +3,7 @@ import { assertEquals } from "@std/assert";
 import {
   type CancellationOrder,
   createStripeCancelCheckoutHandler,
+  defaultFindOrder,
   type StripeCancelCheckoutDependencies,
 } from "./index.ts";
 
@@ -239,4 +240,26 @@ Deno.test("cancellation enforces strict input, rate limiting, and exact-origin C
   assertEquals(await denied.json(), {
     error: { code: "CORS_ORIGIN_DENIED" },
   });
+});
+
+Deno.test("default cancellation resolves its bearer through the narrow service-only RPC", async () => {
+  let capturedName = "";
+  let capturedArgs: Record<string, unknown> | undefined;
+  const client = {
+    rpc: async (name: string, args: Record<string, unknown>) => {
+      capturedName = name;
+      capturedArgs = args;
+      return {
+        data: [{
+          order_id: ORDER_ID,
+          status: "checkout_open",
+          stripe_checkout_session_id: SESSION_ID,
+        }],
+        error: null,
+      };
+    },
+  } as unknown as Parameters<typeof defaultFindOrder>[1];
+  assertEquals(await defaultFindOrder(TOKEN_HASH, client), order());
+  assertEquals(capturedName, "server_lookup_checkout_cancellation");
+  assertEquals(capturedArgs, { p_token_hash: TOKEN_HASH });
 });

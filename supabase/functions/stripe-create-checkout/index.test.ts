@@ -3,6 +3,8 @@ import { assertEquals, assertStringIncludes } from "@std/assert";
 import type Stripe from "stripe";
 import {
   createStripeCreateCheckoutHandler,
+  defaultAnonymousRateLimit,
+  defaultRefreshConnect,
   deriveConfirmationToken,
   type ReservationSnapshot,
   type StripeCreateCheckoutDependencies,
@@ -47,7 +49,10 @@ function reservation(
     stripeAccountId: ACCOUNT_ID,
     checkoutExpiresAt: EXPIRES_AT,
     existingCheckoutSessionId,
-  };
+    integrationIdentifier: "whereto_checkout_bbbbbbbb",
+    createRequestDigest:
+      "41670be5ac66485a172ad79887361db7fe9fa2b4225de51c061c42ab011b1eed",
+  } as ReservationSnapshot;
 }
 
 function sessionFixture(
@@ -69,7 +74,7 @@ function sessionFixture(
     client_reference_id: ORDER_ID,
     success_url: `${APP_ORIGIN}/orders/${token}`,
     cancel_url: `${APP_ORIGIN}/events/${EVENT_ID}/checkout?cancel=${token}`,
-    integration_identifier: "whereto_checkout_abcdefgh",
+    integration_identifier: "whereto_checkout_bbbbbbbb",
     metadata: { order_id: ORDER_ID, event_id: EVENT_ID, tier_id: TIER_ID },
     automatic_tax: { enabled: false },
     url: CHECKOUT_URL,
@@ -105,8 +110,6 @@ function dependencies(
     expireSession: async () => sessionFixture({ status: "expired" }),
     attachSession: async () => undefined,
     releaseReservation: async () => undefined,
-    integrationSuffix: () => "abcdefgh",
-    nowEpochSeconds: () => 1_787_774_395,
     ...overrides,
   };
 }
@@ -176,7 +179,7 @@ Deno.test("checkout refreshes Connect, reserves authoritative inventory, creates
     cancel_url:
       `${APP_ORIGIN}/events/${EVENT_ID}/checkout?cancel=tzGJcJWwoS-3IzLlK9cZV3QHHbC6-vv2d3a-Kl3nHng`,
     client_reference_id: ORDER_ID,
-    integration_identifier: "whereto_checkout_abcdefgh",
+    integration_identifier: "whereto_checkout_bbbbbbbb",
     metadata: { order_id: ORDER_ID, event_id: EVENT_ID, tier_id: TIER_ID },
     payment_intent_data: {
       application_fee_amount: 150,
@@ -229,18 +232,95 @@ Deno.test("checkout retry retrieves and validates the one attached Session witho
   assertEquals(await response.json(), { checkoutUrl: CHECKOUT_URL });
 });
 
-Deno.test("new Checkout gives Stripe at least its full 30-minute minimum after reservation latency", async () => {
+Deno.test("new Checkout uses the one deterministic persisted expiry without request-time mutation", async () => {
   let expiresAt: number | undefined;
   const response = await createStripeCreateCheckoutHandler(dependencies({
-    nowEpochSeconds: () => 1_787_774_410,
     createSession: async (params) => {
       expiresAt = params.expires_at;
-      return sessionFixture({ expires_at: 1_787_776_210 });
+      return sessionFixture();
     },
   }))(request());
 
   assertEquals(response.status, 200);
-  assertEquals(expiresAt, 1_787_776_210);
+  assertEquals(expiresAt, 1_787_776_200);
+});
+
+Deno.test("concurrent pre-attach retries send byte-for-byte identical canonical Stripe create requests", async () => {
+  const captured: Array<{ params: unknown; options: unknown }> = [];
+  const deps = dependencies({
+    createSession: async (params, options) => {
+      captured.push({ params, options });
+      return sessionFixture();
+    },
+  });
+
+  const [first, second] = await Promise.all([
+    createStripeCreateCheckoutHandler(deps)(request()),
+    createStripeCreateCheckoutHandler(deps)(request()),
+  ]);
+
+  assertEquals(first.status, 200);
+  assertEquals(second.status, 200);
+  assertEquals(captured.length, 2);
+  assertEquals(captured[0], captured[1]);
+});
+
+Deno.test("an ambiguous Stripe create failure preserves the reservation and retries the exact same request", async () => {
+  const captured: Array<{ params: unknown; options: unknown }> = [];
+  let attempts = 0;
+  let releases = 0;
+  const deps = dependencies({
+    createSession: async (params, options) => {
+      captured.push({ params, options });
+      attempts += 1;
+      if (attempts === 1) throw new TypeError("network connection closed");
+      return sessionFixture();
+    },
+    releaseReservation: async () => {
+      releases += 1;
+    },
+  });
+
+  const first = await createStripeCreateCheckoutHandler(deps)(request());
+  const second = await createStripeCreateCheckoutHandler(deps)(request());
+
+  assertEquals(first.status, 502);
+  assertEquals(second.status, 200);
+  assertEquals(releases, 0);
+  assertEquals(captured[0], captured[1]);
+});
+
+Deno.test("a definitive Stripe invalid-request failure releases the reservation", async () => {
+  let releases = 0;
+  const response = await createStripeCreateCheckoutHandler(dependencies({
+    createSession: async () => {
+      throw { type: "StripeInvalidRequestError" };
+    },
+    releaseReservation: async () => {
+      releases += 1;
+    },
+  }))(request());
+
+  assertEquals(response.status, 502);
+  assertEquals(releases, 1);
+});
+
+Deno.test("checkout rejects a reservation whose immutable canonical request digest was corrupted", async () => {
+  let stripeTouched = false;
+  const invalid = {
+    ...reservation(),
+    createRequestDigest: "a".repeat(64),
+  } as ReservationSnapshot;
+  const response = await createStripeCreateCheckoutHandler(dependencies({
+    reserveCheckout: async () => invalid,
+    createSession: async () => {
+      stripeTouched = true;
+      return sessionFixture();
+    },
+  }))(request());
+
+  assertEquals(response.status, 500);
+  assertEquals(stripeTouched, false);
 });
 
 Deno.test("checkout rejects unknown browser money, destination, quantity, token, and Session fields before side effects", async () => {
@@ -352,7 +432,7 @@ Deno.test("checkout preserves distinct safe event, tier, and Connect availabilit
   }
 });
 
-Deno.test("checkout releases inventory when Stripe creation fails", async () => {
+Deno.test("checkout preserves inventory when Stripe creation has an ambiguous transport failure", async () => {
   const released: Array<[string, string]> = [];
   const response = await createStripeCreateCheckoutHandler(dependencies({
     createSession: async () => {
@@ -367,7 +447,53 @@ Deno.test("checkout releases inventory when Stripe creation fails", async () => 
   assertEquals(await response.json(), {
     error: { code: "STRIPE_REQUEST_FAILED" },
   });
-  assertEquals(released, [[ORDER_ID, "CHECKOUT_CREATION_FAILED"]]);
+  assertEquals(released, []);
+});
+
+Deno.test("default anonymous limiter hashes caller identity and delegates atomically to the database", async () => {
+  let capturedName = "";
+  let capturedArgs: Record<string, unknown> | undefined;
+  const client = {
+    rpc: async (name: string, args: Record<string, unknown>) => {
+      capturedName = name;
+      capturedArgs = args;
+      return {
+        data: [{ allowed: false, retry_after_seconds: 23 }],
+        error: null,
+      };
+    },
+  } as unknown as Parameters<typeof defaultAnonymousRateLimit>[1];
+  const result = await defaultAnonymousRateLimit(
+    new Request(
+      "https://functions.example/stripe-create-checkout",
+      { headers: { "cf-connecting-ip": "203.0.113.9" } },
+    ),
+    client,
+  );
+  assertEquals(capturedName, "server_consume_checkout_rate_limit");
+  assertEquals(
+    /^[a-f0-9]{64}$/.test(String(capturedArgs?.p_identity_hash)),
+    true,
+  );
+  assertEquals(JSON.stringify(capturedArgs).includes("203.0.113.9"), false);
+  assertEquals(result, { allowed: false, retryAfterSeconds: 23 });
+});
+
+Deno.test("default Connect preflight preserves database event and tier domain codes", async () => {
+  for (
+    const message of ["EVENT_NOT_SELLABLE", "TIER_NOT_FOUND", "TIER_NOT_ACTIVE"]
+  ) {
+    const client = {
+      rpc: async () => ({ data: null, error: { message } }),
+    } as unknown as Parameters<typeof defaultRefreshConnect>[2];
+    let caught: unknown;
+    try {
+      await defaultRefreshConnect(EVENT_ID, TIER_ID, client);
+    } catch (error) {
+      caught = error;
+    }
+    assertEquals((caught as { code?: string }).code, message);
+  }
 });
 
 Deno.test("checkout rejects and releases a live or mismatched Stripe Session snapshot", async () => {

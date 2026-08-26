@@ -134,7 +134,8 @@ begin
     'Refund Buyer', 'refund-buyer@example.invalid', p_request_id, p_hash
   ) as reservation;
   perform public.server_attach_checkout_session(
-    v_order_id, p_session_id, statement_timestamp() + interval '30 minutes'
+    v_order_id, p_session_id,
+    (select orders.checkout_expires_at from public.orders as orders where orders.id = v_order_id)
   );
   perform * from public.server_record_webhook_receipt(
     p_event_id, 'checkout.session.completed', false, p_session_id,
