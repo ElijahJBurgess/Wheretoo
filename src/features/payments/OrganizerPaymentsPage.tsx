@@ -59,6 +59,7 @@ export function OrganizerPaymentsPage() {
   const mutateAccountSession = accountSessionMutation.mutateAsync
   const restoreActionFocusRef = useRef(false)
   const currentUserIdRef = useRef(userId)
+  const isMountedRef = useRef(false)
   const actionRef = useCallback((node: HTMLButtonElement | null) => {
     if (node !== null && restoreActionFocusRef.current) {
       node.focus()
@@ -74,6 +75,13 @@ export function OrganizerPaymentsPage() {
   useLayoutEffect(() => {
     currentUserIdRef.current = userId
   }, [userId])
+
+  useLayoutEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
 
   const refreshAccountSession = useCallback(async (initiatingUserId: string) => {
     const session = await mutateAccountSession(initiatingUserId)
@@ -121,14 +129,14 @@ export function OrganizerPaymentsPage() {
     setExpressLoginOwnerId(initiatingUserId)
     try {
       const url = await getExpressLoginUrl()
-      if (currentUserIdRef.current !== initiatingUserId) return
+      if (!isMountedRef.current || currentUserIdRef.current !== initiatingUserId) return
       window.location.assign(url)
     } catch {
-      if (currentUserIdRef.current === initiatingUserId) {
+      if (isMountedRef.current && currentUserIdRef.current === initiatingUserId) {
         setActionError('Stripe Express could not be opened. Try again.')
       }
     } finally {
-      if (currentUserIdRef.current === initiatingUserId) {
+      if (isMountedRef.current && currentUserIdRef.current === initiatingUserId) {
         setExpressLoginOwnerId(null)
       }
     }

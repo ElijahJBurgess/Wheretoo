@@ -168,6 +168,44 @@ describe('OrganizerPaymentsPage', () => {
     vi.unstubAllGlobals()
   })
 
+  it('does not redirect after unmount when a deferred Express URL resolves', async () => {
+    const user = userEvent.setup()
+    const assign = vi.fn()
+    vi.stubGlobal('window', { location: { assign } })
+    let resolveUrl!: (value: string) => void
+    getExpressLoginUrl.mockReturnValue(new Promise<string>((resolve) => { resolveUrl = resolve }))
+    useConnectStatus.mockReturnValue({ data: { ...baseStatus, status: 'ready' }, isPending: false, isError: false, refetch })
+    const view = render(<OrganizerPaymentsPage />)
+
+    try {
+      await user.click(screen.getByRole('button', { name: 'Open Stripe Express' }))
+      view.unmount()
+      resolveUrl('https://connect.stripe.com/express/login')
+
+      await Promise.resolve()
+      expect(assign).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('redirects to Stripe Express while the initiating organizer remains mounted', async () => {
+    const user = userEvent.setup()
+    const assign = vi.fn()
+    vi.stubGlobal('window', { location: { assign } })
+    getExpressLoginUrl.mockResolvedValue('https://connect.stripe.com/express/login')
+    useConnectStatus.mockReturnValue({ data: { ...baseStatus, status: 'ready' }, isPending: false, isError: false, refetch })
+    render(<OrganizerPaymentsPage />)
+
+    try {
+      await user.click(screen.getByRole('button', { name: 'Open Stripe Express' }))
+      await Promise.resolve()
+      expect(assign).toHaveBeenCalledWith('https://connect.stripe.com/express/login')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('unmounts a failed embedded component, returns focus, and exposes a real retry action', async () => {
     const user = userEvent.setup()
     const mutateAsync = vi.fn().mockResolvedValue({
