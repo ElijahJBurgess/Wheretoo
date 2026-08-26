@@ -13,6 +13,7 @@ import { getServiceClient } from "./database.ts";
 import {
   getAppBaseUrl,
   getStripeWebhookSecret,
+  getStripeWebhookSecrets,
   getSupabaseServiceConfig,
   validateStripeRestrictedKey,
 } from "./env.ts";
@@ -185,6 +186,22 @@ Deno.test("webhook env accepts a non-empty signing secret shape without exposing
       )
     );
   }
+});
+
+Deno.test("webhook env keeps snapshot and thin-event signing secrets in the server boundary", () => {
+  const snapshot = ["whsec", "snapshotboundary123"].join("_");
+  const thin = ["whsec", "thinboundary123"].join("_");
+  assertEquals(
+    getStripeWebhookSecrets(envReader({
+      STRIPE_WEBHOOK_SECRET: snapshot,
+      STRIPE_THIN_WEBHOOK_SECRET: thin,
+    })),
+    [snapshot, thin],
+  );
+  assertEquals(
+    getStripeWebhookSecrets(envReader({ STRIPE_WEBHOOK_SECRET: snapshot })),
+    [snapshot],
+  );
 });
 
 Deno.test("getServiceClient consumes server config once and returns one client", () => {

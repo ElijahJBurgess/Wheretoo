@@ -33,6 +33,18 @@ export function getStripeWebhookSecret(
   return value;
 }
 
+export function getStripeWebhookSecrets(
+  read: EnvReader = defaultEnvReader,
+): string[] {
+  const snapshot = getStripeWebhookSecret(read);
+  const thin = read("STRIPE_THIN_WEBHOOK_SECRET");
+  if (thin === undefined) return [snapshot];
+  if (!/^whsec_[A-Za-z0-9]+$/.test(thin)) {
+    throw new Error("Stripe thin-event webhook credentials are invalid");
+  }
+  return thin === snapshot ? [snapshot] : [snapshot, thin];
+}
+
 export function getSupabaseServiceConfig(read: EnvReader = defaultEnvReader): {
   url: string;
   serviceRoleKey: string;
