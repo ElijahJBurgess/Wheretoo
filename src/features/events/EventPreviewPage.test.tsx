@@ -44,6 +44,7 @@ function renderPreview() {
   const router = createMemoryRouter([
     { path: '/organizer/events/:eventId/preview', element: <EventPreviewPage /> },
     { path: '/organizer/events/:eventId/edit', element: <p>edit destination</p> },
+    { path: '/organizer/events/:eventId/tickets', element: <p>ticket setup destination</p> },
     { path: '/organizer/events/:eventId', element: <p>published destination</p> },
     { path: '/organizer/events', element: <p>events destination</p> },
   ], { initialEntries: ['/organizer/events/event-1/preview'] })
@@ -112,14 +113,11 @@ describe('EventPreviewPage', () => {
     expect(screen.queryByText(/owner|permission|another organizer/i)).not.toBeInTheDocument()
   })
 
-  it('disables publication with accessible persisted-field guidance, including paid milestone copy', () => {
-    useOwnedEvent.mockReturnValue({ ...eventLoaded, data: { ...event, title: '', admission_type: 'paid' } })
+  it('sends paid drafts to ticket setup and keeps direct preview publication unavailable', () => {
+    useOwnedEvent.mockReturnValue({ ...eventLoaded, data: { ...event, admission_type: 'paid' } })
     renderPreview()
-    const publish = screen.getByRole('button', { name: 'Publish event' })
-    expect(publish).toBeDisabled()
-    expect(publish).toHaveAttribute('aria-describedby', 'publish-guidance')
-    expect(screen.getByText('Title must be between 3 and 120 characters.')).toBeInTheDocument()
-    expect(screen.getByText('Paid event publishing is not available in this milestone. Choose Free to publish.')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Set up paid tickets' })).toHaveAttribute('href', '/organizer/events/event-1/tickets')
+    expect(screen.queryByRole('button', { name: /Publish event|Try publishing again/ })).not.toBeInTheDocument()
     expect(mutateAsync).not.toHaveBeenCalled()
   })
 

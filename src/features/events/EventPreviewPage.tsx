@@ -85,12 +85,13 @@ export function EventPreviewPage() {
     )
   }
 
-  const publishResult = eventPublishSchema.safeParse(eventRowToFormValues(event))
+  const isPaidEvent = event.admission_type === 'paid'
+  const publishResult = isPaidEvent ? null : eventPublishSchema.safeParse(eventRowToFormValues(event))
   const persistedEventId = event.id
-  const validationMessages = publishResult.success
+  const validationMessages = publishResult === null || publishResult.success
     ? []
     : [...new Set(publishResult.error.issues.map((issue) => issue.message))]
-  const publishDisabled = !publishResult.success || isPublishing || publishMutation.isPending
+  const publishDisabled = isPaidEvent || publishResult === null || !publishResult.success || isPublishing || publishMutation.isPending
 
   async function handlePublish() {
     if (publishDisabled || activePublishEventIdRef.current === persistedEventId) return
@@ -125,26 +126,35 @@ export function EventPreviewPage() {
       </header>
       <EventSummary event={event} organizer={organizer} />
       <footer className="event-preview__publish">
-        <div id="publish-guidance">
-          <FormErrorSummary
-            errors={publishError ? [...validationMessages, publishError] : validationMessages}
-            title={publishError ? 'Event was not published' : 'Complete before publishing'}
-          />
-          {validationMessages.length === 0 && publishError === null ? (
-            <p>Your event is ready. Publishing makes it immediately discoverable.</p>
-          ) : null}
-        </div>
-        <Button
-          aria-describedby="publish-guidance"
-          disabled={publishDisabled}
-          onClick={() => void handlePublish()}
-        >
-          {isPublishing || publishMutation.isPending
-            ? 'Publishing…'
-            : publishError
-              ? 'Try publishing again'
-              : 'Publish event'}
-        </Button>
+        {isPaidEvent ? (
+          <div id="publish-guidance">
+            <p>Finish ticket setup and activate paid sales from the ticket tiers page.</p>
+            <Link className="ui-button ui-button--primary" to={`/organizer/events/${event.id}/tickets`}>Set up paid tickets</Link>
+          </div>
+        ) : (
+          <>
+            <div id="publish-guidance">
+              <FormErrorSummary
+                errors={publishError ? [...validationMessages, publishError] : validationMessages}
+                title={publishError ? 'Event was not published' : 'Complete before publishing'}
+              />
+              {validationMessages.length === 0 && publishError === null ? (
+                <p>Your event is ready. Publishing makes it immediately discoverable.</p>
+              ) : null}
+            </div>
+            <Button
+              aria-describedby="publish-guidance"
+              disabled={publishDisabled}
+              onClick={() => void handlePublish()}
+            >
+              {isPublishing || publishMutation.isPending
+                ? 'Publishing…'
+                : publishError
+                  ? 'Try publishing again'
+                  : 'Publish event'}
+            </Button>
+          </>
+        )}
       </footer>
     </section>
   )

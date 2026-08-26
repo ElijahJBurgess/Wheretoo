@@ -23,6 +23,12 @@ describe('owned ticket tier API', () => {
     expect(rpc).toHaveBeenCalledWith('list_owned_ticket_tiers', { p_event_id: eventId })
   })
 
+  it('preserves the owner-safe EVENT_NOT_FOUND RPC code for the page boundary', async () => {
+    rpc.mockResolvedValue({ data: null, error: { message: 'EVENT_NOT_FOUND' } })
+
+    await expect(listOwnedTicketTiers(eventId)).rejects.toMatchObject({ message: 'EVENT_NOT_FOUND' })
+  })
+
   it('serializes exact integer minor units and never browser dollar amounts', async () => {
     rpc.mockResolvedValue({ data: [tier], error: null })
 

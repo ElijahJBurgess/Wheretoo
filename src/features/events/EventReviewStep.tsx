@@ -1,10 +1,11 @@
+import { Link } from 'react-router-dom'
 import type { EventFormValues } from './event.types'
 
-type EventReviewStepProps = { values: EventFormValues }
+type EventReviewStepProps = { eventId?: string; values: EventFormValues }
 
 function display(value: string): string { return value.trim() || 'Not added yet' }
 
-export function EventReviewStep({ values }: EventReviewStepProps) {
+export function EventReviewStep({ eventId, values }: EventReviewStepProps) {
   const address = values.location
     ? `${values.location.addressLine1}, ${values.location.city}, ${values.location.region} ${values.location.postalCode}`
     : 'No verified address selected'
@@ -25,7 +26,10 @@ export function EventReviewStep({ values }: EventReviewStepProps) {
         <div><dt>Admission</dt><dd>{values.admissionType === 'free' ? 'Free' : 'Paid'}</dd></div>
       </dl>
       {values.admissionType === 'paid' ? (
-        <p className="event-review__notice" role="status">Paid event publishing is not available in this milestone. Choose Free before publishing.</p>
+        <p className="event-review__notice" role="status">
+          Paid events need ticket tiers and payment setup before sales can begin.{' '}
+          {eventId ? <Link to={`/organizer/events/${eventId}/tickets`}>Set up paid tickets</Link> : 'Save this draft, then set up paid tickets.'}
+        </p>
       ) : null}
     </div>
   )

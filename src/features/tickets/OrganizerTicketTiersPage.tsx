@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link, useBeforeUnload, useBlocker, useNavigate, useParams } from 'react-router-dom'
 import { AsyncState } from '../../components/ui/AsyncState'
 import { Button } from '../../components/ui/Button'
@@ -11,6 +11,7 @@ import { useConnectStatus } from '../payments/payment.queries'
 import { getPaidSalesErrorMessage } from './paidSalesErrors'
 import { usdToMinor } from './ticket.api'
 import { useActivatePaidSales, useOwnedTicketTiers, useSaveTicketTiers } from './ticket.queries'
+import { ticketTiersInputSchema } from './ticket.schemas'
 import type { TicketTierInput, TicketTierRow } from './ticket.types'
 
 type EditableTier = {
@@ -19,6 +20,15 @@ type EditableTier = {
   description: string
   price: string
   quantityTotal: string
+  sortOrder: number
+}
+
+type ActionIdentity = { eventId: string; organizerId: string; version: number }
+
+class TierValidationError extends Error {
+  constructor(message: string, readonly fieldErrors: Record<string, string>) {
+    super(message)
+  }
 }
 
 type TierDraft = {
@@ -38,29 +48,65 @@ function rowToEditableTier(tier: TicketTierRow): EditableTier {
     description: tier.description ?? '',
     price: minorToUsd(tier.unit_amount_minor),
     quantityTotal: String(tier.quantity_total),
+    sortOrder: tier.sort_order,
   }
 }
 
-function newTier(): EditableTier {
-  return { name: '', description: '', price: '', quantityTotal: '', id: undefined }
+function nextAvailableSlot(tiers: EditableTier[]): number | null {
+  for (let slot = 1; slot <= 3; slot += 1) {
+    if (!tiers.some((tier) => tier.sortOrder === slot)) return slot
+  }
+  return null
+}
+
+function newTier(sortOrder: number): EditableTier {
+  return { name: '', description: '', price: '', quantityTotal: '', sortOrder, id: undefined }
 }
 
 function toPayload(tiers: EditableTier[]): TicketTierInput[] {
-  return tiers.map((tier, index) => {
+  const fieldErrors: Record<string, string> = {}
+  const payload = tiers.map((tier, index) => {
+    const name = tier.name.trim()
+    if (name.length === 0) fieldErrors[`${index}-name`] = 'Enter a ticket tier name.'
+    else if (name.length > 80) fieldErrors[`${index}-name`] = 'Ticket tier names can be at most 80 characters.'
+    if (tier.description.trim().length > 240) fieldErrors[`${index}-description`] = 'Descriptions can be at most 240 characters.'
     const quantityTotal = Number(tier.quantityTotal)
     if (!Number.isSafeInteger(quantityTotal) || quantityTotal < 1 || quantityTotal > 2_147_483_647) {
-      throw new Error('Enter a whole-number capacity for every ticket tier')
+      fieldErrors[`${index}-capacity`] = 'Enter a whole-number capacity for every ticket tier'
+    }
+    let unitAmountMinor = 0
+    try {
+      unitAmountMinor = usdToMinor(tier.price)
+    } catch {
+      fieldErrors[`${index}-price`] = 'Enter a whole-dollar amount or up to two cents'
     }
     return {
       ...(tier.id === undefined ? {} : { id: tier.id }),
-      name: tier.name,
+      name,
       description: tier.description,
-      unitAmountMinor: usdToMinor(tier.price),
+      unitAmountMinor,
       currency: 'usd',
       quantityTotal,
-      sortOrder: index + 1,
+      sortOrder: tier.sortOrder,
     }
   })
+  const normalizedNames = new Map<string, number>()
+  payload.forEach((tier, index) => {
+    const previous = normalizedNames.get(tier.name.toLocaleLowerCase('en-US'))
+    if (previous !== undefined) {
+      fieldErrors[`${previous}-name`] = 'Ticket tier names must be unique.'
+      fieldErrors[`${index}-name`] = 'Ticket tier names must be unique.'
+    }
+    normalizedNames.set(tier.name.toLocaleLowerCase('en-US'), index)
+  })
+  if (Object.keys(fieldErrors).length > 0) {
+    throw new TierValidationError('Check the highlighted ticket tiers.', fieldErrors)
+  }
+  const parsed = ticketTiersInputSchema.safeParse(payload)
+  if (!parsed.success) {
+    throw new TierValidationError('Check the highlighted ticket tiers.', {})
+  }
+  return parsed.data
 }
 
 function connectReady(status: ReturnType<typeof useConnectStatus>['data']): boolean {
@@ -73,15 +119,34 @@ export function OrganizerTicketTiersPage() {
   const sessionState = useSession()
   const organizerId = sessionState.status === 'authenticated' ? sessionState.user.id : ''
   const eventQuery = useOwnedEvent(eventId, organizerId)
-  const tiersQuery = useOwnedTicketTiers(organizerId, eventId)
+  const ownedEventId = eventQuery.data?.organizer_id === organizerId ? eventQuery.data.id : ''
+  const tiersQuery = useOwnedTicketTiers(organizerId, ownedEventId)
   const connectQuery = useConnectStatus(organizerId)
   const saveMutation = useSaveTicketTiers(organizerId, eventId)
   const activateMutation = useActivatePaidSales(organizerId)
   const [draft, setDraft] = useState<TierDraft>({ sourceKey: '', tiers: [], dirty: false })
   const [formError, setFormError] = useState<string | null>(null)
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [serverError, setServerError] = useState<string | null>(null)
-  const [isActivating, setIsActivating] = useState(false)
+  const [activationIdentity, setActivationIdentity] = useState<ActionIdentity | null>(null)
   const [leaveApproved, setLeaveApproved] = useState(false)
+  const mountedRef = useRef(false)
+  const currentIdentityRef = useRef<ActionIdentity>({ eventId, organizerId, version: 0 })
+
+  useLayoutEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
+
+  useLayoutEffect(() => {
+    const current = currentIdentityRef.current
+    if (current.eventId === eventId && current.organizerId === organizerId) return
+    currentIdentityRef.current = {
+      eventId,
+      organizerId,
+      version: current.version + 1,
+    }
+  }, [eventId, organizerId])
   const sourceKey = useMemo(
     () => tiersQuery.data?.map((tier) => `${tier.id}:${tier.updated_at}`).join('|') ?? '',
     [tiersQuery.data],
@@ -90,6 +155,11 @@ export function OrganizerTicketTiersPage() {
   const loadedTiers = useMemo(() => tiersQuery.data?.map(rowToEditableTier) ?? [], [tiersQuery.data])
   const tiers = !draft.dirty && draft.sourceKey !== sourceKey ? loadedTiers : draft.tiers
   const dirty = draft.dirty
+  const isActivating = activationIdentity?.eventId === eventId && activationIdentity.organizerId === organizerId
+
+  function isCurrentIdentity(identity: ActionIdentity): boolean {
+    return mountedRef.current && currentIdentityRef.current === identity
+  }
 
   const shouldBlock = useCallback(() => dirty && !leaveApproved, [dirty, leaveApproved])
   const blocker = useBlocker(shouldBlock)
@@ -103,12 +173,14 @@ export function OrganizerTicketTiersPage() {
   function updateTier(index: number, patch: Partial<EditableTier>) {
     setDraft({ sourceKey, tiers: tiers.map((tier, tierIndex) => tierIndex === index ? { ...tier, ...patch } : tier), dirty: true })
     setFormError(null)
+    setFieldErrors({})
     setServerError(null)
   }
 
   function addTier() {
-    if (tiers.length >= 3) return
-    setDraft({ sourceKey, tiers: [...tiers, newTier()], dirty: true })
+    const slot = nextAvailableSlot(tiers)
+    if (slot === null) return
+    setDraft({ sourceKey, tiers: [...tiers, newTier(slot)], dirty: true })
   }
 
   function removeTier(index: number) {
@@ -116,18 +188,25 @@ export function OrganizerTicketTiersPage() {
     setDraft({ sourceKey, tiers: tiers.filter((_, tierIndex) => tierIndex !== index), dirty: true })
   }
 
-  async function saveTiers(): Promise<boolean> {
+  async function saveTiers(identity: ActionIdentity): Promise<boolean> {
     setFormError(null)
+    setFieldErrors({})
     setServerError(null)
     let payload: TicketTierInput[]
     try {
       payload = toPayload(tiers)
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : 'Check each ticket tier and try again.')
+      if (error instanceof TierValidationError) {
+        setFormError(error.message)
+        setFieldErrors(error.fieldErrors)
+      } else {
+        setFormError('Check each ticket tier and try again.')
+      }
       return false
     }
     try {
       const saved = await saveMutation.mutateAsync(payload)
+      if (!isCurrentIdentity(identity)) return false
       setDraft({
         sourceKey: saved.map((tier) => `${tier.id}:${tier.updated_at}`).join('|'),
         tiers: saved.map(rowToEditableTier),
@@ -135,46 +214,55 @@ export function OrganizerTicketTiersPage() {
       })
       return true
     } catch (error) {
-      setServerError(getPaidSalesErrorMessage(error))
+      if (isCurrentIdentity(identity)) setServerError(getPaidSalesErrorMessage(error))
       return false
     }
   }
 
   async function activateSales() {
+    const identity = currentIdentityRef.current
     if (isActivating || !connectReady(connectQuery.data)) return
     setServerError(null)
     setFormError(null)
-    setIsActivating(true)
+    setActivationIdentity(identity)
     try {
-      if (dirty && !(await saveTiers())) return
+      if (dirty && !(await saveTiers(identity))) return
+      if (!isCurrentIdentity(identity)) return
       const activated = await activateMutation.mutateAsync(eventId)
+      if (!isCurrentIdentity(identity)) return
       if (activated.id !== eventId || activated.organizer_id !== organizerId || activated.status !== 'published') {
         throw new Error('Unexpected activation response')
       }
       setLeaveApproved(true)
       void navigate(`/organizer/events/${eventId}`)
     } catch (error) {
-      setServerError(getPaidSalesErrorMessage(error))
+      if (isCurrentIdentity(identity)) setServerError(getPaidSalesErrorMessage(error))
     } finally {
-      setIsActivating(false)
+      if (isCurrentIdentity(identity)) setActivationIdentity(null)
     }
   }
 
-  if (
-    sessionState.status !== 'authenticated' ||
-    ((eventQuery.isPending || eventQuery.data === undefined || tiersQuery.isPending || tiersQuery.data === undefined) && !eventQuery.isError && !tiersQuery.isError)
-  ) {
+  if (sessionState.status !== 'authenticated' || ((eventQuery.isPending || eventQuery.data === undefined) && !eventQuery.isError)) {
     return <AsyncState status="loading" title="Loading ticket setup" />
   }
-  if (eventQuery.isError || tiersQuery.isError) {
-    return <AsyncState action={<Button onClick={() => { void eventQuery.refetch(); void tiersQuery.refetch() }}>Try again</Button>} description="Check your connection, then try again." status="error" title="Ticket setup could not load" />
+  if (eventQuery.isError) {
+    return <AsyncState action={<Button onClick={() => void eventQuery.refetch()}>Try again</Button>} description="Check your connection, then try again." status="error" title="Ticket setup could not load" />
   }
   const event = eventQuery.data
   if (event === null || event === undefined) {
     return <AsyncState action={<Link className="ui-button ui-button--secondary" to="/organizer/events">Back to events</Link>} description="The event may no longer be available." status="empty" title="Event not found" />
   }
-  if (event.admission_type !== 'paid') {
+  if (event.admission_type !== 'paid' && !(event.status === 'published' && event.admission_type === 'free')) {
     return <AsyncState action={<Link className="ui-button ui-button--secondary" to={`/organizer/events/${eventId}/edit`}>Edit event</Link>} description="Choose paid admission before setting up ticket tiers." status="empty" title="Ticket setup unavailable" />
+  }
+  if ((tiersQuery.isPending || tiersQuery.data === undefined) && !tiersQuery.isError) {
+    return <AsyncState status="loading" title="Loading ticket setup" />
+  }
+  if (tiersQuery.isError && (typeof tiersQuery.error === 'object' && tiersQuery.error !== null && 'message' in tiersQuery.error && tiersQuery.error.message === 'EVENT_NOT_FOUND')) {
+    return <AsyncState action={<Link className="ui-button ui-button--secondary" to="/organizer/events">Back to events</Link>} description="The event may no longer be available." status="empty" title="Event not found" />
+  }
+  if (tiersQuery.isError) {
+    return <AsyncState action={<Button onClick={() => void tiersQuery.refetch()}>Try again</Button>} description="Check your connection, then try again." status="error" title="Ticket setup could not load" />
   }
 
   const pending = saveMutation.isPending || isActivating || activateMutation.isPending
@@ -197,18 +285,18 @@ export function OrganizerTicketTiersPage() {
           {tiers.map((tier, index) => (
             <fieldset className="ticket-tier-card" key={tier.id ?? `new-${index}`}>
               <legend>Tier {index + 1}</legend>
-              <div className="ticket-tier-card__header"><h2>{tier.name.trim() || `Ticket tier ${index + 1}`}</h2>{tiers.length > 1 ? <Button disabled={pending} onClick={() => removeTier(index)} variant="secondary">Remove tier</Button> : null}</div>
+              <div className="ticket-tier-card__header"><h2>{tier.name.trim() || `Ticket tier ${tier.sortOrder}`}</h2>{tiers.length > 1 ? <Button disabled={pending} onClick={() => removeTier(index)} variant="secondary">Remove tier {tier.name.trim() || tier.sortOrder}</Button> : null}</div>
               <div className="ticket-tier-card__fields">
-                <Field label="Name" name={`tier-${index}-name`}><input maxLength={80} onChange={(event) => updateTier(index, { name: event.target.value })} value={tier.name} /></Field>
-                <Field label={`Price for ${tier.name.trim() || `tier ${index + 1}`}`} name={`tier-${index}-price`}><input inputMode="decimal" onChange={(event) => updateTier(index, { price: event.target.value })} placeholder="19.99" value={tier.price} /></Field>
-                <Field label="Capacity" name={`tier-${index}-capacity`}><input inputMode="numeric" min="1" onChange={(event) => updateTier(index, { quantityTotal: event.target.value })} type="number" value={tier.quantityTotal} /></Field>
-                <Field label="Description (optional)" name={`tier-${index}-description`}><textarea maxLength={240} onChange={(event) => updateTier(index, { description: event.target.value })} value={tier.description} /></Field>
+                <Field error={fieldErrors[`${index}-name`]} label="Name" name={`tier-${index}-name`}><input maxLength={80} onChange={(event) => updateTier(index, { name: event.target.value })} value={tier.name} /></Field>
+                <Field error={fieldErrors[`${index}-price`]} label={`Price for ${tier.name.trim() || `tier ${tier.sortOrder}`}`} name={`tier-${index}-price`}><input inputMode="decimal" onChange={(event) => updateTier(index, { price: event.target.value })} placeholder="19.99" value={tier.price} /></Field>
+                <Field error={fieldErrors[`${index}-capacity`]} label="Capacity" name={`tier-${index}-capacity`}><input inputMode="numeric" min="1" onChange={(event) => updateTier(index, { quantityTotal: event.target.value })} type="number" value={tier.quantityTotal} /></Field>
+                <Field error={fieldErrors[`${index}-description`]} label="Description (optional)" name={`tier-${index}-description`}><textarea maxLength={240} onChange={(event) => updateTier(index, { description: event.target.value })} value={tier.description} /></Field>
               </div>
             </fieldset>
           ))}
           <div className="ticket-tiers-form__actions">
             <Button disabled={pending || tiers.length >= 3} onClick={addTier} variant="secondary">Add ticket tier</Button>
-            <Button disabled={pending || tiers.length < 1} onClick={() => void saveTiers()}>{saveMutation.isPending ? 'Saving ticket tiers…' : 'Save ticket tiers'}</Button>
+            <Button disabled={pending || tiers.length < 1} onClick={() => void saveTiers(currentIdentityRef.current)}>{saveMutation.isPending ? 'Saving ticket tiers…' : 'Save ticket tiers'}</Button>
           </div>
         </form>
         <aside className="ticket-activation-panel" aria-labelledby="ticket-activation-title">

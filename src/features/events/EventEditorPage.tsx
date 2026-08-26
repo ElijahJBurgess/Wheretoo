@@ -169,7 +169,7 @@ export function EventEditorPage() {
           <FormErrorSummary errors={summaryErrors} title={serverError ? 'Draft could not be saved' : 'Check the highlighted fields'} />
           {activeStep === 1 ? <EventDetailsStep errors={errors} register={register} /> : null}
           {activeStep === 2 ? <EventScheduleLocationStep errors={errors} location={location} onLocationChange={setLocation} register={register} /> : null}
-          {activeStep === 3 ? <EventReviewStep values={getValues()} /> : null}
+          {activeStep === 3 ? <EventReviewStep eventId={isNew ? undefined : eventId} values={getValues()} /> : null}
           <div className="event-editor__actions">
             {activeStep > 1 ? <Button disabled={isBusy} onClick={() => setActiveStep((step) => (step - 1) as 1 | 2)} variant="secondary">Back</Button> : <span />}
             <div className="event-editor__primary-actions">
