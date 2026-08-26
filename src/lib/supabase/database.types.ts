@@ -1183,6 +1183,19 @@ export type Database = {
           stripe_checkout_session_id: string
         }[]
       }
+      server_lookup_order_confirmation: {
+        Args: { p_token_hash: string }
+        Returns: {
+          confirmation_status: string
+          event_ends_at: string
+          event_starts_at: string
+          event_timezone: string
+          event_title: string
+          event_venue_name: string
+          order_number: string
+          tier_name: string
+        }[]
+      }
       server_mark_payment_failed: {
         Args: {
           p_application_fee_amount_minor: number

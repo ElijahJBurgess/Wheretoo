@@ -35,4 +35,13 @@ describe('organizer-only routes', () => {
       match.route.element.type === RequireOrganizer || match.route.element.type === RequireSession
     ))).toBe(false)
   })
+
+  it('keeps bearer order confirmation anonymous and requires the route token', () => {
+    const matches = matchRoutes(appRouter.routes, '/orders/tzGJcJWwoS-3IzLlK9cZV3QHHbC6-vv2d3a-Kl3nHng')
+
+    expect(matches?.at(-1)?.route.path).toBe('/orders/:confirmationToken')
+    expect(matches?.some((match) => isValidElement(match.route.element) && (
+      match.route.element.type === RequireOrganizer || match.route.element.type === RequireSession
+    ))).toBe(false)
+  })
 })

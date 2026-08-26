@@ -757,6 +757,104 @@ h3 {
   margin-top: 0.25rem;
 }
 
+.confirmation-layout {
+  display: grid;
+  width: min(100%, 42rem);
+  min-height: 100vh;
+  align-content: center;
+  justify-items: center;
+  gap: 1rem;
+  margin-inline: auto;
+  padding: clamp(1rem, 5vw, 3rem) 1rem;
+}
+
+.confirmation-layout > .ui-async-state { width: 100%; }
+
+.confirmation-card {
+  display: grid;
+  width: 100%;
+  gap: clamp(1.25rem, 4vw, 2rem);
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-surface);
+  padding: clamp(1.25rem, 6vw, 2.75rem);
+  background: var(--color-surface);
+  box-shadow: 0 1.25rem 4rem rgb(25 22 44 / 8%);
+}
+
+.confirmation-card__header {
+  display: grid;
+  justify-items: start;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 1.5rem;
+}
+
+.confirmation-card__seal {
+  display: grid;
+  width: 4.25rem;
+  height: 4.25rem;
+  place-items: center;
+  margin: 0.25rem 0 1.25rem;
+  border: 2px solid currentColor;
+  border-radius: 999px;
+  color: var(--color-violet-deep);
+  background: color-mix(in srgb, var(--color-violet) 8%, white);
+  font-family: var(--font-display);
+  font-size: 2rem;
+  font-weight: 800;
+}
+
+.confirmation-layout--paid .confirmation-card__seal {
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 9%, white);
+}
+
+.confirmation-layout:is(.confirmation-layout--failed, .confirmation-layout--expired, .confirmation-layout--refunded) .confirmation-card__seal {
+  color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 7%, white);
+}
+
+.confirmation-card__header h1,
+.confirmation-state__title {
+  overflow-wrap: anywhere;
+  font-size: clamp(2rem, 8vw, 3.5rem);
+  line-height: 0.98;
+}
+
+.confirmation-card__header h1 { margin-bottom: 0.65rem; }
+.confirmation-card__header > p:last-child { margin: 0; color: var(--color-muted); line-height: 1.6; }
+.confirmation-state__title { width: 100%; margin-bottom: 1rem; }
+
+.confirmation-card__event {
+  border-left: 3px solid var(--color-violet);
+  padding-left: 1rem;
+}
+
+.confirmation-card__label {
+  margin-bottom: 0.35rem;
+  color: var(--color-violet-deep);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.confirmation-card__event h2 { margin-bottom: 0.55rem; overflow-wrap: anywhere; font-size: clamp(1.45rem, 5vw, 2rem); }
+.confirmation-card__event p:not(.confirmation-card__label) { margin: 0.2rem 0 0; color: var(--color-muted); line-height: 1.5; }
+
+.confirmation-card__facts {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  border-block: 1px solid var(--color-border);
+}
+
+.confirmation-card__facts div { display: grid; grid-template-columns: 6rem minmax(0, 1fr); gap: 1rem; padding-block: 0.85rem; }
+.confirmation-card__facts div + div { border-top: 1px solid var(--color-border); }
+.confirmation-card__facts dt { color: var(--color-muted); font-size: 0.8rem; font-weight: 750; }
+.confirmation-card__facts dd { margin: 0; overflow-wrap: anywhere; font-weight: 750; text-align: right; }
+.confirmation-card > .ui-button { width: 100%; }
+
 .payments-page {
   display: grid;
   gap: 1.5rem;

@@ -20,7 +20,7 @@ select columns_are(
     'organizer_id', 'livemode', 'stripe_account_id', 'dashboard', 'fees_collector',
     'losses_collector', 'country_code', 'currency', 'transfers_status', 'payouts_status',
     'requirements_status', 'requirements_currently_due_count', 'requirements_past_due_count',
-    'last_status_code', 'last_synced_at', 'created_at', 'updated_at'
+    'last_status_code', 'last_synced_at', 'created_at', 'updated_at', 'last_sync_sequence'
   ],
   'organizer Stripe account columns are exact'
 );
@@ -106,7 +106,8 @@ select columns_are(
   array[
     'id', 'stripe_refund_id', 'order_id', 'amount_minor', 'currency', 'status', 'reason',
     'reverse_transfer', 'refund_application_fee', 'stripe_event_id', 'processed_at',
-    'created_at', 'updated_at', 'stripe_payment_intent_id', 'stripe_charge_id'
+    'created_at', 'updated_at', 'stripe_payment_intent_id', 'stripe_charge_id',
+    'stripe_transfer_reversal_id', 'stripe_application_fee_refund_id'
   ],
   'refund columns are exact'
 );
@@ -124,7 +125,8 @@ select results_eq(
       'transfers_status:text', 'payouts_status:text', 'requirements_status:text',
       'requirements_currently_due_count:integer', 'requirements_past_due_count:integer',
       'last_status_code:text', 'last_synced_at:timestamp with time zone',
-      'created_at:timestamp with time zone', 'updated_at:timestamp with time zone'
+      'created_at:timestamp with time zone', 'updated_at:timestamp with time zone',
+      'last_sync_sequence:bigint'
     ]::text[]) collate "C")
   $$,
   'organizer Stripe account column types are exact'
@@ -260,7 +262,8 @@ select results_eq(
       'refund_application_fee:boolean', 'stripe_event_id:text',
       'processed_at:timestamp with time zone', 'created_at:timestamp with time zone',
       'updated_at:timestamp with time zone', 'stripe_payment_intent_id:text',
-      'stripe_charge_id:text'
+      'stripe_charge_id:text', 'stripe_transfer_reversal_id:text',
+      'stripe_application_fee_refund_id:text'
     ]::text[]) collate "C")
   $$,
   'refund column types are exact and refund money uses bigint'
@@ -385,7 +388,9 @@ select results_eq(
       'orders_stripe_payment_intent_id_key',
       'orders_stripe_transfer_id_key',
       'organizer_stripe_accounts_stripe_account_id_key',
+      'refunds_application_fee_refund_id_key',
       'refunds_stripe_refund_id_key',
+      'refunds_transfer_reversal_id_key',
       'ticket_tiers_event_sort_order_key',
       'tickets_order_item_unit_sequence_key'
     ]::text[]) collate "C")
