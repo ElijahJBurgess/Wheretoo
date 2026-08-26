@@ -684,25 +684,43 @@ async function releaseAfterFailure(
   reservation: ReservationSnapshot,
   sessionValue?: unknown,
 ): Promise<void> {
+  if (sessionValue === undefined) {
+    await dependencies.releaseReservation(
+      reservation.orderId,
+      "CHECKOUT_CREATION_FAILED",
+    );
+    return;
+  }
   if (
-    isRecord(sessionValue) && sessionValue.object === "checkout.session" &&
-    sessionValue.livemode === false && sessionValue.status === "complete" &&
-    sessionValue.id === reservation.existingCheckoutSessionId
+    !isRecord(sessionValue) || sessionValue.object !== "checkout.session" ||
+    sessionValue.livemode !== false || typeof sessionValue.id !== "string" ||
+    !SESSION_PATTERN.test(sessionValue.id) ||
+    (reservation.existingCheckoutSessionId !== null &&
+      sessionValue.id !== reservation.existingCheckoutSessionId)
   ) {
+    return;
+  }
+  if (sessionValue.status === "complete") {
     // Completion truth belongs to the webhook. A retry must not downgrade the
     // still-open database order during the interval before fulfillment lands.
     return;
   }
-  if (
-    isRecord(sessionValue) && sessionValue.livemode === false &&
-    sessionValue.status === "open" && typeof sessionValue.id === "string" &&
-    SESSION_PATTERN.test(sessionValue.id)
-  ) {
+  if (sessionValue.status === "open") {
+    let expired: unknown;
     try {
-      await dependencies.expireSession(sessionValue.id);
+      expired = await dependencies.expireSession(sessionValue.id);
     } catch {
-      // The database release remains authoritative for local inventory.
+      return;
     }
+    if (
+      !isRecord(expired) || expired.object !== "checkout.session" ||
+      expired.livemode !== false || expired.id !== sessionValue.id ||
+      expired.status !== "expired"
+    ) {
+      return;
+    }
+  } else if (sessionValue.status !== "expired") {
+    return;
   }
   await dependencies.releaseReservation(
     reservation.orderId,
@@ -780,7 +798,12 @@ export function createStripeCreateCheckoutHandler(
         } catch {
           throw new CheckoutHttpError(502, "STRIPE_REQUEST_FAILED");
         }
-        validated = validateSession(sessionValue, expected);
+        try {
+          validated = validateSession(sessionValue, expected);
+        } catch (error) {
+          shouldRelease = true;
+          throw error;
+        }
         return jsonResponse({ checkoutUrl: validated.url }, 200, headers);
       }
 

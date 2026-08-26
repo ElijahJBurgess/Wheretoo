@@ -462,9 +462,9 @@ select results_eq(
 );
 
 select ok(
-  (select checkout_expires_at between statement_timestamp() + interval '29 minutes'
-    and statement_timestamp() + interval '31 minutes' from first_reservation),
-  'reservation returns the server-defined thirty-minute Checkout expiry'
+  (select checkout_expires_at between clock_timestamp() + interval '30 minutes 45 seconds'
+    and clock_timestamp() + interval '32 minutes' from first_reservation),
+  'reservation persists bounded headroom above Stripe minimum without exceeding thirty-two minutes'
 );
 
 select results_eq(

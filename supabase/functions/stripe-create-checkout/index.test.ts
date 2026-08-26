@@ -265,7 +265,7 @@ Deno.test("concurrent pre-attach retries send byte-for-byte identical canonical 
   assertEquals(captured[0], captured[1]);
 });
 
-Deno.test("an ambiguous Stripe create failure preserves the reservation and retries the exact same request", async () => {
+Deno.test("a delayed ambiguous Stripe replay preserves the reservation and retries the exact same request without a duplicate", async () => {
   const captured: Array<{ params: unknown; options: unknown }> = [];
   let attempts = 0;
   let releases = 0;
@@ -282,12 +282,103 @@ Deno.test("an ambiguous Stripe create failure preserves the reservation and retr
   });
 
   const first = await createStripeCreateCheckoutHandler(deps)(request());
+  await new Promise((resolve) => setTimeout(resolve, 1));
   const second = await createStripeCreateCheckoutHandler(deps)(request());
 
   assertEquals(first.status, 502);
   assertEquals(second.status, 200);
   assertEquals(releases, 0);
   assertEquals(captured[0], captured[1]);
+});
+
+Deno.test("an invalid open attached Session is verified expired before its inventory is released", async () => {
+  const calls: string[] = [];
+  const response = await createStripeCreateCheckoutHandler(dependencies({
+    reserveCheckout: async () => reservation(SESSION_ID),
+    retrieveSession: async () => sessionFixture({ amount_total: 1_999 }),
+    expireSession: async (sessionId) => {
+      calls.push(`expire:${sessionId}`);
+      return sessionFixture({ status: "expired", url: null });
+    },
+    releaseReservation: async (orderId) => {
+      calls.push(`release:${orderId}`);
+    },
+  }))(request());
+
+  assertEquals(response.status, 502);
+  assertEquals(calls, [
+    `expire:${SESSION_ID}`,
+    `release:${ORDER_ID}`,
+  ]);
+});
+
+Deno.test("an attached open Session expiry failure preserves inventory so no payable Session outlives its reservation", async () => {
+  let released = false;
+  const response = await createStripeCreateCheckoutHandler(dependencies({
+    reserveCheckout: async () => reservation(SESSION_ID),
+    retrieveSession: async () => sessionFixture({ amount_total: 1_999 }),
+    expireSession: async () => {
+      throw new Error("upstream expiry unavailable");
+    },
+    releaseReservation: async () => {
+      released = true;
+    },
+  }))(request());
+
+  assertEquals(response.status, 502);
+  assertEquals(released, false);
+});
+
+Deno.test("an unverified attached Session expiry result preserves inventory", async () => {
+  let released = false;
+  const response = await createStripeCreateCheckoutHandler(dependencies({
+    reserveCheckout: async () => reservation(SESSION_ID),
+    retrieveSession: async () => sessionFixture({ amount_total: 1_999 }),
+    expireSession: async () =>
+      sessionFixture({
+        id: "cs_test_DifferentCheckout",
+        status: "expired",
+        url: null,
+      }),
+    releaseReservation: async () => {
+      released = true;
+    },
+  }))(request());
+
+  assertEquals(response.status, 502);
+  assertEquals(released, false);
+});
+
+Deno.test("an invalid terminal attached Session releases only when expired and preserves complete webhook truth", async () => {
+  for (
+    const [status, expectedReleases] of [["expired", 1], [
+      "complete",
+      0,
+    ]] as const
+  ) {
+    let releases = 0;
+    let expires = 0;
+    const response = await createStripeCreateCheckoutHandler(dependencies({
+      reserveCheckout: async () => reservation(SESSION_ID),
+      retrieveSession: async () =>
+        sessionFixture({
+          status,
+          payment_status: status === "complete" ? "paid" : "unpaid",
+          url: null,
+        }),
+      expireSession: async () => {
+        expires += 1;
+        return sessionFixture({ status: "expired", url: null });
+      },
+      releaseReservation: async () => {
+        releases += 1;
+      },
+    }))(request());
+
+    assertEquals(response.status, 502);
+    assertEquals(expires, 0);
+    assertEquals(releases, expectedReleases);
+  }
 });
 
 Deno.test("a definitive Stripe invalid-request failure releases the reservation", async () => {
@@ -496,10 +587,9 @@ Deno.test("default Connect preflight preserves database event and tier domain co
   }
 });
 
-Deno.test("checkout rejects and releases a live or mismatched Stripe Session snapshot", async () => {
+Deno.test("checkout expires and releases invalid open test Session snapshots", async () => {
   for (
     const invalid of [
-      sessionFixture({ livemode: true }),
       sessionFixture({ amount_total: 1_999 }),
       sessionFixture({ metadata: { order_id: "wrong" } }),
       sessionFixture({ url: "https://attacker.example/checkout" }),
@@ -518,6 +608,22 @@ Deno.test("checkout rejects and releases a live or mismatched Stripe Session sna
     });
     assertEquals(releases, 1);
   }
+});
+
+Deno.test("checkout preserves inventory for an invalid live Session snapshot that its test boundary cannot expire", async () => {
+  let released = false;
+  const response = await createStripeCreateCheckoutHandler(dependencies({
+    createSession: async () => sessionFixture({ livemode: true }),
+    releaseReservation: async () => {
+      released = true;
+    },
+  }))(request());
+
+  assertEquals(response.status, 502);
+  assertEquals(await response.json(), {
+    error: { code: "INVALID_STRIPE_SESSION" },
+  });
+  assertEquals(released, false);
 });
 
 Deno.test("checkout never releases a complete Session while authoritative webhook fulfillment may still be pending", async () => {
