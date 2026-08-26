@@ -1,12 +1,13 @@
 import { z } from 'zod'
+import { lowercaseRfcUuidSchema } from '../tickets/ticket.schemas'
 
 export const checkoutInputSchema = z
   .object({
-    eventId: z.uuid(),
-    tierId: z.uuid(),
+    eventId: lowercaseRfcUuidSchema,
+    tierId: lowercaseRfcUuidSchema,
     buyerName: z.string().trim().min(1).max(120),
     buyerEmail: z.string().trim().toLowerCase().email().max(320),
-    clientRequestId: z.uuid(),
+    clientRequestId: lowercaseRfcUuidSchema,
     quantity: z.literal(1),
   })
   .strict()

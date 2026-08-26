@@ -1,8 +1,14 @@
 import { z } from 'zod'
 
+export const lowercaseRfcUuidSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/)
+
 const ticketTierInputSchema = z
   .object({
-    id: z.uuid().optional(),
+    id: lowercaseRfcUuidSchema.optional(),
     name: z.string().trim().min(1).max(80),
     description: z
       .string()
@@ -47,3 +53,73 @@ export const ticketTiersInputSchema = z
       sortOrders.add(tier.sortOrder)
     })
   })
+
+const publicTicketTierSchema = z
+  .object({
+    id: lowercaseRfcUuidSchema,
+    name: z.string().trim().min(1).max(80),
+    description: z.string().trim().max(240).nullable(),
+    unit_amount_minor: z.number().int().min(1).max(99_999_999),
+    currency: z.literal('usd'),
+    availability_status: z.enum(['available', 'sold_out']),
+  })
+  .strict()
+
+export type PublicTicketTier = z.output<typeof publicTicketTierSchema>
+export type PublicTicketTierTuple =
+  | [PublicTicketTier]
+  | [PublicTicketTier, PublicTicketTier]
+  | [PublicTicketTier, PublicTicketTier, PublicTicketTier]
+
+const publicTicketTiersSchema = z
+  .array(publicTicketTierSchema)
+  .min(1)
+  .max(3)
+  .transform((tiers): PublicTicketTierTuple => {
+    const [first, second, third] = tiers
+    if (first === undefined) {
+      throw new Error('At least one public ticket tier is required.')
+    }
+    if (second === undefined) {
+      return [first]
+    }
+    if (third === undefined) {
+      return [first, second]
+    }
+    return [first, second, third]
+  })
+
+export const publicTicketingEventSchema = z
+  .object({
+    event: z
+      .object({
+        id: lowercaseRfcUuidSchema,
+        title: z.string().trim().min(3).max(120),
+        description: z.string().trim().min(20).max(5_000),
+        category: z.string().trim().min(1),
+        starts_at: z.string().datetime({ offset: true }),
+        ends_at: z.string().datetime({ offset: true }),
+        timezone: z.string().trim().min(1),
+        venue_name: z.string().trim().max(160).nullable(),
+        address_line1: z.string().trim().min(1),
+        address_line2: z.string().trim().max(160).nullable(),
+        city: z.string().trim().min(1),
+        region: z.literal('CA'),
+        postal_code: z.string().trim().min(1),
+        country_code: z.literal('US'),
+        latitude: z.number().finite().min(36.8).max(38.9),
+        longitude: z.number().finite().min(-123.6).max(-121),
+        artwork_path: z.string().trim().min(1).nullable(),
+        animation_preset: z.string().trim().min(1),
+        admission_type: z.literal('paid'),
+        organizer: z
+          .object({
+            id: lowercaseRfcUuidSchema,
+            display_name: z.string().trim().min(2).max(100),
+          })
+          .strict(),
+      })
+      .strict(),
+    tiers: publicTicketTiersSchema,
+  })
+  .strict()

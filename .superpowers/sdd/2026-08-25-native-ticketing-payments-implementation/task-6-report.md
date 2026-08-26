@@ -57,3 +57,24 @@ Status: `DONE_WITH_CONCERNS`
   `TEST_ORGANIZER_A_EMAIL`, `TEST_ORGANIZER_A_PASSWORD`, `TEST_ORGANIZER_B_EMAIL`, and
   `TEST_ORGANIZER_B_PASSWORD`. No credentials were read, printed, or added. This is an existing
   environment prerequisite, not a Task 6 schema failure.
+
+## Review fix round 1
+
+- Reduced `OrderConfirmation` to the approved Task 15 bearer-safe projection: only event title,
+  start/end time, timezone, venue, tier name, order number, and one of `processing`, `paid`,
+  `failed`, `expired`, or `refunded`. It no longer exposes order/ticket UUIDs, tier description or
+  quantity, ticket state, issuance timestamps, or failure internals.
+- Added `publicTicketingEventSchema` as the strict JSONB trust boundary for
+  `get_public_event_ticketing`. It accepts only a fully published paid-event projection with
+  non-null public fields, US/CA Bay Area invariants, USD active availability states, and one to
+  three tiers. Its output uses an explicit one/two/three-tier tuple union.
+- Replaced generic UUID validation for persisted tier/check-out IDs with normalization to lowercase
+  plus RFC version 1–5 and variant validation, matching the database tier-ID contract.
+- Added exact inclusive and one-beyond boundary proof for 80/240 text limits, 1/99,999,999 minor
+  USD amounts, and 1/2,147,483,647 capacity. Added compile-time exactness/exhaustiveness guards for
+  Connect, public ticketing, and order-confirmation contracts.
+- TDD evidence: new public-parser exports and uppercase UUID normalization failed before the
+  contract implementation; the focused suite now passes. The final app gate passes 28 Vitest files
+  / 286 tests, TypeScript, ESLint, and production build. The only build output is the pre-existing
+  chunk-size advisory. `git diff --check`, ignored/untracked `.env.local`, and a non-printing
+  secret-pattern scan are clean. No migration or linked-database mutation was performed.
