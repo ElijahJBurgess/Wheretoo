@@ -59,10 +59,6 @@ Deno.test("connect status retrieves the caller's current Stripe account before p
   const calls: string[] = [];
   const dependencies: StripeConnectStatusDependencies = {
     appOrigin: "https://whereto.example",
-    now: () => {
-      calls.push("observe");
-      return NOW;
-    },
     requireOrganizer: async () => ({
       userId: "user",
       organizerId: ORGANIZER_ID,
@@ -70,6 +66,11 @@ Deno.test("connect status retrieves the caller's current Stripe account before p
     findAccount: async (organizerId) => {
       assertEquals(organizerId, ORGANIZER_ID);
       return ACCOUNT_ID;
+    },
+    beginRefresh: async (accountId) => {
+      calls.push("begin");
+      assertEquals(accountId, ACCOUNT_ID);
+      return 101;
     },
     retrieveAccount: async (accountId, params) => {
       calls.push("retrieve");
@@ -80,17 +81,15 @@ Deno.test("connect status retrieves the caller's current Stripe account before p
       return readyAccount();
     },
     persistStatus: async (
-      _organizerId,
-      _accountId,
+      accountId,
+      refreshSequence,
       projection,
-      observedAt,
-      revision,
     ) => {
       calls.push("persist");
+      assertEquals(accountId, ACCOUNT_ID);
+      assertEquals(refreshSequence, 101);
       assertEquals(projection.requirementsStatus, "clear");
-      assertEquals(observedAt, NOW);
-      assertEquals(/^evt_syncConnectStatus[0-9a-f]{32}$/.test(revision), true);
-      return "updated";
+      return { outcome: "updated", syncedAt: NOW };
     },
   };
 
@@ -98,7 +97,7 @@ Deno.test("connect status retrieves the caller's current Stripe account before p
     request(),
   );
 
-  assertEquals(calls, ["observe", "retrieve", "persist"]);
+  assertEquals(calls, ["begin", "retrieve", "persist"]);
   assertEquals(response.status, 200);
   assertEquals(await response.json(), {
     status: "ready",
@@ -109,18 +108,24 @@ Deno.test("connect status retrieves the caller's current Stripe account before p
   });
 });
 
-Deno.test("the shared Connect repository persists status only through the retrieval tuple CAS RPC", async () => {
-  let call: unknown;
+Deno.test("the shared Connect repository persists status only through the DB-sequence CAS RPC", async () => {
+  const calls: unknown[] = [];
   const client = {
     rpc: async (name: string, args: Record<string, unknown>) => {
-      call = { name, args };
-      return { data: "updated", error: null };
+      calls.push({ name, args });
+      return name === "server_begin_connect_refresh"
+        ? { data: 701, error: null }
+        : {
+          data: [{ persistence_result: "updated", last_synced_at: NOW }],
+          error: null,
+        };
     },
   } as unknown as Parameters<typeof createAccountRepository>[0];
   const repository = createAccountRepository(client);
+  const refreshSequence = await repository.beginRefresh(ACCOUNT_ID);
   const result = await repository.persistStatus(
-    ORGANIZER_ID,
     ACCOUNT_ID,
+    refreshSequence,
     {
       transfersStatus: "active",
       payoutsStatus: "active",
@@ -129,38 +134,41 @@ Deno.test("the shared Connect repository persists status only through the retrie
       requirementsPastDueCount: 0,
       lastStatusCode: null,
     },
-    NOW,
-    "evt_syncConnectStatusRepositoryProof",
   );
 
-  assertEquals(result, "updated");
-  assertEquals(call, {
-    name: "server_persist_connect_status_if_current",
-    args: {
-      p_stripe_account_id: ACCOUNT_ID,
-      p_retrieved_at: NOW,
-      p_revision: "evt_syncConnectStatusRepositoryProof",
-      p_transfers_status: "active",
-      p_payouts_status: "active",
-      p_requirements_status: "clear",
-      p_currently_due_count: 0,
-      p_past_due_count: 0,
-      p_last_status_code: null,
+  assertEquals(result, { outcome: "updated", syncedAt: NOW });
+  assertEquals(calls, [
+    {
+      name: "server_begin_connect_refresh",
+      args: { p_stripe_account_id: ACCOUNT_ID },
     },
-  });
+    {
+      name: "server_persist_connect_status_if_current",
+      args: {
+        p_stripe_account_id: ACCOUNT_ID,
+        p_refresh_sequence: 701,
+        p_transfers_status: "active",
+        p_payouts_status: "active",
+        p_requirements_status: "clear",
+        p_currently_due_count: 0,
+        p_past_due_count: 0,
+        p_last_status_code: null,
+      },
+    },
+  ]);
 });
 
 Deno.test("connect status never reports a stale ready retrieval after newer restricted truth", async () => {
   const dependencies: StripeConnectStatusDependencies = {
     appOrigin: "https://whereto.example",
-    now: () => NOW,
     requireOrganizer: async () => ({
       userId: "user",
       organizerId: ORGANIZER_ID,
     }),
     findAccount: async () => ACCOUNT_ID,
+    beginRefresh: async () => 102,
     retrieveAccount: async () => readyAccount(),
-    persistStatus: async () => "stale",
+    persistStatus: async () => ({ outcome: "stale", syncedAt: NOW }),
   };
 
   const response = await createStripeConnectStatusHandler(dependencies)(
@@ -177,17 +185,19 @@ Deno.test("connect status reports not started without contacting Stripe when the
   let retrieved = false;
   const dependencies: StripeConnectStatusDependencies = {
     appOrigin: "https://whereto.example",
-    now: () => NOW,
     requireOrganizer: async () => ({
       userId: "user",
       organizerId: ORGANIZER_ID,
     }),
     findAccount: async () => null,
+    beginRefresh: async () => {
+      throw new Error("must not begin without an account");
+    },
     retrieveAccount: async () => {
       retrieved = true;
       return readyAccount();
     },
-    persistStatus: async () => "updated",
+    persistStatus: async () => ({ outcome: "updated", syncedAt: NOW }),
   };
 
   const response = await createStripeConnectStatusHandler(dependencies)(
@@ -204,12 +214,12 @@ Deno.test("connect status fails closed when the current account configuration is
   malformed.applied_configurations = ["recipient", "merchant"];
   const dependencies: StripeConnectStatusDependencies = {
     appOrigin: "https://whereto.example",
-    now: () => NOW,
     requireOrganizer: async () => ({
       userId: "user",
       organizerId: ORGANIZER_ID,
     }),
     findAccount: async () => ACCOUNT_ID,
+    beginRefresh: async () => 103,
     retrieveAccount: async () => malformed,
     persistStatus: async () => {
       throw new Error("must not persist unsafe readiness");

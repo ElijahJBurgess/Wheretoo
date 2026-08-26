@@ -24,7 +24,7 @@ select has_function(
 );
 select has_function(
   'public', 'server_persist_connect_status_if_current',
-  array['text', 'timestamptz', 'text', 'text', 'text', 'text', 'integer', 'integer', 'text'],
+  array['text', 'bigint', 'text', 'text', 'text', 'integer', 'integer', 'text'],
   'Connect webhook synchronization has a CAS service wrapper'
 );
 
@@ -51,19 +51,19 @@ select function_privs_are(
 );
 select function_privs_are(
   'public', 'server_persist_connect_status_if_current',
-  array['text', 'timestamptz', 'text', 'text', 'text', 'text', 'integer', 'integer', 'text'],
+  array['text', 'bigint', 'text', 'text', 'text', 'integer', 'integer', 'text'],
   'authenticated', array[]::text[],
   'authenticated callers cannot race Connect truth'
 );
 select function_privs_are(
   'public', 'server_persist_connect_status_if_current',
-  array['text', 'timestamptz', 'text', 'text', 'text', 'text', 'integer', 'integer', 'text'],
+  array['text', 'bigint', 'text', 'text', 'text', 'integer', 'integer', 'text'],
   'anon', array[]::text[],
   'anonymous callers cannot race Connect truth'
 );
 select function_privs_are(
   'public', 'server_persist_connect_status_if_current',
-  array['text', 'timestamptz', 'text', 'text', 'text', 'text', 'integer', 'integer', 'text'],
+  array['text', 'bigint', 'text', 'text', 'text', 'integer', 'integer', 'text'],
   'service_role', array['EXECUTE'],
   'service role can persist current Connect truth'
 );
@@ -197,7 +197,17 @@ insert into review_orders values
   ));
 grant select on review_orders to service_role;
 
+create temporary table connect_refresh_tokens (
+  kind text primary key,
+  sequence_number bigint not null
+) on commit drop;
+grant all on connect_refresh_tokens to service_role;
+
 set local role service_role;
+
+insert into connect_refresh_tokens values
+  ('older', public.server_begin_connect_refresh('acct_WebhookReviewSafety')),
+  ('newer', public.server_begin_connect_refresh('acct_WebhookReviewSafety'));
 
 select * from public.server_record_webhook_receipt(
   'evt_ReviewRefundBeforePaid', 'refund.updated', false,
@@ -351,20 +361,25 @@ select results_eq(
   'an unverified refund policy invalidates an existing ticket and marks review'
 );
 
-select is(
-  public.server_persist_connect_status_if_current(
-    'acct_WebhookReviewSafety', '2099-08-26 05:01:00+00', 'evt_NewRestricted',
-    'restricted', 'restricted', 'restricted', 2, 1, 'STRIPE_REQUIREMENTS_PAST_DUE'
-  ),
-  'updated'::text,
+select results_eq(
+  $$ select persistence_result
+    from public.server_persist_connect_status_if_current(
+      'acct_WebhookReviewSafety',
+      (select sequence_number from connect_refresh_tokens where kind = 'newer'),
+      'restricted', 'restricted', 'restricted', 2, 1,
+      'STRIPE_REQUIREMENTS_PAST_DUE'
+    ) $$,
+  $$ values ('updated'::text) $$,
   'newer restricted Connect truth is persisted'
 );
-select is(
-  public.server_persist_connect_status_if_current(
-    'acct_WebhookReviewSafety', '2099-08-26 05:00:00+00', 'evt_OldReady',
-    'active', 'active', 'clear', 0, 0, null
-  ),
-  'stale'::text,
+select results_eq(
+  $$ select persistence_result
+    from public.server_persist_connect_status_if_current(
+      'acct_WebhookReviewSafety',
+      (select sequence_number from connect_refresh_tokens where kind = 'older'),
+      'active', 'active', 'clear', 0, 0, null
+    ) $$,
+  $$ values ('stale'::text) $$,
   'an older ready response is deterministically rejected by CAS'
 );
 reset role;
@@ -372,14 +387,14 @@ select results_eq(
   $$
     select transfers_status, payouts_status, requirements_status,
       requirements_currently_due_count, requirements_past_due_count,
-      last_status_code, last_synced_at, last_sync_revision
+      last_status_code, last_sync_sequence
     from organizer_stripe_accounts
     where stripe_account_id = 'acct_WebhookReviewSafety'
   $$,
   $$ values (
     'restricted'::text, 'restricted'::text, 'restricted'::text,
     2, 1, 'STRIPE_REQUIREMENTS_PAST_DUE'::text,
-    '2099-08-26 05:01:00+00'::timestamptz, 'evt_NewRestricted'::text
+    (select sequence_number from connect_refresh_tokens where kind = 'newer')
   ) $$,
   'stale-ready versus newer-restricted ordering preserves newer truth'
 );

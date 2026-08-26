@@ -6,6 +6,7 @@ import { jsonResponse } from "../_shared/http.ts";
 import { getStripe } from "../_shared/stripeClient.ts";
 import {
   ACCOUNT_INCLUDE,
+  createAccountRepository,
   validateApprovedConnectAccount,
 } from "../stripe-connect-session/connect.ts";
 
@@ -177,11 +178,11 @@ export interface StripeWebhookDependencies {
     id: string,
     params: Stripe.V2.Core.AccountRetrieveParams,
   ): Promise<unknown>;
+  beginAccountRefresh(accountId: string): Promise<number>;
   persistAccountStatus(
     accountId: string,
+    refreshSequence: number,
     projection: ConnectStatusProjection,
-    retrievedAt: string,
-    revision: string,
   ): Promise<boolean>;
   fulfillPaidOrder(snapshot: FulfillmentSnapshot): Promise<void>;
   markPaymentProcessing(snapshot: PaymentSnapshot): Promise<void>;
@@ -189,7 +190,6 @@ export interface StripeWebhookDependencies {
   markPaymentRequiresReview(snapshot: PaymentReviewSnapshot): Promise<void>;
   applyRefund(snapshot: RefundSnapshot): Promise<void>;
   applyDispute(snapshot: DisputeSnapshot): Promise<void>;
-  now(): string;
 }
 
 interface NormalizedEvent {
@@ -522,36 +522,9 @@ async function domainRpc(name: string, params: Record<string, unknown>) {
   if (error !== null) throwRpc(error);
 }
 
-async function defaultPersistAccountStatus(
-  accountId: string,
-  projection: ConnectStatusProjection,
-  retrievedAt: string,
-  revision: string,
-): Promise<boolean> {
-  const { data, error } = await getServiceClient().rpc(
-    "server_persist_connect_status_if_current",
-    {
-      p_stripe_account_id: accountId,
-      p_retrieved_at: retrievedAt,
-      p_revision: revision,
-      p_transfers_status: projection.transfersStatus,
-      p_payouts_status: projection.payoutsStatus,
-      p_requirements_status: projection.requirementsStatus,
-      p_currently_due_count: projection.requirementsCurrentlyDueCount,
-      p_past_due_count: projection.requirementsPastDueCount,
-      p_last_status_code: projection.lastStatusCode,
-    },
-  );
-  if (error !== null) throwRpc(error);
-  if (data === "not_found") return false;
-  if (data !== "updated" && data !== "stale") {
-    throw new Error("account persistence failed");
-  }
-  return true;
-}
-
 function defaultDependencies(): StripeWebhookDependencies {
   const stripe = getStripe();
+  const accountRepository = createAccountRepository();
   return {
     verifyEvent: async (raw, signature) => {
       await verifyStripeSignatureAgainstSecrets(
@@ -582,7 +555,16 @@ function defaultDependencies(): StripeWebhookDependencies {
       stripe.transfers.createReversal(transferId, params, options),
     retrieveAccount: (id, params) =>
       stripe.v2.core.accounts.retrieve(id, params),
-    persistAccountStatus: defaultPersistAccountStatus,
+    beginAccountRefresh: (accountId) =>
+      accountRepository.beginRefresh(accountId),
+    persistAccountStatus: async (accountId, refreshSequence, projection) => {
+      await accountRepository.persistStatus(
+        accountId,
+        refreshSequence,
+        projection,
+      );
+      return true;
+    },
     fulfillPaidOrder: (value) =>
       domainRpc("server_fulfill_paid_order", {
         p_stripe_event_id: value.stripeEventId,
@@ -648,7 +630,6 @@ function defaultDependencies(): StripeWebhookDependencies {
         p_currency: value.currency,
         p_recovery_status: value.recoveryStatus,
       }),
-    now: () => new Date().toISOString(),
   };
 }
 
@@ -1334,7 +1315,7 @@ async function dispatchAccount(
     ACCOUNT_PATTERN,
     "INVALID_STRIPE_ACCOUNT",
   );
-  const retrievedAt = dependencies.now();
+  const refreshSequence = await dependencies.beginAccountRefresh(accountId);
   const account = await dependencies.retrieveAccount(accountId, {
     include: ACCOUNT_INCLUDE,
   });
@@ -1349,9 +1330,8 @@ async function dispatchAccount(
   if (
     !await dependencies.persistAccountStatus(
       accountId,
+      refreshSequence,
       projection,
-      retrievedAt,
-      event.id,
     )
   ) {
     throw new Error("account persistence pending");

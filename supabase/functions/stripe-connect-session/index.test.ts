@@ -58,10 +58,6 @@ Deno.test("connect session creates the approved recipient-only account and retur
   const calls: string[] = [];
   const dependencies: StripeConnectSessionDependencies = {
     appOrigin: "https://whereto.example",
-    now: () => {
-      calls.push("observe");
-      return NOW;
-    },
     requireOrganizer: async () => ({
       userId: "22222222-2222-4222-8222-222222222222",
       organizerId: ORGANIZER_ID,
@@ -78,6 +74,11 @@ Deno.test("connect session creates the approved recipient-only account and retur
         stripeAccountId: ACCOUNT_ID,
       });
       return ACCOUNT_ID;
+    },
+    beginRefresh: async (accountId) => {
+      calls.push("begin");
+      assertEquals(accountId, ACCOUNT_ID);
+      return 201;
     },
     createAccount: async (params, options) => {
       calls.push("create");
@@ -116,16 +117,14 @@ Deno.test("connect session creates the approved recipient-only account and retur
       return accountFixture();
     },
     persistStatus: async (
-      organizerId,
       accountId,
+      refreshSequence,
       projection,
-      observedAt,
-      revision,
     ) => {
       calls.push("persist");
-      assertEquals({ organizerId, accountId, projection, observedAt }, {
-        organizerId: ORGANIZER_ID,
+      assertEquals({ accountId, refreshSequence, projection }, {
         accountId: ACCOUNT_ID,
+        refreshSequence: 201,
         projection: {
           transfersStatus: "pending",
           payoutsStatus: "pending",
@@ -134,10 +133,8 @@ Deno.test("connect session creates the approved recipient-only account and retur
           requirementsPastDueCount: 0,
           lastStatusCode: null,
         },
-        observedAt: NOW,
       });
-      assertEquals(/^evt_syncConnectSession[0-9a-f]{32}$/.test(revision), true);
-      return "updated";
+      return { outcome: "updated", syncedAt: NOW };
     },
     createAccountSession: async (params) => {
       calls.push("session");
@@ -168,7 +165,7 @@ Deno.test("connect session creates the approved recipient-only account and retur
   assertEquals(calls, [
     "create",
     "insert",
-    "observe",
+    "begin",
     "retrieve",
     "persist",
     "session",
@@ -189,7 +186,6 @@ Deno.test("connect session reuses the caller's persisted account without creatin
   let created = false;
   const dependencies: StripeConnectSessionDependencies = {
     appOrigin: "https://whereto.example",
-    now: () => NOW,
     requireOrganizer: async () => ({
       userId: "user",
       organizerId: ORGANIZER_ID,
@@ -198,6 +194,7 @@ Deno.test("connect session reuses the caller's persisted account without creatin
       throw new Error("must not read contact email for an existing account");
     },
     findAccount: async () => ACCOUNT_ID,
+    beginRefresh: async () => 202,
     insertAccount: async () => {
       throw new Error("must not insert");
     },
@@ -206,7 +203,7 @@ Deno.test("connect session reuses the caller's persisted account without creatin
       return accountFixture();
     },
     retrieveAccount: async () => accountFixture(),
-    persistStatus: async () => "updated",
+    persistStatus: async () => ({ outcome: "updated", syncedAt: NOW }),
     createAccountSession: async () => ({
       account: ACCOUNT_ID,
       client_secret: "reused-session-secret",
@@ -229,7 +226,6 @@ Deno.test("connect session never creates a session from stale ready retrieval", 
   let createdSession = false;
   const dependencies: StripeConnectSessionDependencies = {
     appOrigin: "https://whereto.example",
-    now: () => NOW,
     requireOrganizer: async () => ({
       userId: "user",
       organizerId: ORGANIZER_ID,
@@ -238,12 +234,13 @@ Deno.test("connect session never creates a session from stale ready retrieval", 
       throw new Error("must not read contact email for an existing account");
     },
     findAccount: async () => ACCOUNT_ID,
+    beginRefresh: async () => 203,
     insertAccount: async () => {
       throw new Error("must not insert");
     },
     createAccount: async () => accountFixture(),
     retrieveAccount: async () => accountFixture(),
-    persistStatus: async () => "stale",
+    persistStatus: async () => ({ outcome: "stale", syncedAt: NOW }),
     createAccountSession: async () => {
       createdSession = true;
       throw new Error("must not create a session from stale truth");
@@ -265,20 +262,22 @@ Deno.test("connect session rejects unknown request fields before Stripe is calle
   let stripeCalled = false;
   const dependencies: StripeConnectSessionDependencies = {
     appOrigin: "https://whereto.example",
-    now: () => NOW,
     requireOrganizer: async () => ({
       userId: "user",
       organizerId: ORGANIZER_ID,
     }),
     getContactEmail: async () => "verified-owner@example.test",
     findAccount: async () => null,
+    beginRefresh: async () => {
+      throw new Error("must not begin an invalid request");
+    },
     insertAccount: async () => ACCOUNT_ID,
     createAccount: async () => {
       stripeCalled = true;
       return accountFixture();
     },
     retrieveAccount: async () => accountFixture(),
-    persistStatus: async () => "updated",
+    persistStatus: async () => ({ outcome: "updated", syncedAt: NOW }),
     createAccountSession: async () => {
       throw new Error("must not create session");
     },

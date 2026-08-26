@@ -9,7 +9,6 @@ import {
   ACCOUNT_INCLUDE,
   type AccountRepository,
   createAccountRepository,
-  createConnectSyncRevision,
   readEmptyRequest,
   type RequireOrganizer,
   stripeRequest,
@@ -17,10 +16,12 @@ import {
   validateApprovedConnectAccount,
 } from "../stripe-connect-session/connect.ts";
 
-export interface StripeConnectStatusDependencies
-  extends Pick<AccountRepository, "findAccount" | "persistStatus"> {
+export interface StripeConnectStatusDependencies extends
+  Pick<
+    AccountRepository,
+    "findAccount" | "beginRefresh" | "persistStatus"
+  > {
   appOrigin: string;
-  now(): string;
   requireOrganizer: RequireOrganizer;
   retrieveAccount(
     accountId: string,
@@ -33,7 +34,6 @@ function defaultDependencies(): StripeConnectStatusDependencies {
   return {
     ...repository,
     appOrigin: getAppBaseUrl(),
-    now: () => new Date().toISOString(),
     requireOrganizer,
     retrieveAccount: (accountId, params) =>
       getStripe().v2.core.accounts.retrieve(accountId, params),
@@ -59,25 +59,22 @@ export function createStripeConnectStatusHandler(
         return jsonResponse({ status: "not_started" }, 200, headers);
       }
 
-      const observedAt = dependencies.now();
-      const revision = createConnectSyncRevision("ConnectStatus");
+      const refreshSequence = await dependencies.beginRefresh(accountId);
       const account = await stripeRequest(() =>
         dependencies.retrieveAccount(accountId, { include: ACCOUNT_INCLUDE })
       );
       const projection = validateApprovedConnectAccount(account);
       const persistence = await dependencies.persistStatus(
-        organizer.organizerId,
         accountId,
+        refreshSequence,
         projection,
-        observedAt,
-        revision,
       );
-      if (persistence === "stale") {
+      if (persistence.outcome === "stale") {
         throw new HttpError(502, "STRIPE_REQUEST_FAILED");
       }
 
       return jsonResponse(
-        toSafeConnectStatus(projection, observedAt),
+        toSafeConnectStatus(projection, persistence.syncedAt),
         200,
         headers,
       );

@@ -10,7 +10,6 @@ import {
   ACCOUNT_INCLUDE,
   type AccountRepository,
   createAccountRepository,
-  createConnectSyncRevision,
   readEmptyRequest,
   type RequireOrganizer,
   stripeRequest,
@@ -52,7 +51,6 @@ const RECIPIENT_ACCOUNT_PARAMS = (
 
 export interface StripeConnectSessionDependencies extends AccountRepository {
   appOrigin: string;
-  now(): string;
   requireOrganizer: RequireOrganizer;
   getContactEmail(userId: string): Promise<string>;
   createAccount(
@@ -75,7 +73,6 @@ function defaultDependencies(): StripeConnectSessionDependencies {
   return {
     ...repository,
     appOrigin: getAppBaseUrl(),
-    now: () => new Date().toISOString(),
     requireOrganizer,
     async getContactEmail(userId) {
       const { data, error } = await getServiceClient().auth.admin.getUserById(
@@ -140,20 +137,17 @@ export function createStripeConnectSessionHandler(
         });
       }
 
-      const observedAt = dependencies.now();
-      const revision = createConnectSyncRevision("ConnectSession");
+      const refreshSequence = await dependencies.beginRefresh(accountId);
       const account = await stripeRequest(() =>
         dependencies.retrieveAccount(accountId, { include: ACCOUNT_INCLUDE })
       );
       const projection = validateApprovedConnectAccount(account);
       const persistence = await dependencies.persistStatus(
-        organizer.organizerId,
         accountId,
+        refreshSequence,
         projection,
-        observedAt,
-        revision,
       );
-      if (persistence === "stale") {
+      if (persistence.outcome === "stale") {
         throw new HttpError(502, "STRIPE_REQUEST_FAILED");
       }
 
@@ -175,7 +169,7 @@ export function createStripeConnectSessionHandler(
       return jsonResponse(
         {
           client_secret: session.client_secret,
-          connect_status: toSafeConnectStatus(projection, observedAt),
+          connect_status: toSafeConnectStatus(projection, persistence.syncedAt),
         },
         200,
         headers,

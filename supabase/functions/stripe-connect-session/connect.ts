@@ -22,14 +22,9 @@ export interface SafeConnectStatus {
   last_synced_at: string;
 }
 
-export type ConnectPersistenceResult = "updated" | "stale";
-export type ConnectSyncSource =
-  | "ConnectSession"
-  | "ConnectStatus"
-  | "CheckoutPreflight";
-
-export function createConnectSyncRevision(source: ConnectSyncSource): string {
-  return `evt_sync${source}${crypto.randomUUID().replaceAll("-", "")}`;
+export interface ConnectPersistenceResult {
+  outcome: "updated" | "stale";
+  syncedAt: string;
 }
 
 export interface AccountRepository {
@@ -38,12 +33,11 @@ export interface AccountRepository {
     organizerId: string;
     stripeAccountId: string;
   }): Promise<string>;
+  beginRefresh(accountId: string): Promise<number>;
   persistStatus(
-    organizerId: string,
     accountId: string,
+    refreshSequence: number,
     projection: ConnectStatusProjection,
-    observedAt: string,
-    revision: string,
   ): Promise<ConnectPersistenceResult>;
 }
 
@@ -90,19 +84,29 @@ export function createAccountRepository(
       if (winner === null || winner !== stripeAccountId) internalError();
       return winner;
     },
+    async beginRefresh(accountId) {
+      const { data, error } = await client.rpc(
+        "server_begin_connect_refresh",
+        { p_stripe_account_id: accountId },
+      );
+      if (
+        error !== null || !Number.isSafeInteger(data) ||
+        (data as number) <= 0
+      ) {
+        internalError();
+      }
+      return data as number;
+    },
     async persistStatus(
-      _organizerId,
       accountId,
+      refreshSequence,
       projection,
-      observedAt,
-      revision,
     ) {
       const { data, error } = await client.rpc(
         "server_persist_connect_status_if_current",
         {
           p_stripe_account_id: accountId,
-          p_retrieved_at: observedAt,
-          p_revision: revision,
+          p_refresh_sequence: refreshSequence,
           p_transfers_status: projection.transfersStatus,
           p_payouts_status: projection.payoutsStatus,
           p_requirements_status: projection.requirementsStatus,
@@ -111,10 +115,20 @@ export function createAccountRepository(
           p_last_status_code: projection.lastStatusCode,
         },
       );
-      if (error !== null || (data !== "updated" && data !== "stale")) {
+      if (
+        error !== null || !Array.isArray(data) || data.length !== 1 ||
+        typeof data[0] !== "object" || data[0] === null ||
+        (data[0].persistence_result !== "updated" &&
+          data[0].persistence_result !== "stale") ||
+        typeof data[0].last_synced_at !== "string" ||
+        !Number.isFinite(Date.parse(data[0].last_synced_at))
+      ) {
         internalError();
       }
-      return data;
+      return {
+        outcome: data[0].persistence_result,
+        syncedAt: new Date(data[0].last_synced_at).toISOString(),
+      };
     },
   };
 }

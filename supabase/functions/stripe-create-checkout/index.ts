@@ -12,7 +12,6 @@ import {
   ACCOUNT_INCLUDE,
   type AccountRepository,
   createAccountRepository,
-  createConnectSyncRevision,
   validateApprovedConnectAccount,
 } from "../stripe-connect-session/connect.ts";
 
@@ -538,13 +537,14 @@ export async function defaultRefreshConnect(
   tierId: string,
   client = getServiceClient(),
   runtime?: {
-    repository: Pick<AccountRepository, "findAccount" | "persistStatus">;
+    repository: Pick<
+      AccountRepository,
+      "findAccount" | "beginRefresh" | "persistStatus"
+    >;
     retrieveAccount(
       accountId: string,
       params: Stripe.V2.Core.AccountRetrieveParams,
     ): Promise<Stripe.V2.Core.Account>;
-    now(): string;
-    revision(): string;
   },
 ): Promise<void> {
   const { data, error } = await client.rpc("server_get_checkout_preflight", {
@@ -567,9 +567,7 @@ export async function defaultRefreshConnect(
   if (accountId === null) {
     throw new CheckoutHttpError(409, "CONNECT_NOT_READY");
   }
-  const observedAt = runtime?.now() ?? new Date().toISOString();
-  const revision = runtime?.revision() ??
-    createConnectSyncRevision("CheckoutPreflight");
+  const refreshSequence = await repository.beginRefresh(accountId);
   let account: Stripe.V2.Core.Account;
   try {
     account = await (runtime?.retrieveAccount(accountId, {
@@ -587,13 +585,11 @@ export async function defaultRefreshConnect(
     throw new CheckoutHttpError(409, "CONNECT_NOT_READY");
   }
   const persistence = await repository.persistStatus(
-    organizerId,
     accountId,
+    refreshSequence,
     projection,
-    observedAt,
-    revision,
   );
-  if (persistence === "stale") {
+  if (persistence.outcome === "stale") {
     throw new CheckoutHttpError(409, "CONNECT_NOT_READY");
   }
   const current = deriveConnectStatus(account);

@@ -26,7 +26,6 @@ import {
   FEE_REFUND_ID,
   feeRefundFixture,
   NOW_EPOCH_SECONDS,
-  NOW_ISO,
   ORDER_ID,
   PAYMENT_INTENT_ID,
   paymentIntentFixture,
@@ -89,6 +88,7 @@ function dependencies(
         metadata: { dispute_id: DISPUTE_ID, order_id: ORDER_ID },
       }),
     retrieveAccount: async () => accountFixture(),
+    beginAccountRefresh: async () => 401,
     persistAccountStatus: async () => true,
     fulfillPaidOrder: async () => undefined,
     markPaymentProcessing: async () => undefined,
@@ -96,7 +96,6 @@ function dependencies(
     markPaymentRequiresReview: async () => undefined,
     applyRefund: async () => undefined,
     applyDispute: async () => undefined,
-    now: () => NOW_ISO,
     ...overrides,
   };
 }
@@ -501,23 +500,33 @@ Deno.test("transient Stripe retrieval failures remain retryable and return non-2
 
 Deno.test("recipient-account events retrieve current Accounts v2 state and persist only the safe projection", async () => {
   let persisted: unknown;
+  const calls: string[] = [];
   const response = await createStripeWebhookHandler(dependencies({
+    beginAccountRefresh: async (accountId) => {
+      calls.push("begin");
+      assertEquals(accountId, ACCOUNT_ID);
+      return 402;
+    },
     retrieveAccount: async (accountId, params) => {
+      calls.push("retrieve");
       assertEquals(accountId, ACCOUNT_ID);
       assertEquals(params, {
         include: ["configuration.recipient", "defaults", "requirements"],
       });
       return accountFixture();
     },
-    persistAccountStatus: async (accountId, projection, syncedAt) => {
-      persisted = { accountId, projection, syncedAt };
+    persistAccountStatus: async (accountId, refreshSequence, projection) => {
+      calls.push("persist");
+      persisted = { accountId, refreshSequence, projection };
       return true;
     },
   }))(request(thinAccountEvent()));
 
   assertEquals(response.status, 200);
+  assertEquals(calls, ["begin", "retrieve", "persist"]);
   assertEquals(persisted, {
     accountId: ACCOUNT_ID,
+    refreshSequence: 402,
     projection: {
       transfersStatus: "active",
       payoutsStatus: "active",
@@ -526,26 +535,31 @@ Deno.test("recipient-account events retrieve current Accounts v2 state and persi
       requirementsPastDueCount: 0,
       lastStatusCode: null,
     },
-    syncedAt: NOW_ISO,
   });
 });
 
-Deno.test("account synchronization compares with retrieval start so a late stale ready response cannot overwrite newer restricted truth", async () => {
-  const retrievalStartedAt = "2026-08-26T02:00:00.000Z";
-  const retrievalFinishedAt = "2026-08-26T02:01:00.000Z";
-  const clock = [retrievalStartedAt, retrievalFinishedAt];
-  let persistedAt: string | undefined;
+Deno.test("account synchronization persists the same DB-issued causal sequence acquired before retrieval", async () => {
+  const calls: string[] = [];
+  let persistedSequence: number | undefined;
   const response = await createStripeWebhookHandler(dependencies({
-    now: () => clock.shift() ?? retrievalFinishedAt,
-    retrieveAccount: async () => accountFixture(),
-    persistAccountStatus: async (_accountId, _projection, retrievedAt) => {
-      persistedAt = retrievedAt;
+    beginAccountRefresh: async () => {
+      calls.push("begin");
+      return 403;
+    },
+    retrieveAccount: async () => {
+      calls.push("retrieve");
+      return accountFixture();
+    },
+    persistAccountStatus: async (_accountId, refreshSequence) => {
+      calls.push("persist");
+      persistedSequence = refreshSequence;
       return true;
     },
   }))(request(thinAccountEvent()));
 
   assertEquals(response.status, 200);
-  assertEquals(persistedAt, retrievalStartedAt);
+  assertEquals(calls, ["begin", "retrieve", "persist"]);
+  assertEquals(persistedSequence, 403);
 });
 
 Deno.test("a live or malformed retrieved Accounts v2 object is permanently acknowledged without persisting status", async () => {

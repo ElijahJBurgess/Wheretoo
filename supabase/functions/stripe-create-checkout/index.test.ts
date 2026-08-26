@@ -673,7 +673,7 @@ Deno.test("default Connect preflight preserves database event and tier domain co
   }
 });
 
-Deno.test("default Connect preflight captures retrieval start and fails closed when its CAS result is stale", async () => {
+Deno.test("default Connect preflight acquires a DB causal sequence before retrieval and fails closed when its CAS result is stale", async () => {
   for (const persistence of ["updated", "stale"] as const) {
     const calls: string[] = [];
     const client = {
@@ -688,34 +688,30 @@ Deno.test("default Connect preflight captures retrieval start and fails closed w
           calls.push("find");
           return ACCOUNT_ID;
         },
+        beginRefresh: async (accountId: string) => {
+          calls.push("begin");
+          assertEquals(accountId, ACCOUNT_ID);
+          return 301;
+        },
         persistStatus: async (
-          organizerId: string,
           accountId: string,
+          refreshSequence: number,
           projection: unknown,
-          observedAt: string,
-          revision: string,
         ) => {
           calls.push("persist");
-          assertEquals(organizerId, ORGANIZER_ID);
           assertEquals(accountId, ACCOUNT_ID);
-          assertEquals(observedAt, CONNECT_OBSERVED_AT);
-          assertEquals(revision, "evt_syncCheckoutPreflightProof");
+          assertEquals(refreshSequence, 301);
           assertEquals(
             (projection as { requirementsStatus: string }).requirementsStatus,
             "clear",
           );
-          return persistence;
+          return { outcome: persistence, syncedAt: CONNECT_OBSERVED_AT };
         },
       },
       retrieveAccount: async () => {
         calls.push("retrieve");
         return readyConnectAccount();
       },
-      now: () => {
-        calls.push("observe");
-        return CONNECT_OBSERVED_AT;
-      },
-      revision: () => "evt_syncCheckoutPreflightProof",
     };
     let caught: unknown;
     try {
@@ -724,7 +720,7 @@ Deno.test("default Connect preflight captures retrieval start and fails closed w
       caught = error;
     }
 
-    assertEquals(calls, ["find", "observe", "retrieve", "persist"]);
+    assertEquals(calls, ["find", "begin", "retrieve", "persist"]);
     assertEquals(
       (caught as { code?: string } | undefined)?.code,
       persistence === "stale" ? "CONNECT_NOT_READY" : undefined,

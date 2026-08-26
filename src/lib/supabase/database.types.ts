@@ -441,7 +441,7 @@ export type Database = {
           dashboard: string
           fees_collector: string
           last_status_code: string | null
-          last_sync_revision: string | null
+          last_sync_sequence: number
           last_synced_at: string
           livemode: boolean
           losses_collector: string
@@ -461,7 +461,7 @@ export type Database = {
           dashboard?: string
           fees_collector?: string
           last_status_code?: string | null
-          last_sync_revision?: string | null
+          last_sync_sequence?: number
           last_synced_at?: string
           livemode?: boolean
           losses_collector?: string
@@ -481,7 +481,7 @@ export type Database = {
           dashboard?: string
           fees_collector?: string
           last_status_code?: string | null
-          last_sync_revision?: string | null
+          last_sync_sequence?: number
           last_synced_at?: string
           livemode?: boolean
           losses_collector?: string
@@ -1089,6 +1089,10 @@ export type Database = {
         Args: { p_expires_at: string; p_order_id: string; p_session_id: string }
         Returns: string
       }
+      server_begin_connect_refresh: {
+        Args: { p_stripe_account_id: string }
+        Returns: number
+      }
       server_cancel_checkout_reservation: {
         Args: { p_order_id: string; p_reason: string }
         Returns: string
@@ -1244,13 +1248,15 @@ export type Database = {
           p_last_status_code: string
           p_past_due_count: number
           p_payouts_status: string
+          p_refresh_sequence: number
           p_requirements_status: string
-          p_retrieved_at: string
-          p_revision: string
           p_stripe_account_id: string
           p_transfers_status: string
         }
-        Returns: string
+        Returns: {
+          last_synced_at: string
+          persistence_result: string
+        }[]
       }
       server_record_webhook_receipt: {
         Args: {
