@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { AsyncState } from '../../components/ui/AsyncState'
 import { Button } from '../../components/ui/Button'
 import { Field } from '../../components/ui/Field'
@@ -55,6 +55,27 @@ function assignHostedCheckout(checkoutUrl: string): void {
   window.location.assign(checkoutUrl)
 }
 
+type CheckoutStateProps = {
+  action: ReactNode
+  description?: string
+  status: 'loading' | 'empty' | 'error'
+  title: string
+}
+
+export function CheckoutState({ action, description, status, title }: CheckoutStateProps) {
+  return (
+    <main className="checkout-layout">
+      <h1 className="checkout-state__title">{title}</h1>
+      <AsyncState
+        action={action}
+        description={description}
+        status={status}
+        title={status === 'loading' ? 'Please wait' : 'What you can do'}
+      />
+    </main>
+  )
+}
+
 type CheckoutPageProps = {
   assignCheckout?: (checkoutUrl: string) => void
 }
@@ -76,6 +97,9 @@ export function CheckoutPage({ assignCheckout = assignHostedCheckout }: Checkout
   const [isSubmitting, setIsSubmitting] = useState(false)
   const mountedRef = useRef(false)
   const submissionLockRef = useRef(false)
+  const focusInvalidRef = useRef(false)
+  const buyerNameRef = useRef<HTMLInputElement>(null)
+  const buyerEmailRef = useRef<HTMLInputElement>(null)
   const routeKeyRef = useRef(location.key)
   const cancellationRef = useRef<{ token: string; promise: Promise<void> } | null>(null)
 
@@ -84,9 +108,16 @@ export function CheckoutPage({ assignCheckout = assignHostedCheckout }: Checkout
     return () => { mountedRef.current = false }
   }, [])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     routeKeyRef.current = location.key
   }, [location.key])
+
+  useLayoutEffect(() => {
+    if (!focusInvalidRef.current) return
+    if (fieldErrors.buyerName) buyerNameRef.current?.focus()
+    else if (fieldErrors.buyerEmail) buyerEmailRef.current?.focus()
+    focusInvalidRef.current = false
+  }, [fieldErrors])
 
   useEffect(() => {
     if (cancelToken === null) return
@@ -132,6 +163,7 @@ export function CheckoutPage({ assignCheckout = assignHostedCheckout }: Checkout
         if (issue.path[0] === 'buyerName') errors.buyerName = 'Enter your name'
         if (issue.path[0] === 'buyerEmail') errors.buyerEmail = 'Enter a valid email address'
       }
+      focusInvalidRef.current = true
       setFieldErrors(errors)
       setServerError(null)
       return
@@ -159,18 +191,18 @@ export function CheckoutPage({ assignCheckout = assignHostedCheckout }: Checkout
   }
 
   if (cancelToken !== null) {
-    return <main className="checkout-layout"><AsyncState status="loading" title="Cancelling checkout" /></main>
+    return <CheckoutState action={<Link className="ui-button ui-button--secondary" to={eventId ? publicEventPath(eventId) : '/'}>Return to event</Link>} status="loading" title="Cancelling checkout" />
   }
   if (!eventIdResult.success || !tierIdResult.success || (eventQuery.isPending || eventQuery.data === undefined) && !eventQuery.isError) {
-    return <main className="checkout-layout"><AsyncState status="loading" title="Loading checkout" /></main>
+    return <CheckoutState action={<Link className="ui-button ui-button--secondary" to={eventId ? publicEventPath(eventId) : '/'}>Return to event</Link>} status="loading" title="Loading checkout" />
   }
   if (eventQuery.isError || eventQuery.data === null) {
-    return <main className="checkout-layout"><AsyncState status="error" title="Checkout could not load" description="Return to the event and try again." /></main>
+    return <CheckoutState action={<Link className="ui-button ui-button--secondary" to={publicEventPath(eventId)}>Return to event</Link>} description="Check your connection, then return to the event and try again." status="error" title="Checkout could not load" />
   }
 
   const selectedTier = eventQuery.data.tiers.find((tier) => tier.id === tierId && tier.availability_status === 'available')
   if (selectedTier === undefined) {
-    return <main className="checkout-layout"><AsyncState status="loading" title="Loading checkout" /></main>
+    return <CheckoutState action={<Link className="ui-button ui-button--secondary" to={publicEventPath(eventId)}>Return to event</Link>} description="Choose an available ticket to continue." status="empty" title="This ticket is unavailable" />
   }
 
   const errors = [fieldErrors.buyerName, fieldErrors.buyerEmail, serverError].filter((value): value is string => value !== undefined && value !== null)
@@ -195,10 +227,10 @@ export function CheckoutPage({ assignCheckout = assignHostedCheckout }: Checkout
         <form className="checkout-form" noValidate onSubmit={(event) => void submit(event)}>
           <FormErrorSummary errors={errors} title="Check your details" />
           <Field error={fieldErrors.buyerName} label="Your name" name="buyer-name">
-            <input autoComplete="name" disabled={disabled} onChange={(event) => setBuyerName(event.target.value)} value={buyerName} />
+            <input autoComplete="name" disabled={disabled} onChange={(event) => setBuyerName(event.target.value)} ref={buyerNameRef} value={buyerName} />
           </Field>
           <Field error={fieldErrors.buyerEmail} label="Email address" name="buyer-email">
-            <input autoComplete="email" disabled={disabled} inputMode="email" onChange={(event) => setBuyerEmail(event.target.value)} type="email" value={buyerEmail} />
+            <input autoComplete="email" disabled={disabled} inputMode="email" onChange={(event) => setBuyerEmail(event.target.value)} ref={buyerEmailRef} type="email" value={buyerEmail} />
           </Field>
           <Button disabled={disabled} type="submit">{disabled ? 'Opening secure payment…' : 'Continue to secure payment'}</Button>
         </form>

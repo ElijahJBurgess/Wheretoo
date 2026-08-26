@@ -25,6 +25,8 @@ import { CheckoutPage } from './CheckoutPage'
 const eventId = 'eb0fd9d5-d7d5-45dd-a99f-0c8a191bdc6f'
 const tierId = '900a9142-9111-4f87-84d5-b8545a94c7fb'
 const otherTierId = '6b849fa0-4d5e-4faa-bf31-b169cb1bd7fe'
+const nextEventId = '10823f25-2860-4b63-968c-749e8047561d'
+const nextTierId = '18a23f25-2860-4b63-968c-749e8047561d'
 
 const publicEvent: PublicTicketingEvent = {
   event: {
@@ -96,6 +98,25 @@ describe('CheckoutPage', () => {
     expect(screen.queryByText(/platform fee|destination|stripe account|order id/i)).not.toBeInTheDocument()
   })
 
+  it('gives the standalone loading state one semantic heading and a live loading role', () => {
+    useCheckoutPublicEvent.mockReturnValue({ data: undefined, isPending: true, isError: false, refetch })
+    renderCheckout()
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Loading checkout' })).toBeInTheDocument()
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
+    expect(screen.getByRole('status')).toBeInTheDocument()
+  })
+
+  it('gives the standalone load error one semantic heading, alert role, and return control', () => {
+    useCheckoutPublicEvent.mockReturnValue({ data: undefined, isPending: false, isError: true, refetch })
+    renderCheckout()
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Checkout could not load' })).toBeInTheDocument()
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
+    expect(screen.getByRole('alert')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Return to event' })).toHaveAttribute('href', `/events/${eventId}`)
+  })
+
   it.each([
     `/events/${eventId}/checkout`,
     `/events/${eventId}/checkout?tier=not-a-uuid`,
@@ -113,6 +134,12 @@ describe('CheckoutPage', () => {
     await user.click(screen.getByRole('button', { name: 'Continue to secure payment' }))
     expect(screen.getAllByRole('alert')[0]).toHaveTextContent('Enter your name')
     expect(screen.getAllByRole('alert')[0]).toHaveTextContent('Enter a valid email address')
+    expect(screen.getByLabelText('Your name')).toHaveFocus()
+
+    await user.tab()
+    expect(screen.getByLabelText('Email address')).toHaveFocus()
+    await user.tab()
+    expect(screen.getByRole('button', { name: 'Continue to secure payment' })).toHaveFocus()
 
     await user.type(screen.getByLabelText('Your name'), ' Avery Stone ')
     await user.type(screen.getByLabelText('Email address'), 'AVERY@EXAMPLE.COM')
@@ -213,6 +240,34 @@ describe('CheckoutPage', () => {
     await user.click(screen.getByRole('button', { name: 'Continue to secure payment' }))
     await act(async () => { await router.navigate(`/events/${eventId}`) })
     expect(screen.getByText('Public event destination')).toBeInTheDocument()
+    resolveCheckout('https://checkout.stripe.com/c/pay/cs_test_123')
+
+    await Promise.resolve()
+    expect(assign).not.toHaveBeenCalled()
+  })
+
+  it('does not redirect an old request after a committed checkout-to-checkout route change', async () => {
+    const user = userEvent.setup()
+    const assign = vi.fn()
+    let resolveCheckout!: (url: string) => void
+    createCheckout.mockReturnValue(new Promise<string>((resolve) => { resolveCheckout = resolve }))
+    useCheckoutPublicEvent.mockImplementation((queriedEventId: string) => ({
+      data: {
+        ...publicEvent,
+        event: { ...publicEvent.event, id: queriedEventId, title: queriedEventId === nextEventId ? 'Later Market' : 'Night Market' },
+        tiers: [{ ...publicEvent.tiers[0], id: queriedEventId === nextEventId ? nextTierId : tierId }],
+      },
+      isPending: false,
+      isError: false,
+      refetch,
+    }))
+    const { router } = renderCheckout(undefined, assign)
+    await user.type(screen.getByLabelText('Your name'), 'Avery Stone')
+    await user.type(screen.getByLabelText('Email address'), 'avery@example.com')
+    await user.click(screen.getByRole('button', { name: 'Continue to secure payment' }))
+
+    await act(async () => { await router.navigate(`/events/${nextEventId}/checkout?tier=${nextTierId}`) })
+    expect(screen.getByText('Later Market')).toBeInTheDocument()
     resolveCheckout('https://checkout.stripe.com/c/pay/cs_test_123')
 
     await Promise.resolve()
