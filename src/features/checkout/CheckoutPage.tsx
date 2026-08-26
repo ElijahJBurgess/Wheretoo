@@ -89,6 +89,7 @@ export function CheckoutPage({ assignCheckout = assignHostedCheckout }: Checkout
   const cancelToken = new URLSearchParams(location.search).get('cancel')
   const tierIdResult = lowercaseRfcUuidSchema.safeParse(new URLSearchParams(location.search).get('tier') ?? '')
   const tierId = tierIdResult.success ? tierIdResult.data : ''
+  const checkoutIdentity = `${eventId}:${tierId}`
   const eventQuery = useCheckoutPublicEvent(eventId)
   const [buyerName, setBuyerName] = useState('')
   const [buyerEmail, setBuyerEmail] = useState('')
@@ -101,6 +102,8 @@ export function CheckoutPage({ assignCheckout = assignHostedCheckout }: Checkout
   const buyerNameRef = useRef<HTMLInputElement>(null)
   const buyerEmailRef = useRef<HTMLInputElement>(null)
   const routeKeyRef = useRef(location.key)
+  const checkoutIdentityRef = useRef(checkoutIdentity)
+  const activeAttemptRef = useRef<symbol | null>(null)
   const cancellationRef = useRef<{ token: string; promise: Promise<void> } | null>(null)
 
   useEffect(() => {
@@ -110,7 +113,17 @@ export function CheckoutPage({ assignCheckout = assignHostedCheckout }: Checkout
 
   useLayoutEffect(() => {
     routeKeyRef.current = location.key
-  }, [location.key])
+    if (checkoutIdentityRef.current === checkoutIdentity) return
+    checkoutIdentityRef.current = checkoutIdentity
+    activeAttemptRef.current = null
+    submissionLockRef.current = false
+    focusInvalidRef.current = false
+    setBuyerName('')
+    setBuyerEmail('')
+    setFieldErrors({})
+    setServerError(null)
+    setIsSubmitting(false)
+  }, [checkoutIdentity, location.key])
 
   useLayoutEffect(() => {
     if (!focusInvalidRef.current) return
@@ -170,6 +183,8 @@ export function CheckoutPage({ assignCheckout = assignHostedCheckout }: Checkout
     }
 
     submissionLockRef.current = true
+    const attempt = Symbol('checkout-attempt')
+    activeAttemptRef.current = attempt
     const routeKey = location.key
     const clientRequestId = crypto.randomUUID().toLowerCase()
     setFieldErrors({})
@@ -177,16 +192,19 @@ export function CheckoutPage({ assignCheckout = assignHostedCheckout }: Checkout
     setIsSubmitting(true)
     try {
       const checkoutUrl = await createCheckout({ ...validation.data, clientRequestId })
-      if (!mountedRef.current || routeKeyRef.current !== routeKey || !isStripeCheckoutUrl(checkoutUrl)) return
+      if (activeAttemptRef.current !== attempt || !mountedRef.current || routeKeyRef.current !== routeKey || !isStripeCheckoutUrl(checkoutUrl)) return
       assignCheckout(checkoutUrl)
     } catch (error) {
-      if (mountedRef.current && routeKeyRef.current === routeKey) {
+      if (activeAttemptRef.current === attempt && mountedRef.current && routeKeyRef.current === routeKey) {
         setServerError(errorMessage(error))
         if (shouldRefreshAvailability(error)) void eventQuery.refetch()
       }
     } finally {
-      if (mountedRef.current && routeKeyRef.current === routeKey) setIsSubmitting(false)
-      submissionLockRef.current = false
+      if (activeAttemptRef.current === attempt) {
+        activeAttemptRef.current = null
+        submissionLockRef.current = false
+        if (mountedRef.current && routeKeyRef.current === routeKey) setIsSubmitting(false)
+      }
     }
   }
 

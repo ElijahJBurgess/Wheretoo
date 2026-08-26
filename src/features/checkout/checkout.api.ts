@@ -60,7 +60,6 @@ export function isStripeCheckoutUrl(value: string): boolean {
       url.username === '' &&
       url.password === '' &&
       url.search === '' &&
-      url.hash === '' &&
       /^\/c\/pay\/cs_test_[A-Za-z0-9]+$/.test(url.pathname)
   } catch {
     return false

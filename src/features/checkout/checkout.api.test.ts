@@ -42,7 +42,6 @@ describe('checkout API', () => {
     'http://checkout.stripe.com/c/pay/cs_test_123',
     'https://checkout.stripe.com:444/c/pay/cs_test_123',
     'https://buyer@checkout.stripe.com/c/pay/cs_test_123',
-    'https://checkout.stripe.com/c/pay/cs_test_123#fragment',
     'https://checkout.stripe.com/c/pay/cs_test_123?unexpected=query',
     'https://checkout.stripe.com/other/cs_test_123',
     'https://checkout.stripe.com.evil.example/c/pay/cs_test_123',
@@ -61,8 +60,9 @@ describe('checkout API', () => {
     })).rejects.toEqual(new CheckoutApiError('CHECKOUT_UNAVAILABLE'))
   })
 
-  it('accepts only the approved normalized Stripe Checkout payment path', async () => {
-    invoke.mockResolvedValue({ data: { checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_Abc123' }, error: null })
+  it('accepts the documented Stripe Checkout URL path with an opaque fragment without inspecting it', async () => {
+    const checkoutUrl = 'https://checkout.stripe.com/c/pay/cs_test_Abc123#fidkdWxOYHwnPyd1blpxYHZxWjA0S0RFVVxMa2pybGRnX2FfYGdqJz9nY2xtY2Bi'
+    invoke.mockResolvedValue({ data: { checkoutUrl }, error: null })
 
     await expect(createCheckout({
       eventId,
@@ -71,7 +71,7 @@ describe('checkout API', () => {
       buyerEmail: 'avery@example.com',
       clientRequestId: requestId,
       quantity: 1,
-    })).resolves.toBe('https://checkout.stripe.com/c/pay/cs_test_Abc123')
+    })).resolves.toBe(checkoutUrl)
   })
 
   it('maps only documented server codes and suppresses raw function failures', async () => {
