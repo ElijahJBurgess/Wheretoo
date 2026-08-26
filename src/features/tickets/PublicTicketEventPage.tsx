@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useState, type ReactNode } from 'react'
+import { useLayoutEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { AsyncState } from '../../components/ui/AsyncState'
 import { Button } from '../../components/ui/Button'
@@ -79,19 +79,52 @@ type PublicTicketPurchaseProps = {
   tiers: PublicTicketTierTuple
 }
 
+type TicketSelectionStore = {
+  getSnapshot: () => string | null
+  invalidate: (tierId: string) => void
+  select: (tierId: string) => void
+  subscribe: (listener: () => void) => () => void
+}
+
+function createTicketSelectionStore(): TicketSelectionStore {
+  let selectedTierId: string | null = null
+  const listeners = new Set<() => void>()
+
+  function notify() {
+    listeners.forEach((listener) => listener())
+  }
+
+  function replaceSelection(nextTierId: string | null) {
+    if (selectedTierId === nextTierId) return
+    selectedTierId = nextTierId
+    notify()
+  }
+
+  return {
+    getSnapshot: () => selectedTierId,
+    invalidate: (tierId) => {
+      if (selectedTierId === tierId) replaceSelection(null)
+    },
+    select: (tierId) => replaceSelection(tierId),
+    subscribe: (listener) => {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+  }
+}
+
 function PublicTicketPurchase({ eventId, tiers }: PublicTicketPurchaseProps) {
   const navigate = useNavigate()
-  const [selectedTierId, setSelectedTierId] = useState<string | null>(null)
+  const [selectionStore] = useState(createTicketSelectionStore)
+  const selectedTierId = useSyncExternalStore(selectionStore.subscribe, selectionStore.getSnapshot)
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (selectedTierId === null) return
     const selectedTier = tiers.find((tier) => tier.id === selectedTierId)
     if (selectedTier?.availability_status !== 'available') {
-      startTransition(() => {
-        setSelectedTierId((currentTierId) => currentTierId === selectedTierId ? null : currentTierId)
-      })
+      selectionStore.invalidate(selectedTierId)
     }
-  }, [selectedTierId, tiers])
+  }, [selectedTierId, selectionStore, tiers])
 
   const selectedTier = tiers.find(
     (tier) => tier.id === selectedTierId && tier.availability_status === 'available',
@@ -99,7 +132,7 @@ function PublicTicketPurchase({ eventId, tiers }: PublicTicketPurchaseProps) {
   const hasAvailableTier = tiers.some((tier) => tier.availability_status === 'available')
 
   function selectTier(tierId: string) {
-    setSelectedTierId(tierId)
+    selectionStore.select(tierId)
   }
 
   function continueToCheckout() {

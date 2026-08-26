@@ -4,6 +4,12 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PublicTicketingEvent } from './ticket.types'
 
+const { startTransition } = vi.hoisted(() => ({ startTransition: vi.fn((callback: () => void) => callback()) }))
+vi.mock('react', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('react')>()),
+  startTransition,
+}))
+
 const { usePublicTicketingEvent } = vi.hoisted(() => ({ usePublicTicketingEvent: vi.fn() }))
 vi.mock('./publicTicketing.queries', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./publicTicketing.queries')>()),
@@ -65,6 +71,7 @@ function renderPage() {
 describe('PublicTicketEventPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    startTransition.mockImplementation((callback: () => void) => callback())
     usePublicTicketingEvent.mockReturnValue({ data: publicEvent, isPending: false, isError: false, refetch: vi.fn() })
   })
 
@@ -152,6 +159,27 @@ describe('PublicTicketEventPage', () => {
 
     expect(screen.getByRole('radio', { name: /General admission/i })).toBeChecked()
     expect(screen.getByRole('button', { name: 'Continue to checkout' })).toBeEnabled()
+  })
+
+  it('clears selected-tier availability urgently before a rapid sold-out to available update', async () => {
+    const user = userEvent.setup()
+    const { router } = renderPage()
+    await user.click(screen.getByRole('radio', { name: /General admission/i }))
+    startTransition.mockImplementation(() => undefined)
+
+    usePublicTicketingEvent.mockReturnValue({
+      data: { ...publicEvent, tiers: [{ ...publicEvent.tiers[0], availability_status: 'sold_out' }] },
+      isPending: false,
+      isError: false,
+      refetch: vi.fn(),
+    })
+    await act(async () => { await router.navigate(`/events/${eventId}?refresh=rapid-sold-out`) })
+
+    usePublicTicketingEvent.mockReturnValue({ data: publicEvent, isPending: false, isError: false, refetch: vi.fn() })
+    await act(async () => { await router.navigate(`/events/${eventId}?refresh=rapid-available`) })
+
+    expect(screen.getByRole('radio', { name: /General admission/i })).not.toBeChecked()
+    expect(screen.getByRole('button', { name: 'Continue to checkout' })).toBeDisabled()
   })
 
   it('uses one local Los Angeles date when the event begins and ends on that date', () => {
