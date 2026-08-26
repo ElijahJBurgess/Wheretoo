@@ -66,6 +66,7 @@ export function PublishedEventPage() {
       ? { label: 'Removed', copy: 'This event has been removed from public discovery.' }
       : null
   const heading = isPublished ? 'Published' : event.status === 'cancelled' ? 'Cancelled' : 'Event unavailable'
+  const canSetUpPaidTickets = isPublic && event.admission_type === 'free'
 
   return (
     <section aria-labelledby="published-event-title" className="published-event">
@@ -86,6 +87,7 @@ export function PublishedEventPage() {
       </div>
       <EventSummary event={event} organizer={organizer} />
       <footer className="published-event__actions">
+        {canSetUpPaidTickets ? <Link className="ui-button ui-button--primary" to={`/organizer/events/${event.id}/tickets`}>Set up paid tickets</Link> : null}
         <Link className="ui-button ui-button--secondary" to="/organizer/events">Back to events</Link>
       </footer>
     </section>

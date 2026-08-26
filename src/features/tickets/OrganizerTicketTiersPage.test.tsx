@@ -54,6 +54,23 @@ describe('OrganizerTicketTiersPage', () => {
     expect(screen.queryByText(/private table detail/)).not.toBeInTheDocument()
   })
 
+  it('keeps a locked tier capacity, suppresses the raw failure, and allows a retry', async () => {
+    const user = userEvent.setup()
+    saveMutate
+      .mockRejectedValueOnce({ message: 'TIER_LOCKED_AFTER_SALE', details: 'private order count' })
+      .mockResolvedValueOnce([tier])
+    renderPage()
+    const capacity = screen.getByLabelText('Capacity')
+    await user.clear(capacity)
+    await user.type(capacity, '79')
+    await user.click(screen.getByRole('button', { name: 'Save ticket tiers' }))
+    expect(await screen.findByText('This tier already has ticket activity, so its capacity cannot be reduced.')).toBeInTheDocument()
+    expect(capacity).toHaveValue(79)
+    expect(screen.queryByText(/private order count|TIER_LOCKED_AFTER_SALE/)).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Save ticket tiers' }))
+    await waitFor(() => expect(saveMutate).toHaveBeenCalledTimes(2))
+  })
+
   it('guides incomplete Connect setup to payments and never renders a fee editor', () => {
     useConnectStatus.mockReturnValue({ data: { status: 'action_required', requirements_currently_due_count: 1, requirements_past_due_count: 0, last_status_code: 'requirements_due', last_synced_at: '2026-08-25T12:00:00.000Z' }, isPending: false })
     renderPage()
@@ -110,17 +127,22 @@ describe('OrganizerTicketTiersPage', () => {
     expect(saveMutate.mock.calls[0]?.[0]?.[1]).not.toHaveProperty('id')
   })
 
-  it('allows an owned published free event to configure tiers and preserves published identity through activation', async () => {
+  it('navigates only after the returned published-free conversion row retains its ID and first publication time', async () => {
     const user = userEvent.setup()
-    const publishedFree = { ...event, status: 'published', admission_type: 'free', published_at: '2026-08-25T08:00:00.000Z' } as const
+    const publishedAt = '2026-08-25T08:00:00.000Z'
+    const publishedFree = { ...event, status: 'published', admission_type: 'free', published_at: publishedAt } as const
+    const converted = { ...publishedFree, admission_type: 'paid', published_at: publishedAt }
+    let resolveActivation!: (value: typeof converted) => void
     useOwnedEvent.mockReturnValue({ data: publishedFree, isPending: false, isError: false, refetch: vi.fn() })
-    activateMutate.mockResolvedValue({ ...publishedFree, admission_type: 'paid' })
+    activateMutate.mockReturnValue(new Promise<typeof converted>((resolve) => { resolveActivation = resolve }))
     const { router } = renderPage()
     expect(screen.getByRole('heading', { name: 'Ticket tiers' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Activate paid sales' }))
-    await waitFor(() => expect(activateMutate).toHaveBeenCalledWith('event-1'))
+    expect(router.state.location.pathname).toBe('/organizer/events/event-1/tickets')
+    await act(async () => { resolveActivation(converted) })
+    await waitFor(() => expect(activateMutate).toHaveBeenCalledWith(converted.id))
     expect(router.state.location.pathname).toBe('/organizer/events/event-1')
-    expect(publishedFree.published_at).toBe('2026-08-25T08:00:00.000Z')
+    expect(converted).toMatchObject({ id: publishedFree.id, published_at: publishedAt })
   })
 
   it('normalizes an owned-tier RPC EVENT_NOT_FOUND response to the safe missing state', () => {

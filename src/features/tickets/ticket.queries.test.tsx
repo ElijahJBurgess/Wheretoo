@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook } from '@testing-library/react'
 import type { PropsWithChildren } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { eventKeys } from '../events/event.queries'
 
 const { activatePaidSales, listOwnedTicketTiers, saveTicketTiers } = vi.hoisted(() => ({
   activatePaidSales: vi.fn(), listOwnedTicketTiers: vi.fn(), saveTicketTiers: vi.fn(),
@@ -35,6 +36,21 @@ describe('ticket query contracts', () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ticketKeys.owned('organizer-1', 'event-1'), exact: true })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ticketKeys.public('event-1'), exact: true })
     expect(client.getQueryData(ticketKeys.owned('organizer-2', 'event-1'))).toBe('other organizer tiers')
+  })
+
+  it('uses the returned published-free conversion row to preserve the event ID and first publication time in cache', async () => {
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
+    const publishedAt = '2026-08-25T08:00:00.000Z'
+    const conversion = { ...event, admission_type: 'paid', published_at: publishedAt }
+    client.setQueryData(eventKeys.detail('organizer-1', 'event-1'), { ...event, admission_type: 'free', published_at: publishedAt })
+    activatePaidSales.mockResolvedValue(conversion)
+    const { result } = renderHook(() => useActivatePaidSales('organizer-1'), { wrapper: wrapper(client) })
+
+    await act(async () => { await result.current.mutateAsync('event-1') })
+
+    expect(client.getQueryData(eventKeys.detail('organizer-1', 'event-1'))).toMatchObject({
+      id: 'event-1', admission_type: 'paid', published_at: publishedAt,
+    })
   })
 
   it('does not seed or invalidate data when activation returns a different owner', async () => {

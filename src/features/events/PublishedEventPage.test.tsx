@@ -33,6 +33,7 @@ function renderPage(
   const router = createMemoryRouter([
     { path: '/organizer/events/:eventId', element: <PublishedEventPage /> },
     { path: '/organizer/events/:eventId/edit', element: <p>edit destination</p> },
+    { path: '/organizer/events/:eventId/tickets', element: <p>ticket setup destination</p> },
     { path: '/organizer/events', element: <p>events destination</p> },
   ], { initialEntries: ['/organizer/events/event-1'] })
   return { router, ...render(<RouterProvider router={router} />) }
@@ -55,7 +56,8 @@ describe('PublishedEventPage', () => {
     expect(screen.getByRole('heading', { level: 3, name: 'About this event' })).toBeInTheDocument()
     expect(screen.getByText('Published August 24, 2026 at 9:00 AM')).toBeInTheDocument()
     expect(screen.getByText('This event is publicly available.')).toBeInTheDocument()
-    expect(screen.queryByText(/map|tickets|checkout/i)).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Set up paid tickets' })).toHaveAttribute('href', '/organizer/events/event-1/tickets')
+    expect(screen.queryByText(/map|checkout/i)).not.toBeInTheDocument()
   })
 
   it.each(['flagged'] as const)('keeps %s events publicly available without adding an approval state', (moderationStatus) => {
@@ -63,7 +65,20 @@ describe('PublishedEventPage', () => {
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
     expect(screen.getByRole('heading', { level: 1, name: 'Published' })).toBeInTheDocument()
     expect(screen.getByText('This event is publicly available.')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Set up paid tickets' })).toHaveAttribute('href', '/organizer/events/event-1/tickets')
     expect(screen.queryByText(/pending review|awaiting approval/i)).not.toBeInTheDocument()
+  })
+
+  it('takes an owned published-free event to paid ticket setup without exposing an action to public viewers', async () => {
+    const user = userEvent.setup()
+    const { router } = renderPage({ ...event, admission_type: 'free' })
+
+    const setup = screen.getByRole('link', { name: 'Set up paid tickets' })
+    expect(setup).toHaveAttribute('href', '/organizer/events/event-1/tickets')
+    await user.click(setup)
+
+    expect(await screen.findByText('ticket setup destination')).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe('/organizer/events/event-1/tickets')
   })
 
   it.each([
@@ -73,6 +88,7 @@ describe('PublishedEventPage', () => {
     renderPage({ ...event, moderation_status: moderationStatus })
     expect(screen.getByText(label, { selector: '.event-operational-state' })).toBeInTheDocument()
     expect(screen.getByText(copy)).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Set up paid tickets' })).not.toBeInTheDocument()
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
     expect(screen.getByRole('heading', { level: 1, name: 'Published' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 2, name: 'Friday Night Makers' })).toBeInTheDocument()

@@ -52,6 +52,14 @@ describe('owned ticket tier API', () => {
     rpc.mockResolvedValueOnce({ data: null, error: null })
     await expect(activatePaidSales(eventId)).rejects.toThrow('Paid sales activation did not return an event')
   })
+
+  it('returns the exact server activation row without replacing an existing publication timestamp', async () => {
+    const publishedAt = '2026-08-25T08:00:00.000Z'
+    const conversion = { id: eventId, organizer_id: 'organizer-1', status: 'published', admission_type: 'paid', published_at: publishedAt }
+    rpc.mockResolvedValue({ data: conversion, error: null })
+
+    await expect(activatePaidSales(eventId)).resolves.toEqual(conversion)
+  })
 })
 
 describe('usdToMinor', () => {

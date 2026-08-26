@@ -40,6 +40,7 @@ export function useActivatePaidSales(organizerId: string) {
       if (event.id !== requestedEventId || event.organizer_id !== organizerId) {
         throw new Error('Organizer identity changed')
       }
+      queryClient.setQueryData(eventKeys.detail(organizerId, requestedEventId), event)
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: eventKeys.ownedList(organizerId), exact: true }),
         queryClient.invalidateQueries({ queryKey: eventKeys.detail(organizerId, requestedEventId), exact: true }),
