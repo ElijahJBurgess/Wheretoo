@@ -5,10 +5,17 @@ import {
   assertStrictEquals,
   assertThrows,
 } from "@std/assert";
+import type Stripe from "stripe";
 import { type OrganizerAuthDependencies, requireOrganizer } from "./auth.ts";
 import { getCorsHeaders, handleCorsPreflight } from "./cors.ts";
 import { deriveConnectStatus } from "./connectState.ts";
-import { validateStripeRestrictedKey } from "./env.ts";
+import { getServiceClient } from "./database.ts";
+import {
+  getAppBaseUrl,
+  getStripeWebhookSecret,
+  getSupabaseServiceConfig,
+  validateStripeRestrictedKey,
+} from "./env.ts";
 import { HttpError } from "./http.ts";
 import {
   getStripe,
@@ -21,6 +28,81 @@ const TEST_APP_ORIGIN = "https://whereto.example";
 
 function testRestrictedKey(): string {
   return ["rk", "test", "unitboundary123"].join("_");
+}
+
+type RecipientConfiguration = NonNullable<
+  NonNullable<Stripe.V2.Core.Account["configuration"]>["recipient"]
+>;
+type StripeBalanceCapabilities = NonNullable<
+  NonNullable<RecipientConfiguration["capabilities"]>["stripe_balance"]
+>;
+type TransferCapability = NonNullable<
+  StripeBalanceCapabilities["stripe_transfers"]
+>;
+type PayoutCapability = NonNullable<StripeBalanceCapabilities["payouts"]>;
+type RequirementEntry = Stripe.V2.Core.Account.Requirements.Entry;
+
+interface AccountFixtureOptions {
+  id?: string;
+  closed?: boolean;
+  recipientApplied?: boolean;
+  appliedConfigurations?: Stripe.V2.Core.Account["applied_configurations"];
+  transferStatus?: TransferCapability["status"];
+  payoutStatus?: PayoutCapability["status"];
+  transferStatusDetails?: TransferCapability["status_details"];
+  payoutStatusDetails?: PayoutCapability["status_details"];
+  requirements?: RequirementEntry[];
+}
+
+function accountFixture(
+  options: AccountFixtureOptions = {},
+): Stripe.V2.Core.Account {
+  return {
+    id: options.id ?? "acct_testboundary",
+    object: "v2.core.account",
+    applied_configurations: options.appliedConfigurations ?? ["recipient"],
+    closed: options.closed,
+    configuration: {
+      recipient: {
+        applied: options.recipientApplied ?? true,
+        capabilities: {
+          stripe_balance: {
+            stripe_transfers: {
+              status: options.transferStatus ?? "active",
+              status_details: options.transferStatusDetails ?? [],
+            },
+            payouts: {
+              status: options.payoutStatus ?? "active",
+              status_details: options.payoutStatusDetails ?? [],
+            },
+          },
+        },
+      },
+    },
+    created: "2026-08-25T00:00:00.000Z",
+    livemode: false,
+    requirements: { entries: options.requirements ?? [] },
+  };
+}
+
+function requirementEntry(
+  awaitingActionFrom: RequirementEntry["awaiting_action_from"],
+  deadlineStatus: RequirementEntry["minimum_deadline"]["status"],
+): RequirementEntry {
+  return {
+    awaiting_action_from: awaitingActionFrom,
+    description: "Complete account verification",
+    errors: [],
+    impact: {},
+    minimum_deadline: { status: deadlineStatus },
+    requested_reasons: [{ code: "routine_onboarding" }],
+  };
+}
+
+function envReader(
+  values: Readonly<Record<string, string>>,
+): (name: string) => string | undefined {
+  return (name) => values[name];
 }
 
 Deno.test("server Stripe env accepts only a non-empty restricted test key", () => {
@@ -46,6 +128,80 @@ Deno.test("server Stripe env accepts only a non-empty restricted test key", () =
       Error,
       "Stripe server credentials must be a restricted test key",
     );
+  }
+});
+
+Deno.test("application origin env accepts one exact HTTP origin only", () => {
+  const exactOrigin = "https://app.whereto.example";
+  assertEquals(
+    getAppBaseUrl(envReader({ APP_BASE_URL: exactOrigin })),
+    exactOrigin,
+  );
+
+  for (
+    const rejected of [
+      `${exactOrigin}/`,
+      `${exactOrigin}/path`,
+      "javascript:alert(1)",
+      "",
+    ]
+  ) {
+    assertThrows(() => getAppBaseUrl(envReader({ APP_BASE_URL: rejected })));
+  }
+});
+
+Deno.test("Supabase service env returns only its configured server boundary", () => {
+  const url = "https://project.supabase.example";
+  const serviceRoleKey = ["service", "role", "unitboundary"].join("-");
+  const read = envReader({
+    SUPABASE_URL: url,
+    SUPABASE_SERVICE_ROLE_KEY: serviceRoleKey,
+  });
+
+  assertEquals(getSupabaseServiceConfig(read), { url, serviceRoleKey });
+  assertThrows(() =>
+    getSupabaseServiceConfig(envReader({ SUPABASE_URL: url }))
+  );
+});
+
+Deno.test("webhook env accepts a non-empty signing secret shape without exposing it", () => {
+  const webhookSecret = ["whsec", "unitboundary123"].join("_");
+  assertEquals(
+    getStripeWebhookSecret(
+      envReader({ STRIPE_WEBHOOK_SECRET: webhookSecret }),
+    ),
+    webhookSecret,
+  );
+
+  for (const rejected of [undefined, "", ["whsec", ""].join("_")]) {
+    assertThrows(() =>
+      getStripeWebhookSecret(
+        envReader(
+          rejected === undefined ? {} : { STRIPE_WEBHOOK_SECRET: rejected },
+        ),
+      )
+    );
+  }
+});
+
+Deno.test("getServiceClient consumes server config once and returns one client", () => {
+  const previousUrl = Deno.env.get("SUPABASE_URL");
+  const previousKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  Deno.env.set("SUPABASE_URL", "https://project.supabase.example");
+  Deno.env.set(
+    "SUPABASE_SERVICE_ROLE_KEY",
+    ["service", "role", "unitboundary"].join("-"),
+  );
+
+  try {
+    const first = getServiceClient();
+    const second = getServiceClient();
+    assertStrictEquals(first, second);
+  } finally {
+    if (previousUrl === undefined) Deno.env.delete("SUPABASE_URL");
+    else Deno.env.set("SUPABASE_URL", previousUrl);
+    if (previousKey === undefined) Deno.env.delete("SUPABASE_SERVICE_ROLE_KEY");
+    else Deno.env.set("SUPABASE_SERVICE_ROLE_KEY", previousKey);
   }
 });
 
@@ -198,47 +354,16 @@ Deno.test("requireOrganizer uses authorization-safe 401 and 404 outcomes", async
 });
 
 Deno.test("deriveConnectStatus uses Accounts v2 recipient capabilities and requirement ownership", () => {
-  const ready = deriveConnectStatus({
-    id: "acct_ready",
-    livemode: false,
-    configuration: {
-      recipient: {
-        capabilities: {
-          stripe_balance: {
-            stripe_transfers: { status: "active", status_details: [] },
-            payouts: { status: "active", status_details: [] },
-          },
-        },
-      },
-    },
-    requirements: { entries: [] },
-  });
-  const actionRequired = deriveConnectStatus({
+  const ready = deriveConnectStatus(accountFixture({ id: "acct_ready" }));
+  const actionRequired = deriveConnectStatus(accountFixture({
     id: "acct_action",
-    livemode: false,
-    configuration: {
-      recipient: {
-        capabilities: {
-          stripe_balance: {
-            stripe_transfers: { status: "pending", status_details: [] },
-            payouts: { status: "pending", status_details: [] },
-          },
-        },
-      },
-    },
-    requirements: {
-      entries: [
-        {
-          awaiting_action_from: "user",
-          minimum_deadline: { status: "currently_due" },
-        },
-        {
-          awaiting_action_from: "user",
-          minimum_deadline: { status: "past_due" },
-        },
-      ],
-    },
-  });
+    transferStatus: "pending",
+    payoutStatus: "pending",
+    requirements: [
+      requirementEntry("user", "currently_due"),
+      requirementEntry("user", "past_due"),
+    ],
+  }));
 
   assertEquals(ready, {
     transfersStatus: "active",
@@ -254,27 +379,15 @@ Deno.test("deriveConnectStatus uses Accounts v2 recipient capabilities and requi
 });
 
 Deno.test("deriveConnectStatus maps unsupported capability state to a safe restricted projection", () => {
-  const projection = deriveConnectStatus({
+  const projection = deriveConnectStatus(accountFixture({
     id: "acct_restricted",
-    livemode: false,
-    configuration: {
-      recipient: {
-        capabilities: {
-          stripe_balance: {
-            stripe_transfers: {
-              status: "unsupported",
-              status_details: [{
-                code: "unsupported_country",
-                resolution: "contact_stripe",
-              }],
-            },
-            payouts: { status: "restricted", status_details: [] },
-          },
-        },
-      },
-    },
-    requirements: { entries: [] },
-  });
+    transferStatus: "unsupported",
+    payoutStatus: "restricted",
+    transferStatusDetails: [{
+      code: "unsupported_country",
+      resolution: "contact_stripe",
+    }],
+  }));
 
   assertEquals(projection.transfersStatus, "restricted");
   assertEquals(projection.payoutsStatus, "restricted");
@@ -283,28 +396,82 @@ Deno.test("deriveConnectStatus maps unsupported capability state to a safe restr
 });
 
 Deno.test("deriveConnectStatus keeps Stripe-owned due verification pending", () => {
-  const projection = deriveConnectStatus({
+  const projection = deriveConnectStatus(accountFixture({
     id: "acct_verifying",
-    livemode: false,
+    requirements: [requirementEntry("stripe", "currently_due")],
+  }));
+
+  assertEquals(projection.requirementsStatus, "pending");
+});
+
+Deno.test("deriveConnectStatus restricts closed or deactivated recipient accounts", () => {
+  for (
+    const account of [
+      accountFixture({ id: "acct_closed", closed: true }),
+      accountFixture({ id: "acct_unapplied", recipientApplied: false }),
+      accountFixture({
+        id: "acct_notapplied",
+        appliedConfigurations: [],
+      }),
+    ]
+  ) {
+    assertEquals(deriveConnectStatus(account), {
+      transfersStatus: "restricted",
+      payoutsStatus: "restricted",
+      requirementsStatus: "restricted",
+      requirementsCurrentlyDueCount: 0,
+      requirementsPastDueCount: 0,
+      lastStatusCode: null,
+    });
+  }
+});
+
+Deno.test("deriveConnectStatus rejects malformed or incomplete Accounts v2 shapes", () => {
+  const wrongObject = {
+    ...accountFixture({ id: "acct_wrong_object" }),
+    object: "account",
+  };
+  const missingCapabilities = accountFixture({ id: "acct_missing_caps" });
+  missingCapabilities.configuration = {
+    recipient: { applied: true },
+  };
+  const missingRequirements = accountFixture({
+    id: "acct_missing_requirements",
+  });
+  delete missingRequirements.requirements;
+  const invalidStatusDetails = {
+    ...accountFixture({ id: "acct_invaliddetail" }),
     configuration: {
       recipient: {
+        applied: true,
         capabilities: {
           stripe_balance: {
-            stripe_transfers: { status: "active", status_details: [] },
+            stripe_transfers: {
+              status: "active",
+              status_details: [{
+                code: "not_a_stripe_status_code",
+                resolution: "no_resolution",
+              }],
+            },
             payouts: { status: "active", status_details: [] },
           },
         },
       },
     },
-    requirements: {
-      entries: [{
-        awaiting_action_from: "stripe",
-        minimum_deadline: { status: "currently_due" },
-      }],
-    },
-  });
+  };
 
-  assertEquals(projection.requirementsStatus, "pending");
+  for (
+    const malformed of [
+      wrongObject,
+      missingCapabilities,
+      missingRequirements,
+      invalidStatusDetails,
+    ]
+  ) {
+    const error = assertThrows(() => deriveConnectStatus(malformed), HttpError);
+    assertEquals(error.status, 502);
+    assertEquals(error.code, "INVALID_STRIPE_ACCOUNT");
+  }
 });
 
 Deno.test("safeErrorResponse emits stable codes without logging or reflecting sensitive context", async () => {
