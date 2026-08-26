@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { startTransition, useEffect, useState, type ReactNode } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { AsyncState } from '../../components/ui/AsyncState'
 import { Button } from '../../components/ui/Button'
@@ -82,10 +82,25 @@ type PublicTicketPurchaseProps = {
 function PublicTicketPurchase({ eventId, tiers }: PublicTicketPurchaseProps) {
   const navigate = useNavigate()
   const [selectedTierId, setSelectedTierId] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (selectedTierId === null) return
+    const selectedTier = tiers.find((tier) => tier.id === selectedTierId)
+    if (selectedTier?.availability_status !== 'available') {
+      startTransition(() => {
+        setSelectedTierId((currentTierId) => currentTierId === selectedTierId ? null : currentTierId)
+      })
+    }
+  }, [selectedTierId, tiers])
+
   const selectedTier = tiers.find(
     (tier) => tier.id === selectedTierId && tier.availability_status === 'available',
   ) ?? null
   const hasAvailableTier = tiers.some((tier) => tier.availability_status === 'available')
+
+  function selectTier(tierId: string) {
+    setSelectedTierId(tierId)
+  }
 
   function continueToCheckout() {
     if (selectedTier === null) return
@@ -101,7 +116,7 @@ function PublicTicketPurchase({ eventId, tiers }: PublicTicketPurchaseProps) {
         <p className="public-event__eyebrow">Tickets</p>
         <h2 id="public-event-tickets">Choose your ticket</h2>
       </div>
-      <TicketTierList onSelect={setSelectedTierId} selectedTierId={selectedTierId} tiers={tiers} />
+      <TicketTierList onSelect={selectTier} selectedTierId={selectedTier?.id ?? null} tiers={tiers} />
       {hasAvailableTier ? null : <p className="public-event__unavailable">Tickets are currently unavailable</p>}
       <Button disabled={selectedTier === null} onClick={continueToCheckout}>Continue to checkout</Button>
     </section>
@@ -152,7 +167,6 @@ export function PublicTicketEventPage() {
           </section>
           <PublicTicketPurchase
             eventId={event.id}
-            key={tiers.map((tier) => `${tier.id}:${tier.availability_status}`).join('|')}
             tiers={tiers}
           />
         </div>

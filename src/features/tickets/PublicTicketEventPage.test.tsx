@@ -124,6 +124,36 @@ describe('PublicTicketEventPage', () => {
     expect(screen.getByRole('radio', { name: /General admission/i })).not.toBeChecked()
   })
 
+  it('preserves a selected available tier when unrelated tiers are added, reordered, or change availability', async () => {
+    const user = userEvent.setup()
+    const { router } = renderPage()
+    await user.click(screen.getByRole('radio', { name: /General admission/i }))
+
+    usePublicTicketingEvent.mockReturnValue({
+      data: {
+        ...publicEvent,
+        tiers: [{
+          ...publicEvent.tiers[1],
+          availability_status: 'available',
+        }, publicEvent.tiers[0], {
+          id: '10823f25-2860-4b63-968c-749e8047561d',
+          name: 'Late entry',
+          description: null,
+          unit_amount_minor: 1_500,
+          currency: 'usd',
+          availability_status: 'sold_out',
+        }],
+      },
+      isPending: false,
+      isError: false,
+      refetch: vi.fn(),
+    })
+    await act(async () => { await router.navigate(`/events/${eventId}?refresh=unrelated-tier-update`) })
+
+    expect(screen.getByRole('radio', { name: /General admission/i })).toBeChecked()
+    expect(screen.getByRole('button', { name: 'Continue to checkout' })).toBeEnabled()
+  })
+
   it('uses one local Los Angeles date when the event begins and ends on that date', () => {
     renderPage()
 
