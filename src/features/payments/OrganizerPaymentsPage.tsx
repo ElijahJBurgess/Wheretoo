@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { AsyncState } from '../../components/ui/AsyncState'
 import { Button } from '../../components/ui/Button'
 import { useSession } from '../auth/SessionProvider'
@@ -54,10 +54,11 @@ export function OrganizerPaymentsPage() {
   const sessionState = useSession()
   const userId = sessionState.status === 'authenticated' ? sessionState.user.id : ''
   const connectQuery = useConnectStatus(userId)
-  const accountSessionMutation = useConnectAccountSession(userId)
+  const accountSessionMutation = useConnectAccountSession()
   const refreshConnectStatus = connectQuery.refetch
   const mutateAccountSession = accountSessionMutation.mutateAsync
   const restoreActionFocusRef = useRef(false)
+  const currentUserIdRef = useRef(userId)
   const actionRef = useCallback((node: HTMLButtonElement | null) => {
     if (node !== null && restoreActionFocusRef.current) {
       node.focus()
@@ -67,45 +68,69 @@ export function OrganizerPaymentsPage() {
   const [embeddedSession, setEmbeddedSession] = useState<EmbeddedConnectSession | null>(null)
   const [embeddedMode, setEmbeddedMode] = useState<'onboarding' | 'management'>('onboarding')
   const [actionError, setActionError] = useState<string | null>(null)
-  const [isOpeningExpress, setIsOpeningExpress] = useState(false)
+  const [accountSessionOwnerId, setAccountSessionOwnerId] = useState<string | null>(null)
+  const [expressLoginOwnerId, setExpressLoginOwnerId] = useState<string | null>(null)
 
-  const refreshAccountSession = useCallback(async () => {
-    const session = await mutateAccountSession()
+  useLayoutEffect(() => {
+    currentUserIdRef.current = userId
+  }, [userId])
+
+  const refreshAccountSession = useCallback(async (initiatingUserId: string) => {
+    const session = await mutateAccountSession(initiatingUserId)
     return session
   }, [mutateAccountSession])
 
-  const handleEmbeddedLoadError = useCallback(() => {
-    setActionError('Secure payment setup could not load. Try again.')
-  }, [])
-
-  const closeEmbeddedPanel = useCallback(() => {
+  const resetEmbeddedPanel = useCallback((errorMessage: string | null) => {
     setEmbeddedSession(null)
-    setActionError(null)
+    setActionError(errorMessage)
     restoreActionFocusRef.current = true
     void Promise.resolve(refreshConnectStatus())
   }, [refreshConnectStatus])
 
+  const closeEmbeddedPanel = useCallback(() => {
+    resetEmbeddedPanel(null)
+  }, [resetEmbeddedPanel])
+
+  const handleEmbeddedLoadError = useCallback(() => {
+    resetEmbeddedPanel('Secure payment setup could not load. Try again.')
+  }, [resetEmbeddedPanel])
+
   async function openEmbeddedPanel() {
+    const initiatingUserId = userId
     setActionError(null)
+    setAccountSessionOwnerId(initiatingUserId)
     try {
-      const session = await refreshAccountSession()
+      const session = await refreshAccountSession(initiatingUserId)
+      if (currentUserIdRef.current !== initiatingUserId) return
       setEmbeddedMode(paymentMode(session.status.status))
-      setEmbeddedSession({ session, userId })
+      setEmbeddedSession({ session, userId: initiatingUserId })
     } catch {
-      setActionError('Payment setup could not be opened. Try again.')
+      if (currentUserIdRef.current === initiatingUserId) {
+        setActionError('Payment setup could not be opened. Try again.')
+      }
+    } finally {
+      if (currentUserIdRef.current === initiatingUserId) {
+        setAccountSessionOwnerId(null)
+      }
     }
   }
 
   async function openExpressLogin() {
+    const initiatingUserId = userId
     setActionError(null)
-    setIsOpeningExpress(true)
+    setExpressLoginOwnerId(initiatingUserId)
     try {
       const url = await getExpressLoginUrl()
+      if (currentUserIdRef.current !== initiatingUserId) return
       window.location.assign(url)
     } catch {
-      setActionError('Stripe Express could not be opened. Try again.')
+      if (currentUserIdRef.current === initiatingUserId) {
+        setActionError('Stripe Express could not be opened. Try again.')
+      }
     } finally {
-      setIsOpeningExpress(false)
+      if (currentUserIdRef.current === initiatingUserId) {
+        setExpressLoginOwnerId(null)
+      }
     }
   }
 
@@ -127,6 +152,8 @@ export function OrganizerPaymentsPage() {
   const status = connectQuery.data
   const copy = paymentCopy[status.status]
   const activeEmbeddedSession = embeddedSession?.userId === userId ? embeddedSession.session : null
+  const isOpeningAccountSession = accountSessionMutation.isPending && accountSessionOwnerId === userId
+  const isOpeningExpress = expressLoginOwnerId === userId
 
   return (
     <section aria-labelledby="organizer-payments-title" className="payments-page">
@@ -153,16 +180,16 @@ export function OrganizerPaymentsPage() {
             mode={embeddedMode}
             onExit={closeEmbeddedPanel}
             onLoadError={handleEmbeddedLoadError}
-            refreshAccountSession={refreshAccountSession}
+            refreshAccountSession={() => refreshAccountSession(userId)}
           />
         ) : (
           <div className="payments-panel__actions">
             <Button
-              disabled={accountSessionMutation.isPending}
+              disabled={isOpeningAccountSession}
               onClick={() => void openEmbeddedPanel()}
               ref={actionRef}
             >
-              {accountSessionMutation.isPending ? 'Opening secure setup…' : copy.action}
+              {isOpeningAccountSession ? 'Opening secure setup…' : copy.action}
             </Button>
             {status.status === 'ready' ? (
               <Button disabled={isOpeningExpress} onClick={() => void openExpressLogin()} variant="secondary">

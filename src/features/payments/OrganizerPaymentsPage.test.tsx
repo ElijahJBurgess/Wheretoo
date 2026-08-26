@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -14,8 +14,11 @@ vi.mock('../auth/SessionProvider', () => ({ useSession }))
 vi.mock('./payment.queries', () => ({ useConnectAccountSession, useConnectStatus }))
 vi.mock('./payment.api', () => ({ getExpressLoginUrl }))
 vi.mock('./ConnectEmbeddedPanel', () => ({
-  ConnectEmbeddedPanel: ({ onExit }: { onExit: () => void }) => (
-    <button onClick={onExit} type="button">Exit embedded setup</button>
+  ConnectEmbeddedPanel: ({ onExit, onLoadError }: { onExit: () => void; onLoadError: () => void }) => (
+    <>
+      <button onClick={onExit} type="button">Exit embedded setup</button>
+      <button onClick={onLoadError} type="button">Report embedded load error</button>
+    </>
   ),
 }))
 
@@ -118,5 +121,69 @@ describe('OrganizerPaymentsPage', () => {
     expect(getExpressLoginUrl).toHaveBeenCalledOnce()
     expect(await screen.findByRole('alert')).toHaveTextContent('Stripe Express could not be opened. Try again.')
     expect(screen.queryByText(/raw account details/i)).not.toBeInTheDocument()
+  })
+
+  it('does not surface a deferred Account Session for organizer A after the active identity becomes B', async () => {
+    const user = userEvent.setup()
+    let resolveSession!: (value: { clientSecret: string; status: typeof baseStatus & { status: 'pending' } }) => void
+    const deferredSession = new Promise<{ clientSecret: string; status: typeof baseStatus & { status: 'pending' } }>((resolve) => {
+      resolveSession = resolve
+    })
+    const mutateAsync = vi.fn().mockReturnValue(deferredSession)
+    useConnectAccountSession.mockReturnValue({ isPending: false, mutateAsync })
+    useConnectStatus.mockReturnValue({ data: { ...baseStatus, status: 'not_started' }, isPending: false, isError: false, refetch })
+    const view = render(<OrganizerPaymentsPage />)
+
+    await user.click(screen.getByRole('button', { name: 'Set up payments' }))
+    expect(mutateAsync).toHaveBeenCalledWith('organizer-1')
+
+    useSession.mockReturnValue({ status: 'authenticated', session: {}, user: { id: 'organizer-2' } })
+    useConnectStatus.mockReturnValue({ data: { ...baseStatus, status: 'ready' }, isPending: false, isError: false, refetch })
+    view.rerender(<OrganizerPaymentsPage />)
+    resolveSession({ clientSecret: 'organizer-a-session', status: { ...baseStatus, status: 'pending' } })
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Manage payment details' })).toBeInTheDocument()
+    })
+    expect(screen.queryByRole('button', { name: 'Exit embedded setup' })).not.toBeInTheDocument()
+    expect(screen.queryByText('organizer-a-session')).not.toBeInTheDocument()
+  })
+
+  it('does not redirect with a deferred Express URL after its initiating organizer signs out', async () => {
+    const user = userEvent.setup()
+    const assign = vi.fn()
+    vi.stubGlobal('window', { location: { assign } })
+    let resolveUrl!: (value: string) => void
+    getExpressLoginUrl.mockReturnValue(new Promise<string>((resolve) => { resolveUrl = resolve }))
+    useConnectStatus.mockReturnValue({ data: { ...baseStatus, status: 'ready' }, isPending: false, isError: false, refetch })
+    const view = render(<OrganizerPaymentsPage />)
+
+    await user.click(screen.getByRole('button', { name: 'Open Stripe Express' }))
+    useSession.mockReturnValue({ status: 'anonymous', session: null, user: null })
+    view.rerender(<OrganizerPaymentsPage />)
+    resolveUrl('https://connect.stripe.com/express/login')
+
+    await Promise.resolve()
+    expect(assign).not.toHaveBeenCalled()
+    vi.unstubAllGlobals()
+  })
+
+  it('unmounts a failed embedded component, returns focus, and exposes a real retry action', async () => {
+    const user = userEvent.setup()
+    const mutateAsync = vi.fn().mockResolvedValue({
+      clientSecret: 'do-not-render-this',
+      status: { ...baseStatus, status: 'pending' },
+    })
+    useConnectStatus.mockReturnValue({ data: { ...baseStatus, status: 'not_started' }, isPending: false, isError: false, refetch })
+    useConnectAccountSession.mockReturnValue({ isPending: false, mutateAsync })
+    render(<OrganizerPaymentsPage />)
+
+    await user.click(screen.getByRole('button', { name: 'Set up payments' }))
+    await user.click(screen.getByRole('button', { name: 'Report embedded load error' }))
+
+    expect(screen.queryByRole('button', { name: 'Report embedded load error' })).not.toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('Secure payment setup could not load. Try again.')
+    expect(screen.getByRole('button', { name: 'Set up payments' })).toHaveFocus()
+    expect(refetch).toHaveBeenCalledOnce()
   })
 })

@@ -42,15 +42,45 @@ describe('payment query contracts', () => {
     const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
     client.setQueryData(paymentKeys.connect('organizer-2'), 'other organizer status')
     createConnectAccountSession.mockResolvedValue({ clientSecret: 'session-secret', status })
-    const { result } = renderHook(() => useConnectAccountSession('organizer-1'), {
+    const { result } = renderHook(() => useConnectAccountSession(), {
       wrapper: createWrapper(client),
     })
 
     await act(async () => {
-      await result.current.mutateAsync()
+      await result.current.mutateAsync('organizer-1')
     })
 
     expect(client.getQueryData(paymentKeys.connect('organizer-1'))).toEqual(status)
     expect(client.getQueryData(paymentKeys.connect('organizer-2'))).toBe('other organizer status')
+  })
+
+  it('keeps a deferred Account Session response on the immutable initiating organizer after an identity switch', async () => {
+    let resolveSession!: (value: { clientSecret: string; status: typeof status }) => void
+    const deferredSession = new Promise<{ clientSecret: string; status: typeof status }>((resolve) => {
+      resolveSession = resolve
+    })
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
+    client.setQueryData(paymentKeys.connect('organizer-b'), 'organizer-b status')
+    createConnectAccountSession.mockReturnValue(deferredSession)
+    const { result, rerender } = renderHook(
+      ({ userId }: { userId: string }) => {
+        void userId
+        return useConnectAccountSession()
+      },
+      { initialProps: { userId: 'organizer-a' }, wrapper: createWrapper(client) },
+    )
+
+    let pending!: Promise<unknown>
+    act(() => {
+      pending = result.current.mutateAsync('organizer-a' as never)
+    })
+    rerender({ userId: 'organizer-b' })
+    resolveSession({ clientSecret: 'session-secret', status })
+    await act(async () => {
+      await pending
+    })
+
+    expect(client.getQueryData(paymentKeys.connect('organizer-a'))).toEqual(status)
+    expect(client.getQueryData(paymentKeys.connect('organizer-b'))).toBe('organizer-b status')
   })
 })

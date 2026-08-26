@@ -373,6 +373,7 @@ h3 {
   min-height: 4.25rem;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 1rem;
   padding-inline: 1rem;
 }
@@ -670,6 +671,7 @@ h3 {
 .payments-panel__actions { display: flex; flex-wrap: wrap; gap: 0.65rem; }
 .payments-panel__error { margin: 0; color: var(--color-danger); font-size: 0.875rem; font-weight: 700; }
 .payments-panel__embedded { min-width: 0; overflow: clip; border-top: 1px solid var(--color-border); padding-top: 1.25rem; }
+.payments-panel__embedded-actions { display: flex; justify-content: flex-end; padding-top: 1rem; }
 
 @media (min-width: 56rem) {
   .event-summary { grid-template-columns: minmax(20rem, 0.82fr) minmax(0, 1.18fr); align-items: stretch; }
@@ -685,6 +687,27 @@ h3 {
 }
 
 @media (max-width: 35.99rem) {
+  .organizer-layout__header {
+    align-items: flex-start;
+    padding-block: 0.75rem;
+  }
+
+  .organizer-layout__header nav {
+    width: 100%;
+  }
+
+  .organizer-layout__nav {
+    width: 100%;
+    justify-content: space-between;
+    gap: 0.25rem;
+  }
+
+  .organizer-layout__nav :is(a, .organizer-layout__sign-out) {
+    min-height: 2.75rem;
+    justify-content: center;
+    padding-inline: 0.5rem;
+  }
+
   .events-index__header,
   .event-editor__masthead {
     align-items: stretch;

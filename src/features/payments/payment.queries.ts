@@ -14,13 +14,16 @@ export function useConnectStatus(userId: string) {
   })
 }
 
-export function useConnectAccountSession(userId: string) {
+export function useConnectAccountSession() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: createConnectAccountSession,
-    onSuccess: (session) => {
-      queryClient.setQueryData(paymentKeys.connect(userId), session.status)
+    mutationFn: async (initiatingUserId: string) => {
+      if (initiatingUserId.length === 0) throw new Error('Missing organizer identity')
+      return createConnectAccountSession()
+    },
+    onSuccess: (session, initiatingUserId) => {
+      queryClient.setQueryData(paymentKeys.connect(initiatingUserId), session.status)
     },
   })
 }
