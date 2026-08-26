@@ -110,6 +110,7 @@ function dependencies(
     expireSession: async () => sessionFixture({ status: "expired" }),
     attachSession: async () => undefined,
     releaseReservation: async () => undefined,
+    nowEpochSeconds: () => 1_787_773_920,
     ...overrides,
   };
 }
@@ -265,15 +266,21 @@ Deno.test("concurrent pre-attach retries send byte-for-byte identical canonical 
   assertEquals(captured[0], captured[1]);
 });
 
-Deno.test("a delayed ambiguous Stripe replay preserves the reservation and retries the exact same request without a duplicate", async () => {
+Deno.test("ambiguous user replays after eighty and two-hundred-forty seconds preserve one valid canonical Stripe request", async () => {
   const captured: Array<{ params: unknown; options: unknown }> = [];
+  const remainingLifetimeSeconds: number[] = [];
+  let nowEpochSeconds = 1_787_773_920;
   let attempts = 0;
   let releases = 0;
   const deps = dependencies({
+    nowEpochSeconds: () => nowEpochSeconds,
     createSession: async (params, options) => {
       captured.push({ params, options });
+      remainingLifetimeSeconds.push(
+        Number(params.expires_at) - nowEpochSeconds,
+      );
       attempts += 1;
-      if (attempts === 1) throw new TypeError("network connection closed");
+      if (attempts < 3) throw new TypeError("network connection closed");
       return sessionFixture();
     },
     releaseReservation: async () => {
@@ -282,13 +289,60 @@ Deno.test("a delayed ambiguous Stripe replay preserves the reservation and retri
   });
 
   const first = await createStripeCreateCheckoutHandler(deps)(request());
-  await new Promise((resolve) => setTimeout(resolve, 1));
+  nowEpochSeconds += 80;
   const second = await createStripeCreateCheckoutHandler(deps)(request());
+  nowEpochSeconds += 160;
+  const third = await createStripeCreateCheckoutHandler(deps)(request());
 
   assertEquals(first.status, 502);
-  assertEquals(second.status, 200);
+  assertEquals(second.status, 502);
+  assertEquals(third.status, 200);
   assertEquals(releases, 0);
+  assertEquals(remainingLifetimeSeconds, [2_280, 2_200, 2_040]);
   assertEquals(captured[0], captured[1]);
+  assertEquals(captured[1], captured[2]);
+});
+
+Deno.test("a pre-attach replay beyond the persisted minimum-lifetime window preserves inventory without sending invalid Stripe params", async () => {
+  let stripeTouched = false;
+  let released = false;
+  const response = await createStripeCreateCheckoutHandler(dependencies({
+    nowEpochSeconds: () => 1_787_774_161,
+    createSession: async () => {
+      stripeTouched = true;
+      return sessionFixture();
+    },
+    releaseReservation: async () => {
+      released = true;
+    },
+  }))(request());
+
+  assertEquals(response.status, 410);
+  assertEquals(await response.json(), {
+    error: { code: "CHECKOUT_EXPIRED" },
+  });
+  assertEquals(stripeTouched, false);
+  assertEquals(released, false);
+});
+
+Deno.test("an undefined retrieve result for a known attached Session preserves inventory", async () => {
+  let expired = false;
+  let released = false;
+  const response = await createStripeCreateCheckoutHandler(dependencies({
+    reserveCheckout: async () => reservation(SESSION_ID),
+    retrieveSession: async () => undefined,
+    expireSession: async () => {
+      expired = true;
+      return sessionFixture({ status: "expired", url: null });
+    },
+    releaseReservation: async () => {
+      released = true;
+    },
+  }))(request());
+
+  assertEquals(response.status, 502);
+  assertEquals(expired, false);
+  assertEquals(released, false);
 });
 
 Deno.test("an invalid open attached Session is verified expired before its inventory is released", async () => {

@@ -21,6 +21,9 @@ import {
   getStripe,
   rejectLiveStripeObject,
   STRIPE_API_VERSION,
+  STRIPE_MAX_NETWORK_RETRIES,
+  STRIPE_REQUEST_ATTEMPT_ENVELOPE_SECONDS,
+  STRIPE_REQUEST_TIMEOUT_MS,
 } from "./stripeClient.ts";
 import { safeErrorResponse } from "./stripeErrors.ts";
 
@@ -215,7 +218,12 @@ Deno.test("getStripe returns one test-key client pinned to the approved API vers
 
     assertStrictEquals(first, second);
     assertEquals(first.getApiField("version"), "2026-07-29.dahlia");
+    assertEquals(first.getApiField("timeout"), 80_000);
+    assertEquals(first.getApiField("maxNetworkRetries"), 2);
     assertEquals(STRIPE_API_VERSION, "2026-07-29.dahlia");
+    assertEquals(STRIPE_REQUEST_TIMEOUT_MS, 80_000);
+    assertEquals(STRIPE_MAX_NETWORK_RETRIES, 2);
+    assertEquals(STRIPE_REQUEST_ATTEMPT_ENVELOPE_SECONDS, 240);
   } finally {
     if (previous === undefined) Deno.env.delete("STRIPE_RESTRICTED_KEY");
     else Deno.env.set("STRIPE_RESTRICTED_KEY", previous);

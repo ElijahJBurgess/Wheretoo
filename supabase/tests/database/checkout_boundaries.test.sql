@@ -9,15 +9,16 @@ select has_function('private', 'checkout_expiry_from', array['timestamp with tim
 
 select is(
   private.checkout_expiry_from('2026-08-26 12:00:00+00'),
-  '2026-08-26 12:32:00+00'::timestamptz,
-  'an exact minute receives the bounded thirty-two-minute maximum'
+  '2026-08-26 12:39:00+00'::timestamptz,
+  'an exact minute receives the bounded thirty-nine-minute maximum'
 );
 
 select cmp_ok(
   private.checkout_expiry_from('2026-08-26 12:00:59.999999+00')
-    - '2026-08-26 12:00:59.999999+00'::timestamptz,
-  '>=', interval '31 minutes',
-  'the worst minute boundary preserves at least one minute above Stripe minimum'
+    - '2026-08-26 12:00:59.999999+00'::timestamptz
+    - interval '30 minutes',
+  '>=', interval '8 minutes',
+  'the worst minute boundary covers one ambiguous call and one full retry envelope'
 );
 
 select has_column('public', 'orders', 'stripe_destination_account_id',

@@ -4,7 +4,10 @@ import { getCorsHeaders, handleCorsPreflight } from "../_shared/cors.ts";
 import { getServiceClient } from "../_shared/database.ts";
 import { getAppBaseUrl } from "../_shared/env.ts";
 import { jsonResponse } from "../_shared/http.ts";
-import { getStripe } from "../_shared/stripeClient.ts";
+import {
+  getStripe,
+  STRIPE_REQUEST_ATTEMPT_ENVELOPE_SECONDS,
+} from "../_shared/stripeClient.ts";
 import {
   ACCOUNT_INCLUDE,
   createAccountRepository,
@@ -20,6 +23,7 @@ const ACCOUNT_PATTERN = /^acct_[A-Za-z0-9]+$/;
 const SESSION_PATTERN = /^cs_test_[A-Za-z0-9]+$/;
 const INTEGRATION_IDENTIFIER_PATTERN = /^whereto_checkout_[a-z]{8}$/;
 const TERMINAL_SESSION_STATUSES = new Set(["complete", "expired"]);
+const STRIPE_MINIMUM_CHECKOUT_LIFETIME_SECONDS = 30 * 60;
 
 export type CheckoutErrorCode =
   | "CHECKOUT_ALREADY_EXISTS"
@@ -100,7 +104,13 @@ export interface StripeCreateCheckoutDependencies {
     expiresAt: string,
   ): Promise<void>;
   releaseReservation(orderId: string, reason: string): Promise<void>;
+  nowEpochSeconds(): number;
 }
+
+type FailureReleaseOrigin =
+  | "attached-session"
+  | "created-session"
+  | "definitive-create-noncreation";
 
 interface ExpectedSession {
   reservation: ReservationSnapshot;
@@ -643,6 +653,7 @@ function defaultDependencies(): StripeCreateCheckoutDependencies {
     expireSession: (sessionId) => stripe.checkout.sessions.expire(sessionId),
     attachSession: defaultAttachSession,
     releaseReservation: defaultReleaseReservation,
+    nowEpochSeconds: () => Math.floor(Date.now() / 1_000),
   };
 }
 
@@ -682,9 +693,11 @@ function isDefinitiveStripeNonCreation(error: unknown): boolean {
 async function releaseAfterFailure(
   dependencies: StripeCreateCheckoutDependencies,
   reservation: ReservationSnapshot,
+  origin: FailureReleaseOrigin,
   sessionValue?: unknown,
 ): Promise<void> {
   if (sessionValue === undefined) {
+    if (origin !== "definitive-create-noncreation") return;
     await dependencies.releaseReservation(
       reservation.orderId,
       "CHECKOUT_CREATION_FAILED",
@@ -737,7 +750,7 @@ export function createStripeCreateCheckoutHandler(
     const headers = getCorsHeaders(request, dependencies.appOrigin);
     let reservation: ReservationSnapshot | undefined;
     let sessionValue: unknown;
-    let shouldRelease = false;
+    let failureReleaseOrigin: FailureReleaseOrigin | undefined;
     try {
       if (!headers.has("access-control-allow-origin")) {
         throw new CheckoutHttpError(403, "CORS_ORIGIN_DENIED");
@@ -801,10 +814,18 @@ export function createStripeCreateCheckoutHandler(
         try {
           validated = validateSession(sessionValue, expected);
         } catch (error) {
-          shouldRelease = true;
+          failureReleaseOrigin = "attached-session";
           throw error;
         }
         return jsonResponse({ checkoutUrl: validated.url }, 200, headers);
+      }
+
+      if (
+        expected.stripeExpiresAt - dependencies.nowEpochSeconds() <
+          STRIPE_MINIMUM_CHECKOUT_LIFETIME_SECONDS +
+            STRIPE_REQUEST_ATTEMPT_ENVELOPE_SECONDS
+      ) {
+        throw new CheckoutHttpError(410, "CHECKOUT_EXPIRED");
       }
 
       const params = createParams(expected);
@@ -813,17 +834,19 @@ export function createStripeCreateCheckoutHandler(
           idempotencyKey: `whereto-checkout-v1:${reservation.orderId}`,
         });
       } catch (error) {
-        shouldRelease = isDefinitiveStripeNonCreation(error);
+        if (isDefinitiveStripeNonCreation(error)) {
+          failureReleaseOrigin = "definitive-create-noncreation";
+        }
         throw new CheckoutHttpError(502, "STRIPE_REQUEST_FAILED");
       }
       try {
         validated = validateSession(sessionValue, expected);
       } catch (error) {
-        shouldRelease = true;
+        failureReleaseOrigin = "created-session";
         throw error;
       }
       if (validated.status !== "open") {
-        shouldRelease = true;
+        failureReleaseOrigin = "created-session";
         throw new CheckoutHttpError(502, "INVALID_STRIPE_SESSION");
       }
       try {
@@ -833,14 +856,19 @@ export function createStripeCreateCheckoutHandler(
           new Date(validated.expiresAt * 1_000).toISOString(),
         );
       } catch (error) {
-        shouldRelease = true;
+        failureReleaseOrigin = "created-session";
         throw error;
       }
       return jsonResponse({ checkoutUrl: validated.url }, 200, headers);
     } catch (error) {
-      if (reservation !== undefined && shouldRelease) {
+      if (reservation !== undefined && failureReleaseOrigin !== undefined) {
         try {
-          await releaseAfterFailure(dependencies, reservation, sessionValue);
+          await releaseAfterFailure(
+            dependencies,
+            reservation,
+            failureReleaseOrigin,
+            sessionValue,
+          );
         } catch {
           return checkoutErrorResponse(
             new CheckoutHttpError(500, "INTERNAL_ERROR"),

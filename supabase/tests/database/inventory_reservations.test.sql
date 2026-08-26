@@ -462,9 +462,9 @@ select results_eq(
 );
 
 select ok(
-  (select checkout_expires_at between clock_timestamp() + interval '30 minutes 45 seconds'
-    and clock_timestamp() + interval '32 minutes' from first_reservation),
-  'reservation persists bounded headroom above Stripe minimum without exceeding thirty-two minutes'
+  (select checkout_expires_at between clock_timestamp() + interval '37 minutes 45 seconds'
+    and clock_timestamp() + interval '39 minutes' from first_reservation),
+  'reservation covers an ambiguous Stripe call plus its user retry envelope'
 );
 
 select results_eq(
