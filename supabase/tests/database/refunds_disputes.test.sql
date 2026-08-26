@@ -2,7 +2,37 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(32);
+select plan(47);
+
+select has_table('public', 'disputes', 'durable Stripe dispute state table exists');
+select col_is_unique(
+  'public', 'disputes', 'stripe_dispute_id',
+  'Stripe dispute ID is a durable uniqueness boundary'
+);
+select has_index('public', 'disputes', 'disputes_order_id_idx', 'order dispute index exists');
+
+select results_eq(
+  $$
+    select relations.relrowsecurity, relations.relforcerowsecurity
+    from pg_catalog.pg_class as relations
+    join pg_catalog.pg_namespace as namespaces on namespaces.oid = relations.relnamespace
+    where namespaces.nspname = 'public' and relations.relname = 'disputes'
+  $$,
+  $$ values (true, true) $$,
+  'durable dispute state enforces row-level security'
+);
+
+select is(
+  (
+    select count(*)
+    from information_schema.role_table_grants
+    where table_schema = 'public'
+      and table_name = 'disputes'
+      and grantee in ('anon', 'authenticated', 'service_role')
+  ),
+  0::bigint,
+  'browser and service roles have no direct durable dispute table privileges'
+);
 
 select results_eq(
   $$
@@ -10,13 +40,13 @@ select results_eq(
       collate "C"
     from unnest(array[
       'private.apply_dispute(text,uuid,text,text,text,bigint,text,text)',
-      'private.apply_refund(text,uuid,text,bigint,text,text,text,boolean,boolean)'
+      'private.apply_refund(text,uuid,text,text,text,bigint,text,text,text,boolean,boolean)'
     ]) as signatures(signature)
   $$,
   $$
     values ((array[
       'private.apply_dispute(text,uuid,text,text,text,bigint,text,text)',
-      'private.apply_refund(text,uuid,text,bigint,text,text,text,boolean,boolean)'
+      'private.apply_refund(text,uuid,text,text,text,bigint,text,text,text,boolean,boolean)'
     ]::text[]) collate "C")
   $$,
   'the private refund and dispute functions have exact signatures'
@@ -31,7 +61,7 @@ select results_eq(
     ]
     from unnest(array[
       'public.server_apply_dispute(text,uuid,text,text,text,bigint,text,text)',
-      'public.server_apply_refund(text,uuid,text,bigint,text,text,text,boolean,boolean)'
+      'public.server_apply_refund(text,uuid,text,text,text,bigint,text,text,text,boolean,boolean)'
     ]) as functions(function_name)
     order by function_name
   $$,
@@ -140,7 +170,8 @@ select results_eq(
     select order_status, ticket_status
     from public.server_apply_refund(
       'evt_partialrefund', (select id from refunded_order),
-      're_partialrefund', 500, 'usd', 'succeeded', 'requested_by_customer',
+      're_partialrefund', 'pi_refundedorder', 'ch_refundedorder',
+      500, 'usd', 'succeeded', 'requested_by_customer',
       true, false
     )
   $$,
@@ -150,16 +181,18 @@ select results_eq(
 
 select results_eq(
   $$
-    select amount_minor, currency, status, reason, reverse_transfer,
+    select stripe_payment_intent_id, stripe_charge_id,
+      amount_minor, currency, status, reason, reverse_transfer,
       refund_application_fee, stripe_event_id, processed_at is not null
     from public.refunds where stripe_refund_id = 're_partialrefund'
   $$,
   $$ values (
+    'pi_refundedorder'::text, 'ch_refundedorder'::text,
     500::bigint, 'usd'::text, 'succeeded'::text,
     'requested_by_customer'::text, true, false,
     'evt_partialrefund'::text, true
   ) $$,
-  'partial refund stores exact Stripe truth and explicit recovery policy'
+  'partial refund stores authoritative payment linkage and explicit recovery policy'
 );
 
 select results_eq(
@@ -167,7 +200,8 @@ select results_eq(
     select order_status, ticket_status
     from public.server_apply_refund(
       'evt_partialrefund', (select id from refunded_order),
-      're_partialrefund', 500, 'usd', 'succeeded', 'requested_by_customer',
+      're_partialrefund', 'pi_refundedorder', 'ch_refundedorder',
+      500, 'usd', 'succeeded', 'requested_by_customer',
       true, false
     )
   $$,
@@ -185,7 +219,8 @@ select throws_ok(
   $$
     select * from public.server_apply_refund(
       'evt_partialrefund', (select id from refunded_order),
-      're_partialrefund', 501, 'usd', 'succeeded', 'requested_by_customer',
+      're_partialrefund', 'pi_refundedorder', 'ch_refundedorder',
+      501, 'usd', 'succeeded', 'requested_by_customer',
       true, false
     )
   $$,
@@ -203,7 +238,8 @@ select results_eq(
     select order_status, ticket_status
     from public.server_apply_refund(
       'evt_finalrefund', (select id from refunded_order),
-      're_finalrefund', 1500, 'usd', 'succeeded', null,
+      're_finalrefund', 'pi_refundedorder', 'ch_refundedorder',
+      1500, 'usd', 'succeeded', null,
       true, true
     )
   $$,
@@ -240,7 +276,8 @@ select throws_ok(
   $$
     select * from public.server_apply_refund(
       'evt_refundoverflow', (select id from refunded_order),
-      're_refundoverflow', 1, 'usd', 'succeeded', null, true, false
+      're_refundoverflow', 'pi_refundedorder', 'ch_refundedorder',
+      1, 'usd', 'succeeded', null, true, false
     )
   $$,
   'P0001', 'REFUND_TOTAL_INVALID',
@@ -263,7 +300,8 @@ select results_eq(
     select order_status, ticket_status
     from public.server_apply_refund(
       'evt_failedrefund', (select id from refunded_order),
-      're_failedrefund', 100, 'usd', 'failed', 'expired_or_canceled_card',
+      're_failedrefund', 'pi_refundedorder', 'ch_refundedorder',
+      100, 'usd', 'failed', 'expired_or_canceled_card',
       true, false
     )
   $$,
@@ -289,7 +327,8 @@ select results_eq(
     select order_status, ticket_status
     from public.server_apply_refund(
       'evt_pendingrefund', (select id from pending_refund_order),
-      're_pendingrefund', 500, 'usd', 'pending', null, true, false
+      're_pendingrefund', 'pi_pendingrefundorder', 'ch_pendingrefundorder',
+      500, 'usd', 'pending', null, true, false
     )
   $$,
   $$ values ('paid'::text, 'valid'::text) $$,
@@ -315,7 +354,8 @@ select results_eq(
     select order_status, ticket_status
     from public.server_apply_refund(
       'evt_pendingrefundsucceeded', (select id from pending_refund_order),
-      're_pendingrefund', 500, 'usd', 'succeeded', null, true, false
+      're_pendingrefund', 'pi_pendingrefundorder', 'ch_pendingrefundorder',
+      500, 'usd', 'succeeded', null, true, false
     )
   $$,
   $$ values ('partially_refunded'::text, 'refunded'::text) $$,
@@ -349,7 +389,8 @@ select results_eq(
     select order_status, ticket_status
     from public.server_apply_refund(
       'evt_stalependingrefund', (select id from pending_refund_order),
-      're_pendingrefund', 500, 'usd', 'pending', null, true, false
+      're_pendingrefund', 'pi_pendingrefundorder', 'ch_pendingrefundorder',
+      500, 'usd', 'pending', null, true, false
     )
   $$,
   $$ values ('partially_refunded'::text, 'refunded'::text) $$,
@@ -380,14 +421,44 @@ values (pg_temp.create_paid_order(
 ));
 
 select * from public.server_record_webhook_receipt(
-  'evt_disputeopened', 'charge.dispute.created', false, 'dp_disputeopened',
+  'evt_crossorderrefund', 'refund.updated', false, 're_1Nispe2eZvKYlo2Cd31jOCgZ',
+  '2025-08-27.basil', '2026-08-25 13:04:59+00', repeat('8', 64)
+);
+
+select throws_ok(
+  $$
+    select * from public.server_apply_refund(
+      'evt_crossorderrefund', (select id from pending_refund_order),
+      're_1Nispe2eZvKYlo2Cd31jOCgZ',
+      'pi_disputedorder', 'ch_disputedorder',
+      500, 'usd', 'succeeded', null, true, false
+    )
+  $$,
+  'P0001', 'REFUND_SNAPSHOT_MISMATCH',
+  'an equal-value refund cannot cross-apply using another order payment linkage'
+);
+
+select results_eq(
+  $$
+    select
+      (select count(*) from public.refunds
+        where stripe_refund_id = 're_1Nispe2eZvKYlo2Cd31jOCgZ'),
+      (select status from public.orders where id = (select id from pending_refund_order))
+  $$,
+  $$ values (0::bigint, 'partially_refunded'::text) $$,
+  'rejected cross-order refund leaves refund and accepted order truth unchanged'
+);
+
+select * from public.server_record_webhook_receipt(
+  'evt_1DisputeOpenAbC', 'charge.dispute.created', false,
+  'du_1MtJUT2eZvKYlo2CNaw2HvEv',
   '2025-08-27.basil', '2026-08-25 13:05:00+00', repeat('1', 64)
 );
 
 select is(
   public.server_apply_dispute(
-    'evt_disputeopened', (select id from disputed_order),
-    'dp_disputeopened', 'ch_disputedorder', 'needs_response',
+    'evt_1DisputeOpenAbC', (select id from disputed_order),
+    'du_1MtJUT2eZvKYlo2CNaw2HvEv', 'ch_disputedorder', 'needs_response',
     2000, 'usd', 'succeeded'
   ),
   (select id from disputed_order),
@@ -402,9 +473,33 @@ select results_eq(
   $$ values (
     'requires_review'::text, 'requires_review'::text,
     'DISPUTE_NEEDS_RESPONSE_RECOVERY_SUCCEEDED'::text,
-    'evt_disputeopened'::text
+    'evt_1DisputeOpenAbC'::text
   ) $$,
   'dispute truth and destination-transfer recovery result are auditable on the order'
+);
+
+reset role;
+
+select results_eq(
+  $$
+    select stripe_dispute_id, order_id, stripe_charge_id, amount_minor, currency,
+      status, recovery_status, first_stripe_event_id, last_stripe_event_id,
+      first_stripe_event_created_at, last_stripe_event_created_at
+    from public.disputes
+    where stripe_dispute_id = 'du_1MtJUT2eZvKYlo2CNaw2HvEv'
+  $$,
+  $$
+    values (
+      'du_1MtJUT2eZvKYlo2CNaw2HvEv'::text,
+      (select id from disputed_order),
+      'ch_disputedorder'::text, 2000::bigint, 'usd'::text,
+      'needs_response'::text, 'succeeded'::text,
+      'evt_1DisputeOpenAbC'::text, 'evt_1DisputeOpenAbC'::text,
+      '2026-08-25 13:05:00+00'::timestamptz,
+      '2026-08-25 13:05:00+00'::timestamptz
+    )
+  $$,
+  'the first dispute event persists authoritative object and event truth once'
 );
 
 select results_eq(
@@ -416,10 +511,12 @@ select results_eq(
   'a disputed admission becomes non-valid without deleting ticket history'
 );
 
+set local role service_role;
+
 select is(
   public.server_apply_dispute(
-    'evt_disputeopened', (select id from disputed_order),
-    'dp_disputeopened', 'ch_disputedorder', 'needs_response',
+    'evt_1DisputeOpenAbC', (select id from disputed_order),
+    'du_1MtJUT2eZvKYlo2CNaw2HvEv', 'ch_disputedorder', 'needs_response',
     2000, 'usd', 'succeeded'
   ),
   (select id from disputed_order),
@@ -427,20 +524,32 @@ select is(
 );
 
 select is(
-  (select delivery_attempt_count from public.stripe_webhook_events where stripe_event_id = 'evt_disputeopened'),
+  (select delivery_attempt_count from public.stripe_webhook_events where stripe_event_id = 'evt_1DisputeOpenAbC'),
   1,
   'domain retry does not fabricate a second webhook delivery attempt'
 );
 
+reset role;
+
+select is(
+  (select count(*) from public.disputes
+    where stripe_dispute_id = 'du_1MtJUT2eZvKYlo2CNaw2HvEv'),
+  1::bigint,
+  'duplicate dispute delivery preserves one durable dispute row'
+);
+
+set local role service_role;
+
 select * from public.server_record_webhook_receipt(
-  'evt_disputewon', 'charge.dispute.closed', false, 'dp_disputeopened',
+  'evt_disputewon', 'charge.dispute.closed', false,
+  'du_1MtJUT2eZvKYlo2CNaw2HvEv',
   '2025-08-27.basil', '2026-08-25 13:06:00+00', repeat('2', 64)
 );
 
 select is(
   public.server_apply_dispute(
     'evt_disputewon', (select id from disputed_order),
-    'dp_disputeopened', 'ch_disputedorder', 'won',
+    'du_1MtJUT2eZvKYlo2CNaw2HvEv', 'ch_disputedorder', 'won',
     2000, 'usd', 'succeeded'
   ),
   (select id from disputed_order),
@@ -460,11 +569,126 @@ select results_eq(
   'dispute recovery updates audit truth without silently restoring admission'
 );
 
+reset role;
+
+select results_eq(
+  $$
+    select count(*)::bigint, min(status), min(last_stripe_event_id),
+      min(last_stripe_event_created_at)
+    from public.disputes
+    where stripe_dispute_id = 'du_1MtJUT2eZvKYlo2CNaw2HvEv'
+  $$,
+  $$ values (
+    1::bigint, 'won'::text, 'evt_disputewon'::text,
+    '2026-08-25 13:06:00+00'::timestamptz
+  ) $$,
+  'a later dispute event advances one durable row using authoritative event time'
+);
+
+set local role service_role;
+
 select is(
   (select status from public.tickets where order_id = (select id from disputed_order)),
   'cancelled'::text,
   'out-of-order dispute recovery cannot make a cancelled ticket valid again'
 );
+
+select * from public.server_record_webhook_receipt(
+  'evt_staledispute', 'charge.dispute.updated', false,
+  'du_1MtJUT2eZvKYlo2CNaw2HvEv',
+  '2025-08-27.basil', '2026-08-25 13:05:30+00', repeat('0', 64)
+);
+
+select throws_ok(
+  $$
+    select public.server_apply_dispute(
+      'evt_staledispute', (select id from disputed_order),
+      'du_1MtJUT2eZvKYlo2CNaw2HvEv', 'ch_disputedorder', 'needs_response',
+      2000, 'usd', 'failed'
+    )
+  $$,
+  'P0001', 'DISPUTE_STATE_REGRESSION',
+  'an older dispute event cannot regress accepted status or recovery truth'
+);
+
+reset role;
+
+select results_eq(
+  $$
+    select status, recovery_status, last_stripe_event_id,
+      last_stripe_event_created_at
+    from public.disputes
+    where stripe_dispute_id = 'du_1MtJUT2eZvKYlo2CNaw2HvEv'
+  $$,
+  $$ values (
+    'won'::text, 'succeeded'::text, 'evt_disputewon'::text,
+    '2026-08-25 13:06:00+00'::timestamptz
+  ) $$,
+  'rejected stale delivery leaves durable dispute truth unchanged'
+);
+
+set local role service_role;
+
+create temporary table null_dispute_order (id uuid primary key) on commit drop;
+insert into null_dispute_order
+values (pg_temp.create_paid_order(
+  '47000000-0000-4000-8000-000000000004', repeat('3', 64),
+  'cs_test_nulldisputeorder', 'pi_nulldisputeorder', 'ch_nulldisputeorder',
+  'evt_nulldisputeorderpaid'
+));
+
+select * from public.server_record_webhook_receipt(
+  'evt_nulldisputestatus', 'charge.dispute.created', false,
+  'du_1NullStatusAbCdEfGhIjKlMn',
+  '2025-08-27.basil', '2026-08-25 13:08:00+00', repeat('4', 64)
+);
+
+select throws_ok(
+  $$
+    select public.server_apply_dispute(
+      'evt_nulldisputestatus', (select id from null_dispute_order),
+      'du_1NullStatusAbCdEfGhIjKlMn', 'ch_nulldisputeorder', null,
+      2000, 'usd', 'not_attempted'
+    )
+  $$,
+  'P0001', 'DISPUTE_SNAPSHOT_MISMATCH',
+  'null dispute status is rejected before any admission mutation'
+);
+
+select * from public.server_record_webhook_receipt(
+  'evt_nulldisputerecovery', 'charge.dispute.created', false,
+  'du_1NullRecoveryAbCdEfGhIjKl',
+  '2025-08-27.basil', '2026-08-25 13:08:01+00', repeat('5', 64)
+);
+
+select throws_ok(
+  $$
+    select public.server_apply_dispute(
+      'evt_nulldisputerecovery', (select id from null_dispute_order),
+      'du_1NullRecoveryAbCdEfGhIjKl', 'ch_nulldisputeorder', 'needs_response',
+      2000, 'usd', null
+    )
+  $$,
+  'P0001', 'DISPUTE_SNAPSHOT_MISMATCH',
+  'null recovery status is rejected before any admission mutation'
+);
+
+reset role;
+
+select results_eq(
+  $$
+    select orders.status, tickets.status,
+      (select count(*) from public.disputes
+        where order_id = (select id from null_dispute_order))
+    from public.orders as orders
+    join public.tickets as tickets on tickets.order_id = orders.id
+    where orders.id = (select id from null_dispute_order)
+  $$,
+  $$ values ('paid'::text, 'valid'::text, 0::bigint) $$,
+  'rejected null dispute inputs leave order, ticket, and dispute history untouched'
+);
+
+set local role service_role;
 
 select * from public.server_record_webhook_receipt(
   'evt_wrongdispute', 'charge.dispute.created', false, 'dp_wrongdispute',
@@ -501,7 +725,7 @@ select results_eq(
     from public.stripe_webhook_events
     where stripe_event_id in (
       'evt_partialrefund', 'evt_finalrefund', 'evt_failedrefund',
-      'evt_disputeopened', 'evt_disputewon'
+      'evt_1DisputeOpenAbC', 'evt_disputewon'
     )
     order by stripe_event_id
   $$,

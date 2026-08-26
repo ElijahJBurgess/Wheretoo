@@ -2,7 +2,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(83);
+select plan(87);
 
 select has_table('public', 'organizer_stripe_accounts', 'organizer Stripe accounts table exists');
 select has_table('public', 'platform_fee_rules', 'platform fee rules table exists');
@@ -105,7 +105,7 @@ select columns_are(
   array[
     'id', 'stripe_refund_id', 'order_id', 'amount_minor', 'currency', 'status', 'reason',
     'reverse_transfer', 'refund_application_fee', 'stripe_event_id', 'processed_at',
-    'created_at', 'updated_at'
+    'created_at', 'updated_at', 'stripe_payment_intent_id', 'stripe_charge_id'
   ],
   'refund columns are exact'
 );
@@ -256,7 +256,8 @@ select results_eq(
       'currency:text', 'status:text', 'reason:text', 'reverse_transfer:boolean',
       'refund_application_fee:boolean', 'stripe_event_id:text',
       'processed_at:timestamp with time zone', 'created_at:timestamp with time zone',
-      'updated_at:timestamp with time zone'
+      'updated_at:timestamp with time zone', 'stripe_payment_intent_id:text',
+      'stripe_charge_id:text'
     ]::text[]) collate "C")
   $$,
   'refund column types are exact and refund money uses bigint'
@@ -453,7 +454,7 @@ select results_eq(
       ["platform_fee_rules", "platform_fee_rules_processing_estimate_check", "CHECK (processing_fee_treatment = 'platform_fee_only'::text AND processing_estimate_percent_bps IS NULL AND processing_estimate_fixed_minor IS NULL OR processing_fee_treatment = 'stripe_fee_estimate'::text AND processing_estimate_percent_bps IS NOT NULL AND processing_estimate_percent_bps >= 0 AND processing_estimate_percent_bps <= 10000 AND processing_estimate_fixed_minor IS NOT NULL AND processing_estimate_fixed_minor >= 0)"],
       ["platform_fee_rules", "platform_fee_rules_processing_treatment_check", "CHECK (processing_fee_treatment = ANY (ARRAY['stripe_fee_estimate'::text, 'platform_fee_only'::text]))"],
       ["platform_fee_rules", "platform_fee_rules_test_mode_check", "CHECK (NOT livemode)"],
-      ["refunds", "refunds_status_check", "CHECK (status = ANY (ARRAY['pending'::text, 'requires_action'::text, 'succeeded'::text, 'failed'::text, 'cancelled'::text]))"],
+      ["refunds", "refunds_status_check", "CHECK (status = ANY (ARRAY['pending'::text, 'requires_action'::text, 'succeeded'::text, 'failed'::text, 'canceled'::text, 'cancelled'::text]))"],
       ["stripe_webhook_events", "stripe_webhook_events_processing_status_check", "CHECK (processing_status = ANY (ARRAY['processing'::text, 'processed'::text, 'failed'::text]))"],
       ["stripe_webhook_events", "stripe_webhook_events_test_mode_check", "CHECK (NOT livemode)"],
       ["ticket_tiers", "ticket_tiers_currency_check", "CHECK (currency = 'usd'::text)"],
@@ -1045,6 +1046,67 @@ select lives_ok(
     )
   $$,
   'cancelled tickets require only a cancelled timestamp'
+);
+
+select lives_ok(
+  $$
+    insert into public.organizer_stripe_accounts (
+      organizer_id, stripe_account_id
+    ) values (
+      '10000000-0000-0000-0000-000000000090',
+      'acct_1NG8Du2eZvKYlo2C'
+    )
+  $$,
+  'mixed-case Stripe account IDs from Stripe object form are preserved'
+);
+
+select lives_ok(
+  $$
+    insert into public.stripe_webhook_events (
+      stripe_event_id, event_type, stripe_object_id, stripe_created_at, payload_sha256
+    ) values (
+      'evt_1NG8Du2eZvKYlo2CUI79vXWy',
+      'refund.updated',
+      're_1Nispe2eZvKYlo2Cd31jOCgZ',
+      '2026-08-25 17:00:00+00',
+      repeat('f', 64)
+    )
+  $$,
+  'mixed-case Stripe event and object IDs from Stripe fixtures are preserved'
+);
+
+select lives_ok(
+  $$
+    update public.orders
+    set stripe_checkout_session_id = 'cs_test_a11YYufWQzNY63zpQ6QSNRQhkUpVph4WRmzW0zWJO2znZKdVujZ0N0S22u',
+        stripe_payment_intent_id = 'pi_1GszsK2eZvKYlo2CfhZyoZLp',
+        stripe_charge_id = 'ch_1NirD82eZvKYlo2CIvbtLWuY',
+        stripe_transfer_id = 'tr_1Nispe2eZvKYlo2CYezqFhEx',
+        stripe_application_fee_id = 'fee_1Nispe2eZvKYlo2CYezqFhEx',
+        stripe_balance_transaction_id = 'txn_1Nispe2eZvKYlo2CYezqFhEx',
+        stripe_customer_id = 'cus_1NG8Du2eZvKYlo2CUI79vXWy'
+    where id = '40000000-0000-0000-0000-000000000090'
+  $$,
+  'mixed-case Stripe payment identifiers are accepted without normalization'
+);
+
+select lives_ok(
+  $$
+    insert into public.refunds (
+      stripe_refund_id, order_id, amount_minor, currency, status,
+      reverse_transfer, refund_application_fee, stripe_event_id
+    ) values (
+      're_1Nispe2eZvKYlo2Cd31jOCgZ',
+      '40000000-0000-0000-0000-000000000090',
+      100,
+      'usd',
+      'succeeded',
+      true,
+      false,
+      'evt_1NG8Du2eZvKYlo2CUI79vXWy'
+    )
+  $$,
+  'mixed-case Stripe refund IDs are accepted without normalization'
 );
 
 select * from finish();
