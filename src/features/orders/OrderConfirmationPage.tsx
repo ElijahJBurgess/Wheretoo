@@ -42,12 +42,16 @@ function formatSchedule(event: OrderConfirmation['event']): string {
     const date = new Intl.DateTimeFormat('en-US', {
       timeZone: event.timezone,
       weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
-    }).format(start)
+    })
     const time = new Intl.DateTimeFormat('en-US', {
       timeZone: event.timezone,
       hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
     })
-    return `${date}, ${time.format(start)}–${time.format(end)}`
+    const startDate = date.format(start)
+    const endDate = date.format(end)
+    return startDate === endDate
+      ? `${startDate}, ${time.format(start)}–${time.format(end)}`
+      : `${startDate}, ${time.format(start)}–${endDate}, ${time.format(end)}`
   } catch {
     return 'Schedule unavailable'
   }

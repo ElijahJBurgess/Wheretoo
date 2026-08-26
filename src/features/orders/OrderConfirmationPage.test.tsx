@@ -60,6 +60,26 @@ describe('OrderConfirmationPage', () => {
     expect(screen.queryByText(/email|buyer|amount|fee|stripe|destination|ticket id/i)).not.toBeInTheDocument()
   })
 
+  it('formats a same-day schedule once in the event timezone', () => {
+    renderPage()
+    expect(screen.getByText('Monday, August 31, 2026, 7:00 PM PDT–10:00 PM PDT')).toBeInTheDocument()
+  })
+
+  it.each([
+    ['overnight', '2026-09-01T09:00:00Z', 'Tuesday, September 1, 2026, 2:00 AM PDT'],
+    ['multiday', '2026-09-04T05:00:00Z', 'Thursday, September 3, 2026, 10:00 PM PDT'],
+  ] as const)('includes both local dates for a %s event', (_kind, endsAt, expectedEnd) => {
+    useOrderConfirmation.mockReturnValue({
+      data: { ...confirmation, event: { ...confirmation.event, endsAt } },
+      isPending: false,
+      isError: false,
+      isTimedOut: false,
+      retry,
+    })
+    renderPage()
+    expect(screen.getByText(`Monday, August 31, 2026, 7:00 PM PDT–${expectedEnd}`)).toBeInTheDocument()
+  })
+
   it('moves delayed processing to manual retry after the bounded window', async () => {
     const user = userEvent.setup()
     useOrderConfirmation.mockReturnValue({ data: confirmation, isPending: false, isError: false, isTimedOut: true, retry })

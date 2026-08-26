@@ -66,9 +66,9 @@ select results_eq(
   $$,
   $$ values
     ('processing'::text), ('processing'), ('processing'), ('paid'),
-    ('failed'), ('expired'), ('expired'), ('paid'), ('refunded'), ('failed')
+    ('failed'), ('expired'), ('expired'), ('refunded'), ('refunded'), ('failed')
   $$,
-  'every persisted database status maps exhaustively to a safe browser state'
+  'every persisted database status maps exhaustively without presenting a partial refund as paid'
 );
 
 insert into auth.users (id, email)
