@@ -718,7 +718,7 @@ Deno.test("a dispute without withdrawn funds records not-applicable recovery and
   ]);
 });
 
-Deno.test("dispute reversal transport failures retry, while permanent Stripe rejection persists failed recovery", async () => {
+Deno.test("dispute reversal transport failures retry, while invalid reversal requests persist failed recovery", async () => {
   const failedRecoveries: string[] = [];
   const transientFinalizations: unknown[] = [];
   const permanent = await createStripeWebhookHandler(dependencies({
@@ -751,6 +751,66 @@ Deno.test("dispute reversal transport failures retry, while permanent Stripe rej
     "failed",
     "TRANSIENT_PROCESSING_FAILURE",
   ]]]);
+});
+
+Deno.test("Stripe authentication and permission failures keep dispute recovery retryable until corrected", async () => {
+  for (
+    const stripeError of [
+      new Stripe.errors.StripeAuthenticationError({
+        message: "test authentication failure",
+        type: "invalid_request_error",
+        statusCode: 401,
+      }),
+      new Stripe.errors.StripePermissionError({
+        message: "test permission failure",
+        type: "invalid_request_error",
+        statusCode: 403,
+      }),
+    ]
+  ) {
+    let reversalAttempts = 0;
+    const recoveries: string[] = [];
+    const finalizations: unknown[] = [];
+    const testDependencies = dependencies({
+      createTransferReversal: async () => {
+        reversalAttempts += 1;
+        if (reversalAttempts === 1) throw stripeError;
+        return transferReversalFixture({
+          id: DISPUTE_REVERSAL_ID,
+          amount: 1_850,
+          source_refund: null,
+          metadata: { dispute_id: DISPUTE_ID, order_id: ORDER_ID },
+        });
+      },
+      applyDispute: async (snapshot) => {
+        recoveries.push(snapshot.recoveryStatus);
+      },
+      finalizeReceipt: async (...args) => {
+        finalizations.push(args);
+      },
+    });
+    const event = snapshotEvent(
+      "charge.dispute.created",
+      { id: DISPUTE_ID },
+      { id: `evt_Task14DisputeRetry${stripeError.statusCode}` },
+    );
+
+    const failed = await createStripeWebhookHandler(testDependencies)(
+      request(event),
+    );
+    const corrected = await createStripeWebhookHandler(testDependencies)(
+      request(event),
+    );
+
+    assertEquals(stripeError instanceof Stripe.errors.StripeError, true);
+    assertEquals([failed.status, corrected.status], [503, 200]);
+    assertEquals(recoveries, ["recovered"]);
+    assertEquals(finalizations, [[
+      `evt_Task14DisputeRetry${stripeError.statusCode}`,
+      "failed",
+      "TRANSIENT_PROCESSING_FAILURE",
+    ]]);
+  }
 });
 
 Deno.test("unknown signed event types are durably acknowledged without Stripe retrieval or domain mutation", async () => {

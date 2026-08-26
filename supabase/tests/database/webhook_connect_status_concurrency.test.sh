@@ -54,68 +54,98 @@ insert into public.organizer_stripe_accounts (
 );
 commit;" >"$temporary_directory/setup.log" 2>&1
 
-"$supabase_cli" db query --linked "begin;
-select pg_advisory_xact_lock(918503);
-select pg_sleep(6);
-set local role service_role;
-select public.server_persist_connect_status_if_current(
-  'acct_WebhookConnectConcurrency', '2099-08-26 05:00:00+00', 'evt_OldReadyRace',
-  'active', 'active', 'clear', 0, 0, null
-);
-commit;" >"$temporary_directory/older-ready.log" 2>&1 &
-older_pid=$!
+run_cross_path_case() {
+  case_name="$1"
+  marker_id="$2"
+  older_at="$3"
+  older_revision="$4"
+  newer_at="$5"
+  newer_revision="$6"
 
-for _attempt in 1 2 3 4 5 6 7 8; do
-  "$supabase_cli" db query --linked "
-    select exists (
-      select 1 from pg_catalog.pg_locks
-      where locktype = 'advisory' and classid = 0 and objid = '918503'::oid and granted
-    ) as marker_ready;
-  " >"$temporary_directory/marker.log" 2>&1
-  if grep -q '\"marker_ready\": true' "$temporary_directory/marker.log"; then
-    break
+  "$supabase_cli" db query --linked "begin;
+  select pg_advisory_xact_lock($marker_id);
+  select pg_sleep(12);
+  set local role service_role;
+  select public.server_persist_connect_status_if_current(
+    'acct_WebhookConnectConcurrency', '$older_at', '$older_revision',
+    'active', 'active', 'clear', 0, 0, null
+  );
+  commit;" >"$temporary_directory/${case_name}-older-ready.log" 2>&1 &
+  older_pid=$!
+
+  for _attempt in 1 2 3 4 5 6 7 8; do
+    "$supabase_cli" db query --linked "
+      select exists (
+        select 1 from pg_catalog.pg_locks
+        where locktype = 'advisory' and classid = 0
+          and objid = '$marker_id'::oid and granted
+      ) as marker_ready;
+    " >"$temporary_directory/${case_name}-marker.log" 2>&1
+    if grep -q '\"marker_ready\": true' "$temporary_directory/${case_name}-marker.log"; then
+      break
+    fi
+  done
+
+  if ! grep -q '\"marker_ready\": true' "$temporary_directory/${case_name}-marker.log"; then
+    wait "$older_pid"
+    echo "$case_name did not reach its deterministic marker." >&2
+    return 1
   fi
-done
 
-if ! grep -q '\"marker_ready\": true' "$temporary_directory/marker.log"; then
-  echo "Connect CAS race did not reach its deterministic marker." >&2
-  exit 1
-fi
+  "$supabase_cli" db query --linked "begin;
+  set local role service_role;
+  select public.server_persist_connect_status_if_current(
+    'acct_WebhookConnectConcurrency', '$newer_at', '$newer_revision',
+    'restricted', 'restricted', 'restricted', 2, 1,
+    'STRIPE_REQUIREMENTS_PAST_DUE'
+  );
+  commit;" >"$temporary_directory/${case_name}-newer-restricted.log" 2>&1
 
-"$supabase_cli" db query --linked "begin;
-set local role service_role;
-select public.server_persist_connect_status_if_current(
-  'acct_WebhookConnectConcurrency', '2099-08-26 05:01:00+00',
-  'evt_NewerRestrictedRace', 'restricted', 'restricted', 'restricted',
-  2, 1, 'STRIPE_REQUIREMENTS_PAST_DUE'
-);
-commit;" >"$temporary_directory/newer-restricted.log" 2>&1
+  wait "$older_pid"
 
-wait "$older_pid"
+  if ! grep -q '\"server_persist_connect_status_if_current\": \"updated\"' \
+    "$temporary_directory/${case_name}-newer-restricted.log" \
+    || ! grep -q '\"server_persist_connect_status_if_current\": \"stale\"' \
+      "$temporary_directory/${case_name}-older-ready.log"; then
+    echo "$case_name did not classify newer and stale responses correctly." >&2
+    sed -n '1,120p' "$temporary_directory/${case_name}-newer-restricted.log" >&2
+    sed -n '1,120p' "$temporary_directory/${case_name}-older-ready.log" >&2
+    return 1
+  fi
 
-if ! grep -q '\"server_persist_connect_status_if_current\": \"updated\"' \
-  "$temporary_directory/newer-restricted.log" \
-  || ! grep -q '\"server_persist_connect_status_if_current\": \"stale\"' \
-    "$temporary_directory/older-ready.log"; then
-  echo "Connect CAS did not classify the newer and stale responses correctly." >&2
-  exit 1
-fi
+  "$supabase_cli" db query --linked "
+  select transfers_status, payouts_status, requirements_status,
+    requirements_currently_due_count, requirements_past_due_count,
+    last_sync_revision
+  from public.organizer_stripe_accounts
+  where stripe_account_id = 'acct_WebhookConnectConcurrency';
+  " >"$temporary_directory/${case_name}-result.log" 2>&1
 
-"$supabase_cli" db query --linked "
-select transfers_status, payouts_status, requirements_status,
-  requirements_currently_due_count, requirements_past_due_count,
-  last_sync_revision
-from public.organizer_stripe_accounts
-where stripe_account_id = 'acct_WebhookConnectConcurrency';
-" >"$temporary_directory/result.log" 2>&1
+  if ! grep -q '\"transfers_status\": \"restricted\"' \
+    "$temporary_directory/${case_name}-result.log" \
+    || ! grep -q '\"payouts_status\": \"restricted\"' \
+      "$temporary_directory/${case_name}-result.log" \
+    || ! grep -q '\"requirements_status\": \"restricted\"' \
+      "$temporary_directory/${case_name}-result.log" \
+    || ! grep -q "\"last_sync_revision\": \"$newer_revision\"" \
+      "$temporary_directory/${case_name}-result.log"; then
+    echo "$case_name allowed stale ready truth to overwrite newer restriction." >&2
+    sed -n '1,120p' "$temporary_directory/${case_name}-result.log" >&2
+    return 1
+  fi
 
-if ! grep -q '\"transfers_status\": \"restricted\"' "$temporary_directory/result.log" \
-  || ! grep -q '\"payouts_status\": \"restricted\"' "$temporary_directory/result.log" \
-  || ! grep -q '\"requirements_status\": \"restricted\"' "$temporary_directory/result.log" \
-  || ! grep -q '\"last_sync_revision\": \"evt_NewerRestrictedRace\"' \
-    "$temporary_directory/result.log"; then
-  echo "Late stale-ready response overwrote newer restricted Connect truth." >&2
-  exit 1
-fi
+  echo "$case_name preserved newer restricted truth"
+}
 
-echo "newer restricted Connect truth won over a later stale-ready response"
+run_cross_path_case \
+  "status-after-webhook" 918503 \
+  "2099-08-26 05:00:00+00" "evt_ConnectStatusOldReady" \
+  "2099-08-26 05:01:00+00" "evt_WebhookNewRestricted"
+run_cross_path_case \
+  "session-after-checkout" 918504 \
+  "2099-08-26 05:10:00+00" "evt_ConnectSessionOldReady" \
+  "2099-08-26 05:11:00+00" "evt_CheckoutNewRestricted"
+run_cross_path_case \
+  "checkout-after-status" 918505 \
+  "2099-08-26 05:20:00+00" "evt_CheckoutOldReady" \
+  "2099-08-26 05:21:00+00" "evt_ConnectStatusNewRestricted"

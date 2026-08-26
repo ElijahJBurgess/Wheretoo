@@ -22,6 +22,16 @@ export interface SafeConnectStatus {
   last_synced_at: string;
 }
 
+export type ConnectPersistenceResult = "updated" | "stale";
+export type ConnectSyncSource =
+  | "ConnectSession"
+  | "ConnectStatus"
+  | "CheckoutPreflight";
+
+export function createConnectSyncRevision(source: ConnectSyncSource): string {
+  return `evt_sync${source}${crypto.randomUUID().replaceAll("-", "")}`;
+}
+
 export interface AccountRepository {
   findAccount(organizerId: string): Promise<string | null>;
   insertAccount(record: {
@@ -32,8 +42,9 @@ export interface AccountRepository {
     organizerId: string,
     accountId: string,
     projection: ConnectStatusProjection,
-    syncedAt: string,
-  ): Promise<void>;
+    observedAt: string,
+    revision: string,
+  ): Promise<ConnectPersistenceResult>;
 }
 
 export type RequireOrganizer = (
@@ -44,9 +55,9 @@ function internalError(): never {
   throw new HttpError(500, "INTERNAL_ERROR");
 }
 
-export function createAccountRepository(): AccountRepository {
-  const client = getServiceClient();
-
+export function createAccountRepository(
+  client = getServiceClient(),
+): AccountRepository {
   async function findAccount(organizerId: string): Promise<string | null> {
     const { data, error } = await client
       .from("organizer_stripe_accounts")
@@ -80,30 +91,30 @@ export function createAccountRepository(): AccountRepository {
       return winner;
     },
     async persistStatus(
-      organizerId,
+      _organizerId,
       accountId,
       projection,
-      syncedAt,
+      observedAt,
+      revision,
     ) {
-      const { data, error } = await client
-        .from("organizer_stripe_accounts")
-        .update({
-          transfers_status: projection.transfersStatus,
-          payouts_status: projection.payoutsStatus,
-          requirements_status: projection.requirementsStatus,
-          requirements_currently_due_count:
-            projection.requirementsCurrentlyDueCount,
-          requirements_past_due_count: projection.requirementsPastDueCount,
-          last_status_code: projection.lastStatusCode,
-          last_synced_at: syncedAt,
-        })
-        .eq("organizer_id", organizerId)
-        .eq("stripe_account_id", accountId)
-        .eq("livemode", false)
-        .select("organizer_id")
-        .maybeSingle();
-
-      if (error !== null || data === null) internalError();
+      const { data, error } = await client.rpc(
+        "server_persist_connect_status_if_current",
+        {
+          p_stripe_account_id: accountId,
+          p_retrieved_at: observedAt,
+          p_revision: revision,
+          p_transfers_status: projection.transfersStatus,
+          p_payouts_status: projection.payoutsStatus,
+          p_requirements_status: projection.requirementsStatus,
+          p_currently_due_count: projection.requirementsCurrentlyDueCount,
+          p_past_due_count: projection.requirementsPastDueCount,
+          p_last_status_code: projection.lastStatusCode,
+        },
+      );
+      if (error !== null || (data !== "updated" && data !== "stale")) {
+        internalError();
+      }
+      return data;
     },
   };
 }

@@ -1201,11 +1201,7 @@ async function dispatchRefund(
 
 function isPermanentStripeMutationFailure(error: unknown): boolean {
   if (!isRecord(error) || typeof error.type !== "string") return false;
-  return [
-    "StripeInvalidRequestError",
-    "StripePermissionError",
-    "StripeAuthenticationError",
-  ].includes(error.type);
+  return error.type === "StripeInvalidRequestError";
 }
 
 async function dispatchDispute(

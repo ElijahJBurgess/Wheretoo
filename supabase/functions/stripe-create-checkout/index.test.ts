@@ -20,6 +20,7 @@ const ACCOUNT_ID = "acct_Task12Destination";
 const SESSION_ID = "cs_test_Task12Checkout";
 const EXPIRES_AT = "2026-08-26T20:30:00.000Z";
 const CHECKOUT_URL = "https://checkout.stripe.com/c/pay/task12";
+const CONNECT_OBSERVED_AT = "2026-08-26T05:00:00.000Z";
 
 const validBody = {
   eventId: EVENT_ID,
@@ -93,6 +94,37 @@ function sessionFixture(
       has_more: false,
     },
     ...overrides,
+  };
+}
+
+function readyConnectAccount(): Stripe.V2.Core.Account {
+  return {
+    id: ACCOUNT_ID,
+    object: "v2.core.account",
+    applied_configurations: ["recipient"],
+    configuration: {
+      recipient: {
+        applied: true,
+        capabilities: {
+          stripe_balance: {
+            stripe_transfers: { status: "active", status_details: [] },
+            payouts: { status: "active", status_details: [] },
+          },
+        },
+      },
+    },
+    created: CONNECT_OBSERVED_AT,
+    dashboard: "express",
+    defaults: {
+      currency: "usd",
+      responsibilities: {
+        fees_collector: "application",
+        losses_collector: "application",
+        requirements_collector: "stripe",
+      },
+    },
+    livemode: false,
+    requirements: { entries: [] },
   };
 }
 
@@ -638,6 +670,65 @@ Deno.test("default Connect preflight preserves database event and tier domain co
       caught = error;
     }
     assertEquals((caught as { code?: string }).code, message);
+  }
+});
+
+Deno.test("default Connect preflight captures retrieval start and fails closed when its CAS result is stale", async () => {
+  for (const persistence of ["updated", "stale"] as const) {
+    const calls: string[] = [];
+    const client = {
+      rpc: async () => ({
+        data: [{ organizer_id: ORGANIZER_ID, stripe_account_id: ACCOUNT_ID }],
+        error: null,
+      }),
+    } as unknown as Parameters<typeof defaultRefreshConnect>[2];
+    const runtime = {
+      repository: {
+        findAccount: async () => {
+          calls.push("find");
+          return ACCOUNT_ID;
+        },
+        persistStatus: async (
+          organizerId: string,
+          accountId: string,
+          projection: unknown,
+          observedAt: string,
+          revision: string,
+        ) => {
+          calls.push("persist");
+          assertEquals(organizerId, ORGANIZER_ID);
+          assertEquals(accountId, ACCOUNT_ID);
+          assertEquals(observedAt, CONNECT_OBSERVED_AT);
+          assertEquals(revision, "evt_syncCheckoutPreflightProof");
+          assertEquals(
+            (projection as { requirementsStatus: string }).requirementsStatus,
+            "clear",
+          );
+          return persistence;
+        },
+      },
+      retrieveAccount: async () => {
+        calls.push("retrieve");
+        return readyConnectAccount();
+      },
+      now: () => {
+        calls.push("observe");
+        return CONNECT_OBSERVED_AT;
+      },
+      revision: () => "evt_syncCheckoutPreflightProof",
+    };
+    let caught: unknown;
+    try {
+      await defaultRefreshConnect(EVENT_ID, TIER_ID, client, runtime);
+    } catch (error) {
+      caught = error;
+    }
+
+    assertEquals(calls, ["find", "observe", "retrieve", "persist"]);
+    assertEquals(
+      (caught as { code?: string } | undefined)?.code,
+      persistence === "stale" ? "CONNECT_NOT_READY" : undefined,
+    );
   }
 });
 

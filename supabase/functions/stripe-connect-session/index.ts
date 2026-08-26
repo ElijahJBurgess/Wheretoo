@@ -10,6 +10,7 @@ import {
   ACCOUNT_INCLUDE,
   type AccountRepository,
   createAccountRepository,
+  createConnectSyncRevision,
   readEmptyRequest,
   type RequireOrganizer,
   stripeRequest,
@@ -139,17 +140,22 @@ export function createStripeConnectSessionHandler(
         });
       }
 
+      const observedAt = dependencies.now();
+      const revision = createConnectSyncRevision("ConnectSession");
       const account = await stripeRequest(() =>
         dependencies.retrieveAccount(accountId, { include: ACCOUNT_INCLUDE })
       );
       const projection = validateApprovedConnectAccount(account);
-      const syncedAt = dependencies.now();
-      await dependencies.persistStatus(
+      const persistence = await dependencies.persistStatus(
         organizer.organizerId,
         accountId,
         projection,
-        syncedAt,
+        observedAt,
+        revision,
       );
+      if (persistence === "stale") {
+        throw new HttpError(502, "STRIPE_REQUEST_FAILED");
+      }
 
       const session = await stripeRequest(() =>
         dependencies.createAccountSession({
@@ -169,7 +175,7 @@ export function createStripeConnectSessionHandler(
       return jsonResponse(
         {
           client_secret: session.client_secret,
-          connect_status: toSafeConnectStatus(projection, syncedAt),
+          connect_status: toSafeConnectStatus(projection, observedAt),
         },
         200,
         headers,

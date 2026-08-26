@@ -10,7 +10,9 @@ import {
 } from "../_shared/stripeClient.ts";
 import {
   ACCOUNT_INCLUDE,
+  type AccountRepository,
   createAccountRepository,
+  createConnectSyncRevision,
   validateApprovedConnectAccount,
 } from "../stripe-connect-session/connect.ts";
 
@@ -535,6 +537,15 @@ export async function defaultRefreshConnect(
   eventId: string,
   tierId: string,
   client = getServiceClient(),
+  runtime?: {
+    repository: Pick<AccountRepository, "findAccount" | "persistStatus">;
+    retrieveAccount(
+      accountId: string,
+      params: Stripe.V2.Core.AccountRetrieveParams,
+    ): Promise<Stripe.V2.Core.Account>;
+    now(): string;
+    revision(): string;
+  },
 ): Promise<void> {
   const { data, error } = await client.rpc("server_get_checkout_preflight", {
     p_event_id: eventId,
@@ -551,16 +562,21 @@ export async function defaultRefreshConnect(
     throw new CheckoutHttpError(500, "INTERNAL_ERROR");
   }
   const organizerId = data[0].organizer_id;
-  const repository = createAccountRepository();
+  const repository = runtime?.repository ?? createAccountRepository();
   const accountId = await repository.findAccount(organizerId);
   if (accountId === null) {
     throw new CheckoutHttpError(409, "CONNECT_NOT_READY");
   }
+  const observedAt = runtime?.now() ?? new Date().toISOString();
+  const revision = runtime?.revision() ??
+    createConnectSyncRevision("CheckoutPreflight");
   let account: Stripe.V2.Core.Account;
   try {
-    account = await getStripe().v2.core.accounts.retrieve(accountId, {
+    account = await (runtime?.retrieveAccount(accountId, {
       include: ACCOUNT_INCLUDE,
-    });
+    }) ?? getStripe().v2.core.accounts.retrieve(accountId, {
+      include: ACCOUNT_INCLUDE,
+    }));
   } catch {
     throw new CheckoutHttpError(409, "CONNECT_NOT_READY");
   }
@@ -570,12 +586,16 @@ export async function defaultRefreshConnect(
   } catch {
     throw new CheckoutHttpError(409, "CONNECT_NOT_READY");
   }
-  await repository.persistStatus(
+  const persistence = await repository.persistStatus(
     organizerId,
     accountId,
     projection,
-    new Date().toISOString(),
+    observedAt,
+    revision,
   );
+  if (persistence === "stale") {
+    throw new CheckoutHttpError(409, "CONNECT_NOT_READY");
+  }
   const current = deriveConnectStatus(account);
   if (
     current.transfersStatus !== "active" ||

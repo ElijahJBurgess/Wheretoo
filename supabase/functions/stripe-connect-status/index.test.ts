@@ -6,6 +6,7 @@ import {
   handler,
   type StripeConnectStatusDependencies,
 } from "./index.ts";
+import { createAccountRepository } from "../stripe-connect-session/connect.ts";
 
 const ORGANIZER_ID = "11111111-1111-4111-8111-111111111111";
 const ACCOUNT_ID = "acct_Task8Recipient";
@@ -58,7 +59,10 @@ Deno.test("connect status retrieves the caller's current Stripe account before p
   const calls: string[] = [];
   const dependencies: StripeConnectStatusDependencies = {
     appOrigin: "https://whereto.example",
-    now: () => NOW,
+    now: () => {
+      calls.push("observe");
+      return NOW;
+    },
     requireOrganizer: async () => ({
       userId: "user",
       organizerId: ORGANIZER_ID,
@@ -75,10 +79,18 @@ Deno.test("connect status retrieves the caller's current Stripe account before p
       });
       return readyAccount();
     },
-    persistStatus: async (_organizerId, _accountId, projection, syncedAt) => {
+    persistStatus: async (
+      _organizerId,
+      _accountId,
+      projection,
+      observedAt,
+      revision,
+    ) => {
       calls.push("persist");
       assertEquals(projection.requirementsStatus, "clear");
-      assertEquals(syncedAt, NOW);
+      assertEquals(observedAt, NOW);
+      assertEquals(/^evt_syncConnectStatus[0-9a-f]{32}$/.test(revision), true);
+      return "updated";
     },
   };
 
@@ -86,7 +98,7 @@ Deno.test("connect status retrieves the caller's current Stripe account before p
     request(),
   );
 
-  assertEquals(calls, ["retrieve", "persist"]);
+  assertEquals(calls, ["observe", "retrieve", "persist"]);
   assertEquals(response.status, 200);
   assertEquals(await response.json(), {
     status: "ready",
@@ -94,6 +106,70 @@ Deno.test("connect status retrieves the caller's current Stripe account before p
     requirements_past_due_count: 0,
     last_status_code: null,
     last_synced_at: NOW,
+  });
+});
+
+Deno.test("the shared Connect repository persists status only through the retrieval tuple CAS RPC", async () => {
+  let call: unknown;
+  const client = {
+    rpc: async (name: string, args: Record<string, unknown>) => {
+      call = { name, args };
+      return { data: "updated", error: null };
+    },
+  } as unknown as Parameters<typeof createAccountRepository>[0];
+  const repository = createAccountRepository(client);
+  const result = await repository.persistStatus(
+    ORGANIZER_ID,
+    ACCOUNT_ID,
+    {
+      transfersStatus: "active",
+      payoutsStatus: "active",
+      requirementsStatus: "clear",
+      requirementsCurrentlyDueCount: 0,
+      requirementsPastDueCount: 0,
+      lastStatusCode: null,
+    },
+    NOW,
+    "evt_syncConnectStatusRepositoryProof",
+  );
+
+  assertEquals(result, "updated");
+  assertEquals(call, {
+    name: "server_persist_connect_status_if_current",
+    args: {
+      p_stripe_account_id: ACCOUNT_ID,
+      p_retrieved_at: NOW,
+      p_revision: "evt_syncConnectStatusRepositoryProof",
+      p_transfers_status: "active",
+      p_payouts_status: "active",
+      p_requirements_status: "clear",
+      p_currently_due_count: 0,
+      p_past_due_count: 0,
+      p_last_status_code: null,
+    },
+  });
+});
+
+Deno.test("connect status never reports a stale ready retrieval after newer restricted truth", async () => {
+  const dependencies: StripeConnectStatusDependencies = {
+    appOrigin: "https://whereto.example",
+    now: () => NOW,
+    requireOrganizer: async () => ({
+      userId: "user",
+      organizerId: ORGANIZER_ID,
+    }),
+    findAccount: async () => ACCOUNT_ID,
+    retrieveAccount: async () => readyAccount(),
+    persistStatus: async () => "stale",
+  };
+
+  const response = await createStripeConnectStatusHandler(dependencies)(
+    request(),
+  );
+
+  assertEquals(response.status, 502);
+  assertEquals(await response.json(), {
+    error: { code: "STRIPE_REQUEST_FAILED" },
   });
 });
 
@@ -111,7 +187,7 @@ Deno.test("connect status reports not started without contacting Stripe when the
       retrieved = true;
       return readyAccount();
     },
-    persistStatus: async () => undefined,
+    persistStatus: async () => "updated",
   };
 
   const response = await createStripeConnectStatusHandler(dependencies)(

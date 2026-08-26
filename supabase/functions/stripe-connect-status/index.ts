@@ -9,6 +9,7 @@ import {
   ACCOUNT_INCLUDE,
   type AccountRepository,
   createAccountRepository,
+  createConnectSyncRevision,
   readEmptyRequest,
   type RequireOrganizer,
   stripeRequest,
@@ -58,20 +59,25 @@ export function createStripeConnectStatusHandler(
         return jsonResponse({ status: "not_started" }, 200, headers);
       }
 
+      const observedAt = dependencies.now();
+      const revision = createConnectSyncRevision("ConnectStatus");
       const account = await stripeRequest(() =>
         dependencies.retrieveAccount(accountId, { include: ACCOUNT_INCLUDE })
       );
       const projection = validateApprovedConnectAccount(account);
-      const syncedAt = dependencies.now();
-      await dependencies.persistStatus(
+      const persistence = await dependencies.persistStatus(
         organizer.organizerId,
         accountId,
         projection,
-        syncedAt,
+        observedAt,
+        revision,
       );
+      if (persistence === "stale") {
+        throw new HttpError(502, "STRIPE_REQUEST_FAILED");
+      }
 
       return jsonResponse(
-        toSafeConnectStatus(projection, syncedAt),
+        toSafeConnectStatus(projection, observedAt),
         200,
         headers,
       );

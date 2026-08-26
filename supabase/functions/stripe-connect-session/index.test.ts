@@ -58,7 +58,10 @@ Deno.test("connect session creates the approved recipient-only account and retur
   const calls: string[] = [];
   const dependencies: StripeConnectSessionDependencies = {
     appOrigin: "https://whereto.example",
-    now: () => NOW,
+    now: () => {
+      calls.push("observe");
+      return NOW;
+    },
     requireOrganizer: async () => ({
       userId: "22222222-2222-4222-8222-222222222222",
       organizerId: ORGANIZER_ID,
@@ -112,9 +115,15 @@ Deno.test("connect session creates the approved recipient-only account and retur
       });
       return accountFixture();
     },
-    persistStatus: async (organizerId, accountId, projection, syncedAt) => {
+    persistStatus: async (
+      organizerId,
+      accountId,
+      projection,
+      observedAt,
+      revision,
+    ) => {
       calls.push("persist");
-      assertEquals({ organizerId, accountId, projection, syncedAt }, {
+      assertEquals({ organizerId, accountId, projection, observedAt }, {
         organizerId: ORGANIZER_ID,
         accountId: ACCOUNT_ID,
         projection: {
@@ -125,8 +134,10 @@ Deno.test("connect session creates the approved recipient-only account and retur
           requirementsPastDueCount: 0,
           lastStatusCode: null,
         },
-        syncedAt: NOW,
+        observedAt: NOW,
       });
+      assertEquals(/^evt_syncConnectSession[0-9a-f]{32}$/.test(revision), true);
+      return "updated";
     },
     createAccountSession: async (params) => {
       calls.push("session");
@@ -154,7 +165,14 @@ Deno.test("connect session creates the approved recipient-only account and retur
   );
 
   assertEquals(response.status, 200);
-  assertEquals(calls, ["create", "insert", "retrieve", "persist", "session"]);
+  assertEquals(calls, [
+    "create",
+    "insert",
+    "observe",
+    "retrieve",
+    "persist",
+    "session",
+  ]);
   assertEquals(await response.json(), {
     client_secret: "account-session-secret",
     connect_status: {
@@ -188,7 +206,7 @@ Deno.test("connect session reuses the caller's persisted account without creatin
       return accountFixture();
     },
     retrieveAccount: async () => accountFixture(),
-    persistStatus: async () => undefined,
+    persistStatus: async () => "updated",
     createAccountSession: async () => ({
       account: ACCOUNT_ID,
       client_secret: "reused-session-secret",
@@ -205,6 +223,42 @@ Deno.test("connect session reuses the caller's persisted account without creatin
 
   assertEquals(response.status, 200);
   assertEquals(created, false);
+});
+
+Deno.test("connect session never creates a session from stale ready retrieval", async () => {
+  let createdSession = false;
+  const dependencies: StripeConnectSessionDependencies = {
+    appOrigin: "https://whereto.example",
+    now: () => NOW,
+    requireOrganizer: async () => ({
+      userId: "user",
+      organizerId: ORGANIZER_ID,
+    }),
+    getContactEmail: async () => {
+      throw new Error("must not read contact email for an existing account");
+    },
+    findAccount: async () => ACCOUNT_ID,
+    insertAccount: async () => {
+      throw new Error("must not insert");
+    },
+    createAccount: async () => accountFixture(),
+    retrieveAccount: async () => accountFixture(),
+    persistStatus: async () => "stale",
+    createAccountSession: async () => {
+      createdSession = true;
+      throw new Error("must not create a session from stale truth");
+    },
+  };
+
+  const response = await createStripeConnectSessionHandler(dependencies)(
+    request(),
+  );
+
+  assertEquals(response.status, 502);
+  assertEquals(await response.json(), {
+    error: { code: "STRIPE_REQUEST_FAILED" },
+  });
+  assertEquals(createdSession, false);
 });
 
 Deno.test("connect session rejects unknown request fields before Stripe is called", async () => {
@@ -224,7 +278,7 @@ Deno.test("connect session rejects unknown request fields before Stripe is calle
       return accountFixture();
     },
     retrieveAccount: async () => accountFixture(),
-    persistStatus: async () => undefined,
+    persistStatus: async () => "updated",
     createAccountSession: async () => {
       throw new Error("must not create session");
     },
