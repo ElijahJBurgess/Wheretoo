@@ -14,6 +14,7 @@ import { PublishedEventPage } from '../../features/events/PublishedEventPage'
 import { OrganizerSetupPage } from '../../features/organizers/OrganizerSetupPage'
 import { OrganizerPaymentsPage } from '../../features/payments/OrganizerPaymentsPage'
 import { OrganizerTicketTiersPage } from '../../features/tickets/OrganizerTicketTiersPage'
+import { PublicTicketEventPage } from '../../features/tickets/PublicTicketEventPage'
 import { RequireOrganizer } from './RequireOrganizer'
 import { RequireSession } from './RequireSession'
 
@@ -42,6 +43,7 @@ function OrganizerShell() {
 
 export const appRouter = createBrowserRouter([
   { path: '/', element: <Navigate replace to="/auth/sign-in" /> },
+  { path: '/events/:eventId', element: <PublicTicketEventPage /> },
   { path: '/auth/sign-up', element: <SignUpPage /> },
   { path: '/auth/check-email', element: <CheckEmailPage /> },
   { path: '/auth/sign-in', element: <SignInPage /> },

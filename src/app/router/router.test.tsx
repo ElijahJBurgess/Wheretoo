@@ -2,6 +2,7 @@ import { isValidElement } from 'react'
 import { matchRoutes } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 import { RequireOrganizer } from './RequireOrganizer'
+import { RequireSession } from './RequireSession'
 import { appRouter } from './router'
 
 describe('organizer-only routes', () => {
@@ -15,5 +16,14 @@ describe('organizer-only routes', () => {
     expect(matches?.some((match) => (
       isValidElement(match.route.element) && match.route.element.type === RequireOrganizer
     ))).toBe(true)
+  })
+
+  it('keeps the anonymous paid-event route outside the session and organizer guards', () => {
+    const matches = matchRoutes(appRouter.routes, '/events/eb0fd9d5-d7d5-45dd-a99f-0c8a191bdc6f')
+
+    expect(matches?.at(-1)?.route.path).toBe('/events/:eventId')
+    expect(matches?.some((match) => isValidElement(match.route.element) && (
+      match.route.element.type === RequireOrganizer || match.route.element.type === RequireSession
+    ))).toBe(false)
   })
 })
