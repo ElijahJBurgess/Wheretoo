@@ -77,6 +77,24 @@ describe('hosted ticketing database boundary', () => {
     const saved = await saveOneTier(organizerA, eventId)
     expect(saved.error).toBeNull()
     expect(saved.data).toHaveLength(1)
+    const tierId = saved.data![0].id
+
+    const reservationInput = {
+      p_event_id: eventId,
+      p_tier_id: tierId,
+      p_name: 'Denied Browser Buyer',
+      p_email: 'denied-browser@example.invalid',
+      p_client_request_id: randomUUID(),
+      p_confirmation_token_hash: 'a'.repeat(64),
+    }
+    const [authenticatedReservation, anonymousReservation] = await Promise.all([
+      organizerA.rpc('server_reserve_checkout', reservationInput),
+      anonymous.rpc('server_reserve_checkout', reservationInput),
+    ])
+    expect(authenticatedReservation.data).toBeNull()
+    expect(anonymousReservation.data).toBeNull()
+    expect(authenticatedReservation.error?.message).toMatch(/permission denied for function server_reserve_checkout/i)
+    expect(anonymousReservation.error?.message).toMatch(/permission denied for function server_reserve_checkout/i)
 
     const crossOwner = await organizerB.rpc('list_owned_ticket_tiers', { p_event_id: eventId })
     expectCode(crossOwner.error, 'EVENT_NOT_FOUND')
@@ -109,6 +127,7 @@ describe('hosted ticketing database boundary', () => {
     const noConnectEvent = await createPaidDraft(organizerB, organizerBId, 'no-connect')
     const noConnectTier = await saveOneTier(organizerB, noConnectEvent)
     expect(noConnectTier.error).toBeNull()
+    const mismatchedTierId = noConnectTier.data![0].id
     const noConnect = await organizerB.rpc('activate_paid_sales', { p_event_id: noConnectEvent })
     expectCode(noConnect.error, 'CONNECT_NOT_READY')
 
@@ -128,6 +147,13 @@ describe('hosted ticketing database boundary', () => {
     }))
     const serialized = JSON.stringify(projection.data)
     expect(serialized).not.toMatch(/fee|stripe|destination|quantity_total|reserved_quantity|buyer_/i)
+    expect(serialized).not.toContain(mismatchedTierId)
+
+    const nonpublicProjection = await anonymous.rpc('get_public_event_ticketing', {
+      p_event_id: noConnectEvent,
+    })
+    expect(nonpublicProjection.error).toBeNull()
+    expect(nonpublicProjection.data).toEqual([])
   })
 
   it.each([

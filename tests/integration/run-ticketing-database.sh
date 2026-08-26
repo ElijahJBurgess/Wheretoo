@@ -209,4 +209,6 @@ TEST_ORGANIZER_B_PASSWORD="$organizer_b_password" \
     tests/integration/ticketing-database.test.ts \
     tests/integration/ticketing-concurrency.test.ts
 
-echo "Hosted ticketing browser-role integration passed; exact cleanup runs on EXIT."
+"$repository_root/tests/integration/ticketing-final-inventory-race.sh"
+
+echo "Hosted ticketing database gate passed; exact cleanup runs on EXIT."
