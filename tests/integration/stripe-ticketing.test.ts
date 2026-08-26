@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { chromium } from '@playwright/test'
+import { chromium, type Locator, type Page } from '@playwright/test'
 import { describe, expect, it } from 'vitest'
 import { createManagedStripeProofClient } from './stripeWebhookHarness'
 import { loadStripeIntegrationTestEnv } from './testEnv'
@@ -72,22 +72,36 @@ async function createCheckout(
   return { checkoutUrl: value.checkoutUrl as string }
 }
 
+async function visibleTextbox(page: Page, name: string): Promise<Locator> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    for (const frame of page.frames()) {
+      const candidate = frame.getByRole('textbox', { name }).filter({ visible: true }).first()
+      if (await candidate.isVisible()) return candidate
+    }
+    await page.waitForTimeout(100)
+  }
+  throw new Error(`Timed out waiting for hosted Checkout field: ${name}`)
+}
+
 async function exerciseHostedCheckout(url: string, cardNumber: string, outcome: 'paid' | 'declined') {
   const browser = await chromium.launch({ headless: true })
   try {
     const page = await browser.newPage()
     await page.goto(url)
     const card = page.getByRole('radio', { name: 'Card' })
-    if (!(await card.isChecked())) await card.click()
-    await page.getByRole('textbox', { name: 'Card number' }).fill(cardNumber)
-    await page.getByRole('textbox', { name: 'Expiration' }).fill('1234')
-    await page.getByRole('textbox', { name: 'CVC' }).fill('123')
-    await page.getByRole('textbox', { name: 'Cardholder name' }).fill('Task Seventeen')
-    await page.getByRole('textbox', { name: 'ZIP' }).fill('94103')
-    const save = page.getByRole('checkbox', { name: 'Save my information for faster checkout' })
+    if (!(await card.isChecked())) await card.check({ force: true })
+    const cardNumberInput = await visibleTextbox(page, 'Card number')
+    await cardNumberInput.fill(cardNumber)
+    await (await visibleTextbox(page, 'Expiration')).fill('1234')
+    await (await visibleTextbox(page, 'CVC')).fill('123')
+    await (await visibleTextbox(page, 'Cardholder name')).fill('Task Seventeen')
+    await (await visibleTextbox(page, 'ZIP')).fill('94103')
+    const save = page.getByRole('checkbox', { name: 'Save my information for faster checkout' }).filter({ visible: true }).first()
     if (await save.isChecked()) await save.uncheck()
-    await page.getByRole('checkbox', { name: 'I am an AI agent acting on behalf of someone else' }).check()
-    await page.getByRole('button', { name: 'Pay', exact: true }).click()
+    const disclosure = page.getByRole('checkbox', { name: 'I am an AI agent acting on behalf of someone else' }).filter({ visible: true }).first()
+    await disclosure.evaluate((element: HTMLInputElement) => element.click())
+    expect(await disclosure.isChecked()).toBe(true)
+    await page.getByRole('button', { name: 'Pay', exact: true }).filter({ visible: true }).first().click()
     if (outcome === 'paid') {
       await page.waitForURL((value) => value.origin === 'http://127.0.0.1:3000', { timeout: 30_000 })
     } else {

@@ -59,6 +59,16 @@ cleanup() {
   if [ "$DRIVER_DEPLOYED" -eq 1 ] && [ -n "$CURL_CONFIG" ] && [ -f "$CURL_CONFIG" ]; then
     curl --silent --show-error --fail-with-body --config "$CURL_CONFIG" > "$CLEANUP_RESPONSE"
     cleanup_status=$?
+    if [ "$cleanup_status" -ne 0 ]; then
+      node -e '
+        const fs = require("node:fs");
+        const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+        const allowed = new Set(["CONFIG", "DATABASE", "INPUT", "LIVE_MODE_FORBIDDEN", "STRIPE", "UNKNOWN"]);
+        if (allowed.has(value.kind) || /^DATABASE_DELETE_[A-Z_]+$/.test(value.kind)) {
+          process.stdout.write(`Task 17 cleanup error kind: ${value.kind}\n`);
+        }
+      ' "$CLEANUP_RESPONSE" 2>/dev/null || true
+    fi
     if [ "$cleanup_status" -ne 0 ] || ! node -e '
       const fs = require("node:fs");
       const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));

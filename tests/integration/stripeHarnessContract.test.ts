@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
 import { loadStripeIntegrationTestEnv } from './testEnv'
 import { createManagedStripeProofClient } from './stripeWebhookHarness'
@@ -99,5 +100,14 @@ describe('managed proof client boundary', () => {
     await client.invoke('server_proof')
     expect(headers?.get('x-task17-proof-token')).toBe(base.TEST_STRIPE_DRIVER_TOKEN)
     expect(headers?.has('x-task17-onboarding-token')).toBe(false)
+  })
+
+  it('closes only the disposable Accounts v2 fixture with every applied configuration', async () => {
+    const source = await readFile(
+      new URL('./edge/task17-transaction-driver/index.ts', import.meta.url),
+      'utf8',
+    )
+    expect(source).toContain('{ applied_configurations: connectedAccount.applied_configurations }')
+    expect(source).not.toContain('from("disputes").delete()')
   })
 })

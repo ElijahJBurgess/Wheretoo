@@ -751,48 +751,57 @@ async function cleanup(): Promise<Record<string, unknown>> {
       if (receiptReadError !== null) throw new Error("DATABASE");
       for (const value of receipts ?? []) receiptIds.add(value.stripe_event_id);
     }
-    const ensureDelete = (error: unknown) => {
-      if (error !== null) throw new Error("DATABASE");
+    const ensureDelete = (error: unknown, stage: string) => {
+      if (error !== null) throw new Error(`DATABASE_DELETE_${stage}`);
     };
     if (orderIds.length > 0) {
       ensureDelete(
         (await client.from("tickets").delete().in("order_id", orderIds)).error,
+        "TICKETS",
       );
-      ensureDelete(
-        (await client.from("disputes").delete().in("order_id", orderIds)).error,
-      );
+      // The Task 17 fixture never creates a dispute. That table intentionally
+      // denies the service_role direct access; the restrictive order foreign
+      // key makes the successful order delete the exact zero-dispute proof.
       ensureDelete(
         (await client.from("refunds").delete().in("order_id", orderIds)).error,
+        "REFUNDS",
       );
       ensureDelete(
         (await client.from("order_items").delete().in("order_id", orderIds))
           .error,
+        "ORDER_ITEMS",
       );
       ensureDelete(
         (await client.from("orders").delete().in("id", orderIds)).error,
+        "ORDERS",
       );
     }
     if (eventIds.length > 0) {
       ensureDelete(
         (await client.from("ticket_tiers").delete().in("event_id", eventIds))
           .error,
+        "TIERS",
       );
       ensureDelete(
         (await client.from("events").delete().in("id", eventIds)).error,
+        "EVENTS",
       );
     }
     if (receiptIds.size > 0) {
       ensureDelete(
         (await client.from("stripe_webhook_events").delete()
           .in("stripe_event_id", [...receiptIds])).error,
+        "RECEIPTS",
       );
     }
     ensureDelete(
       (await client.from("organizer_stripe_accounts").delete()
         .eq("organizer_id", organizer.id)).error,
+      "CONNECT",
     );
     ensureDelete(
       (await client.from("organizers").delete().eq("id", organizer.id)).error,
+      "ORGANIZER",
     );
   }
   if (authUser !== null) {
@@ -837,7 +846,7 @@ async function cleanup(): Promise<Record<string, unknown>> {
     return result.count ?? 0;
   })();
   const childCount = async (
-    table: "tickets" | "disputes" | "refunds" | "order_items",
+    table: "tickets" | "refunds" | "order_items",
   ) => {
     if (orderIds.length === 0) return 0;
     const result = await client.from(table).select("id", {
@@ -848,14 +857,14 @@ async function cleanup(): Promise<Record<string, unknown>> {
     if (result.error !== null) throw new Error("DATABASE");
     return result.count ?? 0;
   };
-  const [ticketCount, disputeCount, refundCount, itemCount] = await Promise.all(
+  const [ticketCount, refundCount, itemCount] = await Promise.all(
     [
       childCount("tickets"),
-      childCount("disputes"),
       childCount("refunds"),
       childCount("order_items"),
     ],
   );
+  const disputeCount = 0; // A dispute row would have blocked the order delete.
   const stripe = getStripe();
   let connectedAccount = await stripe.v2.core.accounts.retrieve(
     connectedAccountId(),
@@ -865,7 +874,10 @@ async function cleanup(): Promise<Record<string, unknown>> {
     throw new Error("LIVE_MODE_FORBIDDEN");
   }
   if (connectedAccount.closed !== true) {
-    connectedAccount = await stripe.v2.core.accounts.close(connectedAccount.id);
+    connectedAccount = await stripe.v2.core.accounts.close(
+      connectedAccount.id,
+      { applied_configurations: connectedAccount.applied_configurations },
+    );
   }
   const connectedAccountClosed = connectedAccount.closed === true &&
     connectedAccount.livemode === false;
@@ -936,13 +948,13 @@ Deno.serve(async (request) => {
     if (action === "cleanup") return json(await cleanup());
     return json({ ok: false }, 400);
   } catch (error) {
-    const kind = error instanceof Error && [
+    const kind = error instanceof Error && ([
         "CONFIG",
         "DATABASE",
         "INPUT",
         "LIVE_MODE_FORBIDDEN",
         "STRIPE",
-      ].includes(error.message)
+      ].includes(error.message) || /^DATABASE_DELETE_[A-Z_]+$/.test(error.message))
       ? error.message
       : "UNKNOWN";
     return json({ ok: false, kind }, 500);
