@@ -28,7 +28,7 @@ function defaultDependencies(): OrganizerAuthDependencies {
       const { data, error } = await client
         .from("organizers")
         .select("id")
-        .eq("user_id", userId)
+        .eq("id", userId)
         .maybeSingle();
       return { organizer: data === null ? null : { id: data.id }, error };
     },
