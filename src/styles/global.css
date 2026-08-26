@@ -672,6 +672,7 @@ h3 {
 .public-ticket-tier__header strong:first-child { overflow-wrap: anywhere; }
 .public-ticket-tier__sold-out { margin-left: auto; border-radius: 999px; padding: 0.26rem 0.5rem; color: var(--color-danger); background: color-mix(in srgb, var(--color-danger) 8%, white); font-size: 0.72rem; font-weight: 800; white-space: nowrap; text-transform: uppercase; }
 .public-event__unavailable { margin: 0; border-left: 3px solid var(--color-danger); padding: 0.75rem 1rem; color: var(--color-danger); background: color-mix(in srgb, var(--color-danger) 5%, white); font-weight: 700; }
+.public-event-state__title { margin-bottom: 1rem; font-size: clamp(2rem, 7vw, 3.25rem); line-height: 0.98; }
 
 .payments-page {
   display: grid;
@@ -844,10 +845,6 @@ h3 {
   .event-summary__facts { grid-template-columns: 1fr; }
   .event-summary__wide { grid-column: auto; }
   .payments-panel__actions .ui-button { flex: 1 1 100%; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .public-event *, .public-event *::before, .public-event *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
 }
 
 @media (prefers-reduced-motion: reduce) {

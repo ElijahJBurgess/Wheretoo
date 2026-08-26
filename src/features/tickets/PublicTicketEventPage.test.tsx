@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -72,6 +72,7 @@ describe('PublicTicketEventPage', () => {
     renderPage()
 
     expect(screen.getByRole('heading', { name: 'Night Market' })).toBeInTheDocument()
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
     expect(screen.getByText('Hosted by Bay City Arts')).toBeInTheDocument()
     expect(screen.getByText('$25.00')).toBeInTheDocument()
     expect(screen.getByText('Civic Center Plaza')).toBeInTheDocument()
@@ -95,7 +96,7 @@ describe('PublicTicketEventPage', () => {
     expect(router.state.location.search).toBe(`?tier=${tierId}`)
   })
 
-  it('keeps a selection only while the exact selected tier remains available', async () => {
+  it('clears a selection after its exact tier becomes unavailable, even if it later returns', async () => {
     const user = userEvent.setup()
     const { router } = renderPage()
     await user.click(screen.getByRole('radio', { name: /General admission/i }))
@@ -110,6 +111,44 @@ describe('PublicTicketEventPage', () => {
     await act(async () => { await router.navigate(`/events/${eventId}?refresh=availability`) })
 
     expect(screen.getByRole('button', { name: 'Continue to checkout' })).toBeDisabled()
+
+    usePublicTicketingEvent.mockReturnValue({
+      data: publicEvent,
+      isPending: false,
+      isError: false,
+      refetch: vi.fn(),
+    })
+    await act(async () => { await router.navigate(`/events/${eventId}?refresh=available-again`) })
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue to checkout' })).toBeDisabled())
+    expect(screen.getByRole('radio', { name: /General admission/i })).not.toBeChecked()
+  })
+
+  it('uses one local Los Angeles date when the event begins and ends on that date', () => {
+    renderPage()
+
+    expect(screen.getByText('Monday, August 31, 2026')).toBeInTheDocument()
+    expect(screen.getByText('7:00 PM–10:00 PM PT')).toBeInTheDocument()
+  })
+
+  it('uses a local Los Angeles date range when an event crosses midnight', () => {
+    usePublicTicketingEvent.mockReturnValue({
+      data: {
+        ...publicEvent,
+        event: {
+          ...publicEvent.event,
+          starts_at: '2026-09-01T06:30:00+00:00',
+          ends_at: '2026-09-01T08:30:00+00:00',
+        },
+      },
+      isPending: false,
+      isError: false,
+      refetch: vi.fn(),
+    })
+    renderPage()
+
+    expect(screen.getByText('Monday, August 31, 2026 – Tuesday, September 1, 2026')).toBeInTheDocument()
+    expect(screen.getByText('11:30 PM–1:30 AM PT')).toBeInTheDocument()
   })
 
   it.each([
@@ -119,7 +158,8 @@ describe('PublicTicketEventPage', () => {
   ])('renders the safe %s state', (_name, query, title) => {
     usePublicTicketingEvent.mockReturnValue({ ...query, refetch: vi.fn() })
     renderPage()
-    expect(screen.getByText(title)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1, name: title })).toBeInTheDocument()
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
     expect(screen.queryByText(/PGRST|postgres|private/i)).not.toBeInTheDocument()
   })
 

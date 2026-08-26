@@ -9,6 +9,7 @@ const anonymousTicketingClient = createClient<Database>(
   publicEnv.supabasePublishableKey,
   {
     auth: {
+      storageKey: 'whereto-public-ticketing-anon',
       persistSession: false,
       autoRefreshToken: false,
       detectSessionInUrl: false,

@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { AsyncState } from '../../components/ui/AsyncState'
 import { Button } from '../../components/ui/Button'
 import { TicketTierList } from './TicketTierList'
 import { usePublicTicketingEvent } from './publicTicketing.queries'
+import type { PublicTicketTierTuple } from './ticket.types'
 
 const dateFormatter = new Intl.DateTimeFormat('en-US', {
   timeZone: 'America/Los_Angeles',
@@ -37,8 +38,11 @@ function formatDateAndTime(startsAt: string, endsAt: string): { date: string; ti
     return { date: 'Date unavailable', time: 'Time unavailable' }
   }
 
+  const startDate = dateFormatter.format(start)
+  const endDate = dateFormatter.format(end)
+
   return {
-    date: dateFormatter.format(start),
+    date: startDate === endDate ? startDate : `${startDate} – ${endDate}`,
     time: `${timeFormatter.format(start)}–${timeFormatter.format(end)} PT`,
   }
 }
@@ -54,50 +58,73 @@ function formatAddress(event: {
   return `${street}, ${event.city}, ${event.region} ${event.postal_code}`
 }
 
-export function PublicTicketEventPage() {
-  const { eventId = '' } = useParams()
+type PublicEventStateProps = {
+  action?: ReactNode
+  description?: string
+  status: 'loading' | 'empty' | 'error'
+  title: string
+}
+
+function PublicEventState({ action, description, status, title }: PublicEventStateProps) {
+  return (
+    <main className="public-event-layout">
+      <h1 className="public-event-state__title">{title}</h1>
+      <AsyncState action={action} description={description} status={status} title={title} />
+    </main>
+  )
+}
+
+type PublicTicketPurchaseProps = {
+  eventId: string
+  tiers: PublicTicketTierTuple
+}
+
+function PublicTicketPurchase({ eventId, tiers }: PublicTicketPurchaseProps) {
   const navigate = useNavigate()
-  const eventQuery = usePublicTicketingEvent(eventId)
   const [selectedTierId, setSelectedTierId] = useState<string | null>(null)
-
-  if ((eventQuery.isPending || eventQuery.data === undefined) && !eventQuery.isError) {
-    return <main className="public-event-layout"><AsyncState status="loading" title="Loading event" /></main>
-  }
-  if (eventQuery.isError) {
-    return (
-      <main className="public-event-layout">
-        <AsyncState
-          action={<Button onClick={() => void eventQuery.refetch()}>Try again</Button>}
-          description="Check your connection, then try again."
-          status="error"
-          title="Event could not load"
-        />
-      </main>
-    )
-  }
-  if (eventQuery.data === null) {
-    return (
-      <main className="public-event-layout">
-        <AsyncState description="This event may no longer be available." status="empty" title="Event not found" />
-      </main>
-    )
-  }
-
-  const publicEvent = eventQuery.data
-  const { event, tiers } = publicEvent
   const selectedTier = tiers.find(
     (tier) => tier.id === selectedTierId && tier.availability_status === 'available',
   ) ?? null
   const hasAvailableTier = tiers.some((tier) => tier.availability_status === 'available')
-  const dateAndTime = formatDateAndTime(event.starts_at, event.ends_at)
 
   function continueToCheckout() {
     if (selectedTier === null) return
     navigate({
-      pathname: `/events/${event.id}/checkout`,
+      pathname: `/events/${eventId}/checkout`,
       search: `?tier=${encodeURIComponent(selectedTier.id)}`,
     })
   }
+
+  return (
+    <section aria-labelledby="public-event-tickets" className="public-event__tickets">
+      <div>
+        <p className="public-event__eyebrow">Tickets</p>
+        <h2 id="public-event-tickets">Choose your ticket</h2>
+      </div>
+      <TicketTierList onSelect={setSelectedTierId} selectedTierId={selectedTierId} tiers={tiers} />
+      {hasAvailableTier ? null : <p className="public-event__unavailable">Tickets are currently unavailable</p>}
+      <Button disabled={selectedTier === null} onClick={continueToCheckout}>Continue to checkout</Button>
+    </section>
+  )
+}
+
+export function PublicTicketEventPage() {
+  const { eventId = '' } = useParams()
+  const eventQuery = usePublicTicketingEvent(eventId)
+
+  if ((eventQuery.isPending || eventQuery.data === undefined) && !eventQuery.isError) {
+    return <PublicEventState status="loading" title="Loading event" />
+  }
+  if (eventQuery.isError) {
+    return <PublicEventState action={<Button onClick={() => void eventQuery.refetch()}>Try again</Button>} description="Check your connection, then try again." status="error" title="Event could not load" />
+  }
+  if (eventQuery.data === null) {
+    return <PublicEventState description="This event may no longer be available." status="empty" title="Event not found" />
+  }
+
+  const publicEvent = eventQuery.data
+  const { event, tiers } = publicEvent
+  const dateAndTime = formatDateAndTime(event.starts_at, event.ends_at)
 
   return (
     <main className="public-event-layout">
@@ -123,15 +150,11 @@ export function PublicTicketEventPage() {
             <h2 id="public-event-about">About this event</h2>
             <p>{event.description}</p>
           </section>
-          <section aria-labelledby="public-event-tickets" className="public-event__tickets">
-            <div>
-              <p className="public-event__eyebrow">Tickets</p>
-              <h2 id="public-event-tickets">Choose your ticket</h2>
-            </div>
-            <TicketTierList onSelect={setSelectedTierId} selectedTierId={selectedTierId} tiers={tiers} />
-            {hasAvailableTier ? null : <p className="public-event__unavailable">Tickets are currently unavailable</p>}
-            <Button disabled={selectedTier === null} onClick={continueToCheckout}>Continue to checkout</Button>
-          </section>
+          <PublicTicketPurchase
+            eventId={event.id}
+            key={tiers.map((tier) => `${tier.id}:${tier.availability_status}`).join('|')}
+            tiers={tiers}
+          />
         </div>
       </article>
     </main>

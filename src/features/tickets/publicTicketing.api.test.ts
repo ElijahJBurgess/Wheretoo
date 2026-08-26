@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { rpc } = vi.hoisted(() => ({ rpc: vi.fn() }))
+const { createClient, rpc } = vi.hoisted(() => {
+  const rpc = vi.fn()
+  return { createClient: vi.fn(() => ({ rpc })), rpc }
+})
 
-vi.mock('@supabase/supabase-js', () => ({ createClient: vi.fn(() => ({ rpc })) }))
+vi.mock('@supabase/supabase-js', () => ({ createClient }))
 vi.mock('../../lib/env', () => ({
   publicEnv: {
     supabaseUrl: 'https://whereto.example.supabase.co',
@@ -49,7 +52,22 @@ const projection = {
 }
 
 describe('public ticketing API', () => {
-  beforeEach(() => vi.clearAllMocks())
+  beforeEach(() => rpc.mockClear())
+
+  it('uses an isolated nonpersistent anonymous auth client to avoid sharing GoTrue storage', () => {
+    expect(createClient).toHaveBeenCalledWith(
+      'https://whereto.example.supabase.co',
+      'public-anon-key',
+      {
+        auth: {
+          storageKey: 'whereto-public-ticketing-anon',
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false,
+        },
+      },
+    )
+  })
 
   it('reads the one public projection through only the anonymous ticketing RPC', async () => {
     rpc.mockResolvedValue({ data: [projection], error: null })
