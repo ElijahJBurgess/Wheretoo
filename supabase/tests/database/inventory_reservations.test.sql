@@ -2,7 +2,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(51);
+select plan(64);
 
 select has_schema('private', 'private service function schema exists');
 
@@ -330,6 +330,37 @@ select results_eq(
   $$,
   'unfinished Checkout expiry has an exact matching partial index'
 );
+
+create or replace function pg_temp.checkout_reservation_row_count(
+  p_event_id uuid,
+  p_tier_id uuid,
+  p_name text,
+  p_email text,
+  p_client_request_id uuid,
+  p_confirmation_token_hash text
+)
+returns bigint
+language plpgsql
+set search_path = ''
+as $$
+declare
+  v_count bigint;
+begin
+  select count(*) into v_count
+  from public.server_reserve_checkout(
+    p_event_id,
+    p_tier_id,
+    p_name,
+    p_email,
+    p_client_request_id,
+    p_confirmation_token_hash
+  );
+  return v_count;
+exception
+  when others then
+    return -1;
+end;
+$$;
 
 insert into auth.users (id, email)
 values ('15000000-0000-0000-0000-000000000001', 'inventory-owner@example.invalid');
@@ -734,41 +765,264 @@ from public.server_reserve_checkout(
   '3123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
 );
 
+create temporary table stale_tier_reservation on commit drop as
+select *
+from public.server_reserve_checkout(
+  '25000000-0000-0000-0000-000000000001',
+  '35000000-0000-4000-8000-000000000001',
+  'Stale Tier Buyer', 'stale-tier@example.com',
+  '45000000-0000-4000-8000-000000000018',
+  'a123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+);
+
+create temporary table stale_connect_reservation on commit drop as
+select *
+from public.server_reserve_checkout(
+  '25000000-0000-0000-0000-000000000001',
+  '35000000-0000-4000-8000-000000000001',
+  'Stale Connect Retry', 'stale-connect-retry@example.com',
+  '45000000-0000-4000-8000-000000000019',
+  'b123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+);
+
+create temporary table restricted_connect_reservation on commit drop as
+select *
+from public.server_reserve_checkout(
+  '25000000-0000-0000-0000-000000000001',
+  '35000000-0000-4000-8000-000000000001',
+  'Restricted Connect Retry', 'restricted-connect-retry@example.com',
+  '45000000-0000-4000-8000-000000000020',
+  'c123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+);
+
+create temporary table stale_fee_reservation on commit drop as
+select *
+from public.server_reserve_checkout(
+  '25000000-0000-0000-0000-000000000001',
+  '35000000-0000-4000-8000-000000000001',
+  'Stale Fee Retry', 'stale-fee-retry@example.com',
+  '45000000-0000-4000-8000-000000000021',
+  'd123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+);
+
 update public.orders
 set created_at = now() - interval '2 hours',
   checkout_expires_at = now() - interval '1 hour',
   reservation_expires_at = now() - interval '30 minutes'
-where id = (select order_id from stale_final_reservation);
+where id in (
+  select order_id from stale_final_reservation
+  union all select order_id from stale_tier_reservation
+  union all select order_id from stale_connect_reservation
+  union all select order_id from restricted_connect_reservation
+  union all select order_id from stale_fee_reservation
+);
+
+update public.events
+set starts_at = now() - interval '1 hour'
+where id = '25000000-0000-0000-0000-000000000001';
 
 select is(
-  (
-    select count(*)
-    from public.server_reserve_checkout(
-      '25000000-0000-0000-0000-000000000001',
-      '35000000-0000-4000-8000-000000000002',
-      'Stale Final Buyer', 'stale-final@example.com',
-      '45000000-0000-4000-8000-000000000011',
-      '3123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
-    )
+  pg_temp.checkout_reservation_row_count(
+    '25000000-0000-0000-0000-000000000001',
+    '35000000-0000-4000-8000-000000000002',
+    'Stale Final Buyer', 'stale-final@example.com',
+    '45000000-0000-4000-8000-000000000011',
+    '3123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
   ),
   0::bigint,
-  'a stale same-request retry atomically returns no Checkout reservation'
+  'a stale same-request retry bypasses an event that has already started'
+);
+
+select results_eq(
+  $$
+    select status, expired_at is not null, failure_code
+    from public.orders
+    where id = (select order_id from stale_final_reservation)
+  $$,
+  $$ values ('expired'::text, true, 'CHECKOUT_EXPIRED'::text) $$,
+  'the invalid-event retry atomically persists the reservation expiry'
 );
 
 select is(
-  (
-    select count(*)
-    from public.server_reserve_checkout(
-      '25000000-0000-0000-0000-000000000001',
-      '35000000-0000-4000-8000-000000000002',
-      'Stale Final Buyer', 'stale-final@example.com',
-      '45000000-0000-4000-8000-000000000011',
-      '3123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
-    )
+  pg_temp.checkout_reservation_row_count(
+    '25000000-0000-0000-0000-000000000001',
+    '35000000-0000-4000-8000-000000000002',
+    'Stale Final Buyer', 'stale-final@example.com',
+    '45000000-0000-4000-8000-000000000011',
+    '3123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
   ),
   0::bigint,
-  'an already-expired same-request retry remains an idempotent empty result'
+  'an expired same-request retry bypasses the invalid event state'
 );
+
+update public.events
+set starts_at = now() + interval '2 days',
+  ends_at = now() + interval '2 days 2 hours'
+where id = '25000000-0000-0000-0000-000000000001';
+
+update public.ticket_tiers
+set status = 'archived'
+where id = '35000000-0000-4000-8000-000000000001';
+
+select is(
+  pg_temp.checkout_reservation_row_count(
+    '25000000-0000-0000-0000-000000000001',
+    '35000000-0000-4000-8000-000000000001',
+    'Stale Tier Buyer', 'stale-tier@example.com',
+    '45000000-0000-4000-8000-000000000018',
+    'a123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+  ),
+  0::bigint,
+  'a stale same-request retry bypasses an archived selected tier'
+);
+
+select results_eq(
+  $$
+    select status, expired_at is not null, failure_code
+    from public.orders
+    where id = (select order_id from stale_tier_reservation)
+  $$,
+  $$ values ('expired'::text, true, 'CHECKOUT_EXPIRED'::text) $$,
+  'the archived-tier retry atomically persists the reservation expiry'
+);
+
+select is(
+  pg_temp.checkout_reservation_row_count(
+    '25000000-0000-0000-0000-000000000001',
+    '35000000-0000-4000-8000-000000000001',
+    'Stale Tier Buyer', 'stale-tier@example.com',
+    '45000000-0000-4000-8000-000000000018',
+    'a123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+  ),
+  0::bigint,
+  'an expired same-request retry bypasses the archived tier state'
+);
+
+update public.ticket_tiers
+set status = 'active'
+where id = '35000000-0000-4000-8000-000000000001';
+
+update public.organizer_stripe_accounts
+set last_synced_at = now() - interval '6 minutes'
+where organizer_id = '15000000-0000-0000-0000-000000000001';
+
+select is(
+  pg_temp.checkout_reservation_row_count(
+    '25000000-0000-0000-0000-000000000001',
+    '35000000-0000-4000-8000-000000000001',
+    'Stale Connect Retry', 'stale-connect-retry@example.com',
+    '45000000-0000-4000-8000-000000000019',
+    'b123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+  ),
+  0::bigint,
+  'a stale same-request retry bypasses a stale Connect projection'
+);
+
+select results_eq(
+  $$
+    select status, expired_at is not null, failure_code
+    from public.orders
+    where id = (select order_id from stale_connect_reservation)
+  $$,
+  $$ values ('expired'::text, true, 'CHECKOUT_EXPIRED'::text) $$,
+  'the stale-Connect retry atomically persists the reservation expiry'
+);
+
+select is(
+  pg_temp.checkout_reservation_row_count(
+    '25000000-0000-0000-0000-000000000001',
+    '35000000-0000-4000-8000-000000000001',
+    'Stale Connect Retry', 'stale-connect-retry@example.com',
+    '45000000-0000-4000-8000-000000000019',
+    'b123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+  ),
+  0::bigint,
+  'an expired same-request retry bypasses stale Connect state'
+);
+
+update public.organizer_stripe_accounts
+set last_synced_at = now(), transfers_status = 'restricted'
+where organizer_id = '15000000-0000-0000-0000-000000000001';
+
+select is(
+  pg_temp.checkout_reservation_row_count(
+    '25000000-0000-0000-0000-000000000001',
+    '35000000-0000-4000-8000-000000000001',
+    'Restricted Connect Retry', 'restricted-connect-retry@example.com',
+    '45000000-0000-4000-8000-000000000020',
+    'c123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+  ),
+  0::bigint,
+  'a stale same-request retry bypasses restricted Connect capabilities'
+);
+
+select results_eq(
+  $$
+    select status, expired_at is not null, failure_code
+    from public.orders
+    where id = (select order_id from restricted_connect_reservation)
+  $$,
+  $$ values ('expired'::text, true, 'CHECKOUT_EXPIRED'::text) $$,
+  'the restricted-Connect retry atomically persists the reservation expiry'
+);
+
+select is(
+  pg_temp.checkout_reservation_row_count(
+    '25000000-0000-0000-0000-000000000001',
+    '35000000-0000-4000-8000-000000000001',
+    'Restricted Connect Retry', 'restricted-connect-retry@example.com',
+    '45000000-0000-4000-8000-000000000020',
+    'c123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+  ),
+  0::bigint,
+  'an expired same-request retry bypasses restricted Connect state'
+);
+
+update public.organizer_stripe_accounts
+set transfers_status = 'active'
+where organizer_id = '15000000-0000-0000-0000-000000000001';
+
+update public.platform_fee_rules
+set effective_until = now() - interval '1 second'
+where id = '00000000-0000-0000-0000-000000000500';
+
+select is(
+  pg_temp.checkout_reservation_row_count(
+    '25000000-0000-0000-0000-000000000001',
+    '35000000-0000-4000-8000-000000000001',
+    'Stale Fee Retry', 'stale-fee-retry@example.com',
+    '45000000-0000-4000-8000-000000000021',
+    'd123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+  ),
+  0::bigint,
+  'a stale same-request retry bypasses a changed fee window'
+);
+
+select results_eq(
+  $$
+    select status, expired_at is not null, failure_code
+    from public.orders
+    where id = (select order_id from stale_fee_reservation)
+  $$,
+  $$ values ('expired'::text, true, 'CHECKOUT_EXPIRED'::text) $$,
+  'the changed-fee retry atomically persists the reservation expiry'
+);
+
+select is(
+  pg_temp.checkout_reservation_row_count(
+    '25000000-0000-0000-0000-000000000001',
+    '35000000-0000-4000-8000-000000000001',
+    'Stale Fee Retry', 'stale-fee-retry@example.com',
+    '45000000-0000-4000-8000-000000000021',
+    'd123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+  ),
+  0::bigint,
+  'an expired same-request retry bypasses changed fee configuration'
+);
+
+update public.platform_fee_rules
+set effective_until = null
+where id = '00000000-0000-0000-0000-000000000500';
 
 create temporary table replacement_final_reservation on commit drop as
 select *
@@ -784,12 +1038,6 @@ select isnt(
   (select order_id from stale_final_reservation),
   (select order_id from replacement_final_reservation),
   'an expired reservation releases the final inventory unit to a new request'
-);
-
-select results_eq(
-  $$ select status, expired_at is not null from public.orders where id = (select order_id from stale_final_reservation) $$,
-  $$ values ('expired'::text, true) $$,
-  'lazy reservation cleanup advances a stale creating order to expired'
 );
 
 update public.orders
@@ -808,6 +1056,24 @@ select throws_ok(
   $$,
   'P0001', 'TIER_SOLD_OUT',
   'payment-processing quantity keeps the capacity-one tier sold out after reservation expiry'
+);
+
+update public.orders
+set status = 'paid', paid_at = now()
+where id = (select order_id from replacement_final_reservation);
+
+select throws_ok(
+  $$
+    select * from public.server_reserve_checkout(
+      '25000000-0000-0000-0000-000000000001',
+      '35000000-0000-4000-8000-000000000002',
+      'Paid Sold Out Buyer', 'paid-sold-out@example.com',
+      '45000000-0000-4000-8000-000000000022',
+      'e123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+    )
+  $$,
+  'P0001', 'TIER_SOLD_OUT',
+  'paid quantity independently keeps the capacity-one tier sold out'
 );
 
 select results_eq(
