@@ -24,6 +24,8 @@ const CUSTOMER_PATTERN = /^cus_[A-Za-z0-9]+$/;
 const REFUND_PATTERN = /^re_[A-Za-z0-9]+$/;
 const DISPUTE_PATTERN = /^(du|dp)_[A-Za-z0-9]+$/;
 const ACCOUNT_PATTERN = /^acct_[A-Za-z0-9]+$/;
+const TRANSFER_REVERSAL_PATTERN = /^trr_[A-Za-z0-9]+$/;
+const FEE_REFUND_PATTERN = /^fr_[A-Za-z0-9]+$/;
 
 const CHECKOUT_EVENT_TYPES = new Set([
   "checkout.session.completed",
@@ -68,6 +70,7 @@ export interface ReceiptInput {
 
 export interface OrderSnapshot {
   orderId: string;
+  checkoutSessionId: string;
   eventId: string;
   tierId: string;
   currency: "usd";
@@ -104,12 +107,21 @@ export interface PaymentFailureSnapshot extends PaymentSnapshot {
   failureCode: "ASYNC_PAYMENT_FAILED" | "CHECKOUT_EXPIRED";
 }
 
+export interface PaymentReviewSnapshot extends FulfillmentSnapshot {
+  failureCode:
+    | "PAYMENT_CHARGE_REFUNDED"
+    | "PAYMENT_CHARGE_DISPUTED"
+    | "REFUND_POLICY_MISMATCH";
+}
+
 export interface RefundSnapshot {
   stripeEventId: string;
   orderId: string;
   stripeRefundId: string;
   paymentIntentId: string;
   chargeId: string;
+  transferReversalId: string;
+  applicationFeeRefundId: string | null;
   amountMinor: number;
   currency: "usd";
   status: string;
@@ -122,11 +134,13 @@ export interface DisputeSnapshot {
   stripeEventId: string;
   orderId: string;
   stripeDisputeId: string;
+  paymentIntentId: string;
   chargeId: string;
   status: string;
   amountMinor: number;
   currency: "usd";
-  recoveryStatus: "not_attempted";
+  recoveryStatus: "not_applicable" | "failed" | "recovered";
+  transferReversalId: string | null;
 }
 
 export interface StripeWebhookDependencies {
@@ -141,6 +155,7 @@ export interface StripeWebhookDependencies {
     orderId: string,
     checkoutSessionId: string,
   ): Promise<OrderSnapshot | null>;
+  getPaymentOrderSnapshot(orderId: string): Promise<OrderSnapshot | null>;
   retrieveSession(
     id: string,
     params: Stripe.Checkout.SessionRetrieveParams,
@@ -149,6 +164,15 @@ export interface StripeWebhookDependencies {
   retrieveCharge(id: string): Promise<unknown>;
   retrieveRefund(id: string): Promise<unknown>;
   retrieveDispute(id: string): Promise<unknown>;
+  retrieveTransfer(id: string): Promise<unknown>;
+  retrieveTransferReversal(transferId: string, id: string): Promise<unknown>;
+  retrieveApplicationFee(id: string): Promise<unknown>;
+  retrieveApplicationFeeRefund(feeId: string, id: string): Promise<unknown>;
+  createTransferReversal(
+    transferId: string,
+    params: Stripe.TransferCreateReversalParams,
+    options: Stripe.RequestOptions,
+  ): Promise<unknown>;
   retrieveAccount(
     id: string,
     params: Stripe.V2.Core.AccountRetrieveParams,
@@ -156,11 +180,13 @@ export interface StripeWebhookDependencies {
   persistAccountStatus(
     accountId: string,
     projection: ConnectStatusProjection,
-    syncedAt: string,
+    retrievedAt: string,
+    revision: string,
   ): Promise<boolean>;
   fulfillPaidOrder(snapshot: FulfillmentSnapshot): Promise<void>;
   markPaymentProcessing(snapshot: PaymentSnapshot): Promise<void>;
   markPaymentFailed(snapshot: PaymentFailureSnapshot): Promise<void>;
+  markPaymentRequiresReview(snapshot: PaymentReviewSnapshot): Promise<void>;
   applyRefund(snapshot: RefundSnapshot): Promise<void>;
   applyDispute(snapshot: DisputeSnapshot): Promise<void>;
   now(): string;
@@ -436,12 +462,20 @@ async function defaultFinalizeReceipt(
   }
 }
 
-function orderSnapshotFromRpc(value: unknown): OrderSnapshot | null {
+function orderSnapshotFromRpc(
+  value: unknown,
+  fallbackSessionId?: string,
+): OrderSnapshot | null {
   if (!Array.isArray(value)) throw new Error("invalid database response");
   if (value.length === 0) return null;
   const row = parseRpcSingle(value);
   if (
     typeof row.order_id !== "string" || !UUID_PATTERN.test(row.order_id) ||
+    (
+      row.checkout_session_id !== undefined &&
+      (typeof row.checkout_session_id !== "string" ||
+        !SESSION_PATTERN.test(row.checkout_session_id))
+    ) ||
     typeof row.event_id !== "string" || !UUID_PATTERN.test(row.event_id) ||
     typeof row.tier_id !== "string" || !UUID_PATTERN.test(row.tier_id) ||
     row.currency !== "usd" || !Number.isSafeInteger(row.subtotal_minor) ||
@@ -452,6 +486,9 @@ function orderSnapshotFromRpc(value: unknown): OrderSnapshot | null {
   ) throw new Error("invalid database response");
   return {
     orderId: row.order_id,
+    checkoutSessionId: typeof row.checkout_session_id === "string"
+      ? row.checkout_session_id
+      : fallbackSessionId ?? permanent("PAYMENT_SNAPSHOT_MISMATCH"),
     eventId: row.event_id,
     tierId: row.tier_id,
     currency: "usd",
@@ -468,6 +505,15 @@ async function defaultGetOrderSnapshot(orderId: string, sessionId: string) {
     { p_order_id: orderId, p_checkout_session_id: sessionId },
   );
   if (error !== null) throwRpc(error);
+  return orderSnapshotFromRpc(data, sessionId);
+}
+
+async function defaultGetPaymentOrderSnapshot(orderId: string) {
+  const { data, error } = await getServiceClient().rpc(
+    "server_get_webhook_payment_order_snapshot",
+    { p_order_id: orderId },
+  );
+  if (error !== null) throwRpc(error);
   return orderSnapshotFromRpc(data);
 }
 
@@ -479,36 +525,29 @@ async function domainRpc(name: string, params: Record<string, unknown>) {
 async function defaultPersistAccountStatus(
   accountId: string,
   projection: ConnectStatusProjection,
-  syncedAt: string,
+  retrievedAt: string,
+  revision: string,
 ): Promise<boolean> {
-  const client = getServiceClient();
-  const { data: owner, error: findError } = await client
-    .from("organizer_stripe_accounts")
-    .select("organizer_id")
-    .eq("stripe_account_id", accountId)
-    .eq("livemode", false)
-    .maybeSingle();
-  if (findError !== null) throw new Error("account lookup failed");
-  if (owner === null) return false;
-  const { data, error } = await client
-    .from("organizer_stripe_accounts")
-    .update({
-      transfers_status: projection.transfersStatus,
-      payouts_status: projection.payoutsStatus,
-      requirements_status: projection.requirementsStatus,
-      requirements_currently_due_count:
-        projection.requirementsCurrentlyDueCount,
-      requirements_past_due_count: projection.requirementsPastDueCount,
-      last_status_code: projection.lastStatusCode,
-      last_synced_at: syncedAt,
-    })
-    .eq("organizer_id", owner.organizer_id)
-    .eq("stripe_account_id", accountId)
-    .eq("livemode", false)
-    .select("organizer_id")
-    .maybeSingle();
-  if (error !== null) throw new Error("account persistence failed");
-  return data !== null;
+  const { data, error } = await getServiceClient().rpc(
+    "server_persist_connect_status_if_current",
+    {
+      p_stripe_account_id: accountId,
+      p_retrieved_at: retrievedAt,
+      p_revision: revision,
+      p_transfers_status: projection.transfersStatus,
+      p_payouts_status: projection.payoutsStatus,
+      p_requirements_status: projection.requirementsStatus,
+      p_currently_due_count: projection.requirementsCurrentlyDueCount,
+      p_past_due_count: projection.requirementsPastDueCount,
+      p_last_status_code: projection.lastStatusCode,
+    },
+  );
+  if (error !== null) throwRpc(error);
+  if (data === "not_found") return false;
+  if (data !== "updated" && data !== "stale") {
+    throw new Error("account persistence failed");
+  }
+  return true;
 }
 
 function defaultDependencies(): StripeWebhookDependencies {
@@ -526,12 +565,21 @@ function defaultDependencies(): StripeWebhookDependencies {
     recordReceipt: defaultRecordReceipt,
     finalizeReceipt: defaultFinalizeReceipt,
     getOrderSnapshot: defaultGetOrderSnapshot,
+    getPaymentOrderSnapshot: defaultGetPaymentOrderSnapshot,
     retrieveSession: (id, params) =>
       stripe.checkout.sessions.retrieve(id, params),
     retrievePaymentIntent: (id) => stripe.paymentIntents.retrieve(id),
     retrieveCharge: (id) => stripe.charges.retrieve(id),
     retrieveRefund: (id) => stripe.refunds.retrieve(id),
     retrieveDispute: (id) => stripe.disputes.retrieve(id),
+    retrieveTransfer: (id) => stripe.transfers.retrieve(id),
+    retrieveTransferReversal: (transferId, id) =>
+      stripe.transfers.retrieveReversal(transferId, id),
+    retrieveApplicationFee: (id) => stripe.applicationFees.retrieve(id),
+    retrieveApplicationFeeRefund: (feeId, id) =>
+      stripe.applicationFees.retrieveRefund(feeId, id),
+    createTransferReversal: (transferId, params, options) =>
+      stripe.transfers.createReversal(transferId, params, options),
     retrieveAccount: (id, params) =>
       stripe.v2.core.accounts.retrieve(id, params),
     persistAccountStatus: defaultPersistAccountStatus,
@@ -561,13 +609,25 @@ function defaultDependencies(): StripeWebhookDependencies {
         ...paymentRpcParams(value),
         p_failure_code: value.failureCode,
       }),
+    markPaymentRequiresReview: (value) =>
+      domainRpc("server_mark_payment_requires_review", {
+        ...paymentRpcParams(value),
+        p_charge_id: value.chargeId,
+        p_transfer_id: value.transferId,
+        p_application_fee_id: value.applicationFeeId,
+        p_balance_transaction_id: value.balanceTransactionId,
+        p_customer_id: value.customerId,
+        p_failure_code: value.failureCode,
+      }),
     applyRefund: (value) =>
-      domainRpc("server_apply_refund", {
+      domainRpc("server_apply_verified_refund", {
         p_stripe_event_id: value.stripeEventId,
         p_order_id: value.orderId,
         p_stripe_refund_id: value.stripeRefundId,
         p_payment_intent_id: value.paymentIntentId,
         p_charge_id: value.chargeId,
+        p_transfer_reversal_id: value.transferReversalId,
+        p_application_fee_refund_id: value.applicationFeeRefundId,
         p_amount_minor: value.amountMinor,
         p_currency: value.currency,
         p_status: value.status,
@@ -576,11 +636,13 @@ function defaultDependencies(): StripeWebhookDependencies {
         p_refund_application_fee: value.refundApplicationFee,
       }),
     applyDispute: (value) =>
-      domainRpc("server_apply_dispute", {
+      domainRpc("server_apply_verified_dispute", {
         p_stripe_event_id: value.stripeEventId,
         p_order_id: value.orderId,
         p_stripe_dispute_id: value.stripeDisputeId,
+        p_payment_intent_id: value.paymentIntentId,
         p_charge_id: value.chargeId,
+        p_transfer_reversal_id: value.transferReversalId,
         p_status: value.status,
         p_amount_minor: value.amountMinor,
         p_currency: value.currency,
@@ -647,6 +709,9 @@ function validateCharge(
   applicationFeeId: string;
   balanceTransactionId: string;
   customerId: string | null;
+  amountRefunded: number;
+  refunded: boolean;
+  disputed: boolean;
 } {
   if (
     !isRecord(value) || value.object !== "charge" || value.livemode !== false ||
@@ -663,6 +728,12 @@ function validateCharge(
   const customerId = value.customer === null || value.customer === undefined
     ? null
     : expandedId(value.customer, CUSTOMER_PATTERN, "customer");
+  if (
+    !Number.isSafeInteger(value.amount_refunded) ||
+    (value.amount_refunded as number) < 0 ||
+    (value.amount_refunded as number) > order.totalMinor ||
+    typeof value.refunded !== "boolean" || typeof value.disputed !== "boolean"
+  ) permanent("PAYMENT_SNAPSHOT_MISMATCH");
   return {
     id: requireId(value.id, CHARGE_PATTERN, "PAYMENT_SNAPSHOT_MISMATCH"),
     transferId: expandedId(value.transfer, TRANSFER_PATTERN, "transfer"),
@@ -677,6 +748,9 @@ function validateCharge(
       "balance_transaction",
     ),
     customerId,
+    amountRefunded: value.amount_refunded as number,
+    refunded: value.refunded,
+    disputed: value.disputed,
   };
 }
 
@@ -800,6 +874,21 @@ async function dispatchCheckout(
     current.order,
     current.paymentIntent.id,
   );
+  if (charge.amountRefunded > 0 || charge.refunded || charge.disputed) {
+    await dependencies.markPaymentRequiresReview({
+      ...current.payment,
+      paymentIntentId: current.paymentIntent.id,
+      chargeId: charge.id,
+      transferId: charge.transferId,
+      applicationFeeId: charge.applicationFeeId,
+      balanceTransactionId: charge.balanceTransactionId,
+      customerId: charge.customerId,
+      failureCode: charge.disputed
+        ? "PAYMENT_CHARGE_DISPUTED"
+        : "PAYMENT_CHARGE_REFUNDED",
+    });
+    return;
+  }
   await dependencies.fulfillPaidOrder({
     ...current.payment,
     paymentIntentId: current.paymentIntent.id,
@@ -811,16 +900,18 @@ async function dispatchCheckout(
   });
 }
 
-function validatePaymentBinding(
+async function validatePaymentBinding(
   chargeValue: unknown,
   intentValue: unknown,
   expectedChargeId: string,
   expectedIntentId: string,
-): {
-  orderId: string;
+  dependencies: StripeWebhookDependencies,
+): Promise<{
+  order: OrderSnapshot;
   charge: Record<string, unknown>;
   intent: Record<string, unknown>;
-} {
+  payment: FulfillmentSnapshot;
+}> {
   if (
     !isRecord(chargeValue) || chargeValue.object !== "charge" ||
     chargeValue.livemode !== false || chargeValue.id !== expectedChargeId ||
@@ -838,7 +929,188 @@ function validatePaymentBinding(
   if (metadataOrderId(chargeValue.metadata) !== orderId) {
     permanent("PAYMENT_BINDING_MISMATCH");
   }
-  return { orderId, charge: chargeValue, intent: intentValue };
+  const order = await dependencies.getPaymentOrderSnapshot(orderId);
+  if (order === null) permanent("PAYMENT_BINDING_MISMATCH");
+  validateMetadata(intentValue.metadata, order);
+  const transferData = isRecord(intentValue.transfer_data)
+    ? intentValue.transfer_data
+    : permanent("PAYMENT_BINDING_MISMATCH");
+  if (
+    intentValue.amount !== order.totalMinor ||
+    intentValue.currency !== order.currency ||
+    intentValue.application_fee_amount !== order.applicationFeeAmountMinor ||
+    transferData.destination !== order.destinationAccountId ||
+    chargeValue.paid !== true || chargeValue.amount !== order.totalMinor ||
+    chargeValue.currency !== order.currency
+  ) permanent("PAYMENT_BINDING_MISMATCH");
+  const charge = validateCharge(
+    chargeValue,
+    order,
+    expectedIntentId,
+  );
+  return {
+    order,
+    charge: chargeValue,
+    intent: intentValue,
+    payment: {
+      stripeEventId: "",
+      orderId: order.orderId,
+      checkoutSessionId: order.checkoutSessionId,
+      paymentIntentId: expectedIntentId,
+      chargeId: charge.id,
+      transferId: charge.transferId,
+      applicationFeeId: charge.applicationFeeId,
+      balanceTransactionId: charge.balanceTransactionId,
+      customerId: charge.customerId,
+      mode: "payment",
+      paymentStatus: "paid",
+      currency: order.currency,
+      subtotalMinor: order.subtotalMinor,
+      totalMinor: order.totalMinor,
+      applicationFeeAmountMinor: order.applicationFeeAmountMinor,
+      destinationAccountId: order.destinationAccountId,
+    },
+  };
+}
+
+function policyAmount(value: unknown): number {
+  if (typeof value !== "string" || !/^(0|[1-9][0-9]*)$/.test(value)) {
+    permanent("REFUND_POLICY_MISMATCH");
+  }
+  const amount = Number(value);
+  if (!Number.isSafeInteger(amount) || amount < 0) {
+    permanent("REFUND_POLICY_MISMATCH");
+  }
+  return amount;
+}
+
+async function validateRefundPolicy(
+  refund: Record<string, unknown>,
+  binding: Awaited<ReturnType<typeof validatePaymentBinding>>,
+  refundId: string,
+  dependencies: StripeWebhookDependencies,
+): Promise<{
+  transferReversalId: string;
+  applicationFeeRefundId: string | null;
+  refundApplicationFee: boolean;
+}> {
+  const metadata = isRecord(refund.metadata)
+    ? refund.metadata
+    : permanent("REFUND_POLICY_MISMATCH");
+  const keys = [
+    "order_id",
+    "whereto_refund_policy",
+    "whereto_reverse_transfer",
+    "whereto_refund_application_fee",
+    "whereto_transfer_reversal_amount",
+    "whereto_application_fee_refund_id",
+    "whereto_application_fee_refund_amount",
+  ];
+  if (
+    !exactKeys(metadata, keys) ||
+    metadata.order_id !== binding.order.orderId ||
+    metadata.whereto_refund_policy !== "destination_v1" ||
+    metadata.whereto_reverse_transfer !== "true" ||
+    (metadata.whereto_refund_application_fee !== "true" &&
+      metadata.whereto_refund_application_fee !== "false")
+  ) permanent("REFUND_POLICY_MISMATCH");
+
+  const transferReversalId = expandedId(
+    refund.transfer_reversal ?? refund.source_transfer_reversal,
+    TRANSFER_REVERSAL_PATTERN,
+    "transfer_reversal",
+  );
+  const reversalAmount = policyAmount(
+    metadata.whereto_transfer_reversal_amount,
+  );
+  if (reversalAmount <= 0) permanent("REFUND_POLICY_MISMATCH");
+  const transfer = await dependencies.retrieveTransfer(
+    binding.payment.transferId,
+  );
+  if (
+    !isRecord(transfer) || transfer.object !== "transfer" ||
+    transfer.id !== binding.payment.transferId || transfer.livemode !== false ||
+    transfer.currency !== binding.order.currency ||
+    expandedId(transfer.destination, ACCOUNT_PATTERN, "account") !==
+      binding.order.destinationAccountId ||
+    expandedId(transfer.source_transaction, CHARGE_PATTERN, "charge") !==
+      binding.payment.chargeId ||
+    !Number.isSafeInteger(transfer.amount) ||
+    !Number.isSafeInteger(transfer.amount_reversed) ||
+    (transfer.amount as number) <= 0 ||
+    (transfer.amount_reversed as number) < reversalAmount ||
+    reversalAmount > (transfer.amount as number)
+  ) permanent("REFUND_POLICY_MISMATCH");
+  const reversal = await dependencies.retrieveTransferReversal(
+    binding.payment.transferId,
+    transferReversalId,
+  );
+  if (
+    !isRecord(reversal) || reversal.object !== "transfer_reversal" ||
+    reversal.id !== transferReversalId || reversal.amount !== reversalAmount ||
+    reversal.currency !== binding.order.currency ||
+    expandedId(reversal.transfer, TRANSFER_PATTERN, "transfer") !==
+      binding.payment.transferId ||
+    expandedId(reversal.source_refund, REFUND_PATTERN, "refund") !== refundId
+  ) permanent("REFUND_POLICY_MISMATCH");
+
+  const applicationFee = await dependencies.retrieveApplicationFee(
+    binding.payment.applicationFeeId,
+  );
+  if (
+    !isRecord(applicationFee) || applicationFee.object !== "application_fee" ||
+    applicationFee.id !== binding.payment.applicationFeeId ||
+    applicationFee.livemode !== false ||
+    applicationFee.amount !== binding.order.applicationFeeAmountMinor ||
+    applicationFee.currency !== binding.order.currency ||
+    expandedId(applicationFee.charge, CHARGE_PATTERN, "charge") !==
+      binding.payment.chargeId ||
+    !Number.isSafeInteger(applicationFee.amount_refunded)
+  ) permanent("REFUND_POLICY_MISMATCH");
+
+  const refundApplicationFee =
+    metadata.whereto_refund_application_fee === "true";
+  const feeRefundAmount = policyAmount(
+    metadata.whereto_application_fee_refund_amount,
+  );
+  if (!refundApplicationFee) {
+    if (
+      metadata.whereto_application_fee_refund_id !== "none" ||
+      feeRefundAmount !== 0
+    ) permanent("REFUND_POLICY_MISMATCH");
+    return {
+      transferReversalId,
+      applicationFeeRefundId: null,
+      refundApplicationFee,
+    };
+  }
+
+  const feeRefundId = requireId(
+    metadata.whereto_application_fee_refund_id,
+    FEE_REFUND_PATTERN,
+    "REFUND_POLICY_MISMATCH",
+  );
+  if (
+    feeRefundAmount <= 0 ||
+    feeRefundAmount > binding.order.applicationFeeAmountMinor ||
+    (applicationFee.amount_refunded as number) < feeRefundAmount
+  ) permanent("REFUND_POLICY_MISMATCH");
+  const feeRefund = await dependencies.retrieveApplicationFeeRefund(
+    binding.payment.applicationFeeId,
+    feeRefundId,
+  );
+  if (
+    !isRecord(feeRefund) || feeRefund.object !== "fee_refund" ||
+    feeRefund.id !== feeRefundId || feeRefund.amount !== feeRefundAmount ||
+    feeRefund.currency !== binding.order.currency ||
+    expandedId(feeRefund.fee, APPLICATION_FEE_PATTERN, "application_fee") !==
+      binding.payment.applicationFeeId
+  ) permanent("REFUND_POLICY_MISMATCH");
+  return {
+    transferReversalId,
+    applicationFeeRefundId: feeRefundId,
+    refundApplicationFee,
+  };
 }
 
 async function dispatchRefund(
@@ -864,11 +1136,12 @@ async function dispatchRefund(
   );
   const charge = await dependencies.retrieveCharge(chargeId);
   const intent = await dependencies.retrievePaymentIntent(paymentIntentId);
-  const binding = validatePaymentBinding(
+  const binding = await validatePaymentBinding(
     charge,
     intent,
     chargeId,
     paymentIntentId,
+    dependencies,
   );
   const amount = requirePositiveInteger(refund.amount);
   const currency = requireUsd(refund.currency);
@@ -888,25 +1161,51 @@ async function dispatchRefund(
     !Number.isSafeInteger(binding.charge.amount) ||
     (binding.charge.amount as number) < amount
   ) permanent("REFUND_SNAPSHOT_MISMATCH");
-  const metadata = isRecord(refund.metadata) ? refund.metadata : {};
-  const refundApplicationFee =
-    metadata.whereto_refund_application_fee === "true";
+  let policy: {
+    transferReversalId: string;
+    applicationFeeRefundId: string | null;
+    refundApplicationFee: boolean;
+  };
+  try {
+    policy = await validateRefundPolicy(
+      refund,
+      binding,
+      refundId,
+      dependencies,
+    );
+  } catch (error) {
+    if (!(error instanceof PermanentWebhookError)) throw error;
+    await dependencies.markPaymentRequiresReview({
+      ...binding.payment,
+      stripeEventId: event.id,
+      failureCode: "REFUND_POLICY_MISMATCH",
+    });
+    return;
+  }
   await dependencies.applyRefund({
     stripeEventId: event.id,
-    orderId: binding.orderId,
+    orderId: binding.order.orderId,
     stripeRefundId: refundId,
     paymentIntentId,
     chargeId,
+    transferReversalId: policy.transferReversalId,
+    applicationFeeRefundId: policy.applicationFeeRefundId,
     amountMinor: amount,
     currency,
     status,
     reason: typeof refund.reason === "string" ? refund.reason : null,
-    reverseTransfer: refund.transfer_reversal !== null &&
-        refund.transfer_reversal !== undefined ||
-      refund.source_transfer_reversal !== null &&
-        refund.source_transfer_reversal !== undefined,
-    refundApplicationFee,
+    reverseTransfer: true,
+    refundApplicationFee: policy.refundApplicationFee,
   });
+}
+
+function isPermanentStripeMutationFailure(error: unknown): boolean {
+  if (!isRecord(error) || typeof error.type !== "string") return false;
+  return [
+    "StripeInvalidRequestError",
+    "StripePermissionError",
+    "StripeAuthenticationError",
+  ].includes(error.type);
 }
 
 async function dispatchDispute(
@@ -931,11 +1230,12 @@ async function dispatchDispute(
   );
   const charge = await dependencies.retrieveCharge(chargeId);
   const intent = await dependencies.retrievePaymentIntent(paymentIntentId);
-  const binding = validatePaymentBinding(
+  const binding = await validatePaymentBinding(
     charge,
     intent,
     chargeId,
     paymentIntentId,
+    dependencies,
   );
   const amount = requirePositiveInteger(dispute.amount);
   const currency = requireUsd(dispute.currency);
@@ -955,15 +1255,77 @@ async function dispatchDispute(
     !Number.isSafeInteger(binding.charge.amount) ||
     (binding.charge.amount as number) < amount
   ) permanent("DISPUTE_SNAPSHOT_MISMATCH");
+
+  const transfer = await dependencies.retrieveTransfer(
+    binding.payment.transferId,
+  );
+  if (
+    !isRecord(transfer) || transfer.object !== "transfer" ||
+    transfer.id !== binding.payment.transferId || transfer.livemode !== false ||
+    transfer.currency !== currency ||
+    expandedId(transfer.destination, ACCOUNT_PATTERN, "account") !==
+      binding.order.destinationAccountId ||
+    expandedId(transfer.source_transaction, CHARGE_PATTERN, "charge") !==
+      chargeId ||
+    !Number.isSafeInteger(transfer.amount) || (transfer.amount as number) <= 0
+  ) permanent("DISPUTE_SNAPSHOT_MISMATCH");
+
+  let recoveryStatus: DisputeSnapshot["recoveryStatus"] = "not_applicable";
+  let transferReversalId: string | null = null;
+  if (["needs_response", "under_review", "lost"].includes(status)) {
+    const recoveryAmount = Math.floor(
+      (transfer.amount as number) * amount / (binding.charge.amount as number),
+    );
+    if (recoveryAmount <= 0 || recoveryAmount > (transfer.amount as number)) {
+      permanent("DISPUTE_SNAPSHOT_MISMATCH");
+    }
+    const metadata = { dispute_id: disputeId, order_id: binding.order.orderId };
+    try {
+      const reversal = await dependencies.createTransferReversal(
+        binding.payment.transferId,
+        { amount: recoveryAmount, metadata },
+        { idempotencyKey: `whereto-dispute-recovery-${disputeId}` },
+      );
+      if (
+        !isRecord(reversal) || reversal.object !== "transfer_reversal" ||
+        reversal.amount !== recoveryAmount || reversal.currency !== currency ||
+        !isRecord(reversal.metadata) ||
+        !exactKeys(reversal.metadata, Object.keys(metadata)) ||
+        reversal.metadata.dispute_id !== disputeId ||
+        reversal.metadata.order_id !== binding.order.orderId ||
+        expandedId(reversal.transfer, TRANSFER_PATTERN, "transfer") !==
+          binding.payment.transferId ||
+        (reversal.source_refund !== null &&
+          reversal.source_refund !== undefined)
+      ) {
+        recoveryStatus = "failed";
+      } else {
+        transferReversalId = requireId(
+          reversal.id,
+          TRANSFER_REVERSAL_PATTERN,
+          "DISPUTE_RECOVERY_MISMATCH",
+        );
+        recoveryStatus = "recovered";
+      }
+    } catch (error) {
+      if (
+        !(error instanceof PermanentWebhookError) &&
+        !isPermanentStripeMutationFailure(error)
+      ) throw error;
+      recoveryStatus = "failed";
+    }
+  }
   await dependencies.applyDispute({
     stripeEventId: event.id,
-    orderId: binding.orderId,
+    orderId: binding.order.orderId,
     stripeDisputeId: disputeId,
+    paymentIntentId,
     chargeId,
     status,
     amountMinor: amount,
     currency,
-    recoveryStatus: "not_attempted",
+    recoveryStatus,
+    transferReversalId,
   });
 }
 
@@ -976,6 +1338,7 @@ async function dispatchAccount(
     ACCOUNT_PATTERN,
     "INVALID_STRIPE_ACCOUNT",
   );
+  const retrievedAt = dependencies.now();
   const account = await dependencies.retrieveAccount(accountId, {
     include: ACCOUNT_INCLUDE,
   });
@@ -991,7 +1354,8 @@ async function dispatchAccount(
     !await dependencies.persistAccountStatus(
       accountId,
       projection,
-      dependencies.now(),
+      retrievedAt,
+      event.id,
     )
   ) {
     throw new Error("account persistence pending");

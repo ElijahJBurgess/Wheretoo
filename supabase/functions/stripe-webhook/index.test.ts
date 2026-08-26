@@ -3,6 +3,8 @@ import { assertEquals, assertRejects } from "@std/assert";
 import Stripe from "stripe";
 import {
   createStripeWebhookHandler,
+  type DisputeSnapshot,
+  type PaymentReviewSnapshot,
   type ReceiptInput,
   type StripeWebhookDependencies,
   verifyStripeSignature,
@@ -12,24 +14,32 @@ import {
   ACCOUNT_ID,
   accountFixture,
   APPLICATION_FEE_ID,
+  applicationFeeFixture,
   BALANCE_TRANSACTION_ID,
   CHARGE_ID,
   chargeFixture,
   checkoutSessionFixture,
   CUSTOMER_ID,
   DISPUTE_ID,
+  DISPUTE_REVERSAL_ID,
   disputeFixture,
+  FEE_REFUND_ID,
+  feeRefundFixture,
   NOW_EPOCH_SECONDS,
   NOW_ISO,
   ORDER_ID,
   PAYMENT_INTENT_ID,
   paymentIntentFixture,
   REFUND_ID,
+  REFUND_REVERSAL_ID,
   refundFixture,
   SESSION_ID,
   snapshotEvent,
+  THIN_WEBHOOK_SECRET,
   thinAccountEvent,
   TRANSFER_ID,
+  transferFixture,
+  transferReversalFixture,
   WEBHOOK_SECRET,
 } from "./webhookFixtures.ts";
 
@@ -42,6 +52,18 @@ function dependencies(
     finalizeReceipt: async () => undefined,
     getOrderSnapshot: async () => ({
       orderId: ORDER_ID,
+      checkoutSessionId: SESSION_ID,
+      eventId: "22222222-3333-4444-8555-666666666666",
+      tierId: "33333333-4444-4555-8666-777777777777",
+      currency: "usd",
+      subtotalMinor: 2_000,
+      totalMinor: 2_000,
+      applicationFeeAmountMinor: 150,
+      destinationAccountId: ACCOUNT_ID,
+    }),
+    getPaymentOrderSnapshot: async () => ({
+      orderId: ORDER_ID,
+      checkoutSessionId: SESSION_ID,
       eventId: "22222222-3333-4444-8555-666666666666",
       tierId: "33333333-4444-4555-8666-777777777777",
       currency: "usd",
@@ -55,11 +77,23 @@ function dependencies(
     retrieveCharge: async () => chargeFixture(),
     retrieveRefund: async () => refundFixture(),
     retrieveDispute: async () => disputeFixture(),
+    retrieveTransfer: async () =>
+      transferFixture({ amount_reversed: 1_850, reversed: true }),
+    retrieveTransferReversal: async () => transferReversalFixture(),
+    retrieveApplicationFee: async () => applicationFeeFixture(),
+    retrieveApplicationFeeRefund: async () => feeRefundFixture(),
+    createTransferReversal: async () =>
+      transferReversalFixture({
+        id: DISPUTE_REVERSAL_ID,
+        source_refund: null,
+        metadata: { dispute_id: DISPUTE_ID, order_id: ORDER_ID },
+      }),
     retrieveAccount: async () => accountFixture(),
     persistAccountStatus: async () => true,
     fulfillPaidOrder: async () => undefined,
     markPaymentProcessing: async () => undefined,
     markPaymentFailed: async () => undefined,
+    markPaymentRequiresReview: async () => undefined,
     applyRefund: async () => undefined,
     applyDispute: async () => undefined,
     now: () => NOW_ISO,
@@ -129,7 +163,7 @@ Deno.test("official Stripe verification accepts the separately managed thin-even
   const raw = JSON.stringify(thinAccountEvent());
   const signature = await Stripe.webhooks.generateTestHeaderStringAsync({
     payload: raw,
-    secret: WEBHOOK_SECRET,
+    secret: THIN_WEBHOOK_SECRET,
     timestamp: NOW_EPOCH_SECONDS,
   });
 
@@ -137,7 +171,7 @@ Deno.test("official Stripe verification accepts the separately managed thin-even
     stripe,
     raw,
     signature,
-    [["whsec", "wrongdestination"].join("_"), WEBHOOK_SECRET],
+    [WEBHOOK_SECRET, THIN_WEBHOOK_SECRET],
     NOW_EPOCH_SECONDS,
   );
   await assertRejects(() =>
@@ -145,7 +179,7 @@ Deno.test("official Stripe verification accepts the separately managed thin-even
       stripe,
       raw,
       signature,
-      [["whsec", "wrongdestination"].join("_")],
+      [WEBHOOK_SECRET],
       NOW_EPOCH_SECONDS,
     )
   );
@@ -281,6 +315,75 @@ Deno.test("paid completion re-retrieves current Session truth and fulfills one e
     applicationFeeAmountMinor: 150,
     destinationAccountId: ACCOUNT_ID,
   });
+});
+
+Deno.test("a paid Session whose current Charge is already refunded or disputed is marked review and never fulfilled", async () => {
+  const reviews: PaymentReviewSnapshot[] = [];
+  let fulfilled = 0;
+  const handler = createStripeWebhookHandler(dependencies({
+    retrieveSession: async () =>
+      checkoutSessionFixture({
+        payment_intent: paymentIntentFixture({
+          latest_charge: chargeFixture({ amount_refunded: 500 }),
+        }),
+      }),
+    markPaymentRequiresReview: async (snapshot) => {
+      reviews.push(snapshot);
+    },
+    fulfillPaidOrder: async () => {
+      fulfilled += 1;
+    },
+  }));
+
+  const refunded = await handler(request(snapshotEvent(
+    "checkout.session.completed",
+    { id: SESSION_ID },
+  )));
+  assertEquals([refunded.status, fulfilled], [200, 0]);
+  assertEquals(reviews[0], {
+    stripeEventId: "evt_checkoutsessioncompletedTask14",
+    orderId: ORDER_ID,
+    checkoutSessionId: SESSION_ID,
+    paymentIntentId: PAYMENT_INTENT_ID,
+    chargeId: CHARGE_ID,
+    transferId: TRANSFER_ID,
+    applicationFeeId: APPLICATION_FEE_ID,
+    balanceTransactionId: BALANCE_TRANSACTION_ID,
+    customerId: CUSTOMER_ID,
+    mode: "payment",
+    paymentStatus: "paid",
+    currency: "usd",
+    subtotalMinor: 2_000,
+    totalMinor: 2_000,
+    applicationFeeAmountMinor: 150,
+    destinationAccountId: ACCOUNT_ID,
+    failureCode: "PAYMENT_CHARGE_REFUNDED",
+  });
+
+  reviews.length = 0;
+  const disputedHandler = createStripeWebhookHandler(dependencies({
+    retrieveSession: async () =>
+      checkoutSessionFixture({
+        payment_intent: paymentIntentFixture({
+          latest_charge: chargeFixture({ disputed: true }),
+        }),
+      }),
+    markPaymentRequiresReview: async (snapshot) => {
+      reviews.push(snapshot);
+    },
+    fulfillPaidOrder: async () => {
+      fulfilled += 1;
+    },
+  }));
+  await disputedHandler(request(snapshotEvent(
+    "checkout.session.completed",
+    { id: SESSION_ID },
+    { id: "evt_Task14LateDispute" },
+  )));
+  assertEquals([reviews[0]?.failureCode, fulfilled], [
+    "PAYMENT_CHARGE_DISPUTED",
+    0,
+  ]);
 });
 
 Deno.test("unpaid completion marks processing and an out-of-order async success fulfills from current paid Session truth", async () => {
@@ -427,6 +530,24 @@ Deno.test("recipient-account events retrieve current Accounts v2 state and persi
   });
 });
 
+Deno.test("account synchronization compares with retrieval start so a late stale ready response cannot overwrite newer restricted truth", async () => {
+  const retrievalStartedAt = "2026-08-26T02:00:00.000Z";
+  const retrievalFinishedAt = "2026-08-26T02:01:00.000Z";
+  const clock = [retrievalStartedAt, retrievalFinishedAt];
+  let persistedAt: string | undefined;
+  const response = await createStripeWebhookHandler(dependencies({
+    now: () => clock.shift() ?? retrievalFinishedAt,
+    retrieveAccount: async () => accountFixture(),
+    persistAccountStatus: async (_accountId, _projection, retrievedAt) => {
+      persistedAt = retrievedAt;
+      return true;
+    },
+  }))(request(thinAccountEvent()));
+
+  assertEquals(response.status, 200);
+  assertEquals(persistedAt, retrievalStartedAt);
+});
+
 Deno.test("a live or malformed retrieved Accounts v2 object is permanently acknowledged without persisting status", async () => {
   const finalizations: unknown[] = [];
   let persisted = false;
@@ -464,6 +585,22 @@ Deno.test("refund reconciliation retrieves authoritative refund, charge, and Pay
       assertEquals(id, PAYMENT_INTENT_ID);
       return paymentIntentFixture();
     },
+    retrieveTransfer: async (id) => {
+      assertEquals(id, TRANSFER_ID);
+      return transferFixture({ amount_reversed: 1_850, reversed: true });
+    },
+    retrieveTransferReversal: async (transferId, reversalId) => {
+      assertEquals([transferId, reversalId], [TRANSFER_ID, REFUND_REVERSAL_ID]);
+      return transferReversalFixture();
+    },
+    retrieveApplicationFee: async (id) => {
+      assertEquals(id, APPLICATION_FEE_ID);
+      return applicationFeeFixture();
+    },
+    retrieveApplicationFeeRefund: async (feeId, refundId) => {
+      assertEquals([feeId, refundId], [APPLICATION_FEE_ID, FEE_REFUND_ID]);
+      return feeRefundFixture();
+    },
     applyRefund: async (snapshot) => {
       applied = snapshot;
     },
@@ -476,13 +613,32 @@ Deno.test("refund reconciliation retrieves authoritative refund, charge, and Pay
     stripeRefundId: REFUND_ID,
     paymentIntentId: PAYMENT_INTENT_ID,
     chargeId: CHARGE_ID,
+    transferReversalId: REFUND_REVERSAL_ID,
+    applicationFeeRefundId: FEE_REFUND_ID,
     amountMinor: 2_000,
     currency: "usd",
     status: "succeeded",
     reason: "requested_by_customer",
     reverseTransfer: true,
-    refundApplicationFee: false,
+    refundApplicationFee: true,
   });
+});
+
+Deno.test("missing or mismatched automatic-refund policy marks the bound payment review and does not pretend refund reconciliation", async () => {
+  let applied = 0;
+  const reviews: PaymentReviewSnapshot[] = [];
+  const response = await createStripeWebhookHandler(dependencies({
+    retrieveRefund: async () => refundFixture({ metadata: {} }),
+    markPaymentRequiresReview: async (snapshot) => {
+      reviews.push(snapshot);
+    },
+    applyRefund: async () => {
+      applied += 1;
+    },
+  }))(request(snapshotEvent("refund.updated", { id: REFUND_ID })));
+
+  assertEquals([response.status, applied], [200, 0]);
+  assertEquals(reviews[0]?.failureCode, "REFUND_POLICY_MISMATCH");
 });
 
 Deno.test("a failed refund event reconciles the current authoritative failed refund state", async () => {
@@ -501,25 +657,100 @@ Deno.test("a failed refund event reconciles the current authoritative failed ref
   assertEquals([response.status, status], [200, "failed"]);
 });
 
-Deno.test("dispute reconciliation retrieves current authoritative binding and applies a monotonic foundation state", async () => {
-  let applied: unknown;
+Deno.test("dispute reconciliation recovers the destination transfer once with deterministic idempotency and persists validated truth", async () => {
+  let applied: DisputeSnapshot | undefined;
+  let reversalCall: unknown;
   const response = await createStripeWebhookHandler(dependencies({
+    createTransferReversal: async (transferId, params, options) => {
+      reversalCall = { transferId, params, options };
+      return transferReversalFixture({
+        id: DISPUTE_REVERSAL_ID,
+        source_refund: null,
+        metadata: { dispute_id: DISPUTE_ID, order_id: ORDER_ID },
+      });
+    },
     applyDispute: async (snapshot) => {
       applied = snapshot;
     },
   }))(request(snapshotEvent("charge.dispute.updated", { id: DISPUTE_ID })));
 
   assertEquals(response.status, 200);
+  assertEquals(reversalCall, {
+    transferId: TRANSFER_ID,
+    params: {
+      amount: 1_850,
+      metadata: { dispute_id: DISPUTE_ID, order_id: ORDER_ID },
+    },
+    options: { idempotencyKey: `whereto-dispute-recovery-${DISPUTE_ID}` },
+  });
   assertEquals(applied, {
     stripeEventId: "evt_chargedisputeupdatedTask14",
     orderId: ORDER_ID,
     stripeDisputeId: DISPUTE_ID,
+    paymentIntentId: PAYMENT_INTENT_ID,
     chargeId: CHARGE_ID,
     status: "needs_response",
     amountMinor: 2_000,
     currency: "usd",
-    recoveryStatus: "not_attempted",
+    recoveryStatus: "recovered",
+    transferReversalId: DISPUTE_REVERSAL_ID,
   });
+});
+
+Deno.test("a dispute without withdrawn funds records not-applicable recovery and never calls Stripe reversal", async () => {
+  let reversalCalls = 0;
+  let applied: DisputeSnapshot | undefined;
+  const response = await createStripeWebhookHandler(dependencies({
+    retrieveDispute: async () => disputeFixture({ status: "won" }),
+    createTransferReversal: async () => {
+      reversalCalls += 1;
+      return transferReversalFixture();
+    },
+    applyDispute: async (snapshot) => {
+      applied = snapshot;
+    },
+  }))(request(snapshotEvent("charge.dispute.closed", { id: DISPUTE_ID })));
+
+  assertEquals([response.status, reversalCalls, applied?.recoveryStatus], [
+    200,
+    0,
+    "not_applicable",
+  ]);
+});
+
+Deno.test("dispute reversal transport failures retry, while permanent Stripe rejection persists failed recovery", async () => {
+  const failedRecoveries: string[] = [];
+  const transientFinalizations: unknown[] = [];
+  const permanent = await createStripeWebhookHandler(dependencies({
+    createTransferReversal: async () => {
+      throw { type: "StripeInvalidRequestError" };
+    },
+    applyDispute: async (snapshot) => {
+      failedRecoveries.push(snapshot.recoveryStatus);
+    },
+  }))(request(snapshotEvent("charge.dispute.created", { id: DISPUTE_ID })));
+  const transient = await createStripeWebhookHandler(dependencies({
+    createTransferReversal: async () => {
+      throw { type: "StripeConnectionError" };
+    },
+    applyDispute: async () => {
+      throw new Error("must remain retryable before persistence");
+    },
+    finalizeReceipt: async (...args) => {
+      transientFinalizations.push(args);
+    },
+  }))(request(snapshotEvent(
+    "charge.dispute.created",
+    { id: DISPUTE_ID },
+    { id: "evt_Task14DisputeTransient" },
+  )));
+
+  assertEquals([permanent.status, failedRecoveries], [200, ["failed"]]);
+  assertEquals([transient.status, transientFinalizations], [503, [[
+    "evt_Task14DisputeTransient",
+    "failed",
+    "TRANSIENT_PROCESSING_FAILURE",
+  ]]]);
 });
 
 Deno.test("unknown signed event types are durably acknowledged without Stripe retrieval or domain mutation", async () => {

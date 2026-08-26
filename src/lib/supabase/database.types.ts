@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.15"
+    PostgrestVersion: "14.17"
   }
   public: {
     Tables: {
@@ -29,6 +29,8 @@ export type Database = {
           status: string
           stripe_charge_id: string
           stripe_dispute_id: string
+          stripe_payment_intent_id: string | null
+          stripe_transfer_reversal_id: string | null
           updated_at: string
         }
         Insert: {
@@ -45,6 +47,8 @@ export type Database = {
           status: string
           stripe_charge_id: string
           stripe_dispute_id: string
+          stripe_payment_intent_id?: string | null
+          stripe_transfer_reversal_id?: string | null
           updated_at?: string
         }
         Update: {
@@ -61,6 +65,8 @@ export type Database = {
           status?: string
           stripe_charge_id?: string
           stripe_dispute_id?: string
+          stripe_payment_intent_id?: string | null
+          stripe_transfer_reversal_id?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -435,6 +441,7 @@ export type Database = {
           dashboard: string
           fees_collector: string
           last_status_code: string | null
+          last_sync_revision: string | null
           last_synced_at: string
           livemode: boolean
           losses_collector: string
@@ -454,6 +461,7 @@ export type Database = {
           dashboard?: string
           fees_collector?: string
           last_status_code?: string | null
+          last_sync_revision?: string | null
           last_synced_at?: string
           livemode?: boolean
           losses_collector?: string
@@ -473,6 +481,7 @@ export type Database = {
           dashboard?: string
           fees_collector?: string
           last_status_code?: string | null
+          last_sync_revision?: string | null
           last_synced_at?: string
           livemode?: boolean
           losses_collector?: string
@@ -588,10 +597,12 @@ export type Database = {
           refund_application_fee: boolean
           reverse_transfer: boolean
           status: string
+          stripe_application_fee_refund_id: string | null
           stripe_charge_id: string | null
           stripe_event_id: string
           stripe_payment_intent_id: string | null
           stripe_refund_id: string
+          stripe_transfer_reversal_id: string | null
           updated_at: string
         }
         Insert: {
@@ -605,10 +616,12 @@ export type Database = {
           refund_application_fee: boolean
           reverse_transfer: boolean
           status: string
+          stripe_application_fee_refund_id?: string | null
           stripe_charge_id?: string | null
           stripe_event_id: string
           stripe_payment_intent_id?: string | null
           stripe_refund_id: string
+          stripe_transfer_reversal_id?: string | null
           updated_at?: string
         }
         Update: {
@@ -622,10 +635,12 @@ export type Database = {
           refund_application_fee?: boolean
           reverse_transfer?: boolean
           status?: string
+          stripe_application_fee_refund_id?: string | null
           stripe_charge_id?: string | null
           stripe_event_id?: string
           stripe_payment_intent_id?: string | null
           stripe_refund_id?: string
+          stripe_transfer_reversal_id?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -1033,6 +1048,43 @@ export type Database = {
           ticket_status: string
         }[]
       }
+      server_apply_verified_dispute: {
+        Args: {
+          p_amount_minor: number
+          p_charge_id: string
+          p_currency: string
+          p_order_id: string
+          p_payment_intent_id: string
+          p_recovery_status: string
+          p_status: string
+          p_stripe_dispute_id: string
+          p_stripe_event_id: string
+          p_transfer_reversal_id: string
+        }
+        Returns: string
+      }
+      server_apply_verified_refund: {
+        Args: {
+          p_amount_minor: number
+          p_application_fee_refund_id: string
+          p_charge_id: string
+          p_currency: string
+          p_order_id: string
+          p_payment_intent_id: string
+          p_reason: string
+          p_refund_application_fee: boolean
+          p_reverse_transfer: boolean
+          p_status: string
+          p_stripe_event_id: string
+          p_stripe_refund_id: string
+          p_transfer_reversal_id: string
+        }
+        Returns: {
+          order_id: string
+          order_status: string
+          ticket_status: string
+        }[]
+      }
       server_attach_checkout_session: {
         Args: { p_expires_at: string; p_order_id: string; p_session_id: string }
         Returns: string
@@ -1051,6 +1103,14 @@ export type Database = {
       server_expire_checkout_reservations: {
         Args: { p_now: string }
         Returns: number
+      }
+      server_finalize_webhook_receipt: {
+        Args: {
+          p_error_code: string
+          p_processing_status: string
+          p_stripe_event_id: string
+        }
+        Returns: string
       }
       server_fulfill_paid_order: {
         Args: {
@@ -1082,6 +1142,33 @@ export type Database = {
         Returns: {
           organizer_id: string
           stripe_account_id: string
+        }[]
+      }
+      server_get_webhook_order_snapshot: {
+        Args: { p_checkout_session_id: string; p_order_id: string }
+        Returns: {
+          application_fee_amount_minor: number
+          currency: string
+          destination_account_id: string
+          event_id: string
+          order_id: string
+          subtotal_minor: number
+          tier_id: string
+          total_minor: number
+        }[]
+      }
+      server_get_webhook_payment_order_snapshot: {
+        Args: { p_order_id: string }
+        Returns: {
+          application_fee_amount_minor: number
+          checkout_session_id: string
+          currency: string
+          destination_account_id: string
+          event_id: string
+          order_id: string
+          subtotal_minor: number
+          tier_id: string
+          total_minor: number
         }[]
       }
       server_lookup_checkout_cancellation: {
@@ -1122,6 +1209,46 @@ export type Database = {
           p_stripe_event_id: string
           p_subtotal_minor: number
           p_total_minor: number
+        }
+        Returns: string
+      }
+      server_mark_payment_requires_review: {
+        Args: {
+          p_application_fee_amount_minor: number
+          p_application_fee_id: string
+          p_balance_transaction_id: string
+          p_charge_id: string
+          p_checkout_session_id: string
+          p_currency: string
+          p_customer_id: string
+          p_destination_account_id: string
+          p_failure_code: string
+          p_mode: string
+          p_order_id: string
+          p_payment_intent_id: string
+          p_payment_status: string
+          p_stripe_event_id: string
+          p_subtotal_minor: number
+          p_total_minor: number
+          p_transfer_id: string
+        }
+        Returns: {
+          order_id: string
+          order_status: string
+          ticket_status: string
+        }[]
+      }
+      server_persist_connect_status_if_current: {
+        Args: {
+          p_currently_due_count: number
+          p_last_status_code: string
+          p_past_due_count: number
+          p_payouts_status: string
+          p_requirements_status: string
+          p_retrieved_at: string
+          p_revision: string
+          p_stripe_account_id: string
+          p_transfers_status: string
         }
         Returns: string
       }

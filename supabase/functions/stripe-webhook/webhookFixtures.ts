@@ -1,4 +1,7 @@
 export const WEBHOOK_SECRET = ["whsec", "task14fixtureboundary"].join("_");
+export const THIN_WEBHOOK_SECRET = ["whsec", "task14thinfixtureboundary"].join(
+  "_",
+);
 export const NOW_EPOCH_SECONDS = 1_788_000_000;
 export const NOW_ISO = new Date(NOW_EPOCH_SECONDS * 1_000).toISOString();
 
@@ -16,6 +19,9 @@ export const CUSTOMER_ID = "cus_Task14Buyer";
 export const ACCOUNT_ID = "acct_Task14Recipient";
 export const REFUND_ID = "re_Task14Refund";
 export const DISPUTE_ID = "du_Task14Dispute";
+export const REFUND_REVERSAL_ID = "trr_Task14RefundReversal";
+export const DISPUTE_REVERSAL_ID = "trr_Task14DisputeRecovery";
+export const FEE_REFUND_ID = "fr_Task14ApplicationFeeRefund";
 
 export function paymentIntentFixture(
   overrides: Record<string, unknown> = {},
@@ -50,6 +56,9 @@ export function chargeFixture(
     application_fee: APPLICATION_FEE_ID,
     balance_transaction: BALANCE_TRANSACTION_ID,
     customer: CUSTOMER_ID,
+    amount_refunded: 0,
+    refunded: false,
+    disputed: false,
     metadata: { order_id: ORDER_ID, event_id: EVENT_ID, tier_id: TIER_ID },
     ...overrides,
   };
@@ -97,7 +106,77 @@ export function refundFixture(
     reason: "requested_by_customer",
     charge: CHARGE_ID,
     payment_intent: PAYMENT_INTENT_ID,
-    transfer_reversal: "trr_Task14RefundReversal",
+    transfer_reversal: REFUND_REVERSAL_ID,
+    source_transfer_reversal: null,
+    metadata: {
+      order_id: ORDER_ID,
+      whereto_refund_policy: "destination_v1",
+      whereto_reverse_transfer: "true",
+      whereto_refund_application_fee: "true",
+      whereto_transfer_reversal_amount: "1850",
+      whereto_application_fee_refund_id: FEE_REFUND_ID,
+      whereto_application_fee_refund_amount: "150",
+    },
+    ...overrides,
+  };
+}
+
+export function transferFixture(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    id: TRANSFER_ID,
+    object: "transfer",
+    amount: 1_850,
+    amount_reversed: 0,
+    currency: "usd",
+    destination: ACCOUNT_ID,
+    livemode: false,
+    reversed: false,
+    source_transaction: CHARGE_ID,
+    ...overrides,
+  };
+}
+
+export function transferReversalFixture(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    id: REFUND_REVERSAL_ID,
+    object: "transfer_reversal",
+    amount: 1_850,
+    currency: "usd",
+    source_refund: REFUND_ID,
+    transfer: TRANSFER_ID,
+    ...overrides,
+  };
+}
+
+export function applicationFeeFixture(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    id: APPLICATION_FEE_ID,
+    object: "application_fee",
+    amount: 150,
+    amount_refunded: 150,
+    charge: CHARGE_ID,
+    currency: "usd",
+    livemode: false,
+    refunded: true,
+    ...overrides,
+  };
+}
+
+export function feeRefundFixture(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    id: FEE_REFUND_ID,
+    object: "fee_refund",
+    amount: 150,
+    currency: "usd",
+    fee: APPLICATION_FEE_ID,
     ...overrides,
   };
 }
