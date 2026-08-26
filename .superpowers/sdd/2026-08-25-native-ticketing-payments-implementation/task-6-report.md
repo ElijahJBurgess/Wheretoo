@@ -78,3 +78,18 @@ Status: `DONE_WITH_CONCERNS`
   / 286 tests, TypeScript, ESLint, and production build. The only build output is the pre-existing
   chunk-size advisory. `git diff --check`, ignored/untracked `.env.local`, and a non-printing
   secret-pattern scan are clean. No migration or linked-database mutation was performed.
+
+## Review fix round 2
+
+- Rechecked the actual Day 1 `events` constraints before changing the public parser. `category` is
+  limited to the eight existing event categories; `timezone` is non-null but has no nonblank check;
+  and `address_line2` has no length or content constraint.
+- `publicTicketingEventSchema` now imports the canonical `eventCategories` list, accepts any string
+  timezone including empty, and accepts a nullable unrestricted `address_line2`. All paid-public
+  event, location, UUID, tier, USD, and availability invariants remain unchanged.
+- TDD evidence: the new DB-compatible empty-timezone/161-character-address test failed before the
+  parser adjustment, then passed. A companion test rejects `sports`, which is outside the database
+  category set. Final verification passes focused Task 6 tests, 28 Vitest files / 288 tests,
+  TypeScript, ESLint, and production build. The build has only the existing chunk-size advisory;
+  diff and ignored/untracked environment checks remain clean. No migration, type regeneration, or
+  linked-database mutation occurred.

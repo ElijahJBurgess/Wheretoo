@@ -169,6 +169,45 @@ describe('ticketTiersInputSchema', () => {
 })
 
 describe('publicTicketingEventSchema', () => {
+  it('accepts database-valid empty timezone and unrestricted address line two', () => {
+    expect(
+      publicTicketingEventSchema.safeParse({
+        event: {
+          id: 'eb0fd9d5-d7d5-45dd-a99f-0c8a191bdc6f',
+          title: 'Night Market',
+          description: 'Food, music, and neighborhood makers.',
+          category: 'community',
+          starts_at: '2026-09-01T02:00:00+00:00',
+          ends_at: '2026-09-01T05:00:00+00:00',
+          timezone: '',
+          venue_name: 'Civic Center Plaza',
+          address_line1: '1 Dr Carlton B Goodlett Place',
+          address_line2: 'A'.repeat(161),
+          city: 'San Francisco',
+          region: 'CA',
+          postal_code: '94102',
+          country_code: 'US',
+          latitude: 37.7793,
+          longitude: -122.4193,
+          artwork_path: null,
+          animation_preset: 'generic',
+          admission_type: 'paid',
+          organizer: { id: '6b849fa0-4d5e-4faa-bf31-b169cb1bd7fe', display_name: 'Bay City Arts' },
+        },
+        tiers: [
+          {
+            id: '900a9142-9111-4f87-84d5-b8545a94c7fb',
+            name: 'General admission',
+            description: null,
+            unit_amount_minor: 2_500,
+            currency: 'usd',
+            availability_status: 'available',
+          },
+        ],
+      }).success,
+    ).toBe(true)
+  })
+
   it('accepts only the successful paid-public projection with one to three active tiers', () => {
     expect(
       publicTicketingEventSchema.parse({
@@ -213,6 +252,7 @@ describe('publicTicketingEventSchema', () => {
     [{ availability_status: 'active' }, 'a non-public availability state'],
     [{ admission_type: 'free' }, 'a free event'],
     [{ title: null }, 'a nullable publication field'],
+    [{ category: 'sports' }, 'a category outside the database enum'],
   ])('rejects %s (%s)', (patch, reason) => {
     const validProjection = {
       event: {

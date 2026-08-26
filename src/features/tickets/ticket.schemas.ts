@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { eventCategories } from '../events/event.types'
 
 export const lowercaseRfcUuidSchema = z
   .string()
@@ -96,13 +97,13 @@ export const publicTicketingEventSchema = z
         id: lowercaseRfcUuidSchema,
         title: z.string().trim().min(3).max(120),
         description: z.string().trim().min(20).max(5_000),
-        category: z.string().trim().min(1),
+        category: z.enum(eventCategories),
         starts_at: z.string().datetime({ offset: true }),
         ends_at: z.string().datetime({ offset: true }),
-        timezone: z.string().trim().min(1),
+        timezone: z.string(),
         venue_name: z.string().trim().max(160).nullable(),
         address_line1: z.string().trim().min(1),
-        address_line2: z.string().trim().max(160).nullable(),
+        address_line2: z.string().nullable(),
         city: z.string().trim().min(1),
         region: z.literal('CA'),
         postal_code: z.string().trim().min(1),
