@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react'
+import { createRef } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { AsyncState } from './AsyncState'
 import { Button } from './Button'
@@ -42,6 +43,14 @@ describe('organizer UI primitives', () => {
     render(<Button>Save draft</Button>)
 
     expect(screen.getByRole('button', { name: 'Save draft' })).toHaveAttribute('type', 'button')
+  })
+
+  it('forwards a button ref for focus recovery after a secure embedded flow closes', () => {
+    const ref = createRef<HTMLButtonElement>()
+    render(<Button ref={ref}>Return to setup</Button>)
+
+    ref.current?.focus()
+    expect(screen.getByRole('button', { name: 'Return to setup' })).toHaveFocus()
   })
 
   it('announces form and asynchronous errors', () => {

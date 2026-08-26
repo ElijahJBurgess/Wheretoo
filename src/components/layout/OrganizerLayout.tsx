@@ -14,6 +14,7 @@ export function OrganizerLayout({ children, onSignOut }: OrganizerLayoutProps) {
         <nav aria-label="Organizer">
           <div className="organizer-layout__nav">
             <a href="/organizer/events">Events</a>
+            <a href="/organizer/settings/payments">Payments</a>
             <button className="organizer-layout__sign-out" onClick={onSignOut} type="button">
               Sign out
             </button>

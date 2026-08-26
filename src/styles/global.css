@@ -607,6 +607,70 @@ h3 {
 .published-event__notice p { margin: 0; font-weight: 700; }
 .published-event__actions { justify-content: flex-start; }
 
+.payments-page {
+  display: grid;
+  gap: 1.5rem;
+  max-width: 54rem;
+}
+
+.payments-page__header {
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 1.25rem;
+}
+
+.payments-page__header h1 {
+  margin-bottom: 0.35rem;
+  font-size: clamp(2rem, 7vw, 3.25rem);
+  line-height: 0.98;
+}
+
+.payments-page__header > p:last-child,
+.payments-panel__status > p:last-child {
+  margin-bottom: 0;
+  color: var(--color-muted);
+  line-height: 1.55;
+}
+
+.payments-panel {
+  display: grid;
+  min-width: 0;
+  gap: 1.25rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-surface);
+  padding: clamp(1rem, 4vw, 2rem);
+  background: var(--color-surface);
+}
+
+.payments-panel__status {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.payments-panel__status h2 {
+  margin: 0;
+  font-size: clamp(1.5rem, 4vw, 2rem);
+  line-height: 1.05;
+}
+
+.payments-status {
+  width: fit-content;
+  margin: 0;
+  border-radius: 999px;
+  padding: 0.35rem 0.65rem;
+  color: var(--color-violet-deep);
+  background: color-mix(in srgb, var(--color-violet) 9%, white);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.payments-status--ready { color: var(--color-success); background: color-mix(in srgb, var(--color-success) 10%, white); }
+.payments-status--restricted { color: var(--color-danger); background: color-mix(in srgb, var(--color-danger) 8%, white); }
+.payments-panel__actions { display: flex; flex-wrap: wrap; gap: 0.65rem; }
+.payments-panel__error { margin: 0; color: var(--color-danger); font-size: 0.875rem; font-weight: 700; }
+.payments-panel__embedded { min-width: 0; overflow: clip; border-top: 1px solid var(--color-border); padding-top: 1.25rem; }
+
 @media (min-width: 56rem) {
   .event-summary { grid-template-columns: minmax(20rem, 0.82fr) minmax(0, 1.18fr); align-items: stretch; }
   .event-summary__artwork { min-height: 36rem; }
@@ -659,6 +723,7 @@ h3 {
 
   .event-summary__facts { grid-template-columns: 1fr; }
   .event-summary__wide { grid-column: auto; }
+  .payments-panel__actions .ui-button { flex: 1 1 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {

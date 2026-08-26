@@ -12,6 +12,7 @@ import { EventPreviewPage } from '../../features/events/EventPreviewPage'
 import { OrganizerEventsPage } from '../../features/events/OrganizerEventsPage'
 import { PublishedEventPage } from '../../features/events/PublishedEventPage'
 import { OrganizerSetupPage } from '../../features/organizers/OrganizerSetupPage'
+import { OrganizerPaymentsPage } from '../../features/payments/OrganizerPaymentsPage'
 import { RequireOrganizer } from './RequireOrganizer'
 import { RequireSession } from './RequireSession'
 
@@ -59,6 +60,10 @@ export const appRouter = createBrowserRouter([
               {
                 path: '/organizer/events',
                 element: <OrganizerEventsPage />,
+              },
+              {
+                path: '/organizer/settings/payments',
+                element: <OrganizerPaymentsPage />,
               },
               {
                 path: '/organizer/events/new',
