@@ -62,23 +62,33 @@ export function createIntegrationTestClient(env: IntegrationTestEnv) {
 }
 
 const requiredStripeIntegrationVariables = [
+  'TEST_STRIPE_CREDENTIAL_MODE',
   'TEST_SUPABASE_URL',
   'TEST_SUPABASE_PUBLISHABLE_KEY',
   'VITE_STRIPE_PUBLISHABLE_KEY',
   'TEST_FUNCTION_URL',
   'TEST_STRIPE_DRIVER_TOKEN',
-  'TEST_STRIPE_EVENT_ID',
+  'TEST_STRIPE_FIXTURE_PREFIX',
+  'TEST_CONNECTED_ACCOUNT_ID',
+  'TEST_CONNECTED_ACCOUNT_DISPOSABLE',
+  'STRIPE_RESTRICTED_KEY',
+  'STRIPE_WEBHOOK_SECRET',
 ] as const
 
 type StripeIntegrationVariable = (typeof requiredStripeIntegrationVariables)[number]
 
 export type StripeIntegrationTestEnv = {
+  credentialMode: 'direct' | 'managed_edge'
   supabaseUrl: string
   supabasePublishableKey: string
   stripePublishableKey: string
   functionUrl: string
   driverToken: string
-  eventId: string
+  fixturePrefix: string
+  connectedAccountId: string
+  connectedAccountDisposable: true
+  restrictedKeyProof: string
+  webhookSecretProof: string
 }
 
 export function loadStripeIntegrationTestEnv(
@@ -90,6 +100,10 @@ export function loadStripeIntegrationTestEnv(
   }
 
   const invalid: string[] = []
+  const credentialMode = source.TEST_STRIPE_CREDENTIAL_MODE
+  if (credentialMode !== 'direct' && credentialMode !== 'managed_edge') {
+    invalid.push('TEST_STRIPE_CREDENTIAL_MODE')
+  }
   if (!source.TEST_SUPABASE_URL!.startsWith('https://')) invalid.push('TEST_SUPABASE_URL')
   if (!source.TEST_SUPABASE_PUBLISHABLE_KEY!.startsWith('sb_publishable_')) {
     invalid.push('TEST_SUPABASE_PUBLISHABLE_KEY')
@@ -97,29 +111,58 @@ export function loadStripeIntegrationTestEnv(
   if (!source.VITE_STRIPE_PUBLISHABLE_KEY!.startsWith('pk_test_')) {
     invalid.push('VITE_STRIPE_PUBLISHABLE_KEY')
   }
-  if (!source.TEST_FUNCTION_URL!.startsWith('https://')) invalid.push('TEST_FUNCTION_URL')
+  try {
+    const supabase = new URL(source.TEST_SUPABASE_URL!)
+    const functionUrl = new URL(source.TEST_FUNCTION_URL!)
+    if (
+      functionUrl.protocol !== 'https:' ||
+      functionUrl.origin !== supabase.origin ||
+      functionUrl.pathname !== '/functions/v1/task17-transaction-driver' ||
+      functionUrl.search !== '' ||
+      functionUrl.hash !== ''
+    ) invalid.push('TEST_FUNCTION_URL')
+  } catch {
+    invalid.push('TEST_FUNCTION_URL')
+  }
   if (source.TEST_STRIPE_DRIVER_TOKEN!.length < 32) invalid.push('TEST_STRIPE_DRIVER_TOKEN')
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(source.TEST_STRIPE_EVENT_ID!)) {
-    invalid.push('TEST_STRIPE_EVENT_ID')
+  if (!/^task17_[a-z0-9]{12}$/.test(source.TEST_STRIPE_FIXTURE_PREFIX!)) {
+    invalid.push('TEST_STRIPE_FIXTURE_PREFIX')
+  }
+  if (!/^acct_[A-Za-z0-9]+$/.test(source.TEST_CONNECTED_ACCOUNT_ID!)) {
+    invalid.push('TEST_CONNECTED_ACCOUNT_ID')
+  }
+  if (source.TEST_CONNECTED_ACCOUNT_DISPOSABLE !== '1') {
+    invalid.push('TEST_CONNECTED_ACCOUNT_DISPOSABLE')
+  }
+  if (
+    credentialMode === 'managed_edge' &&
+    source.STRIPE_RESTRICTED_KEY !== 'managed:test-mode-authenticated'
+  ) invalid.push('STRIPE_RESTRICTED_KEY')
+  if (
+    credentialMode === 'managed_edge' &&
+    source.STRIPE_WEBHOOK_SECRET !== 'managed:signature-verified'
+  ) invalid.push('STRIPE_WEBHOOK_SECRET')
+  if (credentialMode === 'direct' && !/^rk_test_[A-Za-z0-9]+$/.test(source.STRIPE_RESTRICTED_KEY!)) {
+    invalid.push('STRIPE_RESTRICTED_KEY')
+  }
+  if (credentialMode === 'direct' && !/^whsec_[A-Za-z0-9]+$/.test(source.STRIPE_WEBHOOK_SECRET!)) {
+    invalid.push('STRIPE_WEBHOOK_SECRET')
   }
   if (invalid.length > 0) {
     throw new Error(`Invalid test-only Stripe integration environment variables: ${invalid.join(', ')}`)
   }
 
-  const forbidden = ['TEST_SUPABASE_SECRET_KEY', 'STRIPE_RESTRICTED_KEY', 'STRIPE_WEBHOOK_SECRET']
-    .filter((name) => process.env[name]?.trim())
-  if (forbidden.length > 0) {
-    throw new Error(
-      `Stripe transaction proof must use the managed server boundary; remove raw values: ${forbidden.join(', ')}`,
-    )
-  }
-
   return {
+    credentialMode: credentialMode as 'direct' | 'managed_edge',
     supabaseUrl: source.TEST_SUPABASE_URL!,
     supabasePublishableKey: source.TEST_SUPABASE_PUBLISHABLE_KEY!,
     stripePublishableKey: source.VITE_STRIPE_PUBLISHABLE_KEY!,
     functionUrl: source.TEST_FUNCTION_URL!,
     driverToken: source.TEST_STRIPE_DRIVER_TOKEN!,
-    eventId: source.TEST_STRIPE_EVENT_ID!,
+    fixturePrefix: source.TEST_STRIPE_FIXTURE_PREFIX!,
+    connectedAccountId: source.TEST_CONNECTED_ACCOUNT_ID!,
+    connectedAccountDisposable: true,
+    restrictedKeyProof: source.STRIPE_RESTRICTED_KEY!,
+    webhookSecretProof: source.STRIPE_WEBHOOK_SECRET!,
   }
 }

@@ -15,5 +15,6 @@
     "noUncheckedSideEffectImports": true,
     "types": ["node"]
   },
-  "include": ["tests/integration"]
+  "include": ["tests/integration"],
+  "exclude": ["tests/integration/edge"]
 }

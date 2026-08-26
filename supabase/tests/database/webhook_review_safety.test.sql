@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(33);
+select plan(35);
 
 select has_function(
   'public', 'server_apply_verified_refund',
@@ -396,13 +396,46 @@ select results_eq(
   'verified refund recovery leaves no cancelled admission residue'
 );
 
+update public.tickets
+set status = 'cancelled', refunded_at = null, cancelled_at = statement_timestamp()
+where order_id = (select id from review_orders where kind = 'policy');
+select * from public.server_record_webhook_receipt(
+  'evt_ReviewPolicyRecoveredRetry', 'refund.updated', false,
+  're_ReviewPolicyMismatch', '2026-07-29.dahlia',
+  '2026-08-26 04:02:03+00', repeat('8', 64)
+);
+select results_eq(
+  $$
+    select order_status, ticket_status
+    from public.server_apply_verified_refund(
+      'evt_ReviewPolicyRecoveredRetry',
+      (select id from review_orders where kind = 'policy'),
+      're_ReviewPolicyMismatch', 'pi_ReviewPolicyMismatch',
+      'ch_ReviewPolicyMismatch', 'trr_ReviewPolicyMismatch',
+      'fr_ReviewPolicyMismatch', 2000, 'usd', 'succeeded',
+      'requested_by_customer', true, true
+    )
+  $$,
+  $$ values ('refunded'::text, 'refunded'::text) $$,
+  'a same-terminal verified refund retry heals cancelled ticket residue'
+);
+select is(
+  (
+    select count(*) from public.refunds
+    where order_id = (select id from review_orders where kind = 'policy')
+      and stripe_refund_id = 're_ReviewPolicyMismatch'
+  ),
+  1::bigint,
+  'same-terminal verified refund retry remains one refund row'
+);
+
 select results_eq(
   $$ select persistence_result
     from public.server_persist_connect_status_if_current(
       'acct_WebhookReviewSafety',
       (select sequence_number from connect_refresh_tokens where kind = 'newer'),
       'restricted', 'restricted', 'restricted', 2, 1,
-      'STRIPE_REQUIREMENTS_PAST_DUE'
+      'requirements_past_due'
     ) $$,
   $$ values ('updated'::text) $$,
   'newer restricted Connect truth is persisted'
@@ -428,7 +461,7 @@ select results_eq(
   $$,
   $$ values (
     'restricted'::text, 'restricted'::text, 'restricted'::text,
-    2, 1, 'STRIPE_REQUIREMENTS_PAST_DUE'::text,
+    2, 1, 'requirements_past_due'::text,
     (select sequence_number from connect_refresh_tokens where kind = 'newer')
   ) $$,
   'stale-ready versus newer-restricted ordering preserves newer truth'
@@ -436,8 +469,8 @@ select results_eq(
 
 select is(
   (select count(*) from refunds where order_id in (select id from review_orders)),
-  1::bigint,
-  'only the verified early refund persists a refund domain row'
+  2::bigint,
+  'the verified early and policy-recovery refunds each persist one domain row'
 );
 select is(
   (select count(*) from disputes where order_id in (select id from review_orders)),

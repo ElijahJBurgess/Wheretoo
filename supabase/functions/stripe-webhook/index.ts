@@ -522,7 +522,7 @@ async function domainRpc(name: string, params: Record<string, unknown>) {
   if (error !== null) throwRpc(error);
 }
 
-function defaultDependencies(): StripeWebhookDependencies {
+export function createDefaultStripeWebhookDependencies(): StripeWebhookDependencies {
   const stripe = getStripe();
   const accountRepository = createAccountRepository();
   return {
@@ -1462,7 +1462,9 @@ export function createStripeWebhookHandler(
 }
 
 export function handler(request: Request): Promise<Response> {
-  return createStripeWebhookHandler(defaultDependencies())(request);
+  return createStripeWebhookHandler(createDefaultStripeWebhookDependencies())(
+    request,
+  );
 }
 
 if (import.meta.main) Deno.serve(handler);
