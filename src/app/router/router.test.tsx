@@ -26,4 +26,13 @@ describe('organizer-only routes', () => {
       match.route.element.type === RequireOrganizer || match.route.element.type === RequireSession
     ))).toBe(false)
   })
+
+  it('keeps guest Checkout anonymous and requires the event route parameter', () => {
+    const matches = matchRoutes(appRouter.routes, '/events/eb0fd9d5-d7d5-45dd-a99f-0c8a191bdc6f/checkout')
+
+    expect(matches?.at(-1)?.route.path).toBe('/events/:eventId/checkout')
+    expect(matches?.some((match) => isValidElement(match.route.element) && (
+      match.route.element.type === RequireOrganizer || match.route.element.type === RequireSession
+    ))).toBe(false)
+  })
 })

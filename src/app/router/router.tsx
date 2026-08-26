@@ -6,6 +6,7 @@ import { FormErrorSummary } from '../../components/ui/FormErrorSummary'
 import { CheckEmailPage } from '../../features/auth/CheckEmailPage'
 import { SignInPage } from '../../features/auth/SignInPage'
 import { SignUpPage } from '../../features/auth/SignUpPage'
+import { CheckoutPage } from '../../features/checkout/CheckoutPage'
 import { signOut } from '../../features/auth/auth.api'
 import { EventEditorPage } from '../../features/events/EventEditorPage'
 import { EventPreviewPage } from '../../features/events/EventPreviewPage'
@@ -44,6 +45,7 @@ function OrganizerShell() {
 export const appRouter = createBrowserRouter([
   { path: '/', element: <Navigate replace to="/auth/sign-in" /> },
   { path: '/events/:eventId', element: <PublicTicketEventPage /> },
+  { path: '/events/:eventId/checkout', element: <CheckoutPage /> },
   { path: '/auth/sign-up', element: <SignUpPage /> },
   { path: '/auth/check-email', element: <CheckEmailPage /> },
   { path: '/auth/sign-in', element: <SignInPage /> },
