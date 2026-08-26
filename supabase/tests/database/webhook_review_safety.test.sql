@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(31);
+select plan(33);
 
 select has_function(
   'public', 'server_apply_verified_refund',
@@ -359,6 +359,41 @@ select results_eq(
     'REFUND_POLICY_MISMATCH'::text, 'cancelled'::text
   ) $$,
   'an unverified refund policy invalidates an existing ticket and marks review'
+);
+
+select * from public.server_record_webhook_receipt(
+  'evt_ReviewPolicyRecovered', 'refund.updated', false,
+  're_ReviewPolicyMismatch', '2026-07-29.dahlia',
+  '2026-08-26 04:02:02+00', repeat('7', 64)
+);
+select results_eq(
+  $$
+    select order_status, ticket_status
+    from public.server_apply_verified_refund(
+      'evt_ReviewPolicyRecovered',
+      (select id from review_orders where kind = 'policy'),
+      're_ReviewPolicyMismatch', 'pi_ReviewPolicyMismatch',
+      'ch_ReviewPolicyMismatch', 'trr_ReviewPolicyMismatch',
+      'fr_ReviewPolicyMismatch', 2000, 'usd', 'succeeded',
+      'requested_by_customer', true, true
+    )
+  $$,
+  $$ values ('refunded'::text, 'refunded'::text) $$,
+  'a later verified refund recovers the reviewed order and ticket state'
+);
+select results_eq(
+  $$
+    select orders.status, orders.reconciliation_status, orders.failure_code,
+      tickets.status, tickets.refunded_at is not null,
+      tickets.cancelled_at is null
+    from orders join tickets on tickets.order_id = orders.id
+    where orders.id = (select id from review_orders where kind = 'policy')
+  $$,
+  $$ values (
+    'refunded'::text, 'reconciled'::text, null::text,
+    'refunded'::text, true, true
+  ) $$,
+  'verified refund recovery leaves no cancelled admission residue'
 );
 
 select results_eq(

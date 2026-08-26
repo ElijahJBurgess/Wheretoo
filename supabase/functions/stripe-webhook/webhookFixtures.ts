@@ -160,9 +160,10 @@ export function applicationFeeFixture(
     object: "application_fee",
     amount: 150,
     amount_refunded: 150,
-    charge: CHARGE_ID,
+    charge: "py_Task14PaymentRecord",
     currency: "usd",
     livemode: false,
+    originating_transaction: CHARGE_ID,
     refunded: true,
     ...overrides,
   };

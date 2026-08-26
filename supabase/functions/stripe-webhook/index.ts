@@ -1044,7 +1044,11 @@ async function validateRefundPolicy(
     applicationFee.livemode !== false ||
     applicationFee.amount !== binding.order.applicationFeeAmountMinor ||
     applicationFee.currency !== binding.order.currency ||
-    expandedId(applicationFee.charge, CHARGE_PATTERN, "charge") !==
+    expandedId(
+        applicationFee.originating_transaction ?? applicationFee.charge,
+        CHARGE_PATTERN,
+        "originating_transaction",
+      ) !==
       binding.payment.chargeId ||
     !Number.isSafeInteger(applicationFee.amount_refunded)
   ) permanent("REFUND_POLICY_MISMATCH");
