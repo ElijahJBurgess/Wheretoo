@@ -13,6 +13,7 @@ import { OrganizerEventsPage } from '../../features/events/OrganizerEventsPage'
 import { PublishedEventPage } from '../../features/events/PublishedEventPage'
 import { OrganizerSetupPage } from '../../features/organizers/OrganizerSetupPage'
 import { OrganizerPaymentsPage } from '../../features/payments/OrganizerPaymentsPage'
+import { OrganizerTicketTiersPage } from '../../features/tickets/OrganizerTicketTiersPage'
 import { RequireOrganizer } from './RequireOrganizer'
 import { RequireSession } from './RequireSession'
 
@@ -76,6 +77,10 @@ export const appRouter = createBrowserRouter([
               {
                 path: '/organizer/events/:eventId/preview',
                 element: <EventPreviewPage />,
+              },
+              {
+                path: '/organizer/events/:eventId/tickets',
+                element: <OrganizerTicketTiersPage />,
               },
               {
                 path: '/organizer/events/:eventId',

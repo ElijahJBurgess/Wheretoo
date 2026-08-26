@@ -39,7 +39,7 @@ export function EventEditorPage() {
   const [serverError, setServerError] = useState<string | null>(null)
   const hydratedEventIdRef = useRef<string | null>(null)
   const approvedNavigationRef = useRef(false)
-  const activeActionRef = useRef<'save' | 'preview' | null>(null)
+  const activeActionRef = useRef<'save' | 'preview' | 'tickets' | null>(null)
   const {
     control,
     formState: { errors, isDirty, isSubmitting },
@@ -52,6 +52,7 @@ export function EventEditorPage() {
 
   const location = useWatch({ control, name: 'location' })
   const title = useWatch({ control, name: 'title' })
+  const admissionType = useWatch({ control, name: 'admissionType' })
   const isBusy = isSubmitting || saveMutation.isPending
   const shouldBlockNavigation = useCallback(
     () => isDirty && !approvedNavigationRef.current,
@@ -97,7 +98,7 @@ export function EventEditorPage() {
     return saved
   }
 
-  const submitAction = (action: 'save' | 'preview') => {
+  const submitAction = (action: 'save' | 'preview' | 'tickets') => {
     if (activeActionRef.current !== null) return
     activeActionRef.current = action
     setServerError(null)
@@ -108,9 +109,15 @@ export function EventEditorPage() {
           navigateApproved(`/organizer/events/${eventId}/preview`)
           return
         }
+        if (action === 'tickets' && !isNew && !isDirty) {
+          navigateApproved(`/organizer/events/${eventId}/tickets`)
+          return
+        }
         const saved = await persist(formValues)
         if (action === 'preview') {
           navigateApproved(`/organizer/events/${saved.id}/preview`)
+        } else if (action === 'tickets') {
+          navigateApproved(`/organizer/events/${saved.id}/tickets`)
         } else if (isNew) {
           navigateApproved(`/organizer/events/${saved.id}/edit`, true)
         }
@@ -169,6 +176,11 @@ export function EventEditorPage() {
               <Button disabled={isBusy} onClick={() => submitAction('save')} variant="secondary">
                 {serverError ? 'Try saving again' : saveLabel}
               </Button>
+              {activeStep === 1 && admissionType === 'paid' ? (
+                <Button disabled={isBusy} onClick={() => submitAction('tickets')}>
+                  Set up paid tickets
+                </Button>
+              ) : null}
               {activeStep < 3 ? (
                 <Button disabled={isBusy} onClick={() => setActiveStep((step) => (step + 1) as 2 | 3)}>
                   {activeStep === 1 ? 'Continue to schedule' : 'Continue to review'}

@@ -59,6 +59,7 @@ function renderEditor(
     { path: '/organizer/events/new', element: <EventEditorPage /> },
     { path: '/organizer/events/:eventId/edit', element: <EventEditorPage /> },
     { path: '/organizer/events/:eventId/preview', element: <p>preview destination</p> },
+    { path: '/organizer/events/:eventId/tickets', element: <p>ticket setup destination</p> },
     { path: '/away', element: <p>away destination</p> },
   ], { initialEntries, initialIndex: initialEntries.length - 1 })
   return { ...render(<RouterProvider router={router} />), router }
@@ -221,13 +222,14 @@ describe('EventEditorPage', () => {
     expect(router.state.location.pathname).toBe('/organizer/events/event-1/preview')
   })
 
-  it('shows paid as a foundation and warns on review that paid publishing is unavailable', async () => {
+  it('saves a paid admission selection before routing to ticket setup while free stays in the Day 1 flow', async () => {
     const user = userEvent.setup()
+    mutateAsync.mockResolvedValue({ ...row, admission_type: 'paid' })
     renderEditor()
     await user.click(screen.getByLabelText(/^Paid/))
-    await user.click(screen.getByRole('button', { name: 'Continue to schedule' }))
-    await user.click(screen.getByRole('button', { name: 'Continue to review' }))
-    expect(screen.getByText(/Paid event publishing is not available/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Set up paid tickets' }))
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ values: expect.objectContaining({ admissionType: 'paid' }) })))
+    expect(await screen.findByText('ticket setup destination')).toBeInTheDocument()
   })
 
   it('uses a native modal dialog, treats Escape as Stay, restores focus, and proceeds only on Leave', async () => {

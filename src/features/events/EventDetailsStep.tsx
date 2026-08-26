@@ -37,7 +37,7 @@ export function EventDetailsStep({ errors, register }: EventDetailsStepProps) {
         <fieldset className="event-choice-group">
           <legend>Admission</legend>
           <label><input type="radio" value="free" {...register('admissionType')} /><span><strong>Free</strong><small>Ready for this milestone</small></span></label>
-          <label><input type="radio" value="paid" {...register('admissionType')} /><span><strong>Paid</strong><small>Visible foundation; publishing comes later</small></span></label>
+          <label><input type="radio" value="paid" {...register('admissionType')} /><span><strong>Paid</strong><small>Set ticket tiers after saving this draft</small></span></label>
         </fieldset>
         <Field error={errors.capacity?.message} label="Capacity (optional)" name="capacity">
           <input min="1" inputMode="numeric" type="number" {...register('capacity', { setValueAs: (value) => value === '' || value === null || value === undefined ? null : Number(value) })} />

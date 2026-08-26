@@ -619,6 +619,36 @@ h3 {
   padding-bottom: 1.25rem;
 }
 
+.ticket-tiers-page {
+  display: grid;
+  gap: 1.5rem;
+  max-width: 66rem;
+}
+
+.ticket-tiers-page__header,
+.ticket-tier-card__header,
+.ticket-tiers-form__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.ticket-tiers-page__header { border-bottom: 1px solid var(--color-border); padding-bottom: 1.25rem; }
+.ticket-tiers-page__header h1 { margin-bottom: 0.35rem; font-size: clamp(2rem, 7vw, 3.25rem); line-height: 0.98; }
+.ticket-tiers-page__header p:last-child { margin-bottom: 0; color: var(--color-muted); line-height: 1.55; }
+.ticket-tiers-page__grid { display: grid; align-items: start; gap: 1rem; }
+.ticket-tiers-form, .ticket-activation-panel { display: grid; gap: 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-surface); padding: clamp(1rem, 4vw, 1.5rem); background: var(--color-surface); }
+.ticket-tier-card { display: grid; gap: 1rem; margin: 0; border: 0; border-top: 1px solid var(--color-border); padding: 1.25rem 0 0; }
+.ticket-tier-card:first-child { border-top: 0; padding-top: 0; }
+.ticket-tier-card legend { padding: 0; color: var(--color-violet-deep); font-size: 0.75rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+.ticket-tier-card__header h2, .ticket-activation-panel h2 { margin: 0; font-size: 1.35rem; }
+.ticket-tier-card__fields { display: grid; gap: 1rem; }
+.ticket-activation-panel { position: sticky; top: 1rem; }
+.ticket-activation-panel > p:last-of-type { margin: 0; color: var(--color-muted); line-height: 1.55; }
+@media (min-width: 48rem) { .ticket-tiers-page__grid { grid-template-columns: minmax(0, 1fr) minmax(17rem, 0.38fr); } .ticket-tier-card__fields { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ticket-tier-card__fields .ui-field:last-child { grid-column: 1 / -1; } }
+@media (prefers-reduced-motion: reduce) { .ticket-tiers-page *, .ticket-tiers-page *::before, .ticket-tiers-page *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; } }
+
 .payments-page__header h1 {
   margin-bottom: 0.35rem;
   font-size: clamp(2rem, 7vw, 3.25rem);
