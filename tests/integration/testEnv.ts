@@ -1,4 +1,6 @@
 import process from 'node:process'
+import { createClient } from '@supabase/supabase-js'
+import type { Database } from '../../src/lib/supabase/database.types'
 
 const requiredIntegrationVariables = [
   'TEST_SUPABASE_URL',
@@ -47,4 +49,14 @@ export function loadIntegrationTestEnv(
     organizerBEmail: source.TEST_ORGANIZER_B_EMAIL!,
     organizerBPassword: source.TEST_ORGANIZER_B_PASSWORD!,
   }
+}
+
+export function createIntegrationTestClient(env: IntegrationTestEnv) {
+  return createClient<Database>(env.supabaseUrl, env.supabasePublishableKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  })
 }
