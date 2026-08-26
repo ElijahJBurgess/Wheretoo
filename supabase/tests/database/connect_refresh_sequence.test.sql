@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(20);
+select plan(21);
 
 select has_column(
   'public', 'organizer_stripe_accounts', 'last_sync_sequence',
@@ -112,11 +112,23 @@ select results_eq(
       'acct_ConnectRefreshSequence',
       (select sequence_number from refresh_tokens where kind = 'newer'),
       'restricted', 'restricted', 'restricted', 2, 1,
-      'STRIPE_REQUIREMENTS_PAST_DUE'
+      'requirements_past_due'
     )
   $$,
   $$ values ('updated'::text) $$,
   'the newer restricted refresh persists first'
+);
+select throws_ok(
+  $$
+    select public.server_persist_connect_status_if_current(
+      'acct_ConnectRefreshSequence',
+      (select sequence_number from refresh_tokens where kind = 'newer'),
+      'restricted', 'restricted', 'restricted', 2, 1,
+      'STRIPE_REQUIREMENTS_PAST_DUE'
+    )
+  $$,
+  'P0001', 'CONNECT_STATUS_INVALID',
+  'non-Stripe capability status codes remain rejected'
 );
 select results_eq(
   $$
