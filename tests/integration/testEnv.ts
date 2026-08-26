@@ -60,3 +60,66 @@ export function createIntegrationTestClient(env: IntegrationTestEnv) {
     },
   })
 }
+
+const requiredStripeIntegrationVariables = [
+  'TEST_SUPABASE_URL',
+  'TEST_SUPABASE_PUBLISHABLE_KEY',
+  'VITE_STRIPE_PUBLISHABLE_KEY',
+  'TEST_FUNCTION_URL',
+  'TEST_STRIPE_DRIVER_TOKEN',
+  'TEST_STRIPE_EVENT_ID',
+] as const
+
+type StripeIntegrationVariable = (typeof requiredStripeIntegrationVariables)[number]
+
+export type StripeIntegrationTestEnv = {
+  supabaseUrl: string
+  supabasePublishableKey: string
+  stripePublishableKey: string
+  functionUrl: string
+  driverToken: string
+  eventId: string
+}
+
+export function loadStripeIntegrationTestEnv(
+  source: Partial<Record<StripeIntegrationVariable, string | undefined>> = process.env,
+): StripeIntegrationTestEnv {
+  const missing = requiredStripeIntegrationVariables.filter((name) => !source[name]?.trim())
+  if (missing.length > 0) {
+    throw new Error(`Missing required Stripe integration environment variables: ${missing.join(', ')}`)
+  }
+
+  const invalid: string[] = []
+  if (!source.TEST_SUPABASE_URL!.startsWith('https://')) invalid.push('TEST_SUPABASE_URL')
+  if (!source.TEST_SUPABASE_PUBLISHABLE_KEY!.startsWith('sb_publishable_')) {
+    invalid.push('TEST_SUPABASE_PUBLISHABLE_KEY')
+  }
+  if (!source.VITE_STRIPE_PUBLISHABLE_KEY!.startsWith('pk_test_')) {
+    invalid.push('VITE_STRIPE_PUBLISHABLE_KEY')
+  }
+  if (!source.TEST_FUNCTION_URL!.startsWith('https://')) invalid.push('TEST_FUNCTION_URL')
+  if (source.TEST_STRIPE_DRIVER_TOKEN!.length < 32) invalid.push('TEST_STRIPE_DRIVER_TOKEN')
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(source.TEST_STRIPE_EVENT_ID!)) {
+    invalid.push('TEST_STRIPE_EVENT_ID')
+  }
+  if (invalid.length > 0) {
+    throw new Error(`Invalid test-only Stripe integration environment variables: ${invalid.join(', ')}`)
+  }
+
+  const forbidden = ['TEST_SUPABASE_SECRET_KEY', 'STRIPE_RESTRICTED_KEY', 'STRIPE_WEBHOOK_SECRET']
+    .filter((name) => process.env[name]?.trim())
+  if (forbidden.length > 0) {
+    throw new Error(
+      `Stripe transaction proof must use the managed server boundary; remove raw values: ${forbidden.join(', ')}`,
+    )
+  }
+
+  return {
+    supabaseUrl: source.TEST_SUPABASE_URL!,
+    supabasePublishableKey: source.TEST_SUPABASE_PUBLISHABLE_KEY!,
+    stripePublishableKey: source.VITE_STRIPE_PUBLISHABLE_KEY!,
+    functionUrl: source.TEST_FUNCTION_URL!,
+    driverToken: source.TEST_STRIPE_DRIVER_TOKEN!,
+    eventId: source.TEST_STRIPE_EVENT_ID!,
+  }
+}
