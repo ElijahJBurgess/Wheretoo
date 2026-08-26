@@ -2,7 +2,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(40);
+select plan(51);
 
 select has_schema('private', 'private service function schema exists');
 
@@ -30,6 +30,28 @@ select results_eq(
 
 select results_eq(
   $$
+    select (array_agg(pg_catalog.to_regprocedure(signature)::text order by signature)::text[])
+      collate "C"
+    from unnest(array[
+      'public.server_attach_checkout_session(uuid,text,timestamp with time zone)',
+      'public.server_cancel_checkout_reservation(uuid,text)',
+      'public.server_expire_checkout_reservations(timestamp with time zone)',
+      'public.server_reserve_checkout(uuid,uuid,text,text,uuid,text)'
+    ]) as signatures(signature)
+  $$,
+  $$
+    values ((array[
+      'server_attach_checkout_session(uuid,text,timestamp with time zone)',
+      'server_cancel_checkout_reservation(uuid,text)',
+      'server_expire_checkout_reservations(timestamp with time zone)',
+      'server_reserve_checkout(uuid,uuid,text,text,uuid,text)'
+    ]::text[]) collate "C")
+  $$,
+  'the four public server wrappers have their exact PostgREST signatures'
+);
+
+select results_eq(
+  $$
     select (array_agg(procedures.proname::text order by procedures.proname)::text[])
       collate "C"
     from pg_catalog.pg_proc as procedures
@@ -49,6 +71,29 @@ select results_eq(
     ]::text[]) collate "C")
   $$,
   'all reservation functions are security definers with an empty search path'
+);
+
+select results_eq(
+  $$
+    select (array_agg(procedures.proname::text order by procedures.proname)::text[])
+      collate "C"
+    from pg_catalog.pg_proc as procedures
+    join pg_catalog.pg_namespace as namespaces on namespaces.oid = procedures.pronamespace
+    where namespaces.nspname = 'public'
+      and procedures.proname in (
+        'server_attach_checkout_session', 'server_cancel_checkout_reservation',
+        'server_expire_checkout_reservations', 'server_reserve_checkout'
+      )
+      and procedures.prosecdef
+      and procedures.proconfig = array['search_path=""']
+  $$,
+  $$
+    values ((array[
+      'server_attach_checkout_session', 'server_cancel_checkout_reservation',
+      'server_expire_checkout_reservations', 'server_reserve_checkout'
+    ]::text[]) collate "C")
+  $$,
+  'all public server wrappers are security definers with an empty search path'
 );
 
 select results_eq(
@@ -95,17 +140,48 @@ select results_eq(
   $$
     select array[
       pg_catalog.has_schema_privilege('anon', 'private', 'USAGE'),
-      pg_catalog.has_function_privilege(
-        'anon', 'private.reserve_checkout(uuid,uuid,text,text,uuid,text)', 'EXECUTE'
-      ),
+      pg_catalog.has_function_privilege('anon', function_name, 'EXECUTE'),
       pg_catalog.has_schema_privilege('authenticated', 'private', 'USAGE'),
-      pg_catalog.has_function_privilege(
-        'authenticated', 'private.reserve_checkout(uuid,uuid,text,text,uuid,text)', 'EXECUTE'
-      )
+      pg_catalog.has_function_privilege('authenticated', function_name, 'EXECUTE')
     ]
+    from unnest(array[
+      'private.attach_checkout_session(uuid,text,timestamp with time zone)',
+      'private.cancel_checkout_reservation(uuid,text)',
+      'private.expire_checkout_reservations(timestamp with time zone)',
+      'private.reserve_checkout(uuid,uuid,text,text,uuid,text)'
+    ]) as functions(function_name)
+    order by function_name
   $$,
-  $$ values (array[false, false, false, false]) $$,
-  'browser roles have neither schema usage nor reservation execution'
+  $$ values
+    (array[false, false, false, false]),
+    (array[false, false, false, false]),
+    (array[false, false, false, false]),
+    (array[false, false, false, false])
+  $$,
+  'all four private functions are inaccessible to both browser roles'
+);
+
+select results_eq(
+  $$
+    select array[
+      pg_catalog.has_function_privilege('anon', function_name, 'EXECUTE'),
+      pg_catalog.has_function_privilege('authenticated', function_name, 'EXECUTE')
+    ]
+    from unnest(array[
+      'public.server_attach_checkout_session(uuid,text,timestamp with time zone)',
+      'public.server_cancel_checkout_reservation(uuid,text)',
+      'public.server_expire_checkout_reservations(timestamp with time zone)',
+      'public.server_reserve_checkout(uuid,uuid,text,text,uuid,text)'
+    ]) as functions(function_name)
+    order by function_name
+  $$,
+  $$ values
+    (array[false, false]),
+    (array[false, false]),
+    (array[false, false]),
+    (array[false, false])
+  $$,
+  'all four public server wrappers are inaccessible to both browser roles'
 );
 
 select results_eq(
@@ -127,22 +203,66 @@ select results_eq(
   $$
     select array[
       pg_catalog.has_schema_privilege('service_role', 'private', 'USAGE'),
-      pg_catalog.has_function_privilege(
-        'service_role', 'private.reserve_checkout(uuid,uuid,text,text,uuid,text)', 'EXECUTE'
-      ),
-      pg_catalog.has_function_privilege(
-        'service_role', 'private.attach_checkout_session(uuid,text,timestamp with time zone)', 'EXECUTE'
-      ),
-      pg_catalog.has_function_privilege(
-        'service_role', 'private.cancel_checkout_reservation(uuid,text)', 'EXECUTE'
-      ),
-      pg_catalog.has_function_privilege(
-        'service_role', 'private.expire_checkout_reservations(timestamp with time zone)', 'EXECUTE'
-      )
+      pg_catalog.has_function_privilege('service_role', private_name, 'EXECUTE'),
+      pg_catalog.has_function_privilege('service_role', wrapper_name, 'EXECUTE')
     ]
+    from (values
+      (
+        'private.attach_checkout_session(uuid,text,timestamp with time zone)',
+        'public.server_attach_checkout_session(uuid,text,timestamp with time zone)'
+      ),
+      (
+        'private.cancel_checkout_reservation(uuid,text)',
+        'public.server_cancel_checkout_reservation(uuid,text)'
+      ),
+      (
+        'private.expire_checkout_reservations(timestamp with time zone)',
+        'public.server_expire_checkout_reservations(timestamp with time zone)'
+      ),
+      (
+        'private.reserve_checkout(uuid,uuid,text,text,uuid,text)',
+        'public.server_reserve_checkout(uuid,uuid,text,text,uuid,text)'
+      )
+    ) as functions(private_name, wrapper_name)
+    order by private_name
   $$,
-  $$ values (array[true, true, true, true, true]) $$,
-  'only the service role receives the reservation API'
+  $$ values
+    (array[false, false, true]),
+    (array[false, false, true]),
+    (array[false, false, true]),
+    (array[false, false, true])
+  $$,
+  'the service role receives only the four narrow public wrappers'
+);
+
+select results_eq(
+  $$
+    select (array_agg(
+      procedures.proname || ':' || grantees.rolname || ':' || privileges.privilege_type
+      order by procedures.proname
+    )::text[]) collate "C"
+    from pg_catalog.pg_proc as procedures
+    join pg_catalog.pg_namespace as namespaces on namespaces.oid = procedures.pronamespace
+    cross join lateral pg_catalog.aclexplode(
+      coalesce(procedures.proacl, pg_catalog.acldefault('f', procedures.proowner))
+    ) as privileges
+    join pg_catalog.pg_roles as grantees on grantees.oid = privileges.grantee
+    where namespaces.nspname = 'public'
+      and procedures.proname in (
+        'server_attach_checkout_session', 'server_cancel_checkout_reservation',
+        'server_expire_checkout_reservations', 'server_reserve_checkout'
+      )
+      and privileges.grantee <> procedures.proowner
+  $$,
+  $$
+    values ((array[
+      'server_attach_checkout_session:service_role:EXECUTE',
+      'server_cancel_checkout_reservation:service_role:EXECUTE',
+      'server_expire_checkout_reservations:service_role:EXECUTE',
+      'server_reserve_checkout:service_role:EXECUTE'
+    ]::text[]) collate "C")
+  $$,
+  'the wrappers have exactly one non-owner privilege: service-role execution'
 );
 
 select results_eq(
@@ -162,6 +282,53 @@ select results_eq(
     ]::text[]) collate "C")
   $$,
   'reserve checkout returns only the exact service projection'
+);
+
+select results_eq(
+  $$
+    select (array_agg(parameter_name || ':' || data_type order by ordinal_position)::text[])
+      collate "C"
+    from information_schema.parameters
+    where specific_schema = 'public'
+      and specific_name like 'server_reserve_checkout_%'
+      and parameter_mode = 'OUT'
+  $$,
+  $$
+    values ((array[
+      'order_id:uuid', 'organizer_id:uuid', 'subtotal_minor:bigint', 'currency:text',
+      'application_fee_amount_minor:bigint', 'stripe_account_id:text',
+      'checkout_expires_at:timestamp with time zone', 'existing_checkout_session_id:text'
+    ]::text[]) collate "C")
+  $$,
+  'server reserve wrapper returns only the exact service projection'
+);
+
+select ok(
+  pg_catalog.obj_description(
+    'public.server_reserve_checkout(uuid,uuid,text,text,uuid,text)'::regprocedure,
+    'pg_proc'
+  ) like '%SHA-256 bytes of p_client_request_id::text%'
+  and pg_catalog.obj_description(
+    'public.server_reserve_checkout(uuid,uuid,text,text,uuid,text)'::regprocedure,
+    'pg_proc'
+  ) like '%SHA-256 of those bytes%',
+  'the server wrapper documents deterministic stateless confirmation-token derivation'
+);
+
+select results_eq(
+  $$
+    select indexdef
+    from pg_catalog.pg_indexes
+    where schemaname = 'public'
+      and tablename = 'orders'
+      and indexname = 'orders_checkout_reservation_expiry_idx'
+  $$,
+  $$
+    values (
+      'CREATE INDEX orders_checkout_reservation_expiry_idx ON public.orders USING btree (reservation_expires_at) WHERE (status = ANY (ARRAY[''creating_checkout''::text, ''checkout_open''::text]))'::text
+    )
+  $$,
+  'unfinished Checkout expiry has an exact matching partial index'
 );
 
 insert into auth.users (id, email)
@@ -229,13 +396,19 @@ values (
 set local role service_role;
 create temporary table first_reservation on commit drop as
 select *
-from private.reserve_checkout(
+from public.server_reserve_checkout(
   '25000000-0000-0000-0000-000000000001',
   '35000000-0000-4000-8000-000000000001',
   '  Ada Lovelace  ',
   '  ADA@Example.COM  ',
   '45000000-0000-4000-8000-000000000001',
-  'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  encode(
+    digest(
+      digest('45000000-0000-4000-8000-000000000001', 'sha256'),
+      'sha256'
+    ),
+    'hex'
+  )
 );
 reset role;
 
@@ -272,12 +445,28 @@ select results_eq(
   $$
     values (
       'Ada Lovelace'::text, 'ada@example.com'::text,
-      'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'::text,
+      'b321dfdbf92ca891ecb298f843a7da3ec9d03895d44689ea4b20912e2f7a870d'::text,
       1, 2000::bigint, 150::bigint, 150::bigint, 1850::bigint,
       'creating_checkout'::text
     )
   $$,
   'reservation normalizes guest data, stores only the token hash, fixes quantity at one, and snapshots fees'
+);
+
+select is(
+  (
+    select confirmation_token_hash
+    from public.orders
+    where id = (select order_id from first_reservation)
+  ),
+  encode(
+    digest(
+      digest('45000000-0000-4000-8000-000000000001', 'sha256'),
+      'sha256'
+    ),
+    'hex'
+  ),
+  'the same request UUID deterministically reproduces its confirmation token hash without state'
 );
 
 select results_eq(
@@ -310,19 +499,39 @@ select is(
 
 create temporary table retried_reservation on commit drop as
 select *
-from private.reserve_checkout(
+from public.server_reserve_checkout(
   '25000000-0000-0000-0000-000000000001',
   '35000000-0000-4000-8000-000000000001',
   'Ada Lovelace',
   'ada@example.com',
   '45000000-0000-4000-8000-000000000001',
-  'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  encode(
+    digest(
+      digest('45000000-0000-4000-8000-000000000001', 'sha256'),
+      'sha256'
+    ),
+    'hex'
+  )
 );
 
 select results_eq(
   $$ select order_id, application_fee_amount_minor from retried_reservation $$,
   $$ select order_id, application_fee_amount_minor from first_reservation $$,
   'retrying the same client request returns the same order and fee snapshot'
+);
+
+select throws_ok(
+  $$
+    select * from public.server_reserve_checkout(
+      '25000000-0000-0000-0000-000000000001',
+      '35000000-0000-4000-8000-000000000001',
+      'Ada Lovelace', 'ada@example.com',
+      '45000000-0000-4000-8000-000000000001',
+      'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    )
+  $$,
+  'P0001', 'CHECKOUT_ALREADY_EXISTS',
+  'a malicious same-request retry with a mismatched token hash is rejected'
 );
 
 select results_eq(
@@ -359,7 +568,7 @@ where id = '25000000-0000-0000-0000-000000000001';
 
 select throws_ok(
   $$
-    select * from private.reserve_checkout(
+    select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
       '35000000-0000-4000-8000-000000000001',
       'Blocked Buyer', 'blocked@example.com',
@@ -377,7 +586,7 @@ where id = '25000000-0000-0000-0000-000000000001';
 
 select throws_ok(
   $$
-    select * from private.reserve_checkout(
+    select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
       '35000000-0000-4000-8000-000000000003',
       'Wrong Tier', 'wrong-tier@example.com',
@@ -395,7 +604,7 @@ where id = '35000000-0000-4000-8000-000000000001';
 
 select throws_ok(
   $$
-    select * from private.reserve_checkout(
+    select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
       '35000000-0000-4000-8000-000000000001',
       'Archived Tier', 'archived@example.com',
@@ -417,7 +626,7 @@ where organizer_id = '15000000-0000-0000-0000-000000000001';
 
 select throws_ok(
   $$
-    select * from private.reserve_checkout(
+    select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
       '35000000-0000-4000-8000-000000000001',
       'Stale Connect', 'stale-connect@example.com',
@@ -436,7 +645,7 @@ where organizer_id = '15000000-0000-0000-0000-000000000001';
 
 select throws_ok(
   $$
-    select * from private.reserve_checkout(
+    select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
       '35000000-0000-4000-8000-000000000001',
       'Connect Due', 'connect-due@example.com',
@@ -458,7 +667,7 @@ where id = '00000000-0000-0000-0000-000000000500';
 
 select throws_ok(
   $$
-    select * from private.reserve_checkout(
+    select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
       '35000000-0000-4000-8000-000000000001',
       'No Fee', 'no-fee@example.com',
@@ -476,7 +685,7 @@ where id = '00000000-0000-0000-0000-000000000500';
 
 select throws_ok(
   $$
-    select * from private.reserve_checkout(
+    select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
       '35000000-0000-4000-8000-000000000001',
       ' ', 'valid@example.com',
@@ -490,7 +699,7 @@ select throws_ok(
 
 select throws_ok(
   $$
-    select * from private.reserve_checkout(
+    select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
       '35000000-0000-4000-8000-000000000001',
       'Valid Buyer', 'not-an-email',
@@ -504,7 +713,7 @@ select throws_ok(
 
 select throws_ok(
   $$
-    select * from private.reserve_checkout(
+    select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
       '35000000-0000-4000-8000-000000000001',
       'Valid Buyer', 'valid@example.com',
@@ -517,7 +726,7 @@ select throws_ok(
 
 create temporary table stale_final_reservation on commit drop as
 select *
-from private.reserve_checkout(
+from public.server_reserve_checkout(
   '25000000-0000-0000-0000-000000000001',
   '35000000-0000-4000-8000-000000000002',
   'Stale Final Buyer', 'stale-final@example.com',
@@ -531,9 +740,39 @@ set created_at = now() - interval '2 hours',
   reservation_expires_at = now() - interval '30 minutes'
 where id = (select order_id from stale_final_reservation);
 
+select is(
+  (
+    select count(*)
+    from public.server_reserve_checkout(
+      '25000000-0000-0000-0000-000000000001',
+      '35000000-0000-4000-8000-000000000002',
+      'Stale Final Buyer', 'stale-final@example.com',
+      '45000000-0000-4000-8000-000000000011',
+      '3123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+    )
+  ),
+  0::bigint,
+  'a stale same-request retry atomically returns no Checkout reservation'
+);
+
+select is(
+  (
+    select count(*)
+    from public.server_reserve_checkout(
+      '25000000-0000-0000-0000-000000000001',
+      '35000000-0000-4000-8000-000000000002',
+      'Stale Final Buyer', 'stale-final@example.com',
+      '45000000-0000-4000-8000-000000000011',
+      '3123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+    )
+  ),
+  0::bigint,
+  'an already-expired same-request retry remains an idempotent empty result'
+);
+
 create temporary table replacement_final_reservation on commit drop as
 select *
-from private.reserve_checkout(
+from public.server_reserve_checkout(
   '25000000-0000-0000-0000-000000000001',
   '35000000-0000-4000-8000-000000000002',
   'Replacement Final Buyer', 'replacement-final@example.com',
@@ -554,12 +793,12 @@ select results_eq(
 );
 
 update public.orders
-set status = 'paid', paid_at = now()
+set status = 'payment_processing'
 where id = (select order_id from replacement_final_reservation);
 
 select throws_ok(
   $$
-    select * from private.reserve_checkout(
+    select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
       '35000000-0000-4000-8000-000000000002',
       'Sold Out Buyer', 'sold-out@example.com',
@@ -568,7 +807,7 @@ select throws_ok(
     )
   $$,
   'P0001', 'TIER_SOLD_OUT',
-  'paid quantities keep the final ticket sold out after reservation expiry'
+  'payment-processing quantity keeps the capacity-one tier sold out after reservation expiry'
 );
 
 select results_eq(
@@ -591,7 +830,7 @@ select results_eq(
 
 create temporary table attached_reservation on commit drop as
 select *
-from private.reserve_checkout(
+from public.server_reserve_checkout(
   '25000000-0000-0000-0000-000000000001',
   '35000000-0000-4000-8000-000000000001',
   'Attached Buyer', 'attached@example.com',
@@ -599,7 +838,7 @@ from private.reserve_checkout(
   '6123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
 );
 
-select private.attach_checkout_session(
+select public.server_attach_checkout_session(
   (select order_id from attached_reservation),
   'cs_test_inventoryattachment',
   statement_timestamp() + interval '30 minutes'
@@ -621,7 +860,7 @@ select results_eq(
 
 select results_eq(
   $$
-    select private.attach_checkout_session(
+    select public.server_attach_checkout_session(
       (select order_id from attached_reservation),
       'cs_test_inventoryattachment',
       checkout_expires_at
@@ -638,7 +877,7 @@ select results_eq(
 
 select throws_ok(
   $$
-    select private.attach_checkout_session(
+    select public.server_attach_checkout_session(
       (select order_id from attached_reservation),
       'cs_test_differentattachment',
       statement_timestamp() + interval '30 minutes'
@@ -650,7 +889,7 @@ select throws_ok(
 
 create temporary table cancelled_reservation on commit drop as
 select *
-from private.reserve_checkout(
+from public.server_reserve_checkout(
   '25000000-0000-0000-0000-000000000001',
   '35000000-0000-4000-8000-000000000001',
   'Cancelled Buyer', 'cancelled@example.com',
@@ -658,7 +897,7 @@ from private.reserve_checkout(
   '7123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
 );
 
-select private.cancel_checkout_reservation(
+select public.server_cancel_checkout_reservation(
   (select order_id from cancelled_reservation), 'CHECKOUT_CREATION_FAILED'
 );
 
@@ -677,7 +916,7 @@ select results_eq(
 
 select results_eq(
   $$
-    select private.cancel_checkout_reservation(
+    select public.server_cancel_checkout_reservation(
       (select order_id from cancelled_reservation), 'DIFFERENT_REASON'
     ), status, failure_code
     from public.orders
@@ -696,7 +935,7 @@ where id = (select order_id from cancelled_reservation);
 
 select results_eq(
   $$
-    select private.cancel_checkout_reservation(
+    select public.server_cancel_checkout_reservation(
       (select order_id from cancelled_reservation), 'MUST_NOT_DOWNGRADE_PAID'
     ), status
     from public.orders
@@ -708,7 +947,7 @@ select results_eq(
 
 create temporary table expiring_reservation on commit drop as
 select *
-from private.reserve_checkout(
+from public.server_reserve_checkout(
   '25000000-0000-0000-0000-000000000001',
   '35000000-0000-4000-8000-000000000001',
   'Expiring Buyer', 'expiring@example.com',
@@ -723,7 +962,7 @@ set created_at = now() - interval '2 hours',
 where id = (select order_id from expiring_reservation);
 
 select is(
-  private.expire_checkout_reservations(statement_timestamp()),
+  public.server_expire_checkout_reservations(statement_timestamp()),
   1,
   'scheduled expiry advances exactly the stale unfinished reservation'
 );
@@ -738,14 +977,14 @@ select results_eq(
 );
 
 select is(
-  private.expire_checkout_reservations(statement_timestamp()),
+  public.server_expire_checkout_reservations(statement_timestamp()),
   0,
   'repeated scheduled expiry is idempotent'
 );
 
 create temporary table processing_reservation on commit drop as
 select *
-from private.reserve_checkout(
+from public.server_reserve_checkout(
   '25000000-0000-0000-0000-000000000001',
   '35000000-0000-4000-8000-000000000001',
   'Processing Buyer', 'processing@example.com',
@@ -761,7 +1000,7 @@ where id = (select order_id from processing_reservation);
 
 select results_eq(
   $$
-    select private.expire_checkout_reservations(statement_timestamp()), status
+    select public.server_expire_checkout_reservations(statement_timestamp()), status
     from public.orders where id = (select order_id from processing_reservation)
   $$,
   $$ values (0, 'payment_processing'::text) $$,
