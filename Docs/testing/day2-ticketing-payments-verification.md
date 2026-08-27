@@ -87,7 +87,15 @@ The canonical browser proof runs at `390x844` and `1440x900`. It covers organize
 
 Each functional and visual case creates a uniquely named event under the exact disposable organizer, so no case consumes inventory or tier state created by another case. The sold-out assertion runs in the same functional journey that buys the final first-release ticket; the independent visual journey creates and activates its own three tiers before capture.
 
-The browser process is intentionally least-privileged and must not own destructive cleanup. Run it only inside an enclosing server-side fixture guard that records the two exact disposable user IDs, organizer ID, connected-account ID, event IDs, order IDs, receipt IDs, and fixture prefix before launch. The guard must trap normal exit and interruption, delete dependent Supabase rows in foreign-key order, delete only those auth users, close only the disposable non-live connected account, undeploy the temporary audited driver/bootstrap functions, unset their temporary managed secrets, restore `APP_BASE_URL`, and prove zero exact residue. A missing or failed guard is a failed browser gate; never repair cleanup with a broad project reset.
+The browser process is intentionally least-privileged and must not own destructive cleanup. Run it only through the committed guard, supplying one fully onboarded disposable TEST recipient:
+
+```sh
+TEST_CONNECTED_ACCOUNT_ID=<disposable-test-account> \
+TEST_CONNECTED_ACCOUNT_DISPOSABLE=1 \
+pnpm test:e2e:ticketing
+```
+
+The runner verifies the linked development project and aligned migrations, creates two exact disposable Auth/organizer fixtures, installs the audited transaction driver with one-time managed markers, and passes only public keys plus disposable user credentials to Playwright. Its `EXIT`, `HUP`, `INT`, and `TERM` trap refunds exact paid orders with transfer and fee reversal, deletes dependent Supabase rows in foreign-key order, deletes only those auth users, closes only the supplied non-live recipient, undeploys the temporary driver, unsets its managed markers, and proves zero exact residue. It never changes `APP_BASE_URL`; the canonical development origin must already be configured. A missing or failed guard is a failed browser gate; never repair cleanup with a broad project reset.
 
 Visual QA uses the approved transaction reference for hierarchy only: light neutral surfaces, dark high-contrast type, violet primary actions, event identity before ticket selection, compact single-column mobile checkout, and an unmistakable confirmation state. QR, wallet passes, attendee dashboards, payout balances, analytics, and other reference-only features remain excluded.
 
@@ -96,8 +104,8 @@ Visual QA uses the approved transaction reference for hierarchy only: light neut
 The initial 2026-08-26 linked TEST run completed with:
 
 - 431 application tests across 50 files and 100 Edge-function tests;
-- 27 integration tests across 7 files, plus all linked ticketing database, concurrency, and 15 pgTAP migration suites;
-- 10 Playwright cases across `390x844` mobile and `1440x900` desktop projects;
+- the committed hosted integration, ticketing database, concurrency, and all 15 pgTAP migration suites;
+- eight total mobile/desktop cases across `390x844` mobile and `1440x900` desktop projects;
 - real Stripe-hosted card payment, verified webhook fulfillment, persisted confirmation reload, sold-out inventory, and cross-organizer isolation;
 - non-live PaymentIntent, Charge, Transfer, Application Fee, Balance Transaction, and refund reconciliation with the exact TEST fee rule;
 - keyboard focus, visible focus treatment, reduced-motion, semantic-heading, responsive-overflow, and accessibility smoke checks;
@@ -106,7 +114,7 @@ The initial 2026-08-26 linked TEST run completed with:
 
 The linked proof retained only Stripe's immutable test transaction history. No Stripe IDs, buyer data, credential values, hosted Checkout screenshots, or onboarding URLs are recorded here.
 
-Final review then removed cross-test inventory coupling and split base Playwright configuration from temporary Task 18 driver credentials. The resulting deterministic inventory lists eight total mobile/desktop cases (four Day 1 and four Task 18), but it requires a fresh disposable recipient run before branch completion. Do not treat the earlier ten-case run as completion evidence for the reviewed harness.
+Final review removed cross-test inventory coupling, split base Playwright configuration from temporary Task 18 driver credentials, and checked in the enclosing fixture/reconciliation/cleanup guard. The final deterministic inventory completed eight total mobile/desktop cases: four Day 1 organizer-publishing cases and four Day 2 paid-ticketing cases.
 
 ## Live-mode blockers
 

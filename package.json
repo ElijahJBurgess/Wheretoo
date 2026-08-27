@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:integration:ticketing-db": "tests/integration/run-ticketing-database.sh",
+    "test:e2e:ticketing": "tests/e2e/run-ticketing-browser-proof.sh",
     "test:watch": "vitest",
     "test:e2e": "playwright test --config playwright.config.ts",
     "supabase": "supabase",
