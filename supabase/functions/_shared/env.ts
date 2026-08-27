@@ -10,6 +10,47 @@ function requireEnv(name: string, read: EnvReader = defaultEnvReader): string {
   return value;
 }
 
+export function getModerationWorkerToken(
+  read: EnvReader = defaultEnvReader,
+): string {
+  const value = requireEnv("MODERATION_WORKER_TOKEN", read);
+  if (value.length < 32 || value.length > 256) {
+    throw new Error("Moderation worker token is invalid");
+  }
+  return value;
+}
+
+export function getContextualModerationConfig(
+  read: EnvReader = defaultEnvReader,
+): { endpoint: string; bearerToken: string | null } | null {
+  const endpoint = read("CONTEXTUAL_MODERATION_ENDPOINT");
+  const bearerToken = read("CONTEXTUAL_MODERATION_BEARER_TOKEN");
+  if (endpoint === undefined || endpoint.length === 0) {
+    if (bearerToken !== undefined && bearerToken.length > 0) {
+      throw new Error(
+        "Contextual moderator endpoint is required with its token",
+      );
+    }
+    return null;
+  }
+  if (endpoint !== endpoint.trim()) {
+    throw new Error("Contextual moderator endpoint is invalid");
+  }
+  const parsed = new URL(endpoint);
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
+    throw new Error("Contextual moderator endpoint must be HTTPS");
+  }
+  if (
+    bearerToken !== undefined && (
+      bearerToken.length === 0 || bearerToken !== bearerToken.trim() ||
+      bearerToken.length > 512
+    )
+  ) {
+    throw new Error("Contextual moderator token is invalid");
+  }
+  return { endpoint: parsed.toString(), bearerToken: bearerToken ?? null };
+}
+
 export function validateStripeRestrictedKey(value: string | undefined): string {
   if (value === undefined || !/^rk_test_[A-Za-z0-9]+$/.test(value)) {
     throw new Error("Stripe server credentials must be a restricted test key");
