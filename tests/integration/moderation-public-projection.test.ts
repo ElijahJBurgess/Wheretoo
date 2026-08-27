@@ -18,9 +18,10 @@ async function linkedQuery(sql: string) {
     })
   } catch (error) {
     const output = error as { stderr?: string; stdout?: string }
-    throw new Error(output.stdout ?? output.stderr ?? 'Linked database query failed', {
-      cause: error,
-    })
+    const details = [output.stderr, output.stdout]
+      .filter((value): value is string => Boolean(value?.trim()))
+      .join('\n')
+    throw new Error(details || 'Linked database query failed', { cause: error })
   }
 }
 

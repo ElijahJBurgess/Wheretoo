@@ -111,7 +111,8 @@ wait_for_marker() {
           select 1 from pg_catalog.pg_locks
           where locktype = 'advisory'
             and classid = '$marker_class'::oid
-            and objid = '$marker_object'::oid and granted
+            and objid = '$marker_object'::oid
+            and objsubid = 1 and granted
         ) then
           raise exception using errcode = 'P0001', message = 'ASSERT_EPOCH_MARKER_NOT_READY';
         end if;
