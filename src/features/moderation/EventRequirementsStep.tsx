@@ -2,7 +2,10 @@ import { Controller, type Control, type FieldErrors, type UseFormRegister } from
 import { Field } from '../../components/ui/Field'
 import type { EventRequirementsInput } from './moderation.types'
 
-export type OrganizerRequirementsFormValues = EventRequirementsInput & {
+export type OrganizerRequirementsFormValues = Omit<EventRequirementsInput, 'minimumAge'> & {
+  agreementInvalidatedByEdit?: boolean
+  hydratedEventId?: string
+  minimumAge: EventRequirementsInput['minimumAge'] | ''
   organizerAgreement: boolean
 }
 

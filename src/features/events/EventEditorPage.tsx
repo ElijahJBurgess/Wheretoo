@@ -43,7 +43,7 @@ const emptyEvent: EventFormValues = {
 }
 
 const emptyRequirements: OrganizerRequirementsFormValues = {
-  minimumAge: 'all_ages', alcoholPresent: false, cannabisPresent: false,
+  agreementInvalidatedByEdit: false, hydratedEventId: '', minimumAge: '', alcoholPresent: false, cannabisPresent: false,
   explicitAdultContent: false, gamblingPresent: false, weaponsPresent: false,
   highRiskActivity: false, organizerAgreement: false,
 }
@@ -79,10 +79,7 @@ export function EventEditorPage() {
   const [activeStep, setActiveStep] = useState<ActiveStep>(1)
   const [serverError, setServerError] = useState<string | null>(null)
   const [agreementError, setAgreementError] = useState<string | null>(null)
-  const [agreementInvalidatedByEdit, setAgreementInvalidatedByEdit] = useState(false)
-  const [returnedEvent, setReturnedEvent] = useState<EventRow | null>(null)
   const hydratedEventIdRef = useRef<string | null>(null)
-  const hydratedRequirementsEventIdRef = useRef<string | null>(null)
   const approvedNavigationRef = useRef(false)
   const activeActionRef = useRef<'save' | 'agreement' | 'requirements' | 'tickets' | null>(null)
 
@@ -114,8 +111,13 @@ export function EventEditorPage() {
   const location = useWatch({ control, name: 'location' })
   const title = useWatch({ control, name: 'title' })
   const admissionType = useWatch({ control, name: 'admissionType' })
-  const ownedEvent = returnedEvent ?? eventQuery.data
+  const agreementInvalidatedByEdit = useWatch({ control: requirementsControl, name: 'agreementInvalidatedByEdit' }) ?? false
+  const requirementsHydratedEventId = useWatch({ control: requirementsControl, name: 'hydratedEventId' })
+  const eventQueryHasSafeIdentity = eventQuery.data === undefined || eventQuery.data === null || isNew
+    || (eventQuery.data.id === eventId && eventQuery.data.organizer_id === organizerId)
+  const ownedEvent = eventQueryHasSafeIdentity ? eventQuery.data : undefined
   const isPublished = ownedEvent?.status === 'published'
+  const requirementsAreHydrated = eventId !== '' && requirementsHydratedEventId === eventId
   const hasUnsavedChanges = isDirty || requirementsAreDirty
   const isBusy = isSubmitting || saveDraftMutation.isPending || saveRevisionMutation.isPending
     || saveRequirementsMutation.isPending || acceptPoliciesMutation.isPending
@@ -138,17 +140,18 @@ export function EventEditorPage() {
   }, [hasUnsavedChanges]))
 
   useEffect(() => {
-    if (eventQuery.data && hydratedEventIdRef.current !== eventQuery.data.id) {
+    if (eventQuery.data && eventQueryHasSafeIdentity && hydratedEventIdRef.current !== eventQuery.data.id) {
       reset(eventRowToFormValues(eventQuery.data))
       hydratedEventIdRef.current = eventQuery.data.id
-      setReturnedEvent(null)
     }
-  }, [eventQuery.data, reset])
+  }, [eventQuery.data, eventQueryHasSafeIdentity, reset])
 
   useEffect(() => {
-    if (requirementsQuery.data && hydratedRequirementsEventIdRef.current !== eventId) {
+    if (eventId !== '' && requirementsQuery.data && requirementsHydratedEventId !== eventId) {
       const requirements = requirementsQuery.data
       resetRequirements({
+        agreementInvalidatedByEdit: false,
+        hydratedEventId: eventId,
         minimumAge: requirements.minimumAge,
         alcoholPresent: requirements.alcoholPresent,
         cannabisPresent: requirements.cannabisPresent,
@@ -158,10 +161,8 @@ export function EventEditorPage() {
         highRiskActivity: requirements.highRiskActivity,
         organizerAgreement: !requirements.needsAcceptance,
       })
-      hydratedRequirementsEventIdRef.current = eventId
-      setAgreementInvalidatedByEdit(false)
     }
-  }, [eventId, requirementsQuery.data, resetRequirements])
+  }, [eventId, requirementsHydratedEventId, requirementsQuery.data, resetRequirements])
 
   useEffect(() => {
     approvedNavigationRef.current = false
@@ -177,8 +178,8 @@ export function EventEditorPage() {
   }
 
   function resetDisplayedAgreement() {
-    setAgreementInvalidatedByEdit(true)
-    setRequirementValue('organizerAgreement', false, { shouldDirty: true })
+    setRequirementValue('agreementInvalidatedByEdit', true, { shouldDirty: false })
+    setRequirementValue('organizerAgreement', false, { shouldDirty: false })
     setAgreementError(null)
   }
 
@@ -189,7 +190,6 @@ export function EventEditorPage() {
       if (saved.id !== eventId || saved.organizer_id !== organizerId) throw new Error('SAVED_EVENT_IDENTITY_MISMATCH')
       reset(eventRowToFormValues(saved))
       hydratedEventIdRef.current = saved.id
-      setReturnedEvent(saved)
       return saved
     }
     const saved = await saveDraftMutation.mutateAsync({ eventId: isNew ? null : eventId, organizerId, values: valuesToSave })
@@ -198,12 +198,22 @@ export function EventEditorPage() {
     }
     reset(eventRowToFormValues(saved))
     hydratedEventIdRef.current = saved.id
-    setReturnedEvent(saved)
     return saved
+  }
+
+  async function refetchCurrentOwnedEvent(): Promise<EventRow> {
+    const result = await eventQuery.refetch()
+    const currentEvent = result.data
+    if (currentEvent === null || currentEvent === undefined
+      || currentEvent.id !== eventId || currentEvent.organizer_id !== organizerId) {
+      throw new Error('REFETCHED_EVENT_IDENTITY_MISMATCH')
+    }
+    return currentEvent
   }
 
   function requirementsInput() {
     const values = getRequirementValues()
+    if (values.minimumAge === '') throw new Error('REQUIREMENTS_NOT_HYDRATED')
     return {
       minimumAge: values.minimumAge,
       alcoholPresent: values.alcoholPresent,
@@ -227,10 +237,15 @@ export function EventEditorPage() {
         const saved = await persistForCurrentLifecycle(formValues)
         if (action === 'save' && activeStep >= 4 && saved.id === eventId) {
           const savedRequirements = await saveRequirementsMutation.mutateAsync(requirementsInput())
+          await refetchCurrentOwnedEvent()
           const agreementWasCurrent = requirementsQuery.data?.needsAcceptance === false
             && !eventRevisionChanged && !requirementsChanged && !agreementInvalidatedByEdit
-          resetRequirements({ ...savedRequirements, organizerAgreement: agreementWasCurrent })
-          setAgreementInvalidatedByEdit(!agreementWasCurrent)
+          resetRequirements({
+            ...savedRequirements,
+            agreementInvalidatedByEdit: !agreementWasCurrent,
+            hydratedEventId: eventId,
+            organizerAgreement: agreementWasCurrent,
+          })
         } else if (eventRevisionChanged) {
           resetDisplayedAgreement()
         }
@@ -280,10 +295,15 @@ export function EventEditorPage() {
     try {
       const requirementsWereDirty = requirementsAreDirty
       const savedRequirements = await saveRequirementsMutation.mutateAsync(requirementsInput())
+      await refetchCurrentOwnedEvent()
       const agreementWasCurrent = requirementsQuery.data?.needsAcceptance === false
         && !agreementInvalidatedByEdit && !requirementsWereDirty
-      resetRequirements({ ...savedRequirements, organizerAgreement: agreementWasCurrent })
-      setAgreementInvalidatedByEdit(!agreementWasCurrent)
+      resetRequirements({
+        ...savedRequirements,
+        agreementInvalidatedByEdit: !agreementWasCurrent,
+        hydratedEventId: eventId,
+        organizerAgreement: agreementWasCurrent,
+      })
       setActiveStep(5)
     } catch {
       setServerError(requirementsSaveError)
@@ -309,13 +329,18 @@ export function EventEditorPage() {
       try {
         await persistForCurrentLifecycle(formValues)
         const savedRequirements = await saveRequirementsMutation.mutateAsync(requirementsInput())
+        await refetchCurrentOwnedEvent()
         const accepted = await acceptPoliciesMutation.mutateAsync()
         if (accepted.needsAcceptance) {
           setAgreementError(agreementConfirmationError)
           return
         }
-        resetRequirements({ ...savedRequirements, organizerAgreement: true })
-        setAgreementInvalidatedByEdit(false)
+        resetRequirements({
+          ...savedRequirements,
+          agreementInvalidatedByEdit: false,
+          hydratedEventId: eventId,
+          organizerAgreement: true,
+        })
         navigateApproved(`/organizer/events/${eventId}/preview`)
       } catch {
         setAgreementError(agreementConfirmationError)
@@ -336,6 +361,9 @@ export function EventEditorPage() {
   if (!isNew && eventQuery.isError) {
     return <AsyncState action={<Button onClick={() => void eventQuery.refetch()}>Try again</Button>} description="Check your connection, then try again." status="error" title="Your event could not load" />
   }
+  if (!isNew && !eventQueryHasSafeIdentity) {
+    return <AsyncState action={<Button onClick={() => void eventQuery.refetch()}>Try again</Button>} description="Check your connection, then try again." status="error" title="Your event could not load" />
+  }
   if (!isNew && eventQuery.data === null) {
     return <AsyncState action={<Link className="ui-button ui-button--secondary" to="/organizer/events">Back to events</Link>} description="The event may no longer be available." status="empty" title="Event not found" />
   }
@@ -349,6 +377,32 @@ export function EventEditorPage() {
   if (serverError) summaryErrors.push(serverError)
   if (agreementError) summaryErrors.push(agreementError)
   const saveLabel = isBusy ? 'Saving…' : isPublished ? 'Save changes' : 'Save draft'
+  const requirementsNeedInitialState = activeStep >= 4 && !requirementsAreHydrated
+
+  function requirementsInitialState() {
+    if (!requirementsNeedInitialState) return null
+    if (requirementsQuery.isError) {
+      return (
+        <AsyncState
+          action={<Button autoFocus onClick={() => void requirementsQuery.refetch()}>Try loading requirements again</Button>}
+          description="Check your connection, then try again."
+          status="error"
+          title="Event requirements could not load"
+        />
+      )
+    }
+    if (requirementsQuery.data === null) {
+      return (
+        <AsyncState
+          action={<Link className="ui-button ui-button--secondary" to="/organizer/events">Back to events</Link>}
+          description="The event requirements may no longer be available."
+          status="empty"
+          title="Event requirements not found"
+        />
+      )
+    }
+    return <AsyncState status="loading" title="Loading event requirements" />
+  }
 
   return (
     <section aria-labelledby="event-editor-title" className="event-editor">
@@ -371,10 +425,11 @@ export function EventEditorPage() {
           {activeStep === 1 ? <EventDetailsStep errors={errors} register={register} /> : null}
           {activeStep === 2 ? <EventScheduleLocationStep errors={errors} location={location} onLocationChange={setLocation} register={register} /> : null}
           {activeStep === 3 ? <EventReviewStep eventId={isNew ? undefined : eventId} values={getValues()} /> : null}
-          {activeStep === 4 ? (
+          {requirementsInitialState()}
+          {activeStep === 4 && requirementsAreHydrated ? (
             <EventRequirementsStep control={requirementsControl} errors={requirementErrors} onRequirementChange={resetDisplayedAgreement} register={registerRequirement} />
           ) : null}
-          {activeStep === 5 && organizerTerms && eventPolicy ? (
+          {activeStep === 5 && requirementsAreHydrated && organizerTerms && eventPolicy ? (
             <OrganizerAgreementStep
               error={requirementErrors.organizerAgreement?.message}
               eventPolicy={eventPolicy}
@@ -387,23 +442,25 @@ export function EventEditorPage() {
               register={registerRequirement}
             />
           ) : null}
-          {activeStep === 5 && (!organizerTerms || !eventPolicy) ? (
+          {activeStep === 5 && requirementsAreHydrated && (!organizerTerms || !eventPolicy) ? (
             <AsyncState status="error" title="Current policies could not load" description="Check your connection, then try again." />
           ) : null}
           <div className="event-editor__actions">
             {activeStep > 1 ? <Button disabled={isBusy} onClick={() => setActiveStep((step) => (step - 1) as ActiveStep)} variant="secondary">Back</Button> : <span />}
             <div className="event-editor__primary-actions">
-              <Button disabled={isBusy} onClick={() => submitAction('save')} variant="secondary">
-                {serverError ? 'Try saving again' : saveLabel}
-              </Button>
+              {!requirementsNeedInitialState ? (
+                <Button disabled={isBusy} onClick={() => submitAction('save')} variant="secondary">
+                  {serverError ? 'Try saving again' : saveLabel}
+                </Button>
+              ) : null}
               {activeStep === 1 && admissionType === 'paid' ? (
                 <Button disabled={isBusy} onClick={() => submitAction('tickets')}>Set up paid tickets</Button>
               ) : null}
               {activeStep === 1 ? <Button disabled={isBusy} onClick={() => setActiveStep(2)}>Continue to date &amp; location</Button> : null}
               {activeStep === 2 ? <Button disabled={isBusy} onClick={() => setActiveStep(3)}>Continue to tickets &amp; admission</Button> : null}
               {activeStep === 3 ? <Button disabled={isBusy} onClick={continueToRequirements}>Continue to event requirements</Button> : null}
-              {activeStep === 4 ? <Button disabled={isBusy || eventId === ''} onClick={() => void continueToAgreement()}>Continue to organizer agreement</Button> : null}
-              {activeStep === 5 ? (
+              {activeStep === 4 && requirementsAreHydrated ? <Button disabled={isBusy || eventId === ''} onClick={() => void continueToAgreement()}>Continue to organizer agreement</Button> : null}
+              {activeStep === 5 && requirementsAreHydrated ? (
                 <Button disabled={isBusy || !organizerTerms || !eventPolicy} onClick={submitAgreement}>
                   {agreementError ? 'Try agreement again' : isBusy ? 'Saving agreement…' : 'Save agreement and preview'}
                 </Button>

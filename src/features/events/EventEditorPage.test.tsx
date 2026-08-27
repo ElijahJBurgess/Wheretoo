@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { EventRequirements } from '../moderation/moderation.types'
 import type { EventRow } from './event.types'
 
 const {
@@ -70,6 +71,13 @@ type EditorQueryState = {
   refetch: typeof refetch
 }
 
+type RequirementsQueryState = {
+  data: EventRequirements | null | undefined
+  isPending: boolean
+  isError: boolean
+  refetch: typeof refetch
+}
+
 function renderEditor(
   initialPath = '/organizer/events/new',
   query: EditorQueryState = { data: undefined, isPending: false, isError: false, refetch },
@@ -106,6 +114,7 @@ describe('EventEditorPage', () => {
       },
     })
     useSession.mockReturnValue({ status: 'authenticated', session: {}, user: { id: 'organizer-1' } })
+    refetch.mockResolvedValue({ data: row })
     mutateAsync.mockResolvedValue(row)
     useSaveEventDraft.mockReturnValue({ isPending: false, mutateAsync })
     useSaveEventRevision.mockReturnValue({ isPending: false, mutateAsync: saveRevision })
@@ -140,7 +149,7 @@ describe('EventEditorPage', () => {
     await user.click(screen.getByRole('button', { name: 'Continue to tickets & admission' }))
     expect(screen.queryByLabelText('Minimum age')).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Continue to event requirements' }))
-    expect(screen.getByLabelText('Minimum age')).toBeInTheDocument()
+    expect(await screen.findByLabelText('Minimum age')).toBeInTheDocument()
     expect(mutateAsync).toHaveBeenCalledOnce()
   })
 
@@ -347,6 +356,81 @@ describe('EventEditorPage', () => {
     expect(useOwnedEventRequirements).toHaveBeenCalledWith('organizer-1', 'event-1')
   })
 
+  it('gates requirements behind owner-query loading, focused retry, and a safe not-found state', async () => {
+    const user = userEvent.setup()
+    const eventQuery = { data: row, isPending: false, isError: false, refetch }
+
+    useOwnedEventRequirements.mockReturnValue({ data: undefined, isPending: true, isError: false, refetch })
+    const loading = renderEditor('/organizer/events/event-1/edit', eventQuery)
+    await screen.findByDisplayValue('Saved title')
+    await user.click(screen.getByRole('button', { name: 'Continue to date & location' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to tickets & admission' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to event requirements' }))
+
+    expect(screen.getByRole('status')).toHaveTextContent('Loading event requirements')
+    expect(screen.queryByLabelText('Minimum age')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Continue to organizer agreement' })).not.toBeInTheDocument()
+    loading.unmount()
+
+    useOwnedEventRequirements.mockReturnValue({ data: undefined, isPending: false, isError: true, refetch })
+    const failed = renderEditor('/organizer/events/event-1/edit', eventQuery)
+    await screen.findByDisplayValue('Saved title')
+    await user.click(screen.getByRole('button', { name: 'Continue to date & location' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to tickets & admission' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to event requirements' }))
+
+    const retry = screen.getByRole('button', { name: 'Try loading requirements again' })
+    expect(screen.getByRole('alert')).toHaveTextContent('Event requirements could not load')
+    expect(retry).toHaveFocus()
+    expect(screen.queryByLabelText('Minimum age')).not.toBeInTheDocument()
+    await user.click(retry)
+    expect(refetch).toHaveBeenCalledOnce()
+    failed.unmount()
+
+    useOwnedEventRequirements.mockReturnValue({ data: null, isPending: false, isError: false, refetch })
+    renderEditor('/organizer/events/event-1/edit', eventQuery)
+    await screen.findByDisplayValue('Saved title')
+    await user.click(screen.getByRole('button', { name: 'Continue to date & location' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to tickets & admission' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to event requirements' }))
+
+    expect(screen.getByText('Event requirements not found')).toBeInTheDocument()
+    expect(screen.queryByText(/owner|another organizer|permission/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Continue to organizer agreement' })).not.toBeInTheDocument()
+  })
+
+  it('hydrates a deferred requirements success once and keeps later user edits across errors and refetches', async () => {
+    const user = userEvent.setup()
+    const query: RequirementsQueryState = { data: undefined, isPending: true, isError: false, refetch }
+    useOwnedEventRequirements.mockImplementation(() => query)
+    const view = renderEditor('/organizer/events/event-1/edit', { data: row, isPending: false, isError: false, refetch })
+    await screen.findByDisplayValue('Saved title')
+    await user.click(screen.getByRole('button', { name: 'Continue to date & location' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to tickets & admission' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to event requirements' }))
+    expect(screen.queryByLabelText('Minimum age')).not.toBeInTheDocument()
+
+    query.data = requirements
+    query.isPending = false
+    view.rerender(<RouterProvider router={view.router} />)
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to event requirements' }))
+    expect(await screen.findByLabelText('Minimum age')).toHaveValue('21_plus')
+    await user.click(screen.getByRole('radio', { name: 'Yes', description: 'Cannabis present' }))
+
+    query.data = undefined
+    query.isError = true
+    view.rerender(<RouterProvider router={view.router} />)
+    query.data = { ...requirements, minimumAge: 'all_ages', cannabisPresent: false }
+    query.isError = false
+    view.rerender(<RouterProvider router={view.router} />)
+
+    expect(screen.getByLabelText('Minimum age')).toHaveValue('21_plus')
+    expect(screen.getByRole('radio', { name: 'Yes', description: 'Cannabis present' })).toBeChecked()
+  })
+
   it('retains edited disclosure values and stays on requirements after a safe server error', async () => {
     const user = userEvent.setup()
     saveRequirements.mockRejectedValue(new Error('private.event_risk_disclosures leaked detail'))
@@ -436,6 +520,69 @@ describe('EventEditorPage', () => {
     expect(saveRevision).toHaveBeenCalledWith(expect.objectContaining({ eventId: 'event-1', organizerId: 'organizer-1' }))
     expect(await screen.findByText('Blocked')).toBeInTheDocument()
     expect(mutateAsync).not.toHaveBeenCalled()
+  })
+
+  it('uses the current owner event after requirements persistence instead of masking a moderation refetch', async () => {
+    const user = userEvent.setup()
+    const publishedClear = { ...row, status: 'published', moderation_status: 'clear', published_at: '2026-08-26T10:00:00Z' } as EventRow
+    const savedRevision = { ...publishedClear, title: 'Revised title', content_revision: 2 }
+    const underReview = { ...savedRevision, moderation_status: 'under_review' } as EventRow
+    const query: EditorQueryState = { data: publishedClear, isPending: false, isError: false, refetch }
+    refetch.mockImplementation(async () => {
+      query.data = underReview
+      return { data: underReview }
+    })
+    saveRevision.mockResolvedValue(savedRevision)
+    saveRequirements.mockResolvedValue(requirements)
+    const view = renderEditor('/organizer/events/event-1/edit', query)
+
+    await screen.findByText('Clear')
+    const title = screen.getByLabelText('Event title')
+    await user.clear(title)
+    await user.type(title, 'Revised title')
+    await user.click(screen.getByRole('button', { name: 'Continue to date & location' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to tickets & admission' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to event requirements' }))
+    await user.click(screen.getByRole('radio', { name: 'Yes', description: 'Cannabis present' }))
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    view.rerender(<RouterProvider router={view.router} />)
+
+    expect(saveRevision).toHaveBeenCalledWith(expect.objectContaining({ eventId: 'event-1', organizerId: 'organizer-1' }))
+    expect(saveRequirements).toHaveBeenCalled()
+    expect(refetch).toHaveBeenCalled()
+    expect(await screen.findByText('Under review')).toBeInTheDocument()
+    expect(screen.queryByText('Clear')).not.toBeInTheDocument()
+  })
+
+  it('does not render an identity-mismatched owner event returned by the requirements refetch', async () => {
+    const user = userEvent.setup()
+    const publishedClear = { ...row, status: 'published', moderation_status: 'clear', published_at: '2026-08-26T10:00:00Z' } as EventRow
+    const mismatched = {
+      ...publishedClear,
+      id: 'other-event',
+      organizer_id: 'other-organizer',
+      moderation_status: 'removed',
+      title: 'Unsafe other event',
+    } as EventRow
+    const query: EditorQueryState = { data: publishedClear, isPending: false, isError: false, refetch }
+    refetch.mockImplementation(async () => {
+      query.data = mismatched
+      return { data: mismatched }
+    })
+    saveRequirements.mockResolvedValue(requirements)
+    const view = renderEditor('/organizer/events/event-1/edit', query)
+
+    await screen.findByText('Clear')
+    await user.click(screen.getByRole('button', { name: 'Continue to date & location' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to tickets & admission' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to event requirements' }))
+    await user.click(screen.getByRole('radio', { name: 'Yes', description: 'Cannabis present' }))
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    view.rerender(<RouterProvider router={view.router} />)
+
+    expect(await screen.findByText('Your event could not load')).toBeInTheDocument()
+    expect(screen.queryByText('Unsafe other event')).not.toBeInTheDocument()
+    expect(screen.queryByText('Removed')).not.toBeInTheDocument()
   })
 
   it('rejects a mismatched revision response without reset or navigation', async () => {
