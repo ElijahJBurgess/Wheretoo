@@ -2,7 +2,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(51);
+select plan(61);
 
 select has_function(
   'public',
@@ -35,6 +35,33 @@ select results_eq(
   $$,
   $$ values (false, true, false, true, false, true) $$,
   'only authenticated organizers can execute the three mutation boundaries'
+);
+select results_eq(
+  $$
+    select
+      pg_catalog.has_function_privilege(
+        'authenticated',
+        'public.save_owned_event_revision_without_value_validation(uuid,jsonb)',
+        'EXECUTE'
+      ),
+      pg_catalog.has_function_privilege(
+        'service_role',
+        'public.save_owned_event_revision_without_value_validation(uuid,jsonb)',
+        'EXECUTE'
+      ),
+      pg_catalog.has_function_privilege(
+        'authenticated',
+        'public.save_owned_organizer_profile_without_value_validation(jsonb)',
+        'EXECUTE'
+      ),
+      pg_catalog.has_function_privilege(
+        'service_role',
+        'public.save_owned_organizer_profile_without_value_validation(jsonb)',
+        'EXECUTE'
+      )
+  $$,
+  $$ values (false, false, false, false) $$,
+  'renamed coercing implementations have no browser or service execution path'
 );
 
 select results_eq(
@@ -160,6 +187,17 @@ values
     'America/Los_Angeles', 'Pending Venue', '8 Market Street', null,
     'Oakland', 'CA', '94607', 'US', 'mapbox.pending-revision-event',
     37.8044, -122.2712, 'free', 25, null, null, 'never_public', null
+  ),
+  (
+    '26000000-0000-0000-0000-000000000009',
+    '16000000-0000-0000-0000-000000000002',
+    'published', 'clear', 'Active Deterministic Revision Event',
+    'An active cleared event used to prove canonical schedule validation.', 'community',
+    now() - interval '1 hour', now() + interval '2 hours',
+    'America/Los_Angeles', 'Active Venue', '9 Market Street', null,
+    'Oakland', 'CA', '94607', 'US', 'mapbox.active-revision-event',
+    37.8044, -122.2712, 'free', 30, now() - interval '2 hours', 1,
+    'never_public', null
   );
 
 insert into private.event_risk_disclosures (
@@ -170,7 +208,7 @@ select id, 'all_ages', false, false, false, false, false, false
 from public.events
 where id between
   '26000000-0000-0000-0000-000000000001'::uuid
-  and '26000000-0000-0000-0000-000000000008'::uuid;
+  and '26000000-0000-0000-0000-000000000009'::uuid;
 
 insert into public.ticket_tiers (
   id, event_id, name, description, unit_amount_minor, quantity_total, status, sort_order
@@ -222,6 +260,60 @@ select throws_ok(
   $$,
   'P0001', 'EVENT_REVISION_INVALID',
   'unknown or server-controlled event keys are rejected'
+);
+
+create temporary table valid_event_payload on commit drop as
+select jsonb_build_object(
+  'title', events.title, 'description', events.description,
+  'category', events.category, 'starts_at', events.starts_at,
+  'ends_at', events.ends_at, 'timezone', events.timezone,
+  'venue_name', events.venue_name, 'address_line1', events.address_line1,
+  'address_line2', events.address_line2, 'city', events.city,
+  'region', events.region, 'postal_code', events.postal_code,
+  'country_code', events.country_code, 'mapbox_feature_id', events.mapbox_feature_id,
+  'latitude', events.latitude, 'longitude', events.longitude,
+  'admission_type', events.admission_type, 'capacity', events.capacity
+) as payload
+from public.events as events
+where events.id = '26000000-0000-0000-0000-000000000001';
+
+select throws_ok(
+  $$ select public.save_owned_event_revision('26000000-0000-0000-0000-000000000001', '[]'::jsonb) $$,
+  'P0001', 'EVENT_REVISION_INVALID',
+  'an event snapshot array is rejected before record coercion'
+);
+select throws_ok(
+  $$
+    select public.save_owned_event_revision(
+      '26000000-0000-0000-0000-000000000001',
+      jsonb_set(payload, '{title}', '{}'::jsonb)
+    )
+    from valid_event_payload
+  $$,
+  'P0001', 'EVENT_REVISION_INVALID',
+  'an object-valued event text field is rejected instead of coerced'
+);
+select throws_ok(
+  $$
+    select public.save_owned_event_revision(
+      '26000000-0000-0000-0000-000000000001',
+      jsonb_set(payload, '{latitude}', '"37.7936"'::jsonb)
+    )
+    from valid_event_payload
+  $$,
+  'P0001', 'EVENT_REVISION_INVALID',
+  'a string-valued event number is rejected instead of coerced'
+);
+select throws_ok(
+  $$
+    select public.save_owned_event_revision(
+      '26000000-0000-0000-0000-000000000001',
+      jsonb_set(payload, '{timezone}', 'null'::jsonb)
+    )
+    from valid_event_payload
+  $$,
+  'P0001', 'EVENT_REVISION_INVALID',
+  'JSON null is rejected for a non-null event snapshot field'
 );
 
 create temporary table event_one_before on commit drop as
@@ -673,6 +765,50 @@ select results_eq(
   'failed deterministic candidate facts hold with an accurate immutable audit result'
 );
 
+select set_config('request.jwt.claim.sub', '16000000-0000-0000-0000-000000000002', true);
+set local role authenticated;
+select lives_ok(
+  $$
+    select public.save_owned_event_revision(
+      '26000000-0000-0000-0000-000000000009',
+      (
+        select jsonb_build_object(
+          'title', events.title, 'description', events.description,
+          'category', events.category, 'starts_at', events.starts_at,
+          'ends_at', events.ends_at + interval '15 minutes', 'timezone', events.timezone,
+          'venue_name', events.venue_name, 'address_line1', events.address_line1,
+          'address_line2', events.address_line2, 'city', events.city,
+          'region', events.region, 'postal_code', events.postal_code,
+          'country_code', events.country_code, 'mapbox_feature_id', events.mapbox_feature_id,
+          'latitude', events.latitude, 'longitude', events.longitude,
+          'admission_type', events.admission_type, 'capacity', events.capacity
+        )
+        from public.events as events
+        where events.id = '26000000-0000-0000-0000-000000000009'
+      )
+    )
+  $$,
+  'an active prior-clear event accepts a valid deterministic end-time edit'
+);
+reset role;
+
+select results_eq(
+  $$
+    select events.content_revision, events.moderation_status,
+           evaluations.outcome, actions.action
+    from public.events as events
+    join private.event_moderation_actions as actions
+      on actions.event_id = events.id
+      and actions.content_revision = events.content_revision
+      and actions.source = 'edit'
+    join private.event_moderation_evaluations as evaluations
+      on evaluations.id = actions.evaluation_id
+    where events.id = '26000000-0000-0000-0000-000000000009'
+  $$,
+  $$ values (2::bigint, 'clear'::text, 'clear_candidate'::text, 'clear'::text) $$,
+  'canonical schedule validation keeps an active event clear while its end is future'
+);
+
 select set_config('request.jwt.claim.sub', '16000000-0000-0000-0000-000000000001', true);
 set local role authenticated;
 
@@ -715,6 +851,33 @@ select results_eq(
 create temporary table organizer_event_revisions_before on commit drop as
 select id, content_revision from public.events
 where organizer_id = '16000000-0000-0000-0000-000000000001';
+
+select set_config('request.jwt.claim.sub', '16000000-0000-0000-0000-000000000001', true);
+set local role authenticated;
+select throws_ok(
+  $$ select public.save_owned_organizer_profile('null'::jsonb) $$,
+  'P0001', 'ORGANIZER_PROFILE_INVALID',
+  'a null organizer snapshot is rejected'
+);
+select throws_ok(
+  $$
+    select public.save_owned_organizer_profile(
+      '{"display_name":[],"organizer_type":"Community group","bio":null,"website_url":null,"base_city":"San Francisco","country_code":"US","onboarding_completed_at":null}'::jsonb
+    )
+  $$,
+  'P0001', 'ORGANIZER_PROFILE_INVALID',
+  'an array-valued organizer text field is rejected instead of coerced'
+);
+select throws_ok(
+  $$
+    select public.save_owned_organizer_profile(
+      '{"display_name":"Revision Owner","organizer_type":"Community group","bio":null,"website_url":null,"base_city":"San Francisco","country_code":"US","onboarding_completed_at":123}'::jsonb
+    )
+  $$,
+  'P0001', 'ORGANIZER_PROFILE_INVALID',
+  'a numeric organizer timestamp is rejected instead of coerced'
+);
+reset role;
 
 select set_config('request.jwt.claim.sub', '16000000-0000-0000-0000-000000000001', true);
 set local role authenticated;
@@ -800,9 +963,9 @@ select results_eq(
       and intervals.public_eligibility_version = events.public_eligibility_version
       and events.id between
         '26000000-0000-0000-0000-000000000001'::uuid
-        and '26000000-0000-0000-0000-000000000008'::uuid
+        and '26000000-0000-0000-0000-000000000009'::uuid
   $$,
-  $$ values (8::bigint) $$,
+  $$ values (9::bigint) $$,
   'every fixture retains exactly one current eligibility interval after invalidations'
 );
 
