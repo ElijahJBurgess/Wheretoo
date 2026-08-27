@@ -14,6 +14,7 @@ import {
   getRequiredEventPolicies,
   listModerationQueue,
   reportPublicEvent,
+  resolveLegacyPublicHistory,
   submitModerationAction,
 } from './moderation.api'
 
@@ -38,11 +39,12 @@ const requiredPolicyRows = [
   },
 ]
 const staffCaseRow = {
-  event_id: eventId, moderation_status: 'under_review', content_revision: 2, input_sha256: 'a'.repeat(64), moderation_version: 4,
+  event_id: eventId, organizer_id: '18000000-0000-4000-8000-000000000005', moderation_status: 'under_review', content_revision: 2, input_sha256: 'a'.repeat(64), moderation_version: 4,
   public_history_status: 'never_public', first_publicly_eligible_at: null, title: 'Night market', description: 'Food and local makers.',
   category: 'community', starts_at: '2026-09-02T01:00:00Z', ends_at: '2026-09-02T04:00:00Z', timezone: 'America/Los_Angeles',
   venue_name: 'Civic Center', address_line1: '1 Market St', address_line2: null, city: 'San Francisco', region: 'CA', postal_code: '94102', country_code: 'US',
   mapbox_feature_id: 'address.1', latitude: 37.78, longitude: -122.42,
+  current_open_review_request: true, current_report_count: 2,
   disclosures: { minimum_age: 'all_ages', alcohol_present: false, cannabis_present: false, explicit_adult_content: false, gambling_present: false, weapons_present: false, high_risk_activity: false },
   legacy_resolution: {},
   actions: [{ id: '37beaa67-b2a2-4b56-9c6c-e91208925c45', action: 'hold', previous_status: 'clear', new_status: 'under_review', reason_code: 'user_report', internal_note: null, created_at: '2026-08-26T00:00:00Z', moderation_version: 4 }],
@@ -126,6 +128,30 @@ describe('moderation browser API', () => {
     await expect(acceptCurrentEventPolicies(eventId)).rejects.toEqual(new ModerationApiError('UNAVAILABLE'))
   })
 
+  it('sends an admin legacy resolution with an explicit nullable observed timestamp', async () => {
+    rpc.mockResolvedValueOnce({ data: '61b942dc-908f-4c6e-947c-905ec32c50de', error: null })
+    await resolveLegacyPublicHistory({
+      eventId,
+      expectedContentRevision: 4,
+      expectedInputSha256: 'a'.repeat(64),
+      expectedModerationVersion: 7,
+      publicHistoryStatus: 'never_public',
+      evidenceCode: 'legacy_archive_verified_never_public',
+      observedPublicAt: null,
+      internalNote: '',
+    })
+    expect(rpc).toHaveBeenCalledWith('resolve_legacy_public_history', {
+      p_event_id: eventId,
+      p_expected_content_revision: 4,
+      p_expected_input_sha256: 'a'.repeat(64),
+      p_expected_moderation_version: 7,
+      p_public_history_status: 'never_public',
+      p_evidence_code: 'legacy_archive_verified_never_public',
+      p_observed_public_at: null,
+      p_internal_note: '',
+    })
+  })
+
   it('does not expose malformed public projections', async () => {
     rpc.mockResolvedValue({ data: [{ id: eventId, organizer: { id: eventId } }], error: null })
     await expect(getPublicEvent(eventId)).rejects.toEqual(new ModerationApiError('UNAVAILABLE'))
@@ -141,7 +167,7 @@ describe('moderation browser API', () => {
     rpc.mockResolvedValueOnce({ data: [{ ...staffCaseRow, moderation_status: 'flagged' }], error: null })
     await expect(getModerationCase(eventId)).rejects.toEqual(new ModerationApiError('UNAVAILABLE'))
 
-    rpc.mockResolvedValueOnce({ data: [{ event_id: eventId, moderation_status: 'clear', content_revision: 1, input_sha256: 'a'.repeat(64), moderation_version: 0, public_history_status: 'never_public', queued_evaluation_count: 0, oldest_queued_at: null, leaked: true }], error: null })
+    rpc.mockResolvedValueOnce({ data: [{ event_id: eventId, organizer_id: '18000000-0000-4000-8000-000000000005', moderation_status: 'clear', content_revision: 1, input_sha256: 'a'.repeat(64), moderation_version: 0, public_history_status: 'never_public', current_open_review_request: false, current_report_count: 0, queued_evaluation_count: 0, oldest_queued_at: null, leaked: true }], error: null })
     await expect(listModerationQueue(25)).rejects.toEqual(new ModerationApiError('UNAVAILABLE'))
   })
 

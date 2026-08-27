@@ -10,12 +10,13 @@ import {
   getRequiredEventPolicies,
   listModerationQueue,
   reportPublicEvent,
+  resolveLegacyPublicHistory,
   requestEventReview,
   saveEventRequirements,
   submitModerationAction,
   withdrawEventReview,
 } from './moderation.api'
-import type { EventRequirementsInput, ModerationActionInput, ReportReason } from './moderation.types'
+import type { EventRequirementsInput, LegacyHistoryResolutionInput, ModerationActionInput, ReportReason } from './moderation.types'
 
 export const moderationKeys = {
   policies: ['moderation', 'policies'] as const,
@@ -117,6 +118,19 @@ export function useSubmitModerationAction(staffUserId: string, organizerId: stri
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (input: ModerationActionInput) => submitModerationAction(input),
+    onSuccess: async (_actionId, input) => exactInvalidation(queryClient, [
+      moderationKeys.case(staffUserId, input.eventId), moderationKeys.queue(staffUserId),
+      moderationKeys.review(organizerId, input.eventId),
+      moderationKeys.publicEvent(input.eventId), eventKeys.detail(organizerId, input.eventId),
+      eventKeys.ownedList(organizerId),
+    ]),
+  })
+}
+
+export function useResolveLegacyPublicHistory(staffUserId: string, organizerId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: LegacyHistoryResolutionInput) => resolveLegacyPublicHistory(input),
     onSuccess: async (_actionId, input) => exactInvalidation(queryClient, [
       moderationKeys.case(staffUserId, input.eventId), moderationKeys.queue(staffUserId),
       moderationKeys.review(organizerId, input.eventId),

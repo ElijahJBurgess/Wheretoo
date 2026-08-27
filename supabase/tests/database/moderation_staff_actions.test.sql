@@ -201,6 +201,24 @@ select
   timestamptz '2000-01-01 00:00:00+00' + series * interval '1 second'
 from generate_series(1, 51) as series;
 
+insert into private.event_reports (
+  id, event_id, content_revision, input_sha256, reporter_fingerprint,
+  reason, created_at
+) values
+  ('68000000-0000-4000-8000-000000000001', '28000000-0000-4000-8000-000000000006', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000006'), repeat('1', 64), 'other', now() - interval '5 minutes'),
+  ('68000000-0000-4000-8000-000000000002', '28000000-0000-4000-8000-000000000006', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000006'), repeat('2', 64), 'unsafe', now() - interval '4 minutes'),
+  ('68000000-0000-4000-8000-000000000003', '28000000-0000-4000-8000-000000000003', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000003'), repeat('3', 64), 'other', now() - interval '3 minutes'),
+  ('68000000-0000-4000-8000-000000000004', '28000000-0000-4000-8000-000000000003', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000003'), repeat('4', 64), 'unsafe', now() - interval '2 minutes'),
+  ('68000000-0000-4000-8000-000000000005', '28000000-0000-4000-8000-000000000003', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000003'), repeat('5', 64), 'wrong_location', now() - interval '1 minute');
+
+select set_config('request.jwt.claim.sub', '18000000-0000-4000-8000-000000000005', true);
+set local role authenticated;
+select public.request_event_review(
+  '28000000-0000-4000-8000-000000000006',
+  null
+);
+reset role;
+
 insert into private.event_moderation_evaluations (
   id, event_id, content_revision, input_sha256, queued_moderation_version,
   status, source, outcome, risk_level, reason_codes, provider_reference,
@@ -250,6 +268,19 @@ select set_config('request.jwt.claim.sub', '18000000-0000-4000-8000-000000000001
 set local role authenticated;
 select results_eq($$ select public.get_my_staff_role() $$, $$ values ('moderator'::text) $$,
   'an active moderator reads the server-controlled role only');
+select results_eq(
+  $$
+    select event_id, organizer_id, current_open_review_request,
+      current_report_count
+    from public.list_moderation_queue(25)
+    limit 2
+  $$,
+  $$ values
+    ('28000000-0000-4000-8000-000000000006'::uuid, '18000000-0000-4000-8000-000000000005'::uuid, true, 2::bigint),
+    ('28000000-0000-4000-8000-000000000003'::uuid, '18000000-0000-4000-8000-000000000005'::uuid, false, 3::bigint)
+  $$,
+  'staff queue exposes only bounded owner/review/report facts and prioritizes current review requests before report count'
+);
 select throws_ok(
   $$ insert into private.staff_roles (user_id, role, active, granted_by) values ('18000000-0000-4000-8000-000000000004', 'moderator', true, '18000000-0000-4000-8000-000000000002') $$,
   '42501', null,
@@ -562,10 +593,11 @@ select results_eq(
       array(select key from jsonb_object_keys(to_jsonb(cases)) as key order by key)
         = array[
           'actions', 'address_line1', 'address_line2', 'category', 'city',
-          'content_revision', 'country_code', 'description', 'disclosures',
-          'ends_at', 'evaluations', 'event_id', 'first_publicly_eligible_at',
+          'content_revision', 'country_code', 'current_open_review_request',
+          'current_report_count', 'description', 'disclosures', 'ends_at',
+          'evaluations', 'event_id', 'first_publicly_eligible_at',
           'input_sha256', 'latitude', 'legacy_resolution', 'longitude',
-          'mapbox_feature_id', 'moderation_status', 'moderation_version',
+          'mapbox_feature_id', 'moderation_status', 'moderation_version', 'organizer_id',
           'postal_code', 'public_history_status', 'region', 'starts_at',
           'timezone', 'title', 'venue_name'
         ]::text[]
@@ -580,9 +612,13 @@ select results_eq(
           'created_at', 'evidence_code', 'observed_public_at',
           'resolved_public_history_status'
         ]::text[]
+      and cases.organizer_id = '18000000-0000-4000-8000-000000000005'::uuid
+      and cases.current_open_review_request
+      and cases.current_report_count = 2
       and not to_jsonb(cases) ?| array[
-        'organizer_id', 'owner_id', 'actor_user_id', 'reviewer_user_id',
-        'email', 'provider_reference', 'model_version', 'raw_output',
+        'owner_id', 'actor_user_id', 'reviewer_user_id', 'reporter_fingerprint',
+        'report_reason', 'review_request_id', 'organizer_note', 'email',
+        'provider_reference', 'model_version', 'raw_output',
         'provider_reasoning', 'internal_reasoning'
       ]
       and jsonb_array_length(cases.actions) = 50

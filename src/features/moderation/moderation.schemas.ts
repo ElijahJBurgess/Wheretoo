@@ -113,6 +113,32 @@ export const moderationActionInputSchema = z.strictObject({
   internalNote: z.string().max(1000),
 })
 
+export const legacyHistoryResolutionInputSchema = z.strictObject({
+  eventId: uuidSchema,
+  expectedContentRevision: z.number().int().positive(),
+  expectedInputSha256: sha256Schema,
+  expectedModerationVersion: z.number().int().nonnegative(),
+  publicHistoryStatus: z.enum(['never_public', 'previously_public']),
+  evidenceCode: z.enum([
+    'legacy_archive_verified_never_public',
+    'legacy_archive_verified_public',
+    'legacy_server_prior_public',
+  ]),
+  observedPublicAt: z.iso.datetime().nullable(),
+  internalNote: z.string().max(1000),
+}).superRefine((input, context) => {
+  if (input.publicHistoryStatus === 'never_public') {
+    if (input.evidenceCode !== 'legacy_archive_verified_never_public' || input.observedPublicAt !== null) {
+      context.addIssue({ code: 'custom', message: 'Never-public history requires archive evidence and no observed timestamp.' })
+    }
+    return
+  }
+
+  if (input.evidenceCode === 'legacy_archive_verified_never_public' || input.observedPublicAt === null) {
+    context.addIssue({ code: 'custom', message: 'Previously-public history requires public evidence and an observed timestamp.' })
+  }
+})
+
 const actionHistorySchema = z.array(z.strictObject({
   id: uuidSchema,
   action: moderationHistoryActionSchema,
@@ -147,12 +173,15 @@ const legacyResolutionSchema = z.union([
 
 export const moderationCaseSchema = z.strictObject({
   eventId: uuidSchema,
+  organizerId: uuidSchema,
   moderationStatus: moderationStatusSchema,
   contentRevision: z.number().int().positive(),
   inputSha256: sha256Schema,
   moderationVersion: z.number().int().nonnegative(),
   publicHistoryStatus: publicHistoryStatusSchema,
   firstPubliclyEligibleAt: z.string().nullable(),
+  currentOpenReviewRequest: z.boolean(),
+  currentReportCount: z.number().int().nonnegative(),
   title: z.string(), description: z.string(), category: z.string(), startsAt: z.string(), endsAt: z.string(), timezone: z.string(),
   venueName: z.string(), addressLine1: z.string(), addressLine2: z.string().nullable(), city: z.string(), region: z.string(), postalCode: z.string(), countryCode: z.string(),
   mapboxFeatureId: z.string(), latitude: z.number(), longitude: z.number(),
@@ -160,8 +189,8 @@ export const moderationCaseSchema = z.strictObject({
 })
 
 export const moderationQueueItemSchema = z.strictObject({
-  eventId: uuidSchema, moderationStatus: moderationStatusSchema, contentRevision: z.number().int().positive(), inputSha256: sha256Schema,
-  moderationVersion: z.number().int().nonnegative(), publicHistoryStatus: publicHistoryStatusSchema, queuedEvaluationCount: z.number().int().nonnegative(), oldestQueuedAt: z.string().nullable(),
+  eventId: uuidSchema, organizerId: uuidSchema, moderationStatus: moderationStatusSchema, contentRevision: z.number().int().positive(), inputSha256: sha256Schema,
+  moderationVersion: z.number().int().nonnegative(), publicHistoryStatus: publicHistoryStatusSchema, currentOpenReviewRequest: z.boolean(), currentReportCount: z.number().int().nonnegative(), queuedEvaluationCount: z.number().int().nonnegative(), oldestQueuedAt: z.string().nullable(),
 })
 
 export const staffRoleSchema = z.enum(['moderator', 'admin'])

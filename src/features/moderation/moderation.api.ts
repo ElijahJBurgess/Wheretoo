@@ -1,11 +1,13 @@
 import { z } from 'zod'
 import { publicEventSchema } from '../events/event.schemas'
 import { supabase } from '../../lib/supabase/client'
+import type { Database } from '../../lib/supabase/database.types'
 import {
   agreementStatusSchema,
   currentReviewRequestSchema,
   eventRequirementsInputSchema,
   eventRequirementsSchema,
+  legacyHistoryResolutionInputSchema,
   moderationActionInputSchema,
   moderationCaseSchema,
   moderationQueueItemSchema,
@@ -18,6 +20,7 @@ import type {
   CurrentReviewRequest,
   EventRequirements,
   EventRequirementsInput,
+  LegacyHistoryResolutionInput,
   ModerationActionInput,
   ModerationCase,
   ModerationQueueItem,
@@ -40,18 +43,18 @@ const requiredPolicyRpcRowSchema = z.strictObject({
   policy_kind: z.string(), label: z.string(), version_id: z.string(), stage: z.string(), public_url: z.string(), effective_at: z.string(),
 })
 const moderationCaseRpcRowSchema = z.strictObject({
-  event_id: z.string(), moderation_status: z.string(), content_revision: z.number(), input_sha256: z.string(), moderation_version: z.number(), public_history_status: z.string(),
+  event_id: z.string(), organizer_id: z.string(), moderation_status: z.string(), content_revision: z.number(), input_sha256: z.string(), moderation_version: z.number(), public_history_status: z.string(),
   first_publicly_eligible_at: z.string().nullable(), title: z.string(), description: z.string(), category: z.string(), starts_at: z.string(), ends_at: z.string(), timezone: z.string(),
   venue_name: z.string(), address_line1: z.string(), address_line2: z.string().nullable(), city: z.string(), region: z.string(), postal_code: z.string(), country_code: z.string(),
-  mapbox_feature_id: z.string(), latitude: z.number(), longitude: z.number(), disclosures: z.unknown(), legacy_resolution: z.unknown(), actions: z.unknown(), evaluations: z.unknown(),
+  mapbox_feature_id: z.string(), latitude: z.number(), longitude: z.number(), current_open_review_request: z.boolean(), current_report_count: z.number(), disclosures: z.unknown(), legacy_resolution: z.unknown(), actions: z.unknown(), evaluations: z.unknown(),
 })
 const disclosureRpcSchema = z.strictObject({
   minimum_age: z.string(), alcohol_present: z.boolean(), cannabis_present: z.boolean(), explicit_adult_content: z.boolean(),
   gambling_present: z.boolean(), weapons_present: z.boolean(), high_risk_activity: z.boolean(),
 })
 const moderationQueueRpcRowSchema = z.strictObject({
-  event_id: z.string(), moderation_status: z.string(), content_revision: z.number(), input_sha256: z.string(), moderation_version: z.number(),
-  public_history_status: z.string(), queued_evaluation_count: z.number(), oldest_queued_at: z.string().nullable(),
+  event_id: z.string(), organizer_id: z.string(), moderation_status: z.string(), content_revision: z.number(), input_sha256: z.string(), moderation_version: z.number(),
+  public_history_status: z.string(), current_open_review_request: z.boolean(), current_report_count: z.number(), queued_evaluation_count: z.number(), oldest_queued_at: z.string().nullable(),
 })
 const currentReviewRequestRpcRowSchema = z.strictObject({
   id: z.string(), status: z.string(), created_at: z.string(), resolved_at: z.string().nullable(),
@@ -130,9 +133,10 @@ function requiredPolicyFromRpc(row: z.infer<typeof requiredPolicyRpcRowSchema>):
 function moderationCaseFromRpc(row: z.infer<typeof moderationCaseRpcRowSchema>): ModerationCase {
   const disclosures = parseContract(disclosureRpcSchema, row.disclosures)
   return parseContract(moderationCaseSchema, {
-    eventId: row.event_id, moderationStatus: row.moderation_status, contentRevision: row.content_revision,
+    eventId: row.event_id, organizerId: row.organizer_id, moderationStatus: row.moderation_status, contentRevision: row.content_revision,
     inputSha256: row.input_sha256, moderationVersion: row.moderation_version, publicHistoryStatus: row.public_history_status,
-    firstPubliclyEligibleAt: row.first_publicly_eligible_at, title: row.title, description: row.description,
+    firstPubliclyEligibleAt: row.first_publicly_eligible_at, currentOpenReviewRequest: row.current_open_review_request,
+    currentReportCount: row.current_report_count, title: row.title, description: row.description,
     category: row.category, startsAt: row.starts_at, endsAt: row.ends_at, timezone: row.timezone,
     venueName: row.venue_name, addressLine1: row.address_line1, addressLine2: row.address_line2,
     city: row.city, region: row.region, postalCode: row.postal_code, countryCode: row.country_code,
@@ -231,9 +235,10 @@ export async function listModerationQueue(limit: number): Promise<ModerationQueu
   const rows = parseContract(z.array(moderationQueueRpcRowSchema), data ?? [])
   return rows.map((row) => {
     return parseContract(moderationQueueItemSchema, {
-    eventId: row.event_id, moderationStatus: row.moderation_status, contentRevision: row.content_revision,
+    eventId: row.event_id, organizerId: row.organizer_id, moderationStatus: row.moderation_status, contentRevision: row.content_revision,
     inputSha256: row.input_sha256, moderationVersion: row.moderation_version,
-    publicHistoryStatus: row.public_history_status, queuedEvaluationCount: row.queued_evaluation_count,
+    publicHistoryStatus: row.public_history_status, currentOpenReviewRequest: row.current_open_review_request,
+    currentReportCount: row.current_report_count, queuedEvaluationCount: row.queued_evaluation_count,
     oldestQueuedAt: row.oldest_queued_at,
     })
   })
@@ -256,6 +261,34 @@ export async function submitModerationAction(input: ModerationActionInput): Prom
     p_expected_input_sha256: values.expectedInputSha256, p_expected_moderation_version: values.expectedModerationVersion,
     p_action: values.action, p_reason_code: values.reasonCode, p_internal_note: values.internalNote,
   })
+  if (error) throw safeError(error)
+  const parsed = z.string().uuid().safeParse(data)
+  if (!parsed.success) throw new ModerationApiError('UNAVAILABLE')
+  return parsed.data
+}
+
+export async function resolveLegacyPublicHistory(input: LegacyHistoryResolutionInput): Promise<string> {
+  const values = legacyHistoryResolutionInputSchema.parse(input)
+  type GeneratedArgs = Database['public']['Functions']['resolve_legacy_public_history']['Args']
+  type NullableObservedAtArgs = Omit<GeneratedArgs, 'p_observed_public_at'> & {
+    p_observed_public_at: string | null
+  }
+  const args: NullableObservedAtArgs = {
+    p_event_id: values.eventId,
+    p_expected_content_revision: values.expectedContentRevision,
+    p_expected_input_sha256: values.expectedInputSha256,
+    p_expected_moderation_version: values.expectedModerationVersion,
+    p_public_history_status: values.publicHistoryStatus,
+    p_evidence_code: values.evidenceCode,
+    p_observed_public_at: values.observedPublicAt,
+    p_internal_note: values.internalNote,
+  }
+  // Supabase's generator does not reflect nullable PostgreSQL function
+  // arguments. The strict wrapper above carries the real SQL contract.
+  const { data, error } = await supabase.rpc(
+    'resolve_legacy_public_history',
+    args as GeneratedArgs,
+  )
   if (error) throw safeError(error)
   const parsed = z.string().uuid().safeParse(data)
   if (!parsed.success) throw new ModerationApiError('UNAVAILABLE')

@@ -3,17 +3,17 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import type { PropsWithChildren } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { acceptCurrentEventPolicies, getCurrentEventReviewRequest, getOwnedEventRequirements, requestEventReview, saveEventRequirements, submitModerationAction, withdrawEventReview } = vi.hoisted(() => ({
-  acceptCurrentEventPolicies: vi.fn(), getCurrentEventReviewRequest: vi.fn(), getOwnedEventRequirements: vi.fn(), requestEventReview: vi.fn(), saveEventRequirements: vi.fn(), submitModerationAction: vi.fn(), withdrawEventReview: vi.fn(),
+const { acceptCurrentEventPolicies, getCurrentEventReviewRequest, getOwnedEventRequirements, requestEventReview, resolveLegacyPublicHistory, saveEventRequirements, submitModerationAction, withdrawEventReview } = vi.hoisted(() => ({
+  acceptCurrentEventPolicies: vi.fn(), getCurrentEventReviewRequest: vi.fn(), getOwnedEventRequirements: vi.fn(), requestEventReview: vi.fn(), resolveLegacyPublicHistory: vi.fn(), saveEventRequirements: vi.fn(), submitModerationAction: vi.fn(), withdrawEventReview: vi.fn(),
 }))
-vi.mock('./moderation.api', () => ({ acceptCurrentEventPolicies, getCurrentEventReviewRequest, getOwnedEventRequirements, requestEventReview, saveEventRequirements, submitModerationAction, withdrawEventReview }))
+vi.mock('./moderation.api', () => ({ acceptCurrentEventPolicies, getCurrentEventReviewRequest, getOwnedEventRequirements, requestEventReview, resolveLegacyPublicHistory, saveEventRequirements, submitModerationAction, withdrawEventReview }))
 vi.mock('../events/event.queries', () => ({
   eventKeys: {
     detail: (organizerId: string, eventId: string) => ['events', 'detail', organizerId, eventId],
     ownedList: (organizerId: string) => ['events', 'owned', organizerId],
   },
 }))
-import { moderationKeys, useAcceptCurrentEventPolicies, useCurrentEventReviewRequest, useOwnedEventRequirements, useRequestEventReview, useSaveEventRequirements, useSubmitModerationAction, useWithdrawEventReview } from './moderation.queries'
+import { moderationKeys, useAcceptCurrentEventPolicies, useCurrentEventReviewRequest, useOwnedEventRequirements, useRequestEventReview, useResolveLegacyPublicHistory, useSaveEventRequirements, useSubmitModerationAction, useWithdrawEventReview } from './moderation.queries'
 
 const requirements = {
   minimumAge: 'all_ages' as const, alcoholPresent: false, cannabisPresent: false, explicitAdultContent: false,
@@ -135,5 +135,24 @@ describe('moderation query cache contracts', () => {
     expect(client.getQueryState(moderationKeys.case('staff-2', 'b4ee321a-bdf6-43b2-a7f4-d6478d942908'))?.isInvalidated).toBe(false)
     expect(client.getQueryState(moderationKeys.review('organizer-1', 'b4ee321a-bdf6-43b2-a7f4-d6478d942908'))?.isInvalidated).toBe(true)
     expect(client.getQueryState(moderationKeys.review('organizer-2', 'b4ee321a-bdf6-43b2-a7f4-d6478d942908'))?.isInvalidated).toBe(false)
+  })
+
+  it('invalidates the exact staff, owner, and public facts after legacy history resolution', async () => {
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    resolveLegacyPublicHistory.mockResolvedValue('37beaa67-b2a2-4b56-9c6c-e91208925c45')
+    const { result } = renderHook(() => useResolveLegacyPublicHistory('staff-1', 'organizer-1'), { wrapper: wrapper(client) })
+    await act(async () => {
+      await result.current.mutateAsync({
+        eventId: 'b4ee321a-bdf6-43b2-a7f4-d6478d942908', expectedContentRevision: 2,
+        expectedInputSha256: 'a'.repeat(64), expectedModerationVersion: 4,
+        publicHistoryStatus: 'never_public', evidenceCode: 'legacy_archive_verified_never_public',
+        observedPublicAt: null, internalNote: '',
+      })
+    })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: moderationKeys.case('staff-1', 'b4ee321a-bdf6-43b2-a7f4-d6478d942908'), exact: true })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: moderationKeys.queue('staff-1'), exact: true })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: moderationKeys.review('organizer-1', 'b4ee321a-bdf6-43b2-a7f4-d6478d942908'), exact: true })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: moderationKeys.publicEvent('b4ee321a-bdf6-43b2-a7f4-d6478d942908'), exact: true })
   })
 })

@@ -4,6 +4,7 @@ import type {
   currentReviewRequestSchema,
   eventRequirementsInputSchema,
   eventRequirementsSchema,
+  legacyHistoryResolutionInputSchema,
   moderationActionInputSchema,
   moderationCaseSchema,
   moderationQueueItemSchema,
@@ -21,6 +22,7 @@ export type AgreementStatus = z.infer<typeof agreementStatusSchema>
 export type CurrentReviewRequest = z.infer<typeof currentReviewRequestSchema>
 export type ReportReason = z.infer<typeof reportReasonSchema>
 export type ModerationActionInput = z.infer<typeof moderationActionInputSchema>
+export type LegacyHistoryResolutionInput = z.infer<typeof legacyHistoryResolutionInputSchema>
 export type ModerationCase = z.infer<typeof moderationCaseSchema>
 export type ModerationQueueItem = z.infer<typeof moderationQueueItemSchema>
 export type StaffRole = z.infer<typeof staffRoleSchema>

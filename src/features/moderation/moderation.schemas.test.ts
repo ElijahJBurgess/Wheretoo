@@ -3,6 +3,7 @@ import {
   agreementStatusSchema,
   currentReviewRequestSchema,
   eventRequirementsSchema,
+  legacyHistoryResolutionInputSchema,
   moderationActionInputSchema,
   moderationSourceSchema,
   policyStageSchema,
@@ -102,5 +103,32 @@ describe('moderation browser schemas', () => {
     ])
     expect(moderationSourceSchema.safeParse('report_escalation').success).toBe(true)
     expect(moderationSourceSchema.safeParse('report').success).toBe(false)
+  })
+
+  it('binds legacy history evidence to the selected history and nullable observed time', () => {
+    const base = {
+      eventId: 'b4ee321a-bdf6-43b2-a7f4-d6478d942908',
+      expectedContentRevision: 4,
+      expectedInputSha256: 'a'.repeat(64),
+      expectedModerationVersion: 7,
+      publicHistoryStatus: 'never_public',
+      evidenceCode: 'legacy_archive_verified_never_public',
+      observedPublicAt: null,
+      internalNote: '',
+    }
+
+    expect(legacyHistoryResolutionInputSchema.safeParse(base).success).toBe(true)
+    expect(legacyHistoryResolutionInputSchema.safeParse({
+      ...base,
+      publicHistoryStatus: 'previously_public',
+      evidenceCode: 'legacy_archive_verified_public',
+      observedPublicAt: '2026-08-20T12:00:00Z',
+    }).success).toBe(true)
+    expect(legacyHistoryResolutionInputSchema.safeParse({ ...base, observedPublicAt: '2026-08-20T12:00:00Z' }).success).toBe(false)
+    expect(legacyHistoryResolutionInputSchema.safeParse({
+      ...base,
+      publicHistoryStatus: 'previously_public',
+      evidenceCode: 'legacy_archive_verified_never_public',
+    }).success).toBe(false)
   })
 })

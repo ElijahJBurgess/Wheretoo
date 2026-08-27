@@ -1007,6 +1007,8 @@ export type Database = {
           city: string
           content_revision: number
           country_code: string
+          current_open_review_request: boolean
+          current_report_count: number
           description: string
           disclosures: Json
           ends_at: string
@@ -1020,6 +1022,7 @@ export type Database = {
           mapbox_feature_id: string
           moderation_status: string
           moderation_version: number
+          organizer_id: string
           postal_code: string
           public_history_status: string
           region: string
@@ -1099,11 +1102,14 @@ export type Database = {
         Args: { p_limit: number }
         Returns: {
           content_revision: number
+          current_open_review_request: boolean
+          current_report_count: number
           event_id: string
           input_sha256: string
           moderation_status: string
           moderation_version: number
           oldest_queued_at: string
+          organizer_id: string
           public_history_status: string
           queued_evaluation_count: number
         }[]
