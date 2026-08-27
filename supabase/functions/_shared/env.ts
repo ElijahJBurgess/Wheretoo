@@ -20,6 +20,16 @@ export function getModerationWorkerToken(
   return value;
 }
 
+export function getReportFingerprintSecret(
+  read: EnvReader = defaultEnvReader,
+): string {
+  const value = requireEnv("REPORT_FINGERPRINT_SECRET", read);
+  if (value.length < 32 || value.length > 256) {
+    throw new Error("Report fingerprint secret is invalid");
+  }
+  return value;
+}
+
 export function getContextualModerationConfig(
   read: EnvReader = defaultEnvReader,
 ): { endpoint: string; bearerToken: string | null } | null {

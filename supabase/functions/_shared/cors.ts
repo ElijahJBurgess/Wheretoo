@@ -21,6 +21,13 @@ export function getCorsHeaders(
   return headers;
 }
 
+export function hasExactCorsOrigin(
+  request: Request,
+  appOrigin = getAppBaseUrl(),
+): boolean {
+  return request.headers.get("origin") === appOrigin;
+}
+
 export function handleCorsPreflight(
   request: Request,
   appOrigin = getAppBaseUrl(),
@@ -28,7 +35,7 @@ export function handleCorsPreflight(
   if (request.method !== "OPTIONS") return null;
 
   const headers = getCorsHeaders(request, appOrigin);
-  if (!headers.has("access-control-allow-origin")) {
+  if (!hasExactCorsOrigin(request, appOrigin)) {
     return jsonResponse(
       { error: { code: "CORS_ORIGIN_DENIED" } },
       403,

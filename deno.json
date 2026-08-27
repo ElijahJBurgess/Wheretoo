@@ -7,6 +7,7 @@
   },
   "tasks": {
     "test": "deno test --allow-env supabase/functions",
+    "test:report-event": "deno test --allow-env supabase/functions/report-event",
     "check": "deno check supabase/functions/**/*.ts"
   }
 }
