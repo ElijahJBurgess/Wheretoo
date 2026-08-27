@@ -1,6 +1,8 @@
 # Whereto Build 2.5 Moderation and Public Eligibility Design
 
-**Status:** Proposed architecture awaiting founder review
+**Status:** CLEAN PASS — ready for founder design approval; not implemented
+
+**Final architecture review:** 0 Critical, 0 Important, 0 Minor findings
 
 **Date:** 2026-08-26
 
@@ -178,20 +180,25 @@ No further approval is required for these rules:
 - removal is reversible and every meaningful action is audited;
 - moderation operations must not require routine direct production SQL;
 - Build 3 consumes a server-filtered map-safe projection only.
+- already-open unpaid Checkout Sessions are not actively expired when moderation/public-policy eligibility is lost in Build 2.5;
+- the organizer agreement is required immediately after risk disclosures and before Preview/Publish; and
+- policy acceptance is versioned, auditable, revision-bound, and enforced by the server publish boundary.
 
-## 6. Genuine founder decision still required
+## 6. Founder-locked Stripe Option A
 
-### 6.1 Open unpaid Checkout Sessions whenever moderation/public-policy eligibility is lost
+When a paid event loses moderation/public-policy eligibility:
 
-**Question:** Whenever a paid event loses moderation/public-policy eligibility—because of hold, block, removal, a material edit, organizer-name/tier-text invalidation, or automatic risk escalation—should already-open but unpaid Stripe Checkout Sessions be actively expired, or may they complete because they began before that policy cutoff?
+1. Public discovery is removed immediately through canonical server eligibility.
+2. New reservations/checkouts are blocked immediately under the existing event lock.
+3. The current eligibility interval closes, the monotonic version advances exactly once, and the next ineligible interval opens atomically.
+4. Existing paid orders, tickets, confirmations, refunds, disputes, and payment records remain intact.
+5. Build 2.5 makes no Stripe API call to expire an already-open unpaid Checkout Session.
+6. That Session remains an accepted V1 in-flight transaction. If it later completes, the existing Day 2 abnormal/reconciliation path handles the now-ineligible event; the payment is not reclassified as a newly authorized clean sale.
+7. Build 2.5 performs no automatic refund, financial cancellation, webhook replay, or Stripe regression verification.
 
-**Why this changes architecture:** The database can atomically block new reservations at a recorded eligibility cutoff, but an already-created hosted Stripe Session can still accept payment after any of those transitions. The current webhook path treats an ineligible event as `requires_review`; it does not make the hosted Session disappear. Active expiration would require a narrow call through the existing server-side Stripe boundary, which conflicts with the Build 2.5 Stripe freeze unless explicitly approved.
+This narrow decision applies only to loss of moderation/public-policy eligibility. It does not alter Day 2 behavior for sold-out inventory, Connect readiness, schedule timing, reservation expiry, or payment reconciliation. Production evidence may justify a separately scoped future Session-expiration change, but Build 2.5 contains no implementation or test task for it.
 
-**Recommendation:** Approve a narrow future compatibility operation for every moderation/public-policy eligible-to-ineligible transition: first close the current immutable eligibility epoch, increment the event's monotonic `public_eligibility_version`, hide the event, and block new reservations under the event lock; then asynchronously expire every exact open unpaid test/live-environment Session from prior eligible epochs through the existing server boundary. Each reservation/order/Session must snapshot its eligibility version, so repeated hide/restore cycles cannot erase which policy window authorized it. A payment completed before its epoch's recorded cutoff remains an existing buyer and is fulfilled/preserved; a payment completed after it enters review. Failure to expire does not restore discovery and must alert an operator. This is not a refund and does not alter existing paid tickets.
-
-This decision does not apply to ordinary Day 2 ineligibility such as sold-out inventory, a Connect-readiness failure, or schedule start/end unless a later payment design explicitly says so. Build 2.5 owns moderation/public-policy transitions only.
-
-Until the founder decides, the implementation plan must not silently alter Stripe behavior.
+There are no unresolved founder decisions in this design.
 
 ## 7. Recommended state model
 
@@ -230,11 +237,15 @@ An event is public-policy eligible only when all are true:
 event.status = published
 AND event.moderation_status = clear
 AND event.moderated_revision = event.content_revision
+AND event.publicly_authorized_revision = event.content_revision
+AND event.publicly_authorized_action_id references the exact current revision/digest
+    and its acceptance or migration-only legacy exemption
+AND event.public_history_status = previously_public
 AND its public organizer identity is current/cleared
 AND required location data is valid and map-safe
 ```
 
-Discovery queries additionally apply their explicit time window and category/viewport filters. Cancellation, end time, or a missing/invalid point makes the event absent from active discovery without rewriting moderation history.
+The authorization action is written only by the publish/re-publish boundary after validating the acceptance against the policy pair required for that submission. Bare acceptance-row existence never satisfies this predicate. A later policy update alone never removes an already-published event. A legacy exemption is not acceptance and never applies to a later revision. Discovery queries additionally apply their explicit time window and category/viewport filters. Cancellation, end time, or a missing/invalid point makes the event absent from active discovery without rewriting moderation history.
 
 #### New-sales eligibility — derived from public eligibility plus Day 2 facts
 
@@ -272,12 +283,15 @@ Add server-controlled revision facts to `public.events`:
 | `moderation_version` | `bigint not null default 0` | Optimistic concurrency version for state-changing admin/service actions |
 | `moderation_status` | constrained text | Tightened vocabulary above |
 | `moderation_updated_at` | `timestamptz` | Last state transition timestamp |
-| `first_publicly_eligible_at` | `timestamptz` | Immutable first time this event became discoverable; distinguishes block from later removal |
+| `publicly_authorized_revision` | `bigint` | Exact revision last authorized by publish/re-publish; server-controlled |
+| `publicly_authorized_action_id` | `uuid` | Audit action proving acceptance or exact legacy exemption used for that authorization |
+| `public_history_status` | constrained text | `unknown`, `never_public`, or `previously_public`; legacy ambiguity is explicit rather than guessed |
+| `first_publicly_eligible_at` | `timestamptz` | Immutable earliest defensible observed discoverability time; required for `previously_public`, null otherwise |
 | `public_eligibility_version` | `bigint not null default 0` | Monotonic epoch changed on every moderation/public-policy eligibility transition |
 
-Organizers have no direct grant to `moderated_revision`, `moderation_version`, `moderation_status`, or `moderation_updated_at`.
+Organizers have no direct grant to `moderated_revision`, `moderation_version`, `moderation_status`, `moderation_updated_at`, `publicly_authorized_revision`, or `publicly_authorized_action_id`.
 
-The eligibility transition transaction sets `first_publicly_eligible_at` once, with `coalesce(existing_value, statement_timestamp())`, when the event first becomes eligible; it is never cleared or overwritten. Every moderation/public-policy eligibility transition increments `public_eligibility_version` and opens or closes the corresponding immutable interval in section 12.8 under the same lock. Therefore a prohibited decision is `blocked` when `first_publicly_eligible_at is null`, and `removed` when it is non-null. No nullable current timestamp is used as the sole historical cutoff.
+New events begin `never_public`. The eligibility transition transaction changes that fact once to `previously_public` and sets `first_publicly_eligible_at` with `coalesce(existing_value, statement_timestamp())` when the event first becomes eligible; neither fact can later be reversed. Legacy ambiguity is represented as `unknown` and is held from discovery until resolved from defensible evidence. Every moderation/public-policy eligibility transition atomically closes the current interval, increments `public_eligibility_version`, and opens the next interval described in section 12.8 under the same lock. Therefore a prohibited decision is `blocked` only for `never_public`, and `removed` only for `previously_public`. No nullable timestamp alone is treated as proof that an event was never public.
 
 ### 8.2 Revision-changing content
 
@@ -328,6 +342,22 @@ Every evaluation captures `event_id`, `content_revision`, `input_sha256`, and `q
 
 ## 9. Organizer risk disclosures
 
+### 9.1 Placement and flow
+
+Moderation is not an upfront compliance screen. The organizer sequence is:
+
+1. Event basics;
+2. Date and location;
+3. Tickets/admission;
+4. Event details and requirements;
+5. Organizer agreement;
+6. Preview; and
+7. Publish.
+
+The compact disclosures below live in Event details and requirements. The agreement follows immediately, so the organizer reviews the exact event information and disclosures before acknowledging them.
+
+### 9.2 Compact disclosures
+
 Use one compact age choice plus six yes/no disclosures. This remains within the intended seven-question interaction without creating two contradictory age booleans.
 
 | Input | Values | V1 deterministic treatment |
@@ -349,6 +379,18 @@ Obvious V1 combination rules:
 - weapons, gambling, or high-risk physical activity -> hold regardless of age until contextual review;
 - alcohol with `all_ages` is not automatically held because legitimate all-ages festivals can have controlled alcohol service;
 - Pride, drag, LGBTQ+, sexual-health, medical, museum, and historical terms are never deterministic high-risk categories by themselves.
+
+### 9.3 Organizer agreement
+
+Show one required checkbox, not a legal-text scroll box or separate checkbox per policy:
+
+> I confirm that this event information and the disclosures above are accurate, and I agree to Whereto's Organizer Terms and Event Policy.
+
+`Organizer Terms` and `Event Policy` link to the exact current documents returned by the safe required-policy projection. Supporting copy is concise:
+
+> Whereto may review, restrict, or remove events that violate these policies. Material event changes may trigger another review.
+
+The checkbox is necessary UX evidence of intent but is not itself authoritative persistence. Submitting agreement invokes an owner-authenticated server function that reads the required policy versions server-side and inserts the immutable acceptance described in section 12.10. Acceptance is non-activating: it changes no lifecycle, moderation, or eligibility state. Preview becomes available after acceptance; only the separately invoked locked publish/re-publish boundary may make the revision publicly eligible.
 
 ## 10. Deterministic, contextual, and human decisions
 
@@ -416,17 +458,22 @@ Every action is an atomic state transition plus an append-only audit record. The
 1. Organizer creates a draft.
 2. Draft content changes bump `content_revision` when they affect public/safety content.
 3. Organizer answers the compact disclosures before publish.
-4. Draft remains `not_evaluated` or carries a non-public preview evaluation. It is never publicly eligible because lifecycle is `draft`.
+4. Organizer explicitly accepts the server-selected current Organizer Terms and Event Policy for the exact current revision/digest before Preview/Publish.
+5. Draft remains `not_evaluated` or carries a non-public preview evaluation. It is never publicly eligible because lifecycle is `draft`.
 
 ### 11.2 Publish
 
 1. `publish_event` acquires the existing per-event ticketing advisory lock and row lock.
-2. It validates ownership, lifecycle, required content, schedule, location, disclosures, and paid readiness exactly as applicable.
+2. It validates ownership, lifecycle, required content, schedule, location, disclosures, and paid readiness exactly as applicable. Every new/material revision requires one immutable acceptance matching the current owner, event, revision/digest, and server-required Organizer Terms/Event Policy versions. Only an unchanged pre-rollout published revision may use its exact legacy exemption.
 3. It computes the canonical moderation input digest for the current revision.
-4. Deterministically low-risk content becomes `published + clear` with `moderated_revision = content_revision` in the same transaction and is immediately eligible.
-5. Declared or detected high-risk/contextual content becomes `published + under_review` with no eligible revision and is never visible for a transient window.
-6. An idempotent evaluation record is created for the exact revision when contextual work is required.
-7. A repeated publish returns the same event and cannot duplicate the evaluation.
+4. For a real acceptance, it inserts or reuses one `authorize_publication` action referencing that acceptance and sets the server-only authorized revision/action pointers. The narrow unchanged-legacy idempotent branch reuses its migration authorization action/pointers and cannot create or advance an exemption. Acceptance or exemption existence alone cannot set the pointers.
+5. Authorization is separate from moderation. For an initial draft publish, deterministically low-risk content becomes `published + clear` with `moderated_revision = content_revision` and a distinct `clear` action in the same transaction; high-risk content receives a distinct `hold` action. If an exact preview action already established the same current revision/state, it is reused rather than duplicated.
+6. The transaction evaluates the candidate predicate in section 14.1 and atomically opens eligibility when it passes. The eligibility interval references the `clear` action when clearance and authorization occur together, or the `authorize_publication` action when moderation was already current and authorization was the final missing prerequisite.
+7. Re-publish always applies section 8.2's enforcement matrix. `blocked` and `removed` remain enforced; an already `under_review` event remains held. Updating the exact-revision authorization pointer cannot release any of those states. Only an applicable current-revision evaluation/staff clear, or staff restore for removed content, may do so.
+8. Declared or detected high-risk/contextual initial content becomes `published + under_review`; the authorization pointer alone is insufficient for public eligibility, so it is never visible for a transient window.
+9. An idempotent evaluation record is created for the exact revision when contextual work is required. A later applicable evaluation/staff clear must run the same locked candidate-to-epoch transition atomically.
+10. Whenever this or a later clear/hold/remove/restore changes policy eligibility, it closes the current interval, increments the version exactly once, opens the next interval, and records the transition action atomically.
+11. A repeated publish returns the same event and cannot duplicate the evaluation, authorization/moderation actions, interval transition, or policy acceptance.
 
 ### 11.3 Moderator outage
 
@@ -444,6 +491,7 @@ Every action is an atomic state transition plus an append-only audit record. The
 4. An event already `under_review` stays there. An event already `blocked` or `removed` preserves that enforcement state across every organizer edit; neither deterministic nor contextual automation may release it.
 5. A stale evaluation cannot clear the edit because its revision/digest no longer match.
 6. Rapid edits coalesce queued work: earlier jobs become `superseded`; only the latest revision may change state.
+7. A material edit invalidates the prior revision-bound agreement for the edited content. The owner must explicitly accept the then-required policy versions for the new revision before it can return to Preview/Publish or public eligibility.
 
 ### 11.5 Reports and review requests
 
@@ -470,12 +518,21 @@ The database enforces this staff transition matrix; the client cannot choose a c
 | Action | Valid source and prior-public fact | Result |
 |---|---|---|
 | `hold` | `not_evaluated`, `clear`, or `under_review` | `under_review` |
-| `block` | `not_evaluated`, `clear`, or `under_review`, and `first_publicly_eligible_at is null` | `blocked` |
-| `remove` | `clear` or `under_review`, and `first_publicly_eligible_at is not null` | `removed` |
-| `clear` | `not_evaluated`, `under_review`, or `blocked`, and `first_publicly_eligible_at is null` | `clear` for the exact current revision |
-| `restore` | `removed`, and `first_publicly_eligible_at is not null` | `clear` for the exact current revision |
+| `block` | `not_evaluated`, `clear`, or `under_review`, and history is `never_public` | `blocked` |
+| `remove` | `clear` or `under_review`, and history is `previously_public` | `removed` |
+| `clear` | `not_evaluated` or `under_review`, and history is either known value | `clear` for the exact current revision |
+| `clear` | `blocked`, and history is `never_public` | `clear` for the exact current revision |
+| `restore` | `removed`, and history is `previously_public` | `clear` for the exact current revision |
 
-`block` after prior visibility, `remove` without prior visibility, `clear` of a removed event, `restore` of a never-public blocked event, and any attempt to weaken an enforcement state via `hold` are rejected. A generic staff “prohibit” intent may be translated server-side to `block` or `remove` from immutable prior-public history, but request input cannot override that fact.
+`block` after prior visibility, `remove` without prior visibility, `clear` of a removed event, `restore` of a never-public blocked event, every state-changing action while history is `unknown`, and any attempt to weaken an enforcement state via `hold` are rejected. A generic staff “prohibit” intent may be translated server-side to `block` or `remove` from immutable prior-public history, but request input cannot override that fact.
+
+An admin-only `resolve_legacy_public_history` RPC is the sole exit from `unknown`. It locks the event, requires expected revision/digest/moderation version, accepts only a bounded evidence code plus `never_public` or `previously_public`, increments `moderation_version`, supersedes every queued/processing evaluation for the event, and writes an append-only resolution action. `previously_public` also requires a defensible observed timestamp. The change is one-way; known history can never return to `unknown` or switch categories. Resolution leaves moderation `under_review`, and a separate action loaded against the new moderation version decides clear/block/remove. If evidence is insufficient, the event remains quarantined.
+
+### 11.7 Policy-version changes
+
+A materially changed policy is introduced as a new immutable version and made current in server-controlled configuration. That change does not by itself hide, unpublish, or disable discovery for already-published events. It gates the next publish/re-publish and the next material organizer edit flow. Minor copy changes may retain the same version identifier.
+
+The acceptance function always reads the current required pair after locking the event; the browser cannot select an older version. A concurrent requirements change either records the new pair or causes publish to reject the now-stale acceptance and ask for re-acceptance. No process updates an old acceptance row in place.
 
 ## 12. Recommended database model
 
@@ -487,7 +544,23 @@ The event row contains only the organizer-safe current moderation state, never i
 
 The rollout does not grandfather the old default `clear` as proof of moderation. Before switching public projections to the new predicate, every existing published `clear` or `flagged` row receives a current deterministic/contextual bootstrap evaluation. Rows without a current successful evaluation become `under_review`; legacy `flagged` always becomes `under_review`.
 
-Legacy mapping is explicit: published `clear`/`flagged` rows were discoverable under the old rule, so initialize immutable `first_publicly_eligible_at` from `published_at` (or the earliest defensible audit timestamp) before reclassification. Published `removed` rows receive that timestamp when prior visibility is defensible because `removed` means previously public. A legacy published `blocked` row retains a null timestamp only if existing history proves it was never eligible; if prior visibility is defensible, initialize the timestamp and preserve enforcement as `removed`. Any ambiguous published `blocked`/`removed`, draft/cancelled `removed`, or other state/history contradiction is quarantined as `under_review` with an anomaly audit record rather than guessed. Existing provably valid blocked/removed states otherwise remain enforced. New drafts default to `not_evaluated`.
+Migration uses only defensible repository/database evidence and records an anomaly action for every normalization:
+
+| Legacy combination | Deterministic migration |
+|---|---|
+| published + `clear` | old RLS proves it public at migration observation: history `previously_public`, first time from the earliest defensible evidence (`published_at` only if continuity is proven, otherwise observation time), then bootstrap evaluation; current clearance only after success |
+| published + `flagged` | old RLS proves it public at migration observation: history `previously_public`, first time from the same evidence rule, state `under_review` |
+| published + `blocked` | proof of prior public -> `previously_public + removed`; proof of never-public -> `never_public + blocked`; otherwise `unknown + under_review` quarantine |
+| published + `removed` | proof of prior public -> `previously_public + removed`; proof of never-public -> `never_public + blocked`; otherwise `unknown + under_review` quarantine |
+| draft + `blocked` | positive proof of never-public (including verified non-reverting lifecycle history) -> `never_public + blocked`; otherwise `unknown + under_review` quarantine |
+| draft + `removed` | proof of prior public -> `previously_public + removed`; proof of never-public -> `never_public + blocked`; otherwise `unknown + under_review` quarantine |
+| cancelled + `blocked` | proof of prior public -> `previously_public + removed`; proof of never-public -> `never_public + blocked`; otherwise `unknown + under_review` quarantine |
+| cancelled + `removed` | proof of prior public -> `previously_public + removed`; proof of never-public -> `never_public + blocked`; otherwise `unknown + under_review` quarantine |
+| any other contradictory lifecycle/history combination | `unknown + under_review` quarantine until the admin-only evidence-bound resolution records a known history fact |
+
+`published_at` alone proves publication, not necessarily public eligibility, for a legacy blocked/removed row. Evidence of prior eligibility must come from a state/audit fact that actually satisfied the old `published + clear|flagged` predicate; absent that evidence, migration never labels the row definitely never-public or previously-public. Draft/cancelled lifecycle keeps every quarantined row non-public regardless. New drafts start `never_public + not_evaluated`.
+
+For every qualifying pre-rollout published revision, the bootstrap transaction creates the exact legacy exemption, inserts one migration-sourced `authorize_publication` action referencing it, and sets `publicly_authorized_revision` plus `publicly_authorized_action_id` atomically. It then materializes the appropriate eligibility epoch only when the post-bootstrap candidate predicate passes. A missing exemption/action/pointer fails closed; migration never makes a row public through exemption existence alone.
 
 ### 12.2 `private.event_risk_disclosures`
 
@@ -504,6 +577,8 @@ Legacy mapping is explicit: published `clear`/`flagged` rows were discoverable u
 | `created_at`, `updated_at` | timestamps |
 
 Organizers write this only through the event save/publish boundary so disclosure and revision changes are atomic.
+
+The authenticated `get_owned_event_requirements(event_id)` edit-form projection derives `auth.uid()`, verifies event ownership, and returns only minimum age, the six disclosure booleans, and minimal agreement state (`needs_acceptance` plus current policy link/version display data). It returns no acceptance row/ID/timestamp, internal moderation detail, or other organizer's data. This is the sole browser read path for the private disclosure row; anonymous execution is revoked.
 
 ### 12.3 `private.event_moderation_evaluations`
 
@@ -535,20 +610,34 @@ Append-only audit fields:
 
 - `id uuid`;
 - `event_id uuid`;
+- nullable `previous_content_revision bigint`;
 - `content_revision bigint`;
 - `input_sha256 text`;
 - `actor_type` (`system`, `organizer`, `moderator`, `admin`);
 - nullable `actor_user_id uuid`;
-- `source` (`publish`, `edit`, `evaluation`, `report_escalation`, `review_request`, `manual`);
-- `action` (`clear`, `hold`, `block`, `remove`, `restore`, `request_review`, `resolve_review`);
+- `source` (`publish`, `edit`, `evaluation`, `report_escalation`, `review_request`, `manual`, `migration`);
+- `action` (`record_revision`, `authorize_publication`, `clear`, `hold`, `block`, `remove`, `restore`, `resolve_legacy_history`, `request_review`, `resolve_review`);
 - `previous_status` and `new_status`;
+- nullable `previous_public_history_status` and `new_public_history_status`;
 - `reason_code`;
 - optional bounded `internal_note`;
 - nullable `evaluation_id` and `review_request_id`;
+- nullable `policy_acceptance_id`, required for organizer `authorize_publication` actions;
+- nullable `policy_legacy_exemption_id`, used only by migration-authored legacy authorization actions;
 - `moderation_version`;
 - `created_at`.
 
-No application role can update or delete audit rows. Do not store chain of thought.
+No application role can update or delete audit rows. An `authorize_publication` action requires exactly one of acceptance or legacy-exemption reference and records organizer submission authority without implying moderation clearance. The event authorization pointer plus that immutable action proves exactly which event revision and policy basis were used.
+
+Same-status actions are allowed only when another audited fact changes or a meaningful signal is recorded:
+
+- `record_revision` requires `previous_content_revision < content_revision` and records an edit that preserves `under_review`, `blocked`, or `removed` enforcement;
+- `clear` may be `clear -> clear` only when `moderated_revision` advances to the exact new deterministic-only revision;
+- `hold` may be `under_review -> under_review` only for a new exact-revision evaluation/report/review signal;
+- `resolve_legacy_history` requires `unknown -> never_public|previously_public` in its history fields while moderation remains `under_review`; and
+- `authorize_publication`, `request_review`, and `resolve_review` may preserve moderation state because their own referenced authorization/review fact is the audited change.
+
+All other actions must change moderation state according to section 11.6. Blocked/removed organizer edits use `record_revision`; they never masquerade as a clearance or hold. Do not store chain of thought.
 
 ### 12.5 `private.event_reports`
 
@@ -598,19 +687,69 @@ Organizers cannot read or mutate this table. Moderators cannot grant roles. Init
 
 ### 12.8 `private.event_public_eligibility_intervals`
 
-This append-oriented table preserves every moderation/public-policy eligibility epoch:
+This append-oriented table preserves every moderation/public-policy eligibility state epoch:
 
 - `event_id uuid`;
 - `public_eligibility_version bigint`;
-- `eligible_from timestamptz`;
-- nullable `ineligible_at timestamptz`;
-- `opened_action_id uuid` and nullable `closed_action_id uuid`;
-- constrained policy transition reason; and
+- `eligibility_state` (`eligible`, `ineligible`);
+- `started_at timestamptz` and nullable `ended_at timestamptz`;
+- nullable `started_action_id uuid` and `ended_action_id uuid`;
+- constrained transition reason; and
 - primary key `(event_id, public_eligibility_version)`.
 
-At most one interval per event is open. The event lock serializes interval closure/opening with discovery and reservation policy checks. A later restore opens a new version; it never edits or deletes an older cutoff. The future compatibility change, if founder-approved, also adds `public_eligibility_version` to the reservation/order snapshot used to create each hosted Session. Existing orders are backfilled to the epoch active at reservation time or quarantined for operational reconciliation when that cannot be proven.
+Creation inserts version `0` as the open `ineligible` epoch; only this initialization row may have a null `started_action_id`. Every actual policy eligibility change atomically closes the current interval once with `ended_action_id`, increments the event version once, and inserts the next open interval with the same transition action as `started_action_id`. An open interval has null `ended_at/ended_action_id`; a closed interval requires both. At most one interval per event is open. The event lock serializes close/open with discovery and reservation policy checks. Once closed, an interval cannot be changed or deleted. A hide -> restore -> hide sequence therefore records distinct `ineligible -> eligible -> ineligible -> eligible -> ineligible` generations and preserves every cutoff.
 
-### 12.9 Reason taxonomy
+Under founder-locked Stripe Option A, Build 2.5 does not add a Checkout/Session expiration operation, change Stripe objects, or require an order/Session eligibility-version snapshot. The interval history remains authoritative moderation/public-policy audit data, while the existing Day 2 reconciliation path handles the accepted rare in-flight completion.
+
+### 12.9 `private.organizer_policy_versions` and required-version configuration
+
+Use a tiny immutable registry, seeded/changed through reviewed migrations or a narrow admin/service operational command—not a policy CMS:
+
+- `id text` immutable version identifier;
+- `policy_kind` (`organizer_terms`, `event_policy`);
+- immutable versioned `public_url`;
+- `content_sha256` proving the exact referenced text;
+- `effective_at` and server-generated `created_at`; and
+- unique `(policy_kind, id)`.
+
+`private.organizer_policy_requirements` contains exactly one current required version reference per policy kind. Only admin/service operations may change those references. The acceptance function locks and reads both requirement rows in stable order, so the required pair is one server-controlled snapshot. Historical version rows and versioned policy pages are retained; changing a URL's bytes without a new version/digest is prohibited.
+
+A safe public projection returns only the two current version identifiers, policy kinds, labels, immutable HTTPS URLs, and effective dates needed to render links. It exposes no acceptance, actor, event, or internal configuration history.
+
+### 12.10 `private.event_policy_acceptances`
+
+Each immutable acceptance stores:
+
+- `id uuid`;
+- `event_id uuid`;
+- `organizer_id uuid` copied from the locked owned event;
+- `accepted_by_user_id uuid` from `auth.uid()`;
+- `content_revision bigint`;
+- `input_sha256 text` for the exact event/disclosure content acknowledged;
+- `organizer_terms_version_id text`;
+- `event_policy_version_id text`;
+- server-generated `accepted_at timestamptz`; and
+- foreign keys to the event, organizer, Auth actor, and immutable policy versions.
+
+The owner-authenticated `accept_current_event_policies(event_id)` function accepts no client-selected version or timestamp. It locks the owned event, reads the current required pair, computes the current digest, and inserts or returns the one row unique on `(event_id, organizer_id, accepted_by_user_id, content_revision, input_sha256, organizer_terms_version_id, event_policy_version_id)`. Exact retries are idempotent; a new content revision or required policy pair creates a new history row. It is deliberately non-activating: it cannot change lifecycle, moderation, `moderated_revision`, public-history facts, eligibility version/intervals, or public projections. No application role can update or delete an acceptance.
+
+For every new publication or materially revised publication, `publish_event` independently locks/rechecks the event, recomputes the digest, reads the current required pair, and requires a matching acceptance by the current owner. Only that publish boundary may use the acceptance to change moderation/public eligibility, and it writes the eligibility epoch plus action reference atomically. An unchanged pre-rollout event may return idempotently under its exact legacy exemption but cannot carry that exemption to a new revision. A browser-supplied `accepted = true`, an arbitrary old version, another organizer's row, a stale digest, or a client timestamp has no authority. Acceptance records never enter anonymous, organizer-list, public-detail, ticketing, or future map projections; the owner may receive only the minimal current agreement status needed by the form.
+
+### 12.11 `private.event_policy_legacy_exemptions`
+
+To avoid falsely taking existing published events offline—or fabricating organizer consent—the rollout may insert one migration-authored exemption containing:
+
+- `id uuid` primary key;
+- `event_id uuid` unique;
+- `grandfathered_content_revision bigint`;
+- `input_sha256 text`;
+- fixed reason `pre_build_2_5_publication`;
+- migration identifier; and
+- server-generated `created_at`.
+
+Only an event already published before the policy-acceptance rollout may receive this row. It authorizes continued eligibility for that exact unchanged revision; it is not an acceptance, does not name an accepting user, and cannot be updated to a later revision. The next material edit or new publish requires a real current-version acceptance. The table is private, service/migration-written, immutable, and excluded from all public/map projections.
+
+### 12.12 Reason taxonomy
 
 Use this small V1 internal set:
 
@@ -643,7 +782,7 @@ The exact default-deny table contract is:
 
 - revoke all table privileges from `PUBLIC` and `anon` on `events`, `organizers`, and every moderation table;
 - grant `authenticated` only owner-scoped `SELECT` on its organizer/events rows plus the narrowly approved editable columns used by existing draft flows;
-- expose `private.event_risk_disclosures`, evaluations, actions, reports, review requests, staff roles, and rate buckets to no browser role at all;
+- expose `private.event_risk_disclosures`, evaluations, actions, reports, review requests, policy versions/requirements, policy acceptances/legacy exemptions, staff roles, and rate buckets to no browser role at all;
 - permit organizer disclosure save, review-request creation, and public report submission only through purpose-specific functions that validate ownership/public eligibility and accept allowlisted fields;
 - permit evaluation application only to the service boundary and staff decisions only to authenticated staff RPCs; and
 - grant `anon`/`authenticated` execute only on explicitly named public projection/report functions, never on helper or mutation functions by default.
@@ -671,6 +810,15 @@ Each migration must revoke `PUBLIC` function execute before granting the exact i
 - Corrections are new actions, never history rewrites.
 - Internal notes and reviewer IDs are unavailable to organizers and anonymous users.
 
+### 13.5 Policy-acceptance authorization
+
+- The safe required-policy projection is readable by the form, but the backing registry and requirement tables have no browser table grants.
+- `accept_current_event_policies` is authenticated-only, derives actor from `auth.uid()`, proves current event ownership under lock, reads versions from server-controlled requirements, computes the event digest, and uses server time.
+- `publish_event` performs its own matching check; it never trusts a prior browser response or checkbox field.
+- Acceptance rows are insert-only through the function and unavailable to anonymous/public/map queries. Neither organizer nor staff can rewrite history.
+- Legacy exemption rows are migration/service-only, exact-revision, immutable, and can never be created or advanced by a browser or organizer RPC.
+- A requirement update cannot retroactively change an old acceptance row or take an already-published event offline. It can require a new row for a later publish or material-edit flow.
+
 ## 14. Canonical public eligibility and projections
 
 ### 14.1 One policy helper
@@ -681,7 +829,9 @@ Define one stable database-owned predicate or canonical relation, conceptually:
 private.event_is_publicly_eligible(event_id, as_of)
 ```
 
-It owns lifecycle, moderation state, revision freshness, organizer-public-identity freshness, required location validity, cancellation, and end-state checks. Callers cannot choose which moderation conditions to apply.
+It owns lifecycle, moderation state, revision freshness, publication-authorization action, known public history/current eligible interval, organizer-public-identity freshness, required location validity, cancellation, and end-state checks. Callers cannot choose which moderation conditions to apply.
+
+To avoid a circular first-public transition, locked mutation functions use an internal candidate predicate that applies every condition except the already-materialized current-interval fact and the required final value `previously_public`. It explicitly rejects `public_history_status = unknown`; it accepts known `never_public` for the atomic first-public flip and known `previously_public` for later restorations. Publish first writes the exact authorization action/pointers and moderation result, then evaluates that candidate in the same transaction. If it passes, the transaction changes `never_public -> previously_public` when needed and atomically closes/increments/opens the eligibility epoch before commit. No external query can observe the candidate state. Subsequent clear/hold/remove/restore functions use the same candidate-to-epoch procedure and do not increment when eligibility did not actually change.
 
 The implementation should expose an indexed canonical relation for query performance rather than execute expensive AI/report logic at read time. Eligibility is cheap because the expensive decision has already been reduced to trusted state and revision facts.
 
@@ -765,7 +915,7 @@ Moderation hold/removal:
 
 The moderation action must acquire the same event advisory lock before the event row. This serializes the eligibility cutoff with reservation/tier/event operations. A reservation that commits before the cutoff is pre-existing; one attempting after it fails eligibility.
 
-The disposition of already-open hosted Checkout Sessions after any moderation/public-policy eligible-to-ineligible transition remains the founder decision in section 6. No Build 2.5 implementation may pretend a database flag alone expires a Stripe-hosted payment page.
+An already-open unpaid hosted Checkout Session is an accepted in-flight V1 transaction under section 6. Build 2.5 does not expire it or call Stripe. If it completes after the cutoff, the existing Day 2 abnormal/reconciliation path handles the ineligible event. This accepted edge does not restore discovery, authorize a new reservation, move existing records, or weaken the database cutoff.
 
 ## 18. Reports and anti-brigading
 
@@ -809,6 +959,7 @@ Provide one protected moderation route with:
 - mandatory reason selection;
 - optional bounded internal note; and
 - safe conflict/reload UI when moderation version changed.
+- an admin-only legacy-history anomaly control that requires bounded evidence and never combines history resolution with clearance.
 
 Do not include staff management, policy editing, model tuning, chat, complex appeals, organizer reputation, refund buttons, or SQL consoles in this UI.
 
@@ -835,6 +986,9 @@ Organizer UI shows only:
 | Report endpoint unavailable | Return retryable failure; event state does not change |
 | Public projection request fails | Preserve last-known display briefly, retry, never broaden server result |
 | Worker retries days later | Revision/digest comparison supersedes stale work |
+| Required-policy projection unavailable | New agreement/publish pauses with retryable safe error; existing published eligibility is unchanged |
+| Required policy pair changes after acceptance | Publish rejects stale acceptance; organizer explicitly accepts the new pair |
+| Agreement request is retried | Exact unique tuple returns the existing immutable acceptance; no duplicate audit row |
 
 ## 21. Threat model
 
@@ -851,7 +1005,11 @@ Organizer UI shows only:
 | Fake moderator/admin request | `auth.uid()` plus private role lookup and versioned RPC | Authorization-safe denial; JWT/request flags cannot grant privilege |
 | Stale evaluator clears newer content | Event ID + revision + digest lock check | Result becomes superseded and cannot change state |
 | Removed event remains in cache | Server exclusion + 30-second refetch/replace + no persistent public cache | New request excludes immediately; active client drops on bounded refresh |
-| Paid event accepts new sales after moderation/public-policy eligibility loss | Shared event advisory lock + canonical preflight + immutable eligibility epoch | New reservations fail; existing records remain; open Session policy awaits founder ruling |
+| Paid event accepts new sales after moderation/public-policy eligibility loss | Shared event advisory lock + canonical preflight + immutable eligibility epoch | New reservations fail; records remain; an already-open Session follows locked Option A reconciliation |
+| Organizer forges another event/owner acceptance | Auth-derived actor + owned event row lock + immutable acceptance FK | Request is denied and no acceptance is created |
+| Browser submits old policy version or fake timestamp | Server-selected locked requirement pair + server time | Client values have no authority; current exact versions are recorded or request fails |
+| Policy requirement changes during accept/publish | Stable requirement-row locks + publish recheck | One coherent pair is recorded; stale pair cannot publish; already-published events stay public |
+| Material edit reuses an earlier agreement | Revision/digest-bound acceptance | Edited revision requires explicit current-version acceptance before eligibility |
 
 Additional abuse boundaries:
 
@@ -944,7 +1102,7 @@ Additional abuse boundaries:
 - Disclosures: prior clear revision; later report/admin evidence causes removal.
 - Automated treatment: admin action acquires event lock, sets `removed`, and records prior/new state and reason.
 - Public eligibility: event and tiers disappear immediately on new requests; new reservations fail.
-- Review: organizer retains event/status and may request review; existing paid orders/tickets/confirmations remain; no automatic refund/cancellation. Open unpaid Checkout handling follows the founder decision in section 6.
+- Review: organizer retains event/status and may request review; existing paid orders/tickets/confirmations remain; no automatic refund/cancellation. An already-open unpaid Checkout Session follows founder-locked Option A in section 6.
 
 ## 23. Future verification strategy
 
@@ -960,12 +1118,26 @@ Prove:
 - no `flagged` public legacy state remains;
 - evaluation uniqueness and supersession;
 - append-only actions;
+- same-status audit actions pass only for the enumerated authorization/revision/review/history facts; arbitrary no-op actions fail;
 - one open review request per event;
 - one active report per actor/event/revision;
 - canonical eligibility for every lifecycle/moderation/revision/location combination;
 - `public_eligibility_version` increments exactly once per policy eligibility transition;
+- version `0` initializes as the single open ineligible interval with only its allowed null start-action reference;
 - each eligibility version has one immutable interval, at most one interval per event is open, and close/open is atomic;
 - two consecutive hide/restore cycles retain both historical cutoffs and never reuse a version;
+- `first_publicly_eligible_at` is null for `never_public`/`unknown`, is set once on first eligibility, remains immutable through hide/restore cycles, and uses only defensible observed legacy evidence;
+- historical eligibility intervals reject update/delete and stale work bound to an older version cannot authorize the current event;
+- an `unknown` legacy-history row cannot pass the candidate predicate or open an eligible epoch until admin evidence resolution completes;
+- policy version rows and acceptance rows are immutable;
+- exactly one current required version exists per policy kind;
+- acceptance uniqueness makes an exact retry return one row while a new revision or policy pair creates auditable history;
+- acceptance identity/digest/version/timestamp are server-derived and the publication action references the exact acceptance used;
+- acceptance alone is non-activating and cannot increment eligibility version, open an eligible interval, or change a public projection; only publish may do so atomically;
+- low-risk initial publish atomically records separate authorization and clear actions and opens one eligible interval; high-risk initial publish records authorization and hold actions but opens none;
+- legacy bootstrap atomically creates exemption + migration authorization action + event pointers, and fails closed if any link is missing;
+- attempts to update an old acceptance into a newer version or earlier timestamp fail;
+- only pre-rollout published events receive an exact-revision legacy exemption; it preserves that unchanged revision without pretending consent and cannot authorize a later revision;
 - existing order/ticket/confirmation rows survive hold/remove/restore.
 
 ### 23.2 RLS and privilege tests
@@ -975,9 +1147,17 @@ Prove:
 - anonymous base-table event/organizer access is revoked;
 - anonymous safe projections disclose only approved fields;
 - organizer A cannot read or mutate B's drafts, disclosures, review requests, or events;
+- owner requirements projection returns A's exact seven fields/minimal agreement status, returns authorization-safe not-found for B, and is not executable anonymously;
 - organizers cannot set moderation, eligibility, revision-result, staff, evaluation, report, or audit fields;
+- organizer A cannot accept policies for B's event or reuse B's acceptance;
+- browsers cannot select policy versions, timestamps, actors, organizers, revisions, or digests for acceptance;
+- anonymous/public/map projections cannot read acceptance or policy-configuration history;
+- direct insert/update/delete on policy requirements, versions, and acceptances is denied to browser roles;
+- browser roles cannot create, read, update, or advance legacy policy exemptions;
 - fake moderator calls fail;
 - moderators cannot grant roles;
+- only admins can resolve `unknown` legacy history; resolution is one-way, evidence-bound, version-checked, audited, and does not clear the event;
+- resolving unknown history increments moderation version and supersedes all older queued/processing evaluations before a separate staff decision;
 - service-only evaluation apply functions are not browser-executable;
 - internal notes, reason detail, reports, scores, and reviewer identity never enter public/organizer projections.
 
@@ -990,6 +1170,9 @@ Prove:
 - stale evaluation results become superseded;
 - rapid edits leave only the latest applicable result;
 - published content cannot appear publicly between edit and hold.
+- a material edit cannot reuse the prior revision's policy acceptance;
+- blocked/removed edit -> accept -> re-publish updates authorization evidence but preserves enforcement and public ineligibility;
+- a new required policy version gates the next publish/material-edit flow without hiding an untouched already-published event.
 
 ### 23.4 Failure tests
 
@@ -1000,10 +1183,11 @@ Prove:
 - delayed job for old revision: no state change;
 - report service outage: no moderation mutation;
 - unmoderated non-null artwork: not public.
+- concurrent policy-version change versus acceptance/publish produces one coherent pair or a safe stale-acceptance rejection;
 
 ### 23.5 Report and abuse tests
 
-- duplicate actor reports for one revision count once, while a new revision can be reported independently;
+- duplicate actor reports for one revision count once; a material edit supersedes old-revision reports for escalation while preserving audit, and the same actor can report the new revision independently;
 - rate limits are atomic under concurrency;
 - raw IP/user-agent/email are absent from storage;
 - one report never removes;
@@ -1022,7 +1206,8 @@ Prove:
 - tier text edit versus public paid projection;
 - organizer display-name edit versus public event query.
 - concurrent hide/restore attempts preserve one open eligibility interval and monotonic versions;
-- when the founder-approved Session compatibility path exists, reservation/order snapshots retain the authorizing eligibility version across two hide/restore cycles.
+- two consecutive hide/restore cycles preserve every immutable cutoff and stale generation-bound work cannot authorize the current generation;
+- concurrent acceptance retries produce one immutable row; acceptance versus material edit cannot bind to mixed revision/digest facts.
 
 ### 23.7 Build 3 dependency tests
 
@@ -1030,9 +1215,9 @@ For the canonical public/map projection, prove draft, cancelled, under-review, b
 
 ### 23.8 Application checks
 
-Run focused unit/component tests, typecheck, lint, and build for changed contracts. Browser smoke covers organizer disclosures, under-review/removed status, review request, public report flow, admin actions, responsive/accessibility behavior, and bounded cache refresh.
+Run focused unit/component tests, typecheck, lint, and build for changed contracts. Browser smoke covers organizer disclosures, required agreement/links/validation, under-review/removed status, review request, public report flow, admin actions, responsive/accessibility behavior, and bounded cache refresh.
 
-Do not include Stripe, Connect, Checkout, charge, webhook, refund, destination-charge, or real payment integration tests in the Build 2.5 gate. If the unresolved open-Session decision authorizes a narrow payment-boundary change, it requires a separately approved focused verification scope before implementation.
+Do not include Stripe, Connect, Checkout, charge, webhook, refund, destination-charge, credential access, or real payment integration tests in the Build 2.5 gate. Option A is verified only at the database/application moderation boundary: immediate public exclusion, new-reservation denial through the existing canonical check, preserved records, and unchanged Stripe/payment-side code.
 
 ## 24. Operational scale, cost, bias, and analytics
 
@@ -1064,13 +1249,14 @@ Do not include Stripe, Connect, Checkout, charge, webhook, refund, destination-c
 
 ### 24.4 Minimum instrumentation
 
-The evaluation, action, report, and review-request tables already provide authoritative operational facts. Derive counts for:
+The evaluation, action, report, review-request, eligibility-interval, and policy-acceptance tables already provide authoritative operational facts. Derive counts for:
 
 - evaluations queued/succeeded/failed/superseded;
 - events held/cleared/blocked/removed/restored;
 - material-edit re-evaluations;
 - report submissions/dedupes/rate limits;
 - review requests/resolutions;
+- agreement acceptances by policy version and stale-version publish rejections;
 - vendor failures and time-to-decision.
 
 Do not add a separate behavioral analytics platform or copy event text/model reasoning into analytics.
@@ -1086,7 +1272,8 @@ Do not add a separate behavioral analytics platform or copy event text/model rea
 - include ticket-tier text and organizer display name in the moderated public-content boundary;
 - enforce organizer/staff/service privileges in PostgreSQL, not just UI;
 - make audit history append-only and state changes atomic;
-- define paid moderation/public-policy eligibility-loss locking and decide open Checkout Session treatment;
+- define paid moderation/public-policy eligibility-loss locking and preserve founder-locked Stripe Option A without payment work;
+- make policy versions server-controlled and policy acceptance immutable, revision-bound, owner-bound, and publish-enforced;
 - fail closed for non-null unmoderated artwork;
 - make report escalation resistant to one-user spam and brigading.
 
@@ -1122,6 +1309,8 @@ Do not add a separate behavioral analytics platform or copy event text/model rea
 
 - tightened moderation lifecycle and content/moderated revisions;
 - compact age plus six risk disclosures;
+- Event details and requirements followed by one linked Organizer Terms/Event Policy agreement before Preview/Publish;
+- immutable policy versions, server-controlled current requirements, and revision-bound acceptance audit;
 - deterministic risk/outage policy;
 - structured contextual evaluation boundary and durable jobs/results;
 - stale-result and rapid-edit protection;
@@ -1153,11 +1342,11 @@ Everything in section 25.3, plus any map implementation, AI flyer work, QR/check
 
 The later implementation plan should sequence work as follows:
 
-1. lock the founder decision for open unpaid Checkout Sessions;
-2. introduce state/revision/disclosure/audit schema and migrate legacy moderation safely;
-3. replace anonymous base-table reads with canonical public projections;
-4. add RLS, staff authorization, service-only evaluation boundaries, and append-only actions;
-5. implement deterministic publish/outage rules and exact-revision job creation;
+1. introduce state/revision/history/disclosure/policy-acceptance/audit schema and migrate legacy moderation safely;
+2. replace anonymous base-table reads with canonical public projections;
+3. add RLS, staff authorization, service-only evaluation boundaries, immutable acceptances, and append-only actions;
+4. add Event details/requirements and Organizer agreement to the existing organizer flow;
+5. implement deterministic publish/outage/agreement rules and exact-revision job creation;
 6. implement contextual result validation, stale-result supersession, and bounded retries;
 7. implement safe published edits and related-content invalidation for tiers/organizer identity;
 8. add review requests and the minimal moderator surface;
@@ -1186,8 +1375,10 @@ Build 2.5 is complete only when evidence proves:
 12. removal blocks new reservations under the established event lock;
 13. existing orders/tickets/confirmations remain available and no moderation action moves money;
 14. non-null unmoderated artwork fails closed;
-15. unit, component, database, RLS, concurrency, typecheck, lint, build, responsive, accessibility, cache-removal, and secret gates pass;
-16. no Stripe test, object, credential, function deployment, or payment fixture is used unless the founder separately approves the narrow open-Session compatibility decision.
+15. publish requires an immutable acceptance for the exact owner/event/revision/digest and server-required policy pair;
+16. policy-version changes cannot rewrite acceptance history or hide untouched already-published events, but can require re-acceptance on a later publish/material edit;
+17. unit, component, database, RLS, concurrency, typecheck, lint, build, responsive, accessibility, cache-removal, and secret gates pass;
+18. no Stripe test, object, credential, function deployment, payment fixture, webhook replay, refund, or payment-side implementation is used.
 
 ## 29. Architecture self-review
 
@@ -1201,8 +1392,9 @@ The design was checked against the required failure modes:
 - **Transition gap:** organizer edits preserve enforcement; staff actions follow a database-enforced matrix derived from immutable prior-public history.
 - **False-positive bias:** identity/community vocabulary is neutral, keywords are signals only, reports cannot vote events away, and restoration is available.
 - **Image gap:** no current upload exists, but any non-null unverified artwork fails closed and future assets are checksum-versioned.
-- **Paid-event conflict:** existing records and confirmations survive; reservation/policy-eligibility-loss lock order is defined; monotonic eligibility epochs survive repeated hide/restore cycles; open hosted Sessions are explicitly unresolved rather than hand-waved.
+- **Paid-event conflict:** existing records and confirmations survive; reservation/policy-eligibility-loss lock order is defined; monotonic eligibility epochs survive repeated hide/restore cycles; already-open Sessions are explicitly accepted as Option A in-flight transactions handled by existing reconciliation with no Stripe work.
+- **Terms forgery:** actor, event ownership, revision/digest, current required versions, and timestamp are server-derived; immutable idempotent history cannot be rewritten or borrowed.
 - **Build 3 leakage:** map clients receive only a narrow eligibility-filtered projection and no moderation inputs or hidden rows.
 - **Overbuilt scope:** no reputation engine, legal engine, full appeals system, map, Stripe regression, or AI flyer work is included.
 
-No placeholder implementation choice is required except the explicit founder decision in section 6. Vendor selection, exact UI styling, and detailed task/file sequencing belong to the later implementation plan after approval.
+No founder or placeholder architecture decision remains. Vendor selection, exact UI styling, and detailed task/file sequencing belong to the later implementation plan after approval.
