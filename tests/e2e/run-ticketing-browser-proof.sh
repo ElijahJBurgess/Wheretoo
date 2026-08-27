@@ -94,7 +94,7 @@ cleanup() {
   set +e
 
   if [[ -n "$organizer_a_id" ]]; then
-    "$supabase_cli" db query --linked "select coalesce(json_agg(json_build_object('id', id, 'session_id', stripe_checkout_session_id)), '[]'::json) as orders
+    "$supabase_cli" db query --linked "select coalesce(json_agg(json_build_object('id', id, 'session_id', stripe_checkout_session_id)), '[]'::json) as orders, count(*)::integer as order_count
       from public.orders where organizer_id = '$organizer_a_id'::uuid and stripe_checkout_session_id is not null;" \
       >"$temporary_directory/checkout-orders.json" 2>/dev/null
     checkout_query_exit=$?
@@ -104,14 +104,21 @@ cleanup() {
       ORDERS_FILE="$temporary_directory/checkout-orders.json" node --input-type=module >"$temporary_directory/checkout-orders.txt" <<'NODE'
 import fs from 'node:fs'
 const payload = JSON.parse(fs.readFileSync(process.env.ORDERS_FILE, 'utf8'))
-const row = (payload.rows ?? payload)[0] ?? {}
-for (const order of row.orders ?? []) {
-  if (/^[0-9a-f-]{36}$/.test(order.id ?? '') && /^cs_test_[A-Za-z0-9]+$/.test(order.session_id ?? '')) {
-    console.log(`${order.id}\t${order.session_id}`)
-  }
+const rows = payload.rows ?? payload
+if (!Array.isArray(rows) || rows.length !== 1) process.exit(1)
+const row = rows[0]
+if (!Array.isArray(row.orders) || !Number.isSafeInteger(row.order_count) || row.order_count !== row.orders.length) process.exit(1)
+for (const order of row.orders) {
+  if (typeof order !== 'object' || order === null || Object.keys(order).sort().join(',') !== 'id,session_id') process.exit(1)
+  if (!/^[0-9a-f-]{36}$/.test(order.id ?? '') || !/^cs_test_[A-Za-z0-9]+$/.test(order.session_id ?? '')) process.exit(1)
+  console.log(`${order.id}\t${order.session_id}`)
 }
 NODE
-      while IFS=$'\t' read -r order_id session_id; do
+      checkout_parser_exit=$?
+      if [[ $checkout_parser_exit -ne 0 ]]; then
+        cleanup_failed=1
+      else
+        while IFS=$'\t' read -r order_id session_id; do
         [[ -n "$order_id" && -n "$session_id" ]] || continue
         status_file="$temporary_directory/status-${order_id}.json"
         driver_request "{\"action\":\"checkout_status\",\"session_id\":\"$session_id\"}" "$status_file" || {
@@ -153,7 +160,8 @@ NODE
             "$temporary_directory/deliver-${order_id}.json" && \
             validate_driver_output delivery "$temporary_directory/deliver-${order_id}.json" || cleanup_failed=1
         fi
-      done <"$temporary_directory/checkout-orders.txt"
+        done <"$temporary_directory/checkout-orders.txt"
+      fi
     fi
   fi
 
