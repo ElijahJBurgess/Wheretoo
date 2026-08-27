@@ -1,5 +1,6 @@
 import { assertEquals, assertMatch, assertThrows } from "@std/assert";
 import { createReportEventHandler, deriveReportFingerprints } from "./index.ts";
+import { canonicalizeClientAddress } from "./ip.ts";
 import { reportRequestSchema } from "./contracts.ts";
 
 const appOrigin = "https://app.example";
@@ -45,6 +46,56 @@ Deno.test("report fingerprints are independent HMAC digests and never return cli
     false,
   );
   assertEquals(JSON.stringify(fingerprints).includes("203.0.113.24"), false);
+});
+
+Deno.test("equivalent IPv6 spellings hash as one canonical actor and /64 network", async () => {
+  const compressed = canonicalizeClientAddress("2001:db8:42:5::1");
+  const expanded = canonicalizeClientAddress(
+    "2001:0db8:0042:0005:0000:0000:0000:0001",
+  );
+  const sameNetwork = canonicalizeClientAddress("2001:db8:42:5::2");
+  const otherNetwork = canonicalizeClientAddress("2001:db8:42:6::1");
+  assertEquals(compressed?.actorInput, expanded?.actorInput);
+  assertEquals(compressed?.networkInput, sameNetwork?.networkInput);
+  assertEquals(compressed?.networkInput === otherNetwork?.networkInput, false);
+  const compressedFingerprints = await deriveReportFingerprints(
+    compressed!.actorInput,
+    reportSecret,
+    compressed!.networkInput,
+  );
+  const expandedFingerprints = await deriveReportFingerprints(
+    expanded!.actorInput,
+    reportSecret,
+    expanded!.networkInput,
+  );
+  assertEquals(
+    compressedFingerprints.actorFingerprint,
+    expandedFingerprints.actorFingerprint,
+  );
+  assertEquals(
+    compressedFingerprints.networkFingerprint,
+    expandedFingerprints.networkFingerprint,
+  );
+});
+
+Deno.test("IPv4 canonicalization masks the approved /24 and rejects malformed addresses", () => {
+  const first = canonicalizeClientAddress("203.0.113.24");
+  const sameNetwork = canonicalizeClientAddress("203.0.113.99");
+  const otherNetwork = canonicalizeClientAddress("203.0.114.1");
+  assertEquals(first?.actorInput, "ipv4:203.0.113.24");
+  assertEquals(first?.networkInput, "ipv4:203.0.113.0/24");
+  assertEquals(first?.networkInput, sameNetwork?.networkInput);
+  assertEquals(first?.networkInput === otherNetwork?.networkInput, false);
+  for (
+    const malformed of [
+      "203.0.113.999",
+      "2001:db8::1%zone",
+      "2001:::1",
+      "not-an-ip",
+    ]
+  ) {
+    assertEquals(canonicalizeClientAddress(malformed), null);
+  }
 });
 
 Deno.test("report endpoint returns bounded success for dedupe and safe not-found", async () => {

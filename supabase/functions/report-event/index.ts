@@ -13,14 +13,9 @@ import {
   reportRequestSchema,
   type ReportSubmissionDisposition,
 } from "./contracts.ts";
+import { canonicalizeClientAddress } from "./ip.ts";
 
 const textEncoder = new TextEncoder();
-
-function normalizeClientAddress(value: string | null): string | null {
-  if (value === null) return null;
-  const candidate = value.split(",", 1)[0]?.trim().toLowerCase() ?? "";
-  return /^[0-9a-f:.]{3,45}$/.test(candidate) ? candidate : null;
-}
 
 async function hmacHex(secret: string, value: string): Promise<string> {
   const key = await crypto.subtle.importKey(
@@ -37,19 +32,14 @@ async function hmacHex(secret: string, value: string): Promise<string> {
     .join("");
 }
 
-function networkBucket(address: string): string {
-  const octets = address.match(/^(\d+)\.(\d+)\.(\d+)\.\d+$/);
-  if (octets !== null) return `${octets[1]}.${octets[2]}.${octets[3]}.0/24`;
-  return `${address.slice(0, 19)}::/64`;
-}
-
 export async function deriveReportFingerprints(
-  normalizedAddress: string,
+  canonicalActorInput: string,
   secret: string,
+  canonicalNetworkInput = canonicalActorInput,
 ): Promise<ReportFingerprints> {
   const [actorFingerprint, networkFingerprint] = await Promise.all([
-    hmacHex(secret, `actor:${normalizedAddress}`),
-    hmacHex(secret, `network:${networkBucket(normalizedAddress)}`),
+    hmacHex(secret, `actor:${canonicalActorInput}`),
+    hmacHex(secret, `network:${canonicalNetworkInput}`),
   ]);
   return { actorFingerprint, networkFingerprint };
 }
@@ -72,7 +62,7 @@ export function createDatabaseDependencies(
     appOrigin,
     reportFingerprintSecret,
     clientAddress: (request) =>
-      normalizeClientAddress(request.headers.get("x-forwarded-for")),
+      request.headers.get("x-forwarded-for")?.split(",", 1)[0] ?? null,
     async submit(payload) {
       const { data, error } = await client.rpc("server_submit_event_report", {
         p_event_id: payload.eventId,
@@ -116,7 +106,9 @@ export function createReportEventHandler(
     }
     try {
       const body = reportRequestSchema.safeParse(await request.json());
-      const address = dependencies.clientAddress(request);
+      const address = canonicalizeClientAddress(
+        dependencies.clientAddress(request),
+      );
       if (!body.success || address === null) {
         return jsonResponse(
           { error: { code: "INVALID_REQUEST" } },
@@ -127,8 +119,9 @@ export function createReportEventHandler(
       const disposition = await dependencies.submit({
         ...body.data,
         ...await deriveReportFingerprints(
-          address,
+          address.actorInput,
           dependencies.reportFingerprintSecret,
+          address.networkInput,
         ),
       });
       if (disposition === "not_found") {

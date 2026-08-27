@@ -2,7 +2,7 @@
 
 ## Status
 
-DONE_WITH_CONCERNS
+DONE_WITH_RULING_28_LIMITATION
 
 ## What changed
 
@@ -25,6 +25,27 @@ DONE_WITH_CONCERNS
   deployment dependency for the approved anonymous endpoint; no existing
   function configuration changed.
 
+## Fix round 1: privacy, retention, and concurrency hardening
+
+- Replaced permissive forwarded-address string handling with a small pure
+  parser that validates IPv4 and IPv6 into bytes, rejects malformed and scoped
+  addresses, canonicalizes the actor input, and derives IPv4 `/24` and binary
+  IPv6 `/64` network inputs before HMAC. Neither address form reaches the
+  database or response path.
+- Added forward-only
+  `20260826010875_harden_report_privacy_and_retention.sql`; its service-only
+  bounded retention operation now clears expired report fingerprints and
+  deletes expired actor and network rate buckets. The original applied
+  `010800` and `010850` migrations remain unchanged.
+- Expanded linked rollback pgTAP to 27 assertions through the actual owner,
+  Task 6 revision, and Task 8 staff RPC boundaries: safe cross-owner denial,
+  revision idempotency, withdrawal, staff resolution, and edit supersession.
+- Added a dedicated linked-DB concurrent-session harness. It proves same-actor
+  revision dedupe; concurrent actor-limit exhaustion across two eligible
+  events; concurrent network-limit exhaustion; exactly one report evaluation
+  at three actors; no report-driven visibility/state change; and exact fixture
+  cleanup without exposing digests.
+
 ## Migrations
 
 - `20260826010800_add_review_requests_and_reports.sql` was dry-run as the only
@@ -34,6 +55,9 @@ DONE_WITH_CONCERNS
   replaced only `server_submit_event_report` to remove that variable and
   reassert its service-only ACL. It was separately dry-run as the only pending
   migration and applied once. `010800` was not edited or replayed.
+- Under the same forward-only policy, `20260826010875` was exact-dry-run as the
+  only pending migration and applied once. The final linked dry-run is empty,
+  with local and remote history aligned through `010875`.
 
 ## Verification
 
@@ -61,6 +85,31 @@ DONE_WITH_CONCERNS
   `CORS_ORIGIN_DENIED`; approved exact-origin OPTIONS returned `204`; malformed
   exact-origin POST returned `400` with only `INVALID_REQUEST`; and an unknown
   exact-origin event returned the same safe `404 EVENT_NOT_FOUND` response.
+
+### Fix-round verification
+
+- RED first: new Deno canonicalization coverage failed because the dedicated
+  parser module did not exist; retention coverage failed while expired buckets
+  remained. Both then turned green.
+- Focused Deno `fmt --check`, `lint`, `check`, and tests pass (`7/7`), covering
+  equivalent IPv6 spellings, binary `/64` separation, IPv4 canonical `/24`,
+  malformed address rejection, CORS, bounded errors, and no address in the
+  fingerprint payload.
+- Linked rollback pgTAP passes `1..27`, including retention deletion/current
+  bucket preservation and the actual review RPC boundaries.
+- `moderation_reports_concurrency.test.sh` passes the concurrent actor/network
+  cap and threshold proof. Task 7 evaluation and Task 8 staff-action linked
+  suites and their concurrency harnesses also pass (`49` and `1..60` SQL
+  assertions respectively).
+- `supabase db lint --linked --schema public,private` reports no schema errors;
+  a full lint still emits pre-existing PostGIS extension diagnostics outside
+  Task 9 ownership. `git diff --check` passes.
+- `report-event` alone was redeployed after the parser change with the
+  reproducible command `./node_modules/.bin/supabase functions deploy
+  report-event --project-ref hherncufbuulfwqzlaxo --import-map deno.json`.
+  No secrets were listed or read. Hosted safe probes after deployment: exact
+  origin OPTIONS `204`, bad origin `403`, malformed `400`, and unknown
+  public-event identifier `404`.
 
 ## Remaining concern / blocker
 
