@@ -2,7 +2,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, private, extensions;
 
-select plan(63);
+select plan(152);
 
 select has_table('private', 'event_risk_disclosures', 'risk disclosures are private');
 select has_table('private', 'event_moderation_evaluations', 'moderation evaluations are private');
@@ -204,58 +204,215 @@ select columns_are(
   'eligibility interval columns are exact'
 );
 
+select has_column(
+  policy_fields.table_schema::name,
+  policy_fields.table_name::name,
+  policy_fields.column_name::name,
+  format('%s.%s is a required Task 1 policy field', policy_fields.table_name, policy_fields.column_name)
+)
+from (values
+  ('private', 'organizer_policy_versions', 'id', 'text'),
+  ('private', 'organizer_policy_versions', 'policy_kind', 'text'),
+  ('private', 'organizer_policy_versions', 'public_url', 'text'),
+  ('private', 'organizer_policy_versions', 'content_sha256', 'text'),
+  ('private', 'organizer_policy_versions', 'effective_at', 'timestamp with time zone'),
+  ('private', 'organizer_policy_versions', 'created_at', 'timestamp with time zone'),
+  ('private', 'organizer_policy_requirements', 'policy_kind', 'text'),
+  ('private', 'organizer_policy_requirements', 'policy_version_id', 'text'),
+  ('private', 'organizer_policy_requirements', 'updated_at', 'timestamp with time zone'),
+  ('private', 'event_policy_acceptances', 'id', 'uuid'),
+  ('private', 'event_policy_acceptances', 'event_id', 'uuid'),
+  ('private', 'event_policy_acceptances', 'organizer_id', 'uuid'),
+  ('private', 'event_policy_acceptances', 'accepted_by_user_id', 'uuid'),
+  ('private', 'event_policy_acceptances', 'content_revision', 'bigint'),
+  ('private', 'event_policy_acceptances', 'input_sha256', 'text'),
+  ('private', 'event_policy_acceptances', 'organizer_terms_version_id', 'text'),
+  ('private', 'event_policy_acceptances', 'event_policy_version_id', 'text'),
+  ('private', 'event_policy_acceptances', 'accepted_at', 'timestamp with time zone'),
+  ('private', 'event_policy_legacy_exemptions', 'id', 'uuid'),
+  ('private', 'event_policy_legacy_exemptions', 'event_id', 'uuid'),
+  ('private', 'event_policy_legacy_exemptions', 'grandfathered_content_revision', 'bigint'),
+  ('private', 'event_policy_legacy_exemptions', 'input_sha256', 'text'),
+  ('private', 'event_policy_legacy_exemptions', 'reason', 'text'),
+  ('private', 'event_policy_legacy_exemptions', 'migration_identifier', 'text'),
+  ('private', 'event_policy_legacy_exemptions', 'created_at', 'timestamp with time zone')
+) as policy_fields(table_schema, table_name, column_name, expected_type);
+
+select col_type_is(
+  policy_fields.table_schema::name,
+  policy_fields.table_name::name,
+  policy_fields.column_name::name,
+  policy_fields.expected_type,
+  format('%s.%s has the required Task 1 type', policy_fields.table_name, policy_fields.column_name)
+)
+from (values
+  ('private', 'organizer_policy_versions', 'id', 'text'),
+  ('private', 'organizer_policy_versions', 'policy_kind', 'text'),
+  ('private', 'organizer_policy_versions', 'public_url', 'text'),
+  ('private', 'organizer_policy_versions', 'content_sha256', 'text'),
+  ('private', 'organizer_policy_versions', 'effective_at', 'timestamp with time zone'),
+  ('private', 'organizer_policy_versions', 'created_at', 'timestamp with time zone'),
+  ('private', 'organizer_policy_requirements', 'policy_kind', 'text'),
+  ('private', 'organizer_policy_requirements', 'policy_version_id', 'text'),
+  ('private', 'organizer_policy_requirements', 'updated_at', 'timestamp with time zone'),
+  ('private', 'event_policy_acceptances', 'id', 'uuid'),
+  ('private', 'event_policy_acceptances', 'event_id', 'uuid'),
+  ('private', 'event_policy_acceptances', 'organizer_id', 'uuid'),
+  ('private', 'event_policy_acceptances', 'accepted_by_user_id', 'uuid'),
+  ('private', 'event_policy_acceptances', 'content_revision', 'bigint'),
+  ('private', 'event_policy_acceptances', 'input_sha256', 'text'),
+  ('private', 'event_policy_acceptances', 'organizer_terms_version_id', 'text'),
+  ('private', 'event_policy_acceptances', 'event_policy_version_id', 'text'),
+  ('private', 'event_policy_acceptances', 'accepted_at', 'timestamp with time zone'),
+  ('private', 'event_policy_legacy_exemptions', 'id', 'uuid'),
+  ('private', 'event_policy_legacy_exemptions', 'event_id', 'uuid'),
+  ('private', 'event_policy_legacy_exemptions', 'grandfathered_content_revision', 'bigint'),
+  ('private', 'event_policy_legacy_exemptions', 'input_sha256', 'text'),
+  ('private', 'event_policy_legacy_exemptions', 'reason', 'text'),
+  ('private', 'event_policy_legacy_exemptions', 'migration_identifier', 'text'),
+  ('private', 'event_policy_legacy_exemptions', 'created_at', 'timestamp with time zone')
+) as policy_fields(table_schema, table_name, column_name, expected_type);
+
+select col_not_null(
+  policy_fields.table_schema::name,
+  policy_fields.table_name::name,
+  policy_fields.column_name::name,
+  format('%s.%s is required', policy_fields.table_name, policy_fields.column_name)
+)
+from (values
+  ('private', 'organizer_policy_versions', 'id'),
+  ('private', 'organizer_policy_versions', 'policy_kind'),
+  ('private', 'organizer_policy_versions', 'public_url'),
+  ('private', 'organizer_policy_versions', 'content_sha256'),
+  ('private', 'organizer_policy_versions', 'effective_at'),
+  ('private', 'organizer_policy_versions', 'created_at'),
+  ('private', 'organizer_policy_requirements', 'policy_kind'),
+  ('private', 'organizer_policy_requirements', 'policy_version_id'),
+  ('private', 'organizer_policy_requirements', 'updated_at'),
+  ('private', 'event_policy_acceptances', 'id'),
+  ('private', 'event_policy_acceptances', 'event_id'),
+  ('private', 'event_policy_acceptances', 'organizer_id'),
+  ('private', 'event_policy_acceptances', 'accepted_by_user_id'),
+  ('private', 'event_policy_acceptances', 'content_revision'),
+  ('private', 'event_policy_acceptances', 'input_sha256'),
+  ('private', 'event_policy_acceptances', 'organizer_terms_version_id'),
+  ('private', 'event_policy_acceptances', 'event_policy_version_id'),
+  ('private', 'event_policy_acceptances', 'accepted_at'),
+  ('private', 'event_policy_legacy_exemptions', 'id'),
+  ('private', 'event_policy_legacy_exemptions', 'event_id'),
+  ('private', 'event_policy_legacy_exemptions', 'grandfathered_content_revision'),
+  ('private', 'event_policy_legacy_exemptions', 'input_sha256'),
+  ('private', 'event_policy_legacy_exemptions', 'reason'),
+  ('private', 'event_policy_legacy_exemptions', 'migration_identifier'),
+  ('private', 'event_policy_legacy_exemptions', 'created_at')
+) as policy_fields(table_schema, table_name, column_name);
+
+select col_is_pk('private', 'organizer_policy_versions', 'id', 'policy version id is the primary key');
+select col_is_pk('private', 'organizer_policy_requirements', 'policy_kind', 'policy kind is the requirement primary key');
+select col_is_pk('private', 'event_policy_acceptances', 'id', 'policy acceptance id is the primary key');
+select col_is_pk('private', 'event_policy_legacy_exemptions', 'id', 'legacy exemption id is the primary key');
+
+select fk_ok(
+  policy_fks.table_schema::name,
+  policy_fks.table_name::name,
+  policy_fks.column_name::name,
+  policy_fks.foreign_schema::name,
+  policy_fks.foreign_table::name,
+  policy_fks.foreign_column::name,
+  format('%s.%s references %s.%s(%s)',
+    policy_fks.table_name,
+    policy_fks.column_name,
+    policy_fks.foreign_schema,
+    policy_fks.foreign_table,
+    policy_fks.foreign_column
+  )
+)
+from (values
+  ('private', 'event_policy_acceptances', 'event_id', 'public', 'events', 'id'),
+  ('private', 'event_policy_acceptances', 'organizer_id', 'public', 'organizers', 'id'),
+  ('private', 'event_policy_acceptances', 'accepted_by_user_id', 'auth', 'users', 'id'),
+  ('private', 'event_policy_acceptances', 'organizer_terms_version_id', 'private', 'organizer_policy_versions', 'id'),
+  ('private', 'event_policy_acceptances', 'event_policy_version_id', 'private', 'organizer_policy_versions', 'id'),
+  ('private', 'event_policy_legacy_exemptions', 'event_id', 'public', 'events', 'id')
+) as policy_fks(
+  table_schema, table_name, column_name, foreign_schema, foreign_table, foreign_column
+);
+
+select fk_ok(
+  'private',
+  'organizer_policy_requirements',
+  array['policy_kind', 'policy_version_id']::name[],
+  'private',
+  'organizer_policy_versions',
+  array['policy_kind', 'id']::name[],
+  'policy requirements reference an exact same-kind policy version'
+);
+
 select results_eq(
   $$
     select (array_agg(
-      column_name || ':' || data_type || ':' || is_nullable
-      order by ordinal_position
+      namespaces.nspname || '.' || tables.relname || '.' || constraints.conname || ':' ||
+      pg_catalog.pg_get_constraintdef(constraints.oid)
+      order by namespaces.nspname, tables.relname, constraints.conname
     )) collate "C"
-    from information_schema.columns
-    where table_schema = 'private'
-      and table_name = 'organizer_policy_versions'
-      and column_name in (
-        'id', 'policy_kind', 'public_url', 'content_sha256', 'effective_at', 'created_at'
+    from pg_catalog.pg_constraint as constraints
+    join pg_catalog.pg_class as tables
+      on tables.oid = constraints.conrelid
+    join pg_catalog.pg_namespace as namespaces
+      on namespaces.oid = tables.relnamespace
+    where constraints.contype = 'c'
+      and constraints.conname in (
+        'organizer_policy_versions_kind_check',
+        'organizer_policy_versions_id_check',
+        'organizer_policy_versions_url_check',
+        'organizer_policy_versions_digest_check',
+        'organizer_policy_requirements_kind_check',
+        'event_policy_acceptances_content_revision_check',
+        'event_policy_acceptances_digest_check',
+        'event_policy_legacy_exemptions_revision_check',
+        'event_policy_legacy_exemptions_digest_check',
+        'event_policy_legacy_exemptions_reason_check',
+        'event_policy_legacy_exemptions_migration_check'
       )
   $$,
   $$
     values ((array[
-      'id:text:NO',
-      'policy_kind:text:NO',
-      'public_url:text:NO',
-      'content_sha256:text:NO',
-      'effective_at:timestamp with time zone:NO',
-      'created_at:timestamp with time zone:NO'
+      'private.event_policy_acceptances.event_policy_acceptances_content_revision_check:CHECK ((content_revision >= 1))',
+      'private.event_policy_acceptances.event_policy_acceptances_digest_check:CHECK ((input_sha256 ~ ''^[a-f0-9]{64}$''::text))',
+      'private.event_policy_legacy_exemptions.event_policy_legacy_exemptions_digest_check:CHECK ((input_sha256 ~ ''^[a-f0-9]{64}$''::text))',
+      'private.event_policy_legacy_exemptions.event_policy_legacy_exemptions_migration_check:CHECK (((char_length(btrim(migration_identifier)) >= 1) AND (char_length(btrim(migration_identifier)) <= 120)))',
+      'private.event_policy_legacy_exemptions.event_policy_legacy_exemptions_reason_check:CHECK ((reason = ''pre_build_2_5_publication''::text))',
+      'private.event_policy_legacy_exemptions.event_policy_legacy_exemptions_revision_check:CHECK ((grandfathered_content_revision >= 1))',
+      'private.organizer_policy_requirements.organizer_policy_requirements_kind_check:CHECK ((policy_kind = ANY (ARRAY[''organizer_terms''::text, ''event_policy''::text])))',
+      'private.organizer_policy_versions.organizer_policy_versions_digest_check:CHECK ((content_sha256 ~ ''^[a-f0-9]{64}$''::text))',
+      'private.organizer_policy_versions.organizer_policy_versions_id_check:CHECK (((char_length(btrim(id)) >= 1) AND (char_length(btrim(id)) <= 120)))',
+      'private.organizer_policy_versions.organizer_policy_versions_kind_check:CHECK ((policy_kind = ANY (ARRAY[''organizer_terms''::text, ''event_policy''::text])))',
+      'private.organizer_policy_versions.organizer_policy_versions_url_check:CHECK (((char_length(btrim(public_url)) >= 1) AND (char_length(btrim(public_url)) <= 500)))'
     ]::text[]) collate "C")
   $$,
-  'policy version structural fields are exact while allowing Task 3 stage metadata'
+  'policy checks have the exact Task 1 definitions while allowing later additive checks'
 );
 
-select columns_are(
-  'private',
-  'organizer_policy_requirements',
-  array['policy_kind', 'policy_version_id', 'updated_at'],
-  'policy requirement columns are structural only'
-);
-
-select columns_are(
-  'private',
-  'event_policy_acceptances',
-  array[
-    'id', 'event_id', 'organizer_id', 'accepted_by_user_id', 'content_revision',
-    'input_sha256', 'organizer_terms_version_id', 'event_policy_version_id',
-    'accepted_at'
-  ],
-  'policy acceptance columns are exact'
-);
-
-select columns_are(
-  'private',
-  'event_policy_legacy_exemptions',
-  array[
-    'id', 'event_id', 'grandfathered_content_revision', 'input_sha256',
-    'reason', 'migration_identifier', 'created_at'
-  ],
-  'legacy policy exemption columns are exact'
+select results_eq(
+  $$
+    select (array_agg(
+      constraints.conname || ':' || pg_catalog.pg_get_constraintdef(constraints.oid)
+      order by constraints.conname
+    )) collate "C"
+    from pg_catalog.pg_constraint as constraints
+    where constraints.conrelid = 'private.event_moderation_actions'::regclass
+      and constraints.conname in (
+        'event_moderation_actions_previous_status_check',
+        'event_moderation_actions_new_status_check'
+      )
+  $$,
+  $$
+    values ((array[
+      'event_moderation_actions_new_status_check:CHECK ((new_status = ANY (ARRAY[''not_evaluated''::text, ''clear''::text, ''under_review''::text, ''blocked''::text, ''removed''::text])))',
+      'event_moderation_actions_previous_status_check:CHECK ((previous_status = ANY (ARRAY[''not_evaluated''::text, ''clear''::text, ''under_review''::text, ''blocked''::text, ''removed''::text])))'
+    ]::text[]) collate "C")
+  $$,
+  'audit actions use the final moderation-state vocabulary without legacy flagged'
 );
 
 select results_eq(
@@ -303,70 +460,102 @@ select results_eq(
 select results_eq(
   $$
     select (array_agg(
-      tables.table_schema || '.' || tables.table_name || '.' ||
-      constraints.constraint_name || ':' || constraints.delete_rule
-      order by tables.table_schema, tables.table_name, constraints.constraint_name
+      source_namespaces.nspname || '.' || source_tables.relname || '.' ||
+      constraints.conname || ':(' ||
+      array_to_string(array(
+        select source_columns.attname::text
+        from unnest(constraints.conkey) with ordinality as source_keys(attnum, ordinal_position)
+        join pg_catalog.pg_attribute as source_columns
+          on source_columns.attrelid = constraints.conrelid
+         and source_columns.attnum = source_keys.attnum
+        order by source_keys.ordinal_position
+      ), ',') || ')->' ||
+      target_namespaces.nspname || '.' || target_tables.relname || '(' ||
+      array_to_string(array(
+        select target_columns.attname::text
+        from unnest(constraints.confkey) with ordinality as target_keys(attnum, ordinal_position)
+        join pg_catalog.pg_attribute as target_columns
+          on target_columns.attrelid = constraints.confrelid
+         and target_columns.attnum = target_keys.attnum
+        order by target_keys.ordinal_position
+      ), ',') || '):' ||
+      case constraints.confdeltype
+        when 'a' then 'NO ACTION'
+        when 'r' then 'RESTRICT'
+        when 'c' then 'CASCADE'
+        when 'n' then 'SET NULL'
+        when 'd' then 'SET DEFAULT'
+      end
+      order by source_namespaces.nspname, source_tables.relname, constraints.conname
     )) collate "C"
-    from information_schema.referential_constraints as constraints
-    join information_schema.table_constraints as tables
-      on tables.constraint_catalog = constraints.constraint_catalog
-     and tables.constraint_schema = constraints.constraint_schema
-     and tables.constraint_name = constraints.constraint_name
-    where (
-      tables.constraint_schema = 'private'
-      and tables.table_name in (
-        'event_risk_disclosures',
-        'event_moderation_evaluations',
-        'event_moderation_actions',
-        'event_reports',
-        'event_report_rate_buckets',
-        'moderation_review_requests',
-        'staff_roles',
-        'event_public_eligibility_intervals',
-        'organizer_policy_requirements',
-        'event_policy_acceptances',
-        'event_policy_legacy_exemptions'
+    from pg_catalog.pg_constraint as constraints
+    join pg_catalog.pg_class as source_tables
+      on source_tables.oid = constraints.conrelid
+    join pg_catalog.pg_namespace as source_namespaces
+      on source_namespaces.oid = source_tables.relnamespace
+    join pg_catalog.pg_class as target_tables
+      on target_tables.oid = constraints.confrelid
+    join pg_catalog.pg_namespace as target_namespaces
+      on target_namespaces.oid = target_tables.relnamespace
+    where constraints.contype = 'f'
+      and (
+        (
+          source_namespaces.nspname = 'private'
+          and source_tables.relname in (
+            'event_risk_disclosures',
+            'event_moderation_evaluations',
+            'event_moderation_actions',
+            'event_reports',
+            'event_report_rate_buckets',
+            'moderation_review_requests',
+            'staff_roles',
+            'event_public_eligibility_intervals',
+            'organizer_policy_requirements',
+            'event_policy_acceptances',
+            'event_policy_legacy_exemptions'
+          )
+        )
+        or constraints.conname = 'events_publicly_authorized_action_id_fkey'
       )
-    )
-       or constraints.constraint_name = 'events_publicly_authorized_action_id_fkey'
   $$,
   $$
     values ((array[
-      'private.event_moderation_actions.event_moderation_actions_actor_user_id_fkey:RESTRICT',
-      'private.event_moderation_actions.event_moderation_actions_evaluation_id_fkey:RESTRICT',
-      'private.event_moderation_actions.event_moderation_actions_event_id_fkey:RESTRICT',
-      'private.event_moderation_actions.event_moderation_actions_policy_acceptance_id_fkey:RESTRICT',
-      'private.event_moderation_actions.event_moderation_actions_policy_legacy_exemption_id_fkey:RESTRICT',
-      'private.event_moderation_actions.event_moderation_actions_review_request_id_fkey:RESTRICT',
-      'private.event_moderation_evaluations.event_moderation_evaluations_event_id_fkey:RESTRICT',
-      'private.event_policy_acceptances.event_policy_acceptances_accepted_by_user_id_fkey:RESTRICT',
-      'private.event_policy_acceptances.event_policy_acceptances_event_id_fkey:RESTRICT',
-      'private.event_policy_acceptances.event_policy_acceptances_event_policy_version_id_fkey:RESTRICT',
-      'private.event_policy_acceptances.event_policy_acceptances_organizer_id_fkey:RESTRICT',
-      'private.event_policy_acceptances.event_policy_acceptances_organizer_terms_version_id_fkey:RESTRICT',
-      'private.event_policy_legacy_exemptions.event_policy_legacy_exemptions_event_id_fkey:RESTRICT',
-      'private.event_public_eligibility_intervals.event_public_eligibility_intervals_ended_action_id_fkey:RESTRICT',
-      'private.event_public_eligibility_intervals.event_public_eligibility_intervals_event_id_fkey:RESTRICT',
-      'private.event_public_eligibility_intervals.event_public_eligibility_intervals_started_action_id_fkey:RESTRICT',
-      'private.event_reports.event_reports_event_id_fkey:RESTRICT',
-      'private.event_risk_disclosures.event_risk_disclosures_event_id_fkey:RESTRICT',
-      'private.moderation_review_requests.moderation_review_requests_event_id_fkey:RESTRICT',
-      'private.moderation_review_requests.moderation_review_requests_organizer_id_fkey:RESTRICT',
-      'private.moderation_review_requests.moderation_review_requests_requested_action_id_fkey:RESTRICT',
-      'private.moderation_review_requests.moderation_review_requests_resolved_action_id_fkey:RESTRICT',
-      'private.organizer_policy_requirements.organizer_policy_requirements_policy_version_fkey:RESTRICT',
-      'private.staff_roles.staff_roles_granted_by_fkey:RESTRICT',
-      'private.staff_roles.staff_roles_user_id_fkey:RESTRICT',
-      'public.events.events_publicly_authorized_action_id_fkey:RESTRICT'
+      'private.event_moderation_actions.event_moderation_actions_actor_user_id_fkey:(actor_user_id)->auth.users(id):RESTRICT',
+      'private.event_moderation_actions.event_moderation_actions_evaluation_id_fkey:(evaluation_id)->private.event_moderation_evaluations(id):RESTRICT',
+      'private.event_moderation_actions.event_moderation_actions_event_id_fkey:(event_id)->public.events(id):RESTRICT',
+      'private.event_moderation_actions.event_moderation_actions_policy_acceptance_id_fkey:(policy_acceptance_id)->private.event_policy_acceptances(id):RESTRICT',
+      'private.event_moderation_actions.event_moderation_actions_policy_legacy_exemption_id_fkey:(policy_legacy_exemption_id)->private.event_policy_legacy_exemptions(id):RESTRICT',
+      'private.event_moderation_actions.event_moderation_actions_review_request_id_fkey:(review_request_id)->private.moderation_review_requests(id):RESTRICT',
+      'private.event_moderation_evaluations.event_moderation_evaluations_event_id_fkey:(event_id)->public.events(id):RESTRICT',
+      'private.event_policy_acceptances.event_policy_acceptances_accepted_by_user_id_fkey:(accepted_by_user_id)->auth.users(id):RESTRICT',
+      'private.event_policy_acceptances.event_policy_acceptances_event_id_fkey:(event_id)->public.events(id):RESTRICT',
+      'private.event_policy_acceptances.event_policy_acceptances_event_policy_version_id_fkey:(event_policy_version_id)->private.organizer_policy_versions(id):RESTRICT',
+      'private.event_policy_acceptances.event_policy_acceptances_organizer_id_fkey:(organizer_id)->public.organizers(id):RESTRICT',
+      'private.event_policy_acceptances.event_policy_acceptances_organizer_terms_version_id_fkey:(organizer_terms_version_id)->private.organizer_policy_versions(id):RESTRICT',
+      'private.event_policy_legacy_exemptions.event_policy_legacy_exemptions_event_id_fkey:(event_id)->public.events(id):RESTRICT',
+      'private.event_public_eligibility_intervals.event_public_eligibility_intervals_ended_action_id_fkey:(ended_action_id)->private.event_moderation_actions(id):RESTRICT',
+      'private.event_public_eligibility_intervals.event_public_eligibility_intervals_event_id_fkey:(event_id)->public.events(id):RESTRICT',
+      'private.event_public_eligibility_intervals.event_public_eligibility_intervals_started_action_id_fkey:(started_action_id)->private.event_moderation_actions(id):RESTRICT',
+      'private.event_reports.event_reports_event_id_fkey:(event_id)->public.events(id):RESTRICT',
+      'private.event_risk_disclosures.event_risk_disclosures_event_id_fkey:(event_id)->public.events(id):RESTRICT',
+      'private.moderation_review_requests.moderation_review_requests_event_id_fkey:(event_id)->public.events(id):RESTRICT',
+      'private.moderation_review_requests.moderation_review_requests_organizer_id_fkey:(organizer_id)->public.organizers(id):RESTRICT',
+      'private.moderation_review_requests.moderation_review_requests_requested_action_id_fkey:(requested_action_id)->private.event_moderation_actions(id):RESTRICT',
+      'private.moderation_review_requests.moderation_review_requests_resolved_action_id_fkey:(resolved_action_id)->private.event_moderation_actions(id):RESTRICT',
+      'private.organizer_policy_requirements.organizer_policy_requirements_policy_version_fkey:(policy_kind,policy_version_id)->private.organizer_policy_versions(policy_kind,id):RESTRICT',
+      'private.staff_roles.staff_roles_granted_by_fkey:(granted_by)->auth.users(id):RESTRICT',
+      'private.staff_roles.staff_roles_user_id_fkey:(user_id)->auth.users(id):RESTRICT',
+      'public.events.events_publicly_authorized_action_id_fkey:(publicly_authorized_action_id)->private.event_moderation_actions(id):RESTRICT'
     ]::text[]) collate "C")
   $$,
-  'moderation foreign keys and deletion behavior are exact'
+  'moderation foreign-key columns, targets, order, and deletion behavior are exact'
 );
 
 select results_eq(
   $$
     select (array_agg(
-      schemaname || '.' || tablename || '.' || indexname order by indexname
+      schemaname || '.' || tablename || '.' || indexname || ':' || indexdef
+      order by indexname
     )) collate "C"
     from pg_catalog.pg_indexes
     where schemaname = 'private'
@@ -380,24 +569,26 @@ select results_eq(
         'moderation_review_requests_one_open_idx',
         'event_public_eligibility_intervals_one_open_idx',
         'event_policy_acceptances_exact_key',
-        'event_policy_legacy_exemptions_event_key'
+        'event_policy_legacy_exemptions_event_key',
+        'organizer_policy_versions_kind_id_key'
       )
   $$,
   $$
     values ((array[
-      'private.event_moderation_actions.event_moderation_actions_event_created_idx',
-      'private.event_moderation_evaluations.event_moderation_evaluations_input_key',
-      'private.event_moderation_evaluations.event_moderation_evaluations_queue_idx',
-      'private.event_policy_acceptances.event_policy_acceptances_exact_key',
-      'private.event_policy_legacy_exemptions.event_policy_legacy_exemptions_event_key',
-      'private.event_public_eligibility_intervals.event_public_eligibility_intervals_one_open_idx',
-      'private.event_report_rate_buckets.event_report_rate_buckets_expires_idx',
-      'private.event_reports.event_reports_one_open_per_actor_idx',
-      'private.event_reports.event_reports_open_event_idx',
-      'private.moderation_review_requests.moderation_review_requests_one_open_idx'
+      'private.event_moderation_actions.event_moderation_actions_event_created_idx:CREATE INDEX event_moderation_actions_event_created_idx ON private.event_moderation_actions USING btree (event_id, created_at DESC, id)',
+      'private.event_moderation_evaluations.event_moderation_evaluations_input_key:CREATE UNIQUE INDEX event_moderation_evaluations_input_key ON private.event_moderation_evaluations USING btree (event_id, content_revision, input_sha256, source, queued_moderation_version)',
+      'private.event_moderation_evaluations.event_moderation_evaluations_queue_idx:CREATE INDEX event_moderation_evaluations_queue_idx ON private.event_moderation_evaluations USING btree (created_at, id) WHERE (status = ''queued''::text)',
+      'private.event_policy_acceptances.event_policy_acceptances_exact_key:CREATE UNIQUE INDEX event_policy_acceptances_exact_key ON private.event_policy_acceptances USING btree (event_id, organizer_id, accepted_by_user_id, content_revision, input_sha256, organizer_terms_version_id, event_policy_version_id)',
+      'private.event_policy_legacy_exemptions.event_policy_legacy_exemptions_event_key:CREATE UNIQUE INDEX event_policy_legacy_exemptions_event_key ON private.event_policy_legacy_exemptions USING btree (event_id)',
+      'private.event_public_eligibility_intervals.event_public_eligibility_intervals_one_open_idx:CREATE UNIQUE INDEX event_public_eligibility_intervals_one_open_idx ON private.event_public_eligibility_intervals USING btree (event_id) WHERE (ended_at IS NULL)',
+      'private.event_report_rate_buckets.event_report_rate_buckets_expires_idx:CREATE INDEX event_report_rate_buckets_expires_idx ON private.event_report_rate_buckets USING btree (expires_at)',
+      'private.event_reports.event_reports_one_open_per_actor_idx:CREATE UNIQUE INDEX event_reports_one_open_per_actor_idx ON private.event_reports USING btree (event_id, content_revision, reporter_fingerprint) WHERE (status = ''open''::text)',
+      'private.event_reports.event_reports_open_event_idx:CREATE INDEX event_reports_open_event_idx ON private.event_reports USING btree (event_id, content_revision, created_at) WHERE (status = ''open''::text)',
+      'private.moderation_review_requests.moderation_review_requests_one_open_idx:CREATE UNIQUE INDEX moderation_review_requests_one_open_idx ON private.moderation_review_requests USING btree (event_id) WHERE (status = ''open''::text)',
+      'private.organizer_policy_versions.organizer_policy_versions_kind_id_key:CREATE UNIQUE INDEX organizer_policy_versions_kind_id_key ON private.organizer_policy_versions USING btree (policy_kind, id)'
     ]::text[]) collate "C")
   $$,
-  'moderation indexes are exact'
+  'critical moderation indexes have exact uniqueness, key order, sort order, and predicates'
 );
 
 select results_eq(
@@ -735,6 +926,36 @@ select throws_ok(
 
 select throws_ok(
   $$
+    insert into private.event_moderation_actions (
+      event_id, content_revision, input_sha256, actor_type, source, action,
+      previous_status, new_status, reason_code, moderation_version
+    ) values (
+      '62000000-0000-0000-0000-000000000010', 1, repeat('9', 64),
+      'system', 'manual', 'hold', 'flagged', 'clear', 'no_violation', 0
+    )
+  $$,
+  '23514',
+  'new row for relation "event_moderation_actions" violates check constraint "event_moderation_actions_previous_status_check"',
+  'audit actions reject legacy flagged as a previous state'
+);
+
+select throws_ok(
+  $$
+    insert into private.event_moderation_actions (
+      event_id, content_revision, input_sha256, actor_type, source, action,
+      previous_status, new_status, reason_code, moderation_version
+    ) values (
+      '62000000-0000-0000-0000-000000000010', 1, repeat('a', 64),
+      'system', 'manual', 'hold', 'clear', 'flagged', 'no_violation', 0
+    )
+  $$,
+  '23514',
+  'new row for relation "event_moderation_actions" violates check constraint "event_moderation_actions_new_status_check"',
+  'audit actions reject legacy flagged as a new state'
+);
+
+select throws_ok(
+  $$
     insert into private.event_public_eligibility_intervals (
       event_id, public_eligibility_version, eligibility_state,
       started_action_id, transition_reason
@@ -773,6 +994,13 @@ select throws_ok(
 );
 
 select throws_ok(
+  $$ delete from private.event_policy_acceptances where id = '62000000-0000-0000-0000-000000000020' $$,
+  'P0001',
+  'POLICY_ACCEPTANCE_IMMUTABLE',
+  'policy acceptance deletes are rejected'
+);
+
+select throws_ok(
   $$ update private.organizer_policy_versions set public_url = 'https://example.invalid/changed' where id = 'moderation-test-terms' $$,
   'P0001',
   'POLICY_VERSION_IMMUTABLE',
@@ -780,10 +1008,24 @@ select throws_ok(
 );
 
 select throws_ok(
+  $$ delete from private.organizer_policy_versions where id = 'moderation-test-terms' $$,
+  'P0001',
+  'POLICY_VERSION_IMMUTABLE',
+  'policy version deletes are rejected'
+);
+
+select throws_ok(
   $$ update private.event_policy_legacy_exemptions set grandfathered_content_revision = 2 where id = '62000000-0000-0000-0000-000000000021' $$,
   'P0001',
   'POLICY_LEGACY_EXEMPTION_IMMUTABLE',
   'legacy exemption updates are rejected'
+);
+
+select throws_ok(
+  $$ delete from private.event_policy_legacy_exemptions where id = '62000000-0000-0000-0000-000000000021' $$,
+  'P0001',
+  'POLICY_LEGACY_EXEMPTION_IMMUTABLE',
+  'legacy exemption deletes are rejected'
 );
 
 select lives_ok(
