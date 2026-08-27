@@ -112,3 +112,28 @@ export const eventPublishSchema = eventDraftSchema.superRefine((values, context)
     })
   }
 })
+
+export const publicEventSchema = z.strictObject({
+  id: z.string().uuid(),
+  title: z.string().min(1),
+  description: z.string().min(1),
+  category: z.enum(eventCategories),
+  startsAt: z.string().min(1),
+  endsAt: z.string().min(1),
+  timezone: z.literal('America/Los_Angeles'),
+  venueName: z.string().min(1),
+  addressLine1: z.string().min(1),
+  addressLine2: z.string().nullable(),
+  city: z.string().min(1),
+  region: z.literal('CA'),
+  postalCode: z.string().min(1),
+  countryCode: z.literal('US'),
+  latitude: z.number().finite().min(-90).max(90),
+  longitude: z.number().finite().min(-180).max(180),
+  artworkPath: z.string().nullable(),
+  animationPreset: z.string().min(1),
+  admissionType: z.enum(['free', 'paid']),
+  minimumAge: z.enum(['all_ages', '18_plus', '21_plus']),
+  advisories: z.array(z.enum(['alcohol', 'cannabis', 'mature_content'])),
+  organizer: z.strictObject({ id: z.string().uuid(), displayName: z.string().min(1) }),
+})

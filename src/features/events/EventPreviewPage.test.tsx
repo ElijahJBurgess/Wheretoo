@@ -25,7 +25,7 @@ const organizer: Organizer = {
 }
 
 const event: EventRow = {
-  id: 'event-1', organizer_id: 'organizer-1', status: 'draft', moderation_status: 'clear',
+  id: 'event-1', organizer_id: 'organizer-1', status: 'draft', moderation_status: 'clear', content_revision: 1, moderated_revision: null, moderation_version: 0, moderation_updated_at: null, public_history_status: 'never_public', first_publicly_eligible_at: null, public_eligibility_version: 0, publicly_authorized_revision: null, publicly_authorized_action_id: null,
   title: 'Friday Night Makers', description: 'Meet neighborhood artists and makers for an open studio evening.',
   category: 'art_culture', starts_at: '2027-01-15T20:30:00.000Z', ends_at: '2027-01-15T22:00:00.000Z',
   timezone: 'America/Los_Angeles', venue_name: 'The Workshop', address_line1: '123 Valencia St',

@@ -16,7 +16,7 @@ vi.mock('./event.queries', () => ({ useOwnedEvents }))
 import { OrganizerEventsPage } from './OrganizerEventsPage'
 
 const baseEvent: EventRow = {
-  id: 'event-1', organizer_id: 'organizer-1', status: 'draft', moderation_status: 'clear',
+  id: 'event-1', organizer_id: 'organizer-1', status: 'draft', moderation_status: 'clear', content_revision: 1, moderated_revision: null, moderation_version: 0, moderation_updated_at: null, public_history_status: 'never_public', first_publicly_eligible_at: null, public_eligibility_version: 0, publicly_authorized_revision: null, publicly_authorized_action_id: null,
   title: 'Night Market', description: null, category: null, starts_at: '2026-08-25T02:00:00.000Z',
   ends_at: null, timezone: 'America/Los_Angeles', venue_name: null, address_line1: null,
   address_line2: null, city: null, region: null, postal_code: null, country_code: 'US',

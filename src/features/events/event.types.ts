@@ -49,3 +49,28 @@ export type EventFormValues = {
   admissionType: 'free' | 'paid'
   capacity: number | null
 }
+
+export type PublicEvent = {
+  id: string
+  title: string
+  description: string
+  category: EventCategory
+  startsAt: string
+  endsAt: string
+  timezone: 'America/Los_Angeles'
+  venueName: string
+  addressLine1: string
+  addressLine2: string | null
+  city: string
+  region: 'CA'
+  postalCode: string
+  countryCode: 'US'
+  latitude: number
+  longitude: number
+  artworkPath: string | null
+  animationPreset: string
+  admissionType: 'free' | 'paid'
+  minimumAge: 'all_ages' | '18_plus' | '21_plus'
+  advisories: Array<'alcohol' | 'cannabis' | 'mature_content'>
+  organizer: { id: string; displayName: string }
+}

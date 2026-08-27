@@ -30,7 +30,7 @@ function restoreDialogMethod(name: 'close' | 'showModal', descriptor?: PropertyD
 }
 
 const row: EventRow = {
-  id: 'event-1', organizer_id: 'organizer-1', status: 'draft', moderation_status: 'clear', title: 'Saved title',
+  id: 'event-1', organizer_id: 'organizer-1', status: 'draft', moderation_status: 'clear', content_revision: 1, moderated_revision: null, moderation_version: 0, moderation_updated_at: null, public_history_status: 'never_public', first_publicly_eligible_at: null, public_eligibility_version: 0, publicly_authorized_revision: null, publicly_authorized_action_id: null, title: 'Saved title',
   description: 'Saved description', category: 'community', starts_at: '2026-12-02T02:30:00.000Z',
   ends_at: '2026-12-02T04:00:00.000Z', timezone: 'America/Los_Angeles', venue_name: 'Saved venue',
   address_line1: '1 Market St', address_line2: null, city: 'San Francisco', region: 'CA', postal_code: '94105',

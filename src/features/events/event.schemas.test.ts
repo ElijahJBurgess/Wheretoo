@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { eventDraftSchema, eventPublishSchema } from './event.schemas'
+import { eventDraftSchema, eventPublishSchema, publicEventSchema } from './event.schemas'
 import type { EventFormValues, NormalizedLocation } from './event.types'
 
 const validLocation: NormalizedLocation = {
@@ -153,5 +153,17 @@ describe('eventPublishSchema', () => {
     vi.useFakeTimers()
     expect(eventDraftSchema.safeParse({ ...validValues, admissionType: 'paid' }).success).toBe(true)
     expect(publish({ admissionType: 'paid' }).success).toBe(false)
+  })
+})
+
+describe('publicEventSchema', () => {
+  it('accepts only the narrow public RPC projection', () => {
+    expect(publicEventSchema.safeParse({
+      id: 'b4ee321a-bdf6-43b2-a7f4-d6478d942908', title: 'Night Market', description: 'Food and makers.', category: 'community',
+      startsAt: '2026-09-01T02:00:00Z', endsAt: '2026-09-01T05:00:00Z', timezone: 'America/Los_Angeles', venueName: 'Civic Center',
+      addressLine1: '1 Market St', addressLine2: null, city: 'San Francisco', region: 'CA', postalCode: '94102', countryCode: 'US',
+      latitude: 37.78, longitude: -122.42, artworkPath: null, animationPreset: 'generic', admissionType: 'free', minimumAge: 'all_ages', advisories: [],
+      organizer: { id: 'c9c39721-6d2c-413e-9a69-253267bd0f80', displayName: 'Bay City Arts' },
+    }).success).toBe(true)
   })
 })
