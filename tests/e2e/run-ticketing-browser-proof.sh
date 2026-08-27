@@ -60,6 +60,25 @@ if (!response.ok) process.exit(1)
 NODE
 }
 
+validate_driver_output() {
+  local kind="$1"
+  local output="$2"
+  KIND="$kind" OUTPUT="$output" node --input-type=module <<'NODE'
+import fs from 'node:fs'
+const value = JSON.parse(fs.readFileSync(process.env.OUTPUT, 'utf8'))
+if (process.env.KIND === 'delivery') {
+  if (value.status !== 200 || value.receipt?.processing_status !== 'processed') process.exit(1)
+} else if (process.env.KIND === 'expiry') {
+  if (value.ok !== true || value.livemode !== false || value.status !== 'expired') process.exit(1)
+} else if (process.env.KIND === 'refund') {
+  if (value.ok !== true || value.livemode !== false || value.amount !== value.reversal_amount || value.application_fee_refund_amount <= 0) process.exit(1)
+} else if (process.env.KIND === 'cleanup') {
+  const counts = ['event_count','organizer_count','connect_count','order_count','tier_count','receipt_count','ticket_count','dispute_count','refund_count','item_count']
+  if (value.ok !== true || value.connected_account_closed !== true || counts.some((name) => value[name] !== 0)) process.exit(1)
+} else process.exit(1)
+NODE
+}
+
 delete_auth_user() {
   local user_id="$1"
   [[ -n "$user_id" ]] || return 0
@@ -75,29 +94,75 @@ cleanup() {
   set +e
 
   if [[ -n "$organizer_a_id" ]]; then
-    "$supabase_cli" db query --linked "select coalesce(json_agg(id), '[]'::json) as order_ids
-      from public.orders where organizer_id = '$organizer_a_id'::uuid and status in ('paid','requires_review');" \
-      >"$temporary_directory/paid-orders.json" 2>/dev/null
-    if [[ $? -eq 0 && $driver_deployed -eq 1 ]]; then
-      ORDERS_FILE="$temporary_directory/paid-orders.json" node --input-type=module >"$temporary_directory/order-ids.txt" <<'NODE'
+    "$supabase_cli" db query --linked "select coalesce(json_agg(json_build_object('id', id, 'session_id', stripe_checkout_session_id)), '[]'::json) as orders
+      from public.orders where organizer_id = '$organizer_a_id'::uuid and stripe_checkout_session_id is not null;" \
+      >"$temporary_directory/checkout-orders.json" 2>/dev/null
+    checkout_query_exit=$?
+    if [[ $checkout_query_exit -ne 0 ]]; then
+      cleanup_failed=1
+    elif [[ $driver_deployed -eq 1 ]]; then
+      ORDERS_FILE="$temporary_directory/checkout-orders.json" node --input-type=module >"$temporary_directory/checkout-orders.txt" <<'NODE'
 import fs from 'node:fs'
 const payload = JSON.parse(fs.readFileSync(process.env.ORDERS_FILE, 'utf8'))
 const row = (payload.rows ?? payload)[0] ?? {}
-for (const id of row.order_ids ?? []) if (/^[0-9a-f-]{36}$/.test(id)) console.log(id)
+for (const order of row.orders ?? []) {
+  if (/^[0-9a-f-]{36}$/.test(order.id ?? '') && /^cs_test_[A-Za-z0-9]+$/.test(order.session_id ?? '')) {
+    console.log(`${order.id}\t${order.session_id}`)
+  }
+}
 NODE
-      while IFS= read -r order_id; do
-        [[ -n "$order_id" ]] || continue
-        driver_request "{\"action\":\"create_refund\",\"order_id\":\"$order_id\"}" \
-          "$temporary_directory/refund-${order_id}.json" || cleanup_failed=1
-      done <"$temporary_directory/order-ids.txt"
+      while IFS=$'\t' read -r order_id session_id; do
+        [[ -n "$order_id" && -n "$session_id" ]] || continue
+        status_file="$temporary_directory/status-${order_id}.json"
+        driver_request "{\"action\":\"checkout_status\",\"session_id\":\"$session_id\"}" "$status_file" || {
+          cleanup_failed=1
+          continue
+        }
+        checkout_state="$(STATUS_FILE="$status_file" node --input-type=module <<'NODE'
+import fs from 'node:fs'
+const value = JSON.parse(fs.readFileSync(process.env.STATUS_FILE, 'utf8'))
+if (value.ok !== true || value.livemode !== false) process.exit(1)
+if (value.status === 'complete' && value.payment_status === 'paid' && value.charge_paid === true) console.log('paid')
+else if (value.status === 'open' && value.payment_status !== 'paid') console.log('open')
+else if (value.status === 'expired' && value.payment_status !== 'paid') console.log('expired')
+else if (value.status === 'complete' && value.payment_status !== 'paid') console.log('terminal-unpaid')
+else process.exit(1)
+NODE
+)" || {
+          cleanup_failed=1
+          continue
+        }
+        event_id="evt_task17cleanup$(openssl rand -hex 12)"
+        event_created="$(date +%s)"
+        if [[ "$checkout_state" == paid ]]; then
+          driver_request "{\"action\":\"deliver\",\"event\":{\"event_id\":\"$event_id\",\"type\":\"checkout.session.completed\",\"object\":\"checkout.session\",\"object_id\":\"$session_id\",\"created\":$event_created}}" \
+            "$temporary_directory/deliver-${order_id}.json" && \
+            validate_driver_output delivery "$temporary_directory/deliver-${order_id}.json" || cleanup_failed=1
+          driver_request "{\"action\":\"create_refund\",\"order_id\":\"$order_id\"}" \
+            "$temporary_directory/refund-${order_id}.json" && \
+            validate_driver_output refund "$temporary_directory/refund-${order_id}.json" || cleanup_failed=1
+        elif [[ "$checkout_state" == open ]]; then
+          driver_request "{\"action\":\"expire_checkout\",\"session_id\":\"$session_id\"}" \
+            "$temporary_directory/expire-${order_id}.json" && \
+            validate_driver_output expiry "$temporary_directory/expire-${order_id}.json" || cleanup_failed=1
+          driver_request "{\"action\":\"deliver\",\"event\":{\"event_id\":\"$event_id\",\"type\":\"checkout.session.expired\",\"object\":\"checkout.session\",\"object_id\":\"$session_id\",\"created\":$event_created}}" \
+            "$temporary_directory/deliver-${order_id}.json" && \
+            validate_driver_output delivery "$temporary_directory/deliver-${order_id}.json" || cleanup_failed=1
+        elif [[ "$checkout_state" == expired ]]; then
+          driver_request "{\"action\":\"deliver\",\"event\":{\"event_id\":\"$event_id\",\"type\":\"checkout.session.expired\",\"object\":\"checkout.session\",\"object_id\":\"$session_id\",\"created\":$event_created}}" \
+            "$temporary_directory/deliver-${order_id}.json" && \
+            validate_driver_output delivery "$temporary_directory/deliver-${order_id}.json" || cleanup_failed=1
+        fi
+      done <"$temporary_directory/checkout-orders.txt"
     fi
   fi
 
-  if [[ $driver_deployed -eq 1 ]]; then
-    driver_request '{"action":"cleanup"}' "$temporary_directory/driver-cleanup.json" || cleanup_failed=1
+  if [[ $driver_deployed -eq 1 && $cleanup_failed -eq 0 ]]; then
+    driver_request '{"action":"cleanup"}' "$temporary_directory/driver-cleanup.json" && \
+      validate_driver_output cleanup "$temporary_directory/driver-cleanup.json" || cleanup_failed=1
   fi
 
-  if [[ -n "$organizer_a_id" || -n "$organizer_b_id" ]]; then
+  if [[ $cleanup_failed -eq 0 && ( -n "$organizer_a_id" || -n "$organizer_b_id" ) ]]; then
     local ids_sql=""
     [[ -n "$organizer_a_id" ]] && ids_sql="'$organizer_a_id'::uuid"
     [[ -n "$organizer_b_id" ]] && ids_sql="${ids_sql:+$ids_sql,}'$organizer_b_id'::uuid"
@@ -118,8 +183,8 @@ NODE
       delete from public.tickets where order_id in (select id from task18_orders);
       delete from public.refunds where order_id in (select id from task18_orders);
       delete from public.order_items where order_id in (select id from task18_orders);
-      delete from public.stripe_webhook_events where stripe_event_id in (select stripe_event_id from task18_receipts);
       delete from public.orders where id in (select id from task18_orders);
+      delete from public.stripe_webhook_events where stripe_event_id in (select stripe_event_id from task18_receipts);
       delete from public.ticket_tiers where event_id in (select id from task18_events);
       delete from public.events where id in (select id from task18_events);
       delete from public.organizer_stripe_accounts where organizer_id in ($ids_sql);

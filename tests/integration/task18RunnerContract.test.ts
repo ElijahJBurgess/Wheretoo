@@ -24,6 +24,8 @@ describe('Task 18 browser proof runner contract', () => {
     expect(runner).toContain('/auth/v1/admin/users')
     expect(runner).toContain('functions deploy task17-transaction-driver')
     expect(runner).toContain('pnpm test:e2e')
+    expect(runner).toContain('\\"action\\":\\"checkout_status\\"')
+    expect(runner).toContain('\\"action\\":\\"expire_checkout\\"')
     expect(runner).toContain('\\"action\\":\\"create_refund\\"')
     expect(runner).toContain('{"action":"cleanup"}')
     expect(runner).toContain('functions delete task17-transaction-driver')
@@ -31,6 +33,9 @@ describe('Task 18 browser proof runner contract', () => {
     expect(runner).toContain('residue_count')
     expect(runner).toContain('TEST_CONNECTED_ACCOUNT_DISPOSABLE')
     expect(runner).not.toContain('STRIPE_RESTRICTED_KEY=')
+    expect(runner.indexOf('delete from public.orders')).toBeLessThan(
+      runner.indexOf('delete from public.stripe_webhook_events'),
+    )
   })
 
   it('documents the reviewed eight-case command without a stale incomplete verdict', () => {
