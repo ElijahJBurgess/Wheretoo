@@ -74,7 +74,7 @@ describe('OrganizerEventsPage', () => {
     useOwnedEvents.mockReturnValue({
       data: [
         baseEvent,
-        { ...baseEvent, id: 'event-2', title: null, status: 'published', starts_at: null },
+        { ...baseEvent, id: 'event-2', title: null, status: 'published', moderated_revision: 1, starts_at: null },
       ],
       isPending: false,
       isError: false,
@@ -96,7 +96,8 @@ describe('OrganizerEventsPage', () => {
   it('maps only safe lifecycle and moderation states without public eligibility claims', () => {
     useOwnedEvents.mockReturnValue({
       data: [
-        { ...baseEvent, id: 'event-clear', status: 'published', moderation_status: 'clear', title: 'Clear event' },
+        { ...baseEvent, id: 'event-clear', status: 'published', moderation_status: 'clear', moderated_revision: 1, title: 'Clear event' },
+        { ...baseEvent, id: 'event-stale', status: 'published', moderation_status: 'clear', moderated_revision: null, title: 'Stale event' },
         { ...baseEvent, id: 'event-review', status: 'published', moderation_status: 'under_review', title: 'Review event' },
         { ...baseEvent, id: 'event-blocked', status: 'published', moderation_status: 'blocked', title: 'Blocked event' },
         { ...baseEvent, id: 'event-removed', status: 'published', moderation_status: 'removed', title: 'Removed event' },
@@ -107,6 +108,7 @@ describe('OrganizerEventsPage', () => {
     renderPage()
 
     expect(screen.getByRole('link', { name: 'Clear event, Published' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Stale event, Under review' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Review event, Under review' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Blocked event, Blocked' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Removed event, Removed' })).toBeInTheDocument()

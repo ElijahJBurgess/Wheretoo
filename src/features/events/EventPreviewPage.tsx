@@ -1,10 +1,11 @@
 import { useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { AsyncState } from '../../components/ui/AsyncState'
 import { Button } from '../../components/ui/Button'
 import { FormErrorSummary } from '../../components/ui/FormErrorSummary'
 import { useSession } from '../auth/SessionProvider'
-import { useOwnedEventRequirements } from '../moderation/moderation.queries'
+import { moderationKeys, useOwnedEventRequirements } from '../moderation/moderation.queries'
 import { useOrganizer } from '../organizers/organizer.queries'
 import { eventRowToFormValues } from './event.api'
 import { useOwnedEvent, usePublishEvent } from './event.queries'
@@ -19,6 +20,7 @@ export function EventPreviewPage() {
   const authenticatedOrganizerId = sessionState.status === 'authenticated' ? sessionState.user.id : ''
   const eventQuery = useOwnedEvent(eventId, authenticatedOrganizerId)
   const requirementsQuery = useOwnedEventRequirements(authenticatedOrganizerId, eventId)
+  const queryClient = useQueryClient()
   const persistedOrganizerId = eventQuery.data?.organizer_id ?? ''
   const organizerQuery = useOrganizer(persistedOrganizerId)
   const publishMutation = usePublishEvent(persistedOrganizerId)
@@ -133,6 +135,7 @@ export function EventPreviewPage() {
         setPublishError('Publishing failed. Try again.')
         return
       }
+      queryClient.removeQueries({ queryKey: moderationKeys.publicEvent(persistedEventId), exact: true })
       navigate(`/organizer/events/${published.id}`)
     } catch (error) {
       setPublishError(getPublishErrorMessage(error))

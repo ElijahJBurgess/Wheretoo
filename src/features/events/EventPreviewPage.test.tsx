@@ -1,4 +1,5 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -12,7 +13,10 @@ const { mutateAsync, organizerRefetch, eventRefetch, requirementsRefetch, useOrg
 
 vi.mock('../auth/SessionProvider', () => ({ useSession }))
 vi.mock('../organizers/organizer.queries', () => ({ useOrganizer }))
-vi.mock('../moderation/moderation.queries', () => ({ useOwnedEventRequirements }))
+vi.mock('../moderation/moderation.queries', () => ({
+  moderationKeys: { publicEvent: (eventId: string) => ['public-event', eventId] },
+  useOwnedEventRequirements,
+}))
 vi.mock('./event.queries', () => ({ useOwnedEvent, usePublishEvent }))
 vi.mock('../../lib/supabase/client', () => ({ supabase: {} }))
 
@@ -48,6 +52,7 @@ const requirements = {
 }
 
 function renderPreview() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   const router = createMemoryRouter([
     { path: '/organizer/events/:eventId/preview', element: <EventPreviewPage /> },
     { path: '/organizer/events/:eventId/edit', element: <p>edit destination</p> },
@@ -55,7 +60,11 @@ function renderPreview() {
     { path: '/organizer/events/:eventId', element: <p>published destination</p> },
     { path: '/organizer/events', element: <p>events destination</p> },
   ], { initialEntries: ['/organizer/events/event-1/preview'] })
-  return { router, ...render(<RouterProvider router={router} />) }
+  return {
+    client,
+    router,
+    ...render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>),
+  }
 }
 
 describe('EventPreviewPage', () => {
@@ -193,11 +202,13 @@ describe('EventPreviewPage', () => {
       data: { ...event, status: 'published', moderation_status: moderationStatus },
     })
     mutateAsync.mockResolvedValueOnce({ ...event, status: 'published', moderation_status: moderationStatus })
-    const { router } = renderPreview()
+    const { client, router } = renderPreview()
+    client.setQueryData(['public-event', 'event-1'], { id: 'stale-public-event' })
 
     await user.click(screen.getByRole('button', { name: 'Publish changes' }))
     expect(mutateAsync).toHaveBeenCalledWith('event-1')
     await waitFor(() => expect(router.state.location.pathname).toBe('/organizer/events/event-1'))
+    expect(client.getQueryData(['public-event', 'event-1'])).toBeUndefined()
   })
 
   it.each([

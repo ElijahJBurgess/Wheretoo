@@ -20,6 +20,7 @@ import { PublishedEventPage } from './PublishedEventPage'
 const organizer = { id: 'organizer-1', display_name: 'Bay City Arts' } as Organizer
 const event = {
   id: 'event-1', organizer_id: 'organizer-1', status: 'published', moderation_status: 'clear', title: 'Friday Night Makers',
+  content_revision: 1, moderated_revision: 1,
   description: 'Meet neighborhood artists and makers for an open studio evening.', category: 'art_culture',
   starts_at: '2027-01-15T20:30:00.000Z', ends_at: '2027-01-15T22:00:00.000Z', timezone: 'America/Los_Angeles',
   venue_name: 'The Workshop', address_line1: '123 Valencia St', address_line2: null, city: 'San Francisco', region: 'CA',
@@ -74,6 +75,21 @@ describe('PublishedEventPage', () => {
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
     expect(screen.getByRole('heading', { level: 1, name: 'Under review' })).toBeInTheDocument()
     expect(screen.getByText('This event is not currently available in public discovery.')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Set up paid tickets' })).not.toBeInTheDocument()
+  })
+
+  it('shows clear but non-current content as under review', () => {
+    usePublicEvent.mockReturnValue({ data: null, isPending: false, isError: false, isFetching: false, refetch: publicEventRefetch })
+    renderPage({ ...event, moderation_status: 'clear', moderated_revision: null })
+    expect(screen.getByRole('heading', { level: 1, name: 'Under review' })).toBeInTheDocument()
+    expect(screen.getByText('This event is not currently available in public discovery.')).toBeInTheDocument()
+  })
+
+  it('does not trust cached public data while the canonical projection refreshes', () => {
+    usePublicEvent.mockReturnValue({ data: { id: 'event-1' }, isPending: false, isError: false, isFetching: true, refetch: publicEventRefetch })
+    renderPage()
+    expect(screen.getByText('Checking public availability…')).toBeInTheDocument()
+    expect(screen.queryByText('This event is publicly available.')).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Set up paid tickets' })).not.toBeInTheDocument()
   })
 
@@ -133,6 +149,17 @@ describe('PublishedEventPage', () => {
     await act(async () => resolve('37beaa67-b2a2-4b56-9c6c-e91208925c45'))
   })
 
+  it('shows a retryable current-review failure instead of an indefinite loading state', async () => {
+    const user = userEvent.setup()
+    usePublicEvent.mockReturnValue({ data: null, isPending: false, isError: false, isFetching: false, refetch: publicEventRefetch })
+    useCurrentEventReviewRequest.mockReturnValue({ data: undefined, isPending: false, isError: true, refetch: reviewRefetch })
+    renderPage({ ...event, moderation_status: 'blocked' })
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Review request status could not load.')
+    await user.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(reviewRefetch).toHaveBeenCalledOnce()
+  })
+
   it('submits a bounded optional review note once and offers a safe retry on failure', async () => {
     const user = userEvent.setup()
     usePublicEvent.mockReturnValue({ data: null, isPending: false, isError: false, refetch: publicEventRefetch })
@@ -148,6 +175,7 @@ describe('PublishedEventPage', () => {
     await user.click(screen.getByRole('button', { name: 'Try requesting review again' }))
     expect(requestMutateAsync).toHaveBeenLastCalledWith('Please review the updated context.')
     expect(requestMutateAsync).toHaveBeenCalledTimes(2)
+    await waitFor(() => expect(screen.getByRole('status')).toHaveFocus())
   })
 
   it('redirects drafts with replace semantics', async () => {

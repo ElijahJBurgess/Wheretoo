@@ -27,7 +27,11 @@ function organizerEventStatus(event: EventRow): { label: string; style: string }
   if (event.status === 'draft') return { label: 'Draft', style: 'draft' }
   if (event.moderation_status === 'blocked') return { label: 'Blocked', style: 'blocked' }
   if (event.moderation_status === 'removed') return { label: 'Removed', style: 'removed' }
-  if (event.moderation_status === 'under_review' || event.moderation_status === 'not_evaluated') {
+  if (
+    event.moderation_status === 'under_review'
+    || event.moderation_status === 'not_evaluated'
+    || event.moderated_revision !== event.content_revision
+  ) {
     return { label: 'Under review', style: 'under-review' }
   }
   return { label: 'Published', style: 'published' }

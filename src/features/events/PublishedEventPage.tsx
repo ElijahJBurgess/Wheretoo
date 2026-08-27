@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
 import { AsyncState } from '../../components/ui/AsyncState'
 import { Button } from '../../components/ui/Button'
@@ -48,7 +48,11 @@ function organizerStatus(event: EventRow) {
   if (event.moderation_status === 'removed') {
     return { heading: 'Removed', label: 'Removed', copy: 'This event has been removed from public discovery.' }
   }
-  if (event.moderation_status === 'under_review' || event.moderation_status === 'not_evaluated') {
+  if (
+    event.moderation_status === 'under_review'
+    || event.moderation_status === 'not_evaluated'
+    || event.moderated_revision !== event.content_revision
+  ) {
     return { heading: 'Under review', label: 'Under review', copy: 'This event is not currently available in public discovery.' }
   }
   return { heading: 'Published', label: null, copy: 'This event is not currently available in public discovery.' }
@@ -71,6 +75,10 @@ export function PublishedEventPage() {
   const activeReviewActionRef = useRef<'request' | 'withdraw' | null>(null)
   const requestButtonRef = useRef<HTMLButtonElement | null>(null)
   const reviewStatusRef = useRef<HTMLParagraphElement | null>(null)
+
+  useEffect(() => {
+    if (reviewFeedback !== null) reviewStatusRef.current?.focus()
+  }, [reviewFeedback])
 
   if (
     sessionState.status !== 'authenticated' ||
@@ -101,7 +109,8 @@ export function PublishedEventPage() {
 
   const isPublished = event.status === 'published'
   const status = organizerStatus(event)
-  const isPublic = isPublished && !publicEventQuery.isError && publicEventQuery.data !== undefined && publicEventQuery.data !== null
+  const publicAvailabilityIsPending = publicEventQuery.isPending || publicEventQuery.isFetching || publicEventQuery.data === undefined
+  const isPublic = isPublished && !publicEventQuery.isError && !publicAvailabilityIsPending && publicEventQuery.data !== null
   const canSetUpPaidTickets = isPublic && event.admission_type === 'free'
   const canRequestReview = isPublished && ['under_review', 'blocked', 'removed'].includes(event.moderation_status)
   const currentReview = reviewQuery.data
@@ -116,7 +125,6 @@ export function PublishedEventPage() {
       await requestReviewMutation.mutateAsync(reviewNote.trim())
       setReviewNote('')
       setReviewFeedback('Review requested.')
-      reviewStatusRef.current?.focus()
     } catch {
       setReviewError('Review request could not be sent. Try again.')
       requestButtonRef.current?.focus()
@@ -133,7 +141,6 @@ export function PublishedEventPage() {
     try {
       await withdrawReviewMutation.mutateAsync()
       setReviewFeedback('Review request withdrawn.')
-      reviewStatusRef.current?.focus()
     } catch {
       setReviewError('Review request could not be withdrawn. Try again.')
     } finally {
@@ -156,17 +163,17 @@ export function PublishedEventPage() {
         ) : null}
       </header>
       <div aria-live="polite" className={`published-event__notice${isPublic ? ' published-event__notice--public' : ''}`}>
-        {isPublic
-          ? <p>This event is publicly available.</p>
-          : publicEventQuery.isError
-            ? (
-                <div>
-                  <p>Public availability could not be confirmed.</p>
-                  <Button onClick={() => void publicEventQuery.refetch()} variant="secondary">Check public availability again</Button>
-                </div>
-              )
-            : publicEventQuery.isPending || publicEventQuery.data === undefined
-              ? <p>Checking public availability…</p>
+        {publicEventQuery.isError
+          ? (
+              <div>
+                <p>Public availability could not be confirmed.</p>
+                <Button onClick={() => void publicEventQuery.refetch()} variant="secondary">Check public availability again</Button>
+              </div>
+            )
+          : publicAvailabilityIsPending
+            ? <p>Checking public availability…</p>
+            : isPublic
+              ? <p>This event is publicly available.</p>
               : <p>{status.copy}</p>}
       </div>
       <EventSummary event={event} organizer={organizer} />
@@ -177,13 +184,13 @@ export function PublishedEventPage() {
             <h2 id="review-request-title">Request review</h2>
             <p>Ask Whereto to review this saved version. You can include one optional note.</p>
           </header>
-          {reviewQuery.isPending || reviewQuery.data === undefined ? (
-            <p role="status">Loading review request status…</p>
-          ) : reviewQuery.isError ? (
+          {reviewQuery.isError ? (
             <div className="review-request__error" role="alert">
               <p>Review request status could not load.</p>
               <Button onClick={() => void reviewQuery.refetch()} variant="secondary">Try again</Button>
             </div>
+          ) : reviewQuery.isPending || reviewQuery.data === undefined ? (
+            <p role="status">Loading review request status…</p>
           ) : currentReview?.status === 'open' ? (
             <div className="review-request__current">
               <p ref={reviewStatusRef} role="status" tabIndex={-1}>
