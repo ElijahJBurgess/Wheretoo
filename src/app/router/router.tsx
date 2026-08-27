@@ -17,13 +17,21 @@ import { OrganizerPaymentsPage } from '../../features/payments/OrganizerPayments
 import { OrderConfirmationPage } from '../../features/orders/OrderConfirmationPage'
 import { EventPolicyPage } from '../../features/moderation/EventPolicyPage'
 import { OrganizerTermsPage } from '../../features/moderation/OrganizerTermsPage'
+import { ModerationCasePage } from '../../features/moderation/ModerationCasePage'
+import { ModerationQueuePage } from '../../features/moderation/ModerationQueuePage'
+import { RequireStaff } from '../../features/moderation/RequireStaff'
+import { useStaffRole } from '../../features/moderation/moderation.queries'
 import { OrganizerTicketTiersPage } from '../../features/tickets/OrganizerTicketTiersPage'
 import { PublicTicketEventPage } from '../../features/tickets/PublicTicketEventPage'
 import { RequireOrganizer } from './RequireOrganizer'
 import { RequireSession } from './RequireSession'
+import { useSession } from '../../features/auth/SessionProvider'
 
 function OrganizerShell() {
   const navigate = useNavigate()
+  const sessionState = useSession()
+  const staffUserId = sessionState.status === 'authenticated' ? sessionState.user.id : ''
+  const staffRoleQuery = useStaffRole(staffUserId)
   const [signOutError, setSignOutError] = useState<string | null>(null)
 
   async function handleSignOut() {
@@ -38,7 +46,7 @@ function OrganizerShell() {
   }
 
   return (
-    <OrganizerLayout onSignOut={() => void handleSignOut()}>
+    <OrganizerLayout onSignOut={() => void handleSignOut()} staffRole={staffRoleQuery.data ?? null}>
       <FormErrorSummary errors={signOutError ? [signOutError] : []} title="Sign out failed" />
       <Outlet />
     </OrganizerLayout>
@@ -64,6 +72,13 @@ export const appRouter = createBrowserRouter([
           {
             path: '/organizer/setup',
             element: <OrganizerSetupPage />,
+          },
+          {
+            element: <RequireStaff />,
+            children: [
+              { path: '/moderation', element: <ModerationQueuePage /> },
+              { path: '/moderation/events/:eventId', element: <ModerationCasePage /> },
+            ],
           },
           {
             element: <RequireOrganizer />,

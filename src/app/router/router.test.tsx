@@ -3,6 +3,7 @@ import { matchRoutes } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 import { RequireOrganizer } from './RequireOrganizer'
 import { RequireSession } from './RequireSession'
+import { RequireStaff } from '../../features/moderation/RequireStaff'
 import { appRouter } from './router'
 
 describe('organizer-only routes', () => {
@@ -57,5 +58,16 @@ describe('organizer-only routes', () => {
     expect(matches?.some((match) => isValidElement(match.route.element) && (
       match.route.element.type === RequireOrganizer || match.route.element.type === RequireSession
     ))).toBe(false)
+  })
+
+  it.each([
+    ['/moderation', '/moderation'],
+    ['/moderation/events/eb0fd9d5-d7d5-45dd-a99f-0c8a191bdc6f', '/moderation/events/:eventId'],
+  ])('keeps staff route %s behind session and database staff guards but not organizer setup', (path, routePath) => {
+    const matches = matchRoutes(appRouter.routes, path)
+    expect(matches?.at(-1)?.route.path).toBe(routePath)
+    expect(matches?.some((match) => isValidElement(match.route.element) && match.route.element.type === RequireSession)).toBe(true)
+    expect(matches?.some((match) => isValidElement(match.route.element) && match.route.element.type === RequireStaff)).toBe(true)
+    expect(matches?.some((match) => isValidElement(match.route.element) && match.route.element.type === RequireOrganizer)).toBe(false)
   })
 })
