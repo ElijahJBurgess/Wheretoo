@@ -66,8 +66,8 @@ const result = {
   outcome: "clear_candidate" as const,
   riskLevel: "low" as const,
   reasonCodes: ["no_violation" as const],
-  providerReference: "opaque-provider-ref",
-  modelVersion: "model-v1",
+  providerReference: "provider/opaque-ref",
+  modelVersion: "provider/model-v1",
 };
 
 function request(token: string | null = workerToken): Request {
@@ -117,7 +117,7 @@ Deno.test("worker and contextual provider env stay server-only and validate exac
   assertEquals(getContextualModerationConfig(() => undefined), null);
 });
 
-Deno.test("structured schemas reject malformed jobs and provider prose", () => {
+Deno.test("structured schemas reject malformed jobs and unsafe provider metadata", () => {
   assertEquals(moderationJobSchema.parse(job), job);
   assertEquals(contextualModerationResultSchema.parse(result), result);
   assertThrows(() =>
@@ -136,6 +136,19 @@ Deno.test("structured schemas reject malformed jobs and provider prose", () => {
   assertThrows(() =>
     moderationJobSchema.parse({ ...job, buyerEmail: "x@example.invalid" })
   );
+  for (
+    const invalidResult of [
+      { ...result, outcome: "review_required", reasonCodes: ["no_violation"] },
+      { ...result, providerReference: "contact@example.invalid" },
+      { ...result, providerReference: "prose with spaces" },
+      { ...result, providerReference: "provider/sk_live_abcdef0123456789" },
+      { ...result, providerReference: "provider/opaque\nreference" },
+      { ...result, modelVersion: "provider/input excerpt" },
+      { ...result, modelVersion: "provider/abcdef0123456789abcdef0123456789" },
+    ]
+  ) {
+    assertThrows(() => contextualModerationResultSchema.parse(invalidResult));
+  }
 });
 
 Deno.test("worker requires the exact bearer token before claiming work", async () => {

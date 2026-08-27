@@ -16,6 +16,10 @@ export const moderationReasonCodeSchema = z.enum([
 ]);
 
 const nullableText = z.string().nullable();
+const opaqueProviderMetadataSchema = z.string().regex(
+  /^[a-z][a-z0-9_-]{0,31}\/(?!sk(?:_|-)|rk(?:_|-)|whsec(?:_|-))(?![A-Fa-f0-9]{32,}$)[A-Za-z0-9_-]{6,40}$/,
+  "provider metadata must be a bounded opaque identifier",
+);
 
 const canonicalInputSchema = z.object({
   event: z.object({
@@ -78,8 +82,8 @@ export const contextualModerationResultSchema = z.object({
   ]),
   riskLevel: z.enum(["low", "high"]),
   reasonCodes: z.array(moderationReasonCodeSchema).min(1).max(12),
-  providerReference: z.string().min(1).max(255).nullable(),
-  modelVersion: z.string().min(1).max(120).nullable(),
+  providerReference: opaqueProviderMetadataSchema.nullable(),
+  modelVersion: opaqueProviderMetadataSchema.nullable(),
 }).strict().superRefine((value, context) => {
   if (
     value.outcome === "clear_candidate" &&
@@ -95,6 +99,15 @@ export const contextualModerationResultSchema = z.object({
     context.addIssue({
       code: "custom",
       message: "held candidates must be high risk",
+    });
+  }
+  if (
+    value.outcome !== "clear_candidate" &&
+    value.reasonCodes.includes("no_violation")
+  ) {
+    context.addIssue({
+      code: "custom",
+      message: "held candidates cannot include no_violation",
     });
   }
   if (new Set(value.reasonCodes).size !== value.reasonCodes.length) {

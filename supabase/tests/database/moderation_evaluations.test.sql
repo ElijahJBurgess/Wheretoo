@@ -2,7 +2,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(33);
+select plan(48);
 
 select has_function(
   'public', 'server_claim_moderation_evaluation', array['text'],
@@ -165,7 +165,7 @@ select results_eq(
     select public.server_apply_moderation_evaluation(
       evaluations.id, evaluations.content_revision, evaluations.input_sha256,
       evaluations.queued_moderation_version, 'clear_candidate', 'low',
-      array['no_violation'], 'opaque-ref', 'model-v1'
+      array['no_violation'], 'provider/opaque-ref', 'provider/model-v1'
     )
     from private.event_moderation_evaluations as evaluations
     where evaluations.id = '37000000-0000-4000-8000-000000000001'
@@ -188,13 +188,26 @@ select results_eq(
     select public.server_apply_moderation_evaluation(
       evaluations.id, evaluations.content_revision, evaluations.input_sha256,
       evaluations.queued_moderation_version, 'clear_candidate', 'low',
-      array['no_violation'], 'opaque-ref', 'model-v1'
+      array['no_violation'], 'provider/opaque-ref', 'provider/model-v1'
     )
     from private.event_moderation_evaluations as evaluations
     where evaluations.id = '37000000-0000-4000-8000-000000000001'
   $$,
   $$ values ('already_applied'::text) $$,
   'duplicate apply is idempotent'
+);
+select throws_ok(
+  $$
+    select public.server_apply_moderation_evaluation(
+      evaluations.id, evaluations.content_revision, repeat('f', 64),
+      evaluations.queued_moderation_version, 'clear_candidate', 'low',
+      array['no_violation'], null, null
+    )
+    from private.event_moderation_evaluations as evaluations
+    where evaluations.id = '37000000-0000-4000-8000-000000000001'
+  $$,
+  'P0001', 'MODERATION_EVALUATION_CONFLICT',
+  'a terminal apply rejects a mismatched immutable input tuple'
 );
 
 reset role;
@@ -332,6 +345,102 @@ select throws_ok(
   $$
     select public.server_apply_moderation_evaluation(
       evaluations.id, evaluations.content_revision, evaluations.input_sha256,
+      evaluations.queued_moderation_version, null, 'low',
+      array['no_violation'], null, null
+    ) from private.event_moderation_evaluations as evaluations
+    where evaluations.id = '37000000-0000-4000-8000-000000000004'
+  $$,
+  '22023', 'MODERATION_RESULT_INVALID',
+  'null moderation outcomes are rejected explicitly'
+);
+select throws_ok(
+  $$
+    select public.server_apply_moderation_evaluation(
+      evaluations.id, evaluations.content_revision, evaluations.input_sha256,
+      evaluations.queued_moderation_version, 'clear_candidate', null,
+      array['no_violation'], null, null
+    ) from private.event_moderation_evaluations as evaluations
+    where evaluations.id = '37000000-0000-4000-8000-000000000004'
+  $$,
+  '22023', 'MODERATION_RESULT_INVALID',
+  'null moderation risk levels are rejected explicitly'
+);
+select throws_ok(
+  $$
+    select public.server_apply_moderation_evaluation(
+      evaluations.id, evaluations.content_revision, evaluations.input_sha256,
+      evaluations.queued_moderation_version, 'review_required', 'high',
+      array['no_violation'], null, null
+    ) from private.event_moderation_evaluations as evaluations
+    where evaluations.id = '37000000-0000-4000-8000-000000000004'
+  $$,
+  '22023', 'MODERATION_RESULT_INVALID',
+  'held outcomes cannot include the clear-only reason code'
+);
+select throws_ok(
+  $$
+    select public.server_apply_moderation_evaluation(
+      evaluations.id, evaluations.content_revision, evaluations.input_sha256,
+      evaluations.queued_moderation_version, 'clear_candidate', 'low',
+      array['no_violation'], 'synthetic@example.invalid', null
+    ) from private.event_moderation_evaluations as evaluations
+    where evaluations.id = '37000000-0000-4000-8000-000000000004'
+  $$,
+  '22023', 'MODERATION_RESULT_INVALID',
+  'provider metadata must use opaque identifiers'
+);
+select throws_ok(
+  $$
+    select public.server_apply_moderation_evaluation(
+      evaluations.id, evaluations.content_revision, evaluations.input_sha256,
+      evaluations.queued_moderation_version, 'clear_candidate', 'low',
+      array['no_violation'], 'provider/has whitespace', null
+    ) from private.event_moderation_evaluations as evaluations
+    where evaluations.id = '37000000-0000-4000-8000-000000000004'
+  $$,
+  '22023', 'MODERATION_RESULT_INVALID',
+  'provider metadata rejects prose and whitespace'
+);
+select throws_ok(
+  $$
+    select public.server_apply_moderation_evaluation(
+      evaluations.id, evaluations.content_revision, evaluations.input_sha256,
+      evaluations.queued_moderation_version, 'clear_candidate', 'low',
+      array['no_violation'], 'provider/opaque' || chr(10) || 'ref', null
+    ) from private.event_moderation_evaluations as evaluations
+    where evaluations.id = '37000000-0000-4000-8000-000000000004'
+  $$,
+  '22023', 'MODERATION_RESULT_INVALID',
+  'provider metadata rejects line breaks'
+);
+select throws_ok(
+  $$
+    select public.server_apply_moderation_evaluation(
+      evaluations.id, evaluations.content_revision, evaluations.input_sha256,
+      evaluations.queued_moderation_version, 'clear_candidate', 'low',
+      array['no_violation'], 'provider/sk_live_abcdef0123456789', 'provider/model-v1'
+    ) from private.event_moderation_evaluations as evaluations
+    where evaluations.id = '37000000-0000-4000-8000-000000000004'
+  $$,
+  '22023', 'MODERATION_RESULT_INVALID',
+  'provider metadata rejects token-like identifiers'
+);
+select throws_ok(
+  $$
+    select public.server_apply_moderation_evaluation(
+      evaluations.id, evaluations.content_revision, evaluations.input_sha256,
+      evaluations.queued_moderation_version, 'clear_candidate', 'low',
+      array['no_violation'], 'provider/opaque-ref', 'provider/input excerpt'
+    ) from private.event_moderation_evaluations as evaluations
+    where evaluations.id = '37000000-0000-4000-8000-000000000004'
+  $$,
+  '22023', 'MODERATION_RESULT_INVALID',
+  'model metadata rejects input excerpts'
+);
+select throws_ok(
+  $$
+    select public.server_apply_moderation_evaluation(
+      evaluations.id, evaluations.content_revision, evaluations.input_sha256,
       evaluations.queued_moderation_version, 'review_required', 'high',
       array['not-approved'], null, null
     )
@@ -375,6 +484,28 @@ select results_eq(
   $$ select status, attempt_count, failure_code, finished_at is not null from private.event_moderation_evaluations where id = '37000000-0000-4000-8000-000000000005' $$,
   $$ values ('failed'::text, 3, 'MODERATOR_TIMEOUT'::text, true) $$,
   'retry exhaustion persists only bounded terminal facts'
+);
+select results_eq(
+  $$
+    select public.server_fail_moderation_evaluation(
+      evaluations.id, evaluations.content_revision, evaluations.input_sha256,
+      evaluations.queued_moderation_version, 'MODERATOR_TIMEOUT'
+    ) from private.event_moderation_evaluations as evaluations
+    where evaluations.id = '37000000-0000-4000-8000-000000000005'
+  $$,
+  $$ values ('failed'::text) $$,
+  'an exact terminal failure retry is idempotent'
+);
+select throws_ok(
+  $$
+    select public.server_fail_moderation_evaluation(
+      evaluations.id, evaluations.content_revision, repeat('e', 64),
+      evaluations.queued_moderation_version, 'MODERATOR_TIMEOUT'
+    ) from private.event_moderation_evaluations as evaluations
+    where evaluations.id = '37000000-0000-4000-8000-000000000005'
+  $$,
+  'P0001', 'MODERATION_EVALUATION_CONFLICT',
+  'a terminal failure rejects a mismatched immutable input tuple'
 );
 select throws_ok(
   $$
@@ -422,6 +553,39 @@ select results_eq(
   $$ select status, attempt_count, started_at, finished_at, failure_code from private.event_moderation_evaluations where id = '37000000-0000-4000-8000-000000000006' $$,
   $$ values ('queued'::text, 1, null::timestamptz, null::timestamptz, 'MODERATOR_UNAVAILABLE'::text) $$,
   'retry scheduling clears lease timestamps while retaining a safe code'
+);
+
+reset role;
+update private.event_moderation_evaluations
+set status = 'processing',
+    created_at = statement_timestamp() - interval '10 minutes',
+    started_at = statement_timestamp() - interval '6 minutes'
+where id = '37000000-0000-4000-8000-000000000006';
+set local role service_role;
+select results_eq(
+  $$ select evaluation_id, attempt_count from public.server_claim_moderation_evaluation('worker-lease') $$,
+  $$ values ('37000000-0000-4000-8000-000000000006'::uuid, 2) $$,
+  'an expired lease is reclaimed exactly once with its next bounded attempt'
+);
+select results_eq(
+  $$ select status, attempt_count, started_at > statement_timestamp() - interval '1 minute' from private.event_moderation_evaluations where id = '37000000-0000-4000-8000-000000000006' $$,
+  $$ values ('processing'::text, 2, true) $$,
+  'reclaim renews the lease without resetting its attempt count'
+);
+reset role;
+update private.event_moderation_evaluations
+set attempt_count = 3, started_at = statement_timestamp() - interval '6 minutes'
+where id = '37000000-0000-4000-8000-000000000006';
+set local role service_role;
+select results_eq(
+  $$ select count(*)::bigint from public.server_claim_moderation_evaluation('worker-cleanup') $$,
+  $$ values (0::bigint) $$,
+  'expired final leases are cleaned without producing more work'
+);
+select results_eq(
+  $$ select status, attempt_count, failure_code from private.event_moderation_evaluations where id = '37000000-0000-4000-8000-000000000006' $$,
+  $$ values ('failed'::text, 3, 'MODERATOR_LEASE_EXPIRED'::text) $$,
+  'an expired final lease becomes a bounded terminal failure rather than stranding'
 );
 
 select results_eq(
