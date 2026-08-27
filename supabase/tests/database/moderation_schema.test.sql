@@ -748,15 +748,23 @@ select lives_ok(
     );
 
     insert into private.organizer_policy_versions (
-      id, policy_kind, public_url, content_sha256, effective_at
+      id, policy_kind, stage, public_url, content_sha256, effective_at
     ) values
-      ('moderation-test-terms', 'organizer_terms', 'https://example.invalid/terms', repeat('1', 64), now()),
-      ('moderation-test-policy', 'event_policy', 'https://example.invalid/policy', repeat('2', 64), now());
+      (
+        'moderation-test-terms', 'organizer_terms', 'production_approved',
+        'https://example.invalid/terms', repeat('1', 64), now()
+      ),
+      (
+        'moderation-test-policy', 'event_policy', 'production_approved',
+        'https://example.invalid/policy', repeat('2', 64), now()
+      );
 
-    insert into private.organizer_policy_requirements (policy_kind, policy_version_id)
-    values
-      ('organizer_terms', 'moderation-test-terms'),
-      ('event_policy', 'moderation-test-policy');
+    update private.organizer_policy_requirements
+    set policy_version_id = case policy_kind
+      when 'organizer_terms' then 'moderation-test-terms'
+      else 'moderation-test-policy'
+    end
+    where policy_kind in ('organizer_terms', 'event_policy');
 
     insert into private.event_policy_acceptances (
       id, event_id, organizer_id, accepted_by_user_id, content_revision,
