@@ -145,7 +145,7 @@ describe('EventEditorPage', () => {
     await user.click(screen.getByRole('button', { name: 'Save draft' }))
     await waitFor(() => expect(router.state.location.pathname).toBe('/organizer/events/event-1/edit'))
     expect(mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ eventId: null, organizerId: 'organizer-1' }))
-    expect(screen.getByText('Saved')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('Saved')).toBeInTheDocument())
     expect(router.state.historyAction).toBe('REPLACE')
 
     const savedTitle = screen.getByLabelText('Event title')

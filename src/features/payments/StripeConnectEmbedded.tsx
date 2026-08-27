@@ -17,6 +17,8 @@ type StripeConnectEmbeddedProps = {
   refreshAccountSession: () => Promise<ConnectAccountSession>
 }
 
+const connectInstances = new WeakMap<ConnectAccountSession, ReturnType<typeof loadConnectAndInitialize>>()
+
 function createClientSecretFetcher(
   initialClientSecret: string,
   refreshAccountSession: () => Promise<ConnectAccountSession>,
@@ -33,6 +35,31 @@ function createClientSecretFetcher(
   }
 }
 
+function connectInstanceForSession(
+  initialSession: ConnectAccountSession,
+  refreshAccountSession: () => Promise<ConnectAccountSession>,
+) {
+  const existing = connectInstances.get(initialSession)
+  if (existing) return existing
+
+  const instance = loadConnectAndInitialize({
+    publishableKey: publicEnv.stripePublishableKey,
+    fetchClientSecret: createClientSecretFetcher(initialSession.clientSecret, refreshAccountSession),
+    appearance: {
+      variables: {
+        colorPrimary: '#6d4aff',
+        colorBackground: '#ffffff',
+        colorText: '#19162c',
+        colorDanger: '#b42318',
+        borderRadius: '12px',
+        fontFamily: 'Manrope Variable, sans-serif',
+      },
+    },
+  })
+  connectInstances.set(initialSession, instance)
+  return instance
+}
+
 export default function StripeConnectEmbedded({
   initialSession,
   mode,
@@ -40,22 +67,7 @@ export default function StripeConnectEmbedded({
   onLoadError,
   refreshAccountSession,
 }: StripeConnectEmbeddedProps) {
-  const [connectInstance] = useState(() =>
-    loadConnectAndInitialize({
-      publishableKey: publicEnv.stripePublishableKey,
-      fetchClientSecret: createClientSecretFetcher(initialSession.clientSecret, refreshAccountSession),
-      appearance: {
-        variables: {
-          colorPrimary: '#6d4aff',
-          colorBackground: '#ffffff',
-          colorText: '#19162c',
-          colorDanger: '#b42318',
-          borderRadius: '12px',
-          fontFamily: 'Manrope Variable, sans-serif',
-        },
-      },
-    }),
-  )
+  const [connectInstance] = useState(() => connectInstanceForSession(initialSession, refreshAccountSession))
 
   return (
     <ConnectComponentsProvider connectInstance={connectInstance}>

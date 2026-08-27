@@ -1026,6 +1026,13 @@ h3 {
   .event-summary__facts { grid-template-columns: 1fr; }
   .event-summary__wide { grid-column: auto; }
   .payments-panel__actions .ui-button { flex: 1 1 100%; }
+  .confirmation-card__facts div:last-child { grid-template-columns: 1fr; gap: 0.35rem; }
+  .confirmation-card__facts div:last-child dd {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.8125rem;
+    letter-spacing: -0.02em;
+    text-align: left;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

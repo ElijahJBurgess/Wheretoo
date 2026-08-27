@@ -143,6 +143,7 @@ export async function assertPageContract(
   h1: string,
   currentStep?: string,
   requirePrimary = true,
+  allowedControlCopy?: RegExp,
 ) {
   await expect(page.getByRole('heading', { name: h1, level: 1 })).toBeVisible()
   if (currentStep) {
@@ -189,7 +190,11 @@ export async function assertPageContract(
 
   const excludedControls = await page.getByRole('button').allTextContents()
   const excludedLinks = await page.getByRole('link').allTextContents()
-  expect([...excludedControls, ...excludedLinks].filter((copy) => forbiddenControlCopy.test(copy))).toEqual([])
+  expect(
+    [...excludedControls, ...excludedLinks].filter(
+      (copy) => forbiddenControlCopy.test(copy) && !allowedControlCopy?.test(copy),
+    ),
+  ).toEqual([])
 }
 
 export async function captureState(page: Page, testInfo: TestInfo, state: string, h1: string) {
@@ -197,7 +202,8 @@ export async function captureState(page: Page, testInfo: TestInfo, state: string
     page,
     h1,
     state === 'details' ? 'Details' : state === 'schedule' ? 'Schedule & location' : state === 'review' ? 'Review' : undefined,
-    state !== 'published',
+    true,
+    state === 'published' ? /ticket/i : undefined,
   )
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.evaluate(() => document.fonts.ready)

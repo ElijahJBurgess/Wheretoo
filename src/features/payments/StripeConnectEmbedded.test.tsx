@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react'
+import { StrictMode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { loadConnectAndInitialize } = vi.hoisted(() => ({ loadConnectAndInitialize: vi.fn() }))
@@ -32,15 +33,18 @@ describe('StripeConnectEmbedded', () => {
       ...initialSession,
       clientSecret: 'refreshed-account-session',
     })
-    const { rerender } = render(
-      <StripeConnectEmbedded
-        initialSession={initialSession}
-        mode="onboarding"
-        onExit={vi.fn()}
-        onLoadError={vi.fn()}
-        refreshAccountSession={refreshAccountSession}
-      />,
+    const renderEmbedded = (mode: 'onboarding' | 'management') => (
+      <StrictMode>
+        <StripeConnectEmbedded
+          initialSession={initialSession}
+          mode={mode}
+          onExit={vi.fn()}
+          onLoadError={vi.fn()}
+          refreshAccountSession={refreshAccountSession}
+        />
+      </StrictMode>
     )
+    const { rerender } = render(renderEmbedded('onboarding'))
 
     expect(screen.getByText('Stripe notifications')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Embedded onboarding' })).toBeInTheDocument()
@@ -55,15 +59,7 @@ describe('StripeConnectEmbedded', () => {
     await expect(options.fetchClientSecret()).resolves.toBe('refreshed-account-session')
     expect(refreshAccountSession).toHaveBeenCalledOnce()
 
-    rerender(
-      <StripeConnectEmbedded
-        initialSession={initialSession}
-        mode="management"
-        onExit={vi.fn()}
-        onLoadError={vi.fn()}
-        refreshAccountSession={refreshAccountSession}
-      />,
-    )
+    rerender(renderEmbedded('management'))
     expect(screen.getByText('Embedded account management')).toBeInTheDocument()
     expect(loadConnectAndInitialize).toHaveBeenCalledOnce()
   })

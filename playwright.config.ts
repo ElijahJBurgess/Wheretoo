@@ -27,6 +27,7 @@ export default defineConfig({
       VITE_SUPABASE_URL: env.supabaseUrl,
       VITE_SUPABASE_PUBLISHABLE_KEY: env.supabasePublishableKey,
       VITE_MAPBOX_ACCESS_TOKEN: env.mapboxAccessToken,
+      VITE_STRIPE_PUBLISHABLE_KEY: env.stripePublishableKey,
     },
   },
   projects: [
@@ -36,7 +37,7 @@ export default defineConfig({
     },
     {
       name: 'desktop-chromium',
-      use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 1000 } },
+      use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } },
     },
   ],
 })
