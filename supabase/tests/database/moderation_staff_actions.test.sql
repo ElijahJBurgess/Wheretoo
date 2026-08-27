@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(37);
+select no_plan();
 
 select has_function('public', 'get_my_staff_role', array[]::text[],
   'staff can read only their own active database role');
@@ -94,6 +94,32 @@ from public.events
 where id between '28000000-0000-4000-8000-000000000001'::uuid
   and '28000000-0000-4000-8000-000000000006'::uuid;
 
+insert into private.event_policy_legacy_exemptions (
+  id, event_id, grandfathered_content_revision, input_sha256, migration_identifier
+) values (
+  '58000000-0000-4000-8000-000000000001',
+  '28000000-0000-4000-8000-000000000001', 1,
+  private.compute_event_input_sha256('28000000-0000-4000-8000-000000000001'),
+  'staff-action-fixture'
+);
+insert into private.event_moderation_actions (
+  id, event_id, content_revision, input_sha256, actor_type, source, action,
+  previous_status, new_status, previous_public_history_status,
+  new_public_history_status, reason_code, policy_legacy_exemption_id,
+  moderation_version
+) values (
+  '48000000-0000-4000-8000-000000000001',
+  '28000000-0000-4000-8000-000000000001', 1,
+  private.compute_event_input_sha256('28000000-0000-4000-8000-000000000001'),
+  'system', 'migration', 'authorize_publication',
+  'not_evaluated', 'not_evaluated', 'never_public', 'never_public',
+  'other', '58000000-0000-4000-8000-000000000001', 9
+);
+update public.events
+set publicly_authorized_revision = 1,
+    publicly_authorized_action_id = '48000000-0000-4000-8000-000000000001'
+where id = '28000000-0000-4000-8000-000000000001';
+
 insert into private.event_moderation_actions (
   id, event_id, content_revision, input_sha256, actor_type, actor_user_id,
   source, action, previous_status, new_status, previous_public_history_status,
@@ -160,6 +186,36 @@ select set_config('request.jwt.claim.sub', '18000000-0000-4000-8000-000000000001
 set local role authenticated;
 select results_eq($$ select public.get_my_staff_role() $$, $$ values ('moderator'::text) $$,
   'an active moderator reads the server-controlled role only');
+select throws_ok(
+  $$ insert into private.staff_roles (user_id, role, active, granted_by) values ('18000000-0000-4000-8000-000000000004', 'moderator', true, '18000000-0000-4000-8000-000000000002') $$,
+  '42501', null,
+  'a moderator cannot insert staff roles directly'
+);
+select throws_ok(
+  $$ update private.staff_roles set active = false where user_id = '18000000-0000-4000-8000-000000000001' $$,
+  '42501', null,
+  'a moderator cannot mutate staff roles directly'
+);
+select throws_ok(
+  $$ delete from private.staff_roles where user_id = '18000000-0000-4000-8000-000000000001' $$,
+  '42501', null,
+  'a moderator cannot delete staff roles directly'
+);
+select throws_ok(
+  $$ insert into private.event_legacy_history_resolutions (event_id, action_id, resolved_by_user_id, resolved_public_history_status, evidence_code) values ('28000000-0000-4000-8000-000000000001', '48000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000001', 'never_public', 'legacy_archive_verified_never_public') $$,
+  '42501', null,
+  'a moderator cannot insert legacy-resolution evidence directly'
+);
+select throws_ok(
+  $$ update private.event_legacy_history_resolutions set evidence_code = 'legacy_archive_verified_never_public' where false $$,
+  '42501', null,
+  'a moderator cannot update legacy-resolution evidence directly'
+);
+select throws_ok(
+  $$ delete from private.event_legacy_history_resolutions where false $$,
+  '42501', null,
+  'a moderator cannot delete legacy-resolution evidence directly'
+);
 select throws_ok($$ select * from public.list_moderation_queue(101) $$,
   '22023', 'MODERATION_QUEUE_LIMIT_INVALID',
   'queue limit above the bounded maximum is rejected');
@@ -225,8 +281,42 @@ select lives_ok(
   'under-review hold is an approved same-state audited signal'
 );
 select lives_ok(
+  $$ select public.moderate_event('28000000-0000-4000-8000-000000000001', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000001'), 12, 'clear', 'no_violation', null) $$,
+  'a moderator may clear a known-history under-review revision'
+);
+reset role;
+select results_eq(
+  $$
+    select events.public_history_status, actions.previous_public_history_status,
+      actions.new_public_history_status, intervals.eligibility_state,
+      events.public_eligibility_version
+    from public.events as events
+    join private.event_moderation_actions as actions
+      on actions.event_id = events.id and actions.moderation_version = 13
+    join private.event_public_eligibility_intervals as intervals
+      on intervals.event_id = events.id
+      and intervals.public_eligibility_version = events.public_eligibility_version
+      and intervals.ended_at is null
+    where events.id = '28000000-0000-4000-8000-000000000001'
+  $$,
+  $$ values ('previously_public'::text, 'never_public'::text, 'previously_public'::text, 'eligible'::text, 1::bigint) $$,
+  'first-public clear records the same history transition as the event and open eligible epoch'
+);
+select set_config('request.jwt.claim.sub', '18000000-0000-4000-8000-000000000001', true);
+set local role authenticated;
+select throws_ok(
+  $$ select public.moderate_event('28000000-0000-4000-8000-000000000002', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000002'), 20, 'remove', 'other', null) $$,
+  'P0001', 'MODERATION_TRANSITION_INVALID',
+  'otherwise-valid removal is rejected for never-public history'
+);
+select lives_ok(
   $$ select public.moderate_event('28000000-0000-4000-8000-000000000002', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000002'), 20, 'block', 'other', null) $$,
   'a moderator may block a never-public clear event'
+);
+select throws_ok(
+  $$ select public.moderate_event('28000000-0000-4000-8000-000000000003', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000003'), 30, 'block', 'other', null) $$,
+  'P0001', 'MODERATION_TRANSITION_INVALID',
+  'otherwise-valid block is rejected for previously-public history'
 );
 select lives_ok(
   $$ select public.moderate_event('28000000-0000-4000-8000-000000000003', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000003'), 30, 'remove', 'other', null) $$,
@@ -253,6 +343,16 @@ set local role authenticated;
 select lives_ok(
   $$ select public.moderate_event('28000000-0000-4000-8000-000000000004', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000004'), 40, 'clear', 'no_violation', null) $$,
   'a moderator may clear a never-public blocked event'
+);
+select throws_ok(
+  $$ select public.moderate_event('28000000-0000-4000-8000-000000000004', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000004'), 41, 'restore', 'no_violation', null) $$,
+  'P0001', 'MODERATION_TRANSITION_INVALID',
+  'restore-from-blocked is rejected even with a current exact revision'
+);
+select throws_ok(
+  $$ select public.moderate_event('28000000-0000-4000-8000-000000000005', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000005'), 50, 'clear', 'no_violation', null) $$,
+  'P0001', 'MODERATION_TRANSITION_INVALID',
+  'clear-from-removed is rejected even for previously-public history'
 );
 select lives_ok(
   $$ select public.moderate_event('28000000-0000-4000-8000-000000000005', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000005'), 50, 'restore', 'no_violation', null) $$,
@@ -300,6 +400,35 @@ select results_eq(
   $$ select count(*)::bigint from public.get_moderation_case('28000000-0000-4000-8000-000000000006') $$,
   $$ values (1::bigint) $$,
   'staff case lookup returns one bounded internal case projection'
+);
+select results_eq(
+  $$
+    select
+      to_jsonb(cases) ?& array[
+        'title', 'description', 'category', 'starts_at', 'ends_at', 'timezone',
+        'venue_name', 'address_line1', 'address_line2', 'city', 'region',
+        'postal_code', 'country_code', 'mapbox_feature_id', 'latitude',
+        'longitude', 'disclosures', 'legacy_resolution'
+      ]
+      and (to_jsonb(cases) -> 'disclosures') ?& array[
+        'minimum_age', 'alcohol_present', 'cannabis_present',
+        'explicit_adult_content', 'gambling_present', 'weapons_present',
+        'high_risk_activity'
+      ]
+      and (to_jsonb(cases) -> 'legacy_resolution') ?& array[
+        'resolved_public_history_status', 'evidence_code',
+        'observed_public_at', 'created_at'
+      ]
+      and not to_jsonb(cases) ?| array[
+        'organizer_id', 'actor_user_id', 'reviewer_user_id',
+        'email', 'provider_reference', 'model_version'
+      ]
+      and jsonb_array_length(cases.actions) <= 50
+      and jsonb_array_length(cases.evaluations) <= 50
+    from public.get_moderation_case('28000000-0000-4000-8000-000000000006') as cases
+  $$,
+  $$ values (true) $$,
+  'staff case has the exact bounded workflow allowlist and excludes PII/provider internals'
 );
 reset role;
 
