@@ -22,6 +22,9 @@
 - Stripe is frozen: zero Stripe/Connect/Checkout/webhook/refund/destination-charge fixtures, API calls, CLI commands, credential reads, secret changes, integration tests, or payment-side implementation changes.
 - Founder-locked Option A: hide immediately, block new database reservations, preserve all records, do not expire already-open Sessions, and let the unchanged Day 2 abnormal/reconciliation path handle a rare stale completion.
 - Do not build the Build 3 map. The map-safe database projection and typed response are Build 2.5 dependency contracts only.
+- Build 2.5 development uses two explicit non-production policy versions: `dev-organizer-terms-v1` at `/organizer-terms` and `dev-event-policy-v1` at `/event-policy`. Their pages contain only the founder-approved placeholder notices and must never be represented as production legal consent.
+- Final Organizer Terms and Event Policy are a production-launch prerequisite only. Their absence cannot block Build 2.5 implementation, internal verification, completion, or Build 3 planning/build work.
+- Production launch fails closed unless both current required policies are production-approved immutable versions with canonical HTTPS URLs, approved version IDs, effective dates, and exact content digests; development-placeholder versions can never satisfy that readiness check.
 - Do not build a policy CMS, full appeals system, organizer reputation, automatic report takedown, automatic refunds, artwork uploader, AI flyer generator, staff-management UI, or giant analytics product.
 - Contextual moderation is provider-adapted. If no provider is configured, the worker returns bounded `MODERATOR_UNAVAILABLE`, retries at most three times, and leaves contextual/high-risk events held; deterministically low-risk publication continues.
 - Never store chain of thought, raw model prose, raw IP addresses, user agents, auth tokens, or provider secrets. Store only validated structured outcomes and bounded safe codes.
@@ -29,14 +32,16 @@
 - Each task gets a fresh implementation subagent under `superpowers:subagent-driven-development`, followed by spec-compliance and quality/security review. Do not parallelize migrations or shared generated types; frontend-only tasks may proceed only after their database/type dependency is committed.
 - After each task: run `git diff --check`, a task-scoped credential scan, stage only listed files, commit with the specified message, write the ignored task evidence report, and leave unrelated files untouched.
 
-## External Execution Prerequisite
+## Development Policy Configuration and Production Launch Gate
 
-Before Task 3 can push policy configuration, the founder/legal owner must supply both exact approved immutable documents, stable version identifiers, SHA-256 digests, effective dates, and canonical HTTPS URLs for:
+There is no founder/legal blocker before Build 2.5 execution. Task 3 seeds only these clearly marked development/test policy records:
 
-- Whereto Organizer Terms; and
-- Whereto Event Policy.
+- `dev-organizer-terms-v1` -> `/organizer-terms` -> `Whereto Organizer Terms will be finalized before public launch.`
+- `dev-event-policy-v1` -> `/event-policy` -> `Whereto Event Policy will be finalized before public launch.`
 
-These artifacts are absent from the repository. Executors must not invent legal text, use mutable URLs, or seed fake acceptances. Tasks 1–2 may be implemented while this input is obtained; continuous execution must stop before Task 3's migration push if it remains unavailable.
+The migration records an explicit `development_placeholder` policy stage and the SHA-256 digest of each exact notice. A private singleton policy environment starts `unconfigured`; a service/admin-only operation sets the confirmed linked development project to `development`, while `production` is rejected unless the current pair is production-approved. Acceptance, publish, and canonical public eligibility fail closed while unconfigured or when the configured environment and required pair disagree. These records prove version selection, event/revision binding, server timestamps, immutable acceptance, and re-acceptance behavior for development only. They contain no invented substantive terms and cannot be promoted or interpreted as production-approved policy versions.
+
+Before any real organizer/public production launch, an operational launch gate must prove all nine conditions: production Organizer Terms exist; production Event Policy exists; both have stable canonical HTTPS URLs; both have approved version identifiers; both have effective dates; both have exact content digests; no `development_placeholder` version satisfies the production-required check; current required-policy configuration references the approved production pair and the policy environment is `production`; and real organizers accept the production pair as appropriate. The production deployment remains closed to real organizer/public traffic until this check passes. This gate does not block Build 2.5 completion or Build 3 planning/build work.
 
 ---
 
@@ -46,7 +51,7 @@ These artifacts are absent from the repository. Executors must not invent legal 
 
 - `supabase/migrations/20260826010000_create_moderation_foundation.sql` — additive event revision/history fields and private moderation/policy tables.
 - `supabase/migrations/20260826010100_migrate_legacy_moderation.sql` — explicit legacy state classification, quarantine, bootstrap actions/exemptions, epoch initialization, and final moderation constraint.
-- `supabase/migrations/20260826010200_add_event_policy_acceptance.sql` — immutable policy registry/requirements, owner requirements projection, acceptance RPC, and exact ACL.
+- `supabase/migrations/20260826010200_add_event_policy_acceptance.sql` — immutable staged policy registry/requirements, fail-closed environment gate, development placeholder pair, owner requirements projection, acceptance RPC, and exact ACL.
 - `supabase/migrations/20260826010300_add_moderation_eligibility_functions.sql` — canonical digest, deterministic rules, artwork seam, publication authorization, publish/re-publish, candidate/canonical eligibility, and epoch transitions.
 - `supabase/migrations/20260826010400_route_public_reads_through_eligibility.sql` — revoke anonymous base reads and replace event, ticketing, checkout-preflight, fulfillment-validity, and map-safe projections with canonical eligibility.
 - `supabase/migrations/20260826010500_add_published_event_revision_paths.sql` — owner-safe published edits plus tier-text and organizer-display-name invalidation.
@@ -79,6 +84,7 @@ These artifacts are absent from the repository. Executors must not invent legal 
 
 - `src/features/moderation/moderation.types.ts`, `moderation.schemas.ts`, `moderation.api.ts`, `moderation.queries.ts` — disclosures, policy status, review, reports, staff queue/actions, and typed query keys.
 - `src/features/moderation/EventRequirementsStep.tsx`, `OrganizerAgreementStep.tsx` — late organizer flow steps.
+- `src/features/moderation/OrganizerTermsPage.tsx`, `EventPolicyPage.tsx` — development-only notice routes; no substantive legal copy.
 - `src/features/moderation/ReportEventDialog.tsx` — bounded public report UI.
 - `src/features/moderation/RequireStaff.tsx`, `ModerationQueuePage.tsx`, `ModerationCasePage.tsx` — protected minimal moderation console.
 - Existing event, ticket, organizer, router, layout, and style modules — narrow integrations only.
@@ -212,40 +218,51 @@ git commit -m "feat: migrate legacy moderation safely"
 - Test: `supabase/tests/database/organizers_events_rls.test.sql`
 
 **Interfaces:**
-- Consumes: founder/legal-approved policy version identifiers, SHA-256 digests, effective dates, canonical HTTPS URLs, and Task 1/2 policy tables.
-- Produces: `get_required_event_policies()`, `get_owned_event_requirements(uuid)`, `accept_current_event_policies(uuid)`, and minimal owner agreement status.
+- Consumes: the two founder-approved development placeholder identifiers/routes/notices and Task 1/2 policy tables; no final legal document is required for this task.
+- Produces: `get_required_event_policies()`, `get_owned_event_requirements(uuid)`, `accept_current_event_policies(uuid)`, service/admin-only `private.configure_policy_environment(text)`, `private.production_policy_configuration_is_ready()`, and minimal owner agreement status.
 
-- [ ] **Step 1: Verify the external policy artifacts before writing RED**
+- [ ] **Step 1: Write development-placeholder and production-readiness RED**
 
-Check that both immutable documents, version IDs, digests, effective dates, and HTTPS URLs are supplied and mutually consistent. If absent, stop here and report the external prerequisite; do not seed invented text or mutable links.
+Assert the exact development IDs, relative routes, `development_placeholder` stage, exact-notice digests, server-controlled requirement pair, and singleton environment default `unconfigured`. Prove acceptance/public eligibility fail closed while unconfigured; service/admin can configure the confirmed dev project as `development`; browser roles cannot configure it; the development pair is then acceptable for internal event-flow tests while `private.production_policy_configuration_is_ready()` remains false; immutable placeholder rows cannot be relabeled production-approved; production configuration rejects either placeholder requirement; and production readiness requires two distinct production-stage rows with HTTPS URLs/version IDs/effective dates/digests.
 
 - [ ] **Step 2: Write acceptance/security RED pgTAP**
 
-Cover owner A success, owner B denial, anonymous denial, client-selected old version rejection, ignored client timestamp/actor, server timestamp, exact retry idempotency, new revision/new version new row, immutable history, non-activating acceptance, policy change not hiding untouched published events, legacy exemption exact-revision behavior, and public leakage denial.
+Cover owner A success, owner B denial, anonymous denial, client-selected old version rejection, ignored client timestamp/actor, server timestamp, exact retry idempotency, new revision/new version new row, immutable history, non-activating acceptance, policy change not hiding untouched published events, legacy exemption exact-revision behavior, public leakage denial, and an acceptance of a development version remaining explicitly non-production.
 
 - [ ] **Step 3: Implement the policy migration and exact RPCs**
 
-Seed exactly two immutable policy version rows and requirement references. Define authenticated RPCs with no client version/timestamp arguments:
+Add immutable policy stage `development_placeholder|production_approved` and private singleton `organizer_policy_release_settings.environment` with `unconfigured|development|production`, changed only by reviewed migration/admin-service operations. Seed the singleton as `unconfigured` and seed exactly two immutable development rows and requirement references:
+
+```text
+dev-organizer-terms-v1 | development_placeholder | /organizer-terms | 2026-08-26T00:00:00Z | 5adc8a233232f30a58152a663394ce01d0af29ddbff8401bdad7f836ee49d475
+dev-event-policy-v1    | development_placeholder | /event-policy    | 2026-08-26T00:00:00Z | 797aa818b4e7ee9b1d9eb8e7b5b4dba013616080cdf09ccf33875c9a81429de3
+```
+
+The two digests are over the exact UTF-8 notice sentences shown in the development-policy section, with no trailing newline.
+
+Allow relative app routes only for `development_placeholder`; require canonical `https://` URLs for `production_approved`. `private.configure_policy_environment('development')` requires both current rows to be development placeholders; `private.configure_policy_environment('production')` requires both to be production-approved and pass readiness metadata checks; any other value fails. Acceptance, publish, and canonical public eligibility require a configured environment and a matching pair. Production readiness returns true only when the singleton is `production` and the current pair contains one production-approved row of each policy kind with nonblank approved ID, effective date, and 64-character lowercase content digest. Define authenticated RPCs with no client version/timestamp arguments:
 
 ```sql
 public.get_required_event_policies()
 public.get_owned_event_requirements(p_event_id uuid)
 public.accept_current_event_policies(p_event_id uuid)
+private.configure_policy_environment(p_environment text)
+private.production_policy_configuration_is_ready()
 ```
 
-All security-definer functions use `set search_path = ''`, derive `auth.uid()`, verify owner, lock event then requirements in stable order, recompute the digest, and revoke `PUBLIC` before granting only intended execution.
+All security-definer functions use `set search_path = ''`, derive `auth.uid()`, verify owner, lock event then requirements in stable order, recompute the digest, and revoke `PUBLIC` before granting only intended execution. The readiness helper is service/admin operational only and does not expose private policy history to browsers.
 
 - [ ] **Step 4: Dry-run and push only Task 3**
 
-Reconfirm development; dry-run must list only `20260826010200_add_event_policy_acceptance.sql`. Push it and verify exact policy rows by IDs/digests only—never print document contents or secrets unnecessarily.
+Reconfirm development; dry-run must list only `20260826010200_add_event_policy_acceptance.sql`. Push it, invoke the service/admin-only environment operation with literal `development`, and verify the exact development rows by IDs/stages/digests only. The absence of final production policy documents is not a stop condition; no production environment operation is invoked.
 
 - [ ] **Step 5: Run GREEN and privilege verification**
 
-Run focused acceptance pgTAP and organizer RLS. Inspect `information_schema.routine_privileges` and table ACLs: anon may read only the narrow required-policy projection, authenticated owners may execute owner RPCs, and no browser role may read private acceptance/configuration tables.
+Run focused acceptance pgTAP and organizer RLS. Inspect `information_schema.routine_privileges` and table ACLs: anon may read only the narrow required-policy projection, authenticated owners may execute owner RPCs, no browser role may read private acceptance/configuration tables or configure the environment, development readiness is false, a rollback-only valid production pair plus production environment makes readiness true without rewriting any development version, and either placeholder/unconfigured state makes it false again.
 
 - [ ] **Step 6: Review idempotency and policy-change semantics**
 
-Prove acceptance inserts no action/epoch/public transition, a browser boolean is irrelevant, current required pair is server-selected, old rows cannot be rewritten, and the exact legacy branch cannot advance revisions.
+Prove acceptance inserts no action/epoch/public transition, a browser boolean is irrelevant, current required pair is server-selected, old rows cannot be rewritten, the exact legacy branch cannot advance revisions, and development acceptance cannot be reported by any operational check as production legal consent.
 
 - [ ] **Step 7: Commit the policy contract**
 
@@ -281,7 +298,7 @@ Expected: current `publish_event` ignores disclosures/revision/authorization and
 
 - [ ] **Step 3: Implement canonical input, rules, and atomic transitions**
 
-Canonical JSON uses sorted stable keys and includes event public fields, disclosures, versioned artwork checksum, tier public name/description, and organizer display name; hash with `digest(..., 'sha256')`. `publish_event` locks advisory -> event -> requirements, validates exact acceptance/exemption, writes distinct `authorize_publication` plus `clear|hold` actions, sets authorization pointers, and calls candidate-to-epoch transition. Every status/epoch/action commit is atomic.
+Canonical JSON uses sorted stable keys and includes event public fields, disclosures, versioned artwork checksum, tier public name/description, and organizer display name; hash with `digest(..., 'sha256')`. `publish_event` locks advisory -> event -> policy environment -> requirements, rejects `unconfigured`, requires development placeholders only in `development` and production-approved rows only in `production`, validates exact acceptance/exemption, writes distinct `authorize_publication` plus `clear|hold` actions, sets authorization pointers, and calls candidate-to-epoch transition. A production environment with either development placeholder fails before publication and public eligibility. Every status/epoch/action commit is atomic.
 
 - [ ] **Step 4: Dry-run and push exactly Task 4**
 
@@ -321,7 +338,7 @@ git commit -m "feat: centralize moderation eligibility"
 
 - [ ] **Step 1: Write public-projection RED**
 
-Assert draft/cancelled/under-review/blocked/removed/stale-revision/unknown-history/invalid-location/ended rows are absent before browser receipt; clear current rows return only allowlisted fields; event detail/ticketing/map results agree; organizer bio/site/base city and all moderation/policy internals are absent; anon `select *` fails.
+Assert draft/cancelled/under-review/blocked/removed/stale-revision/unknown-history/invalid-location/ended rows are absent before browser receipt; `unconfigured` policy environment and production-with-placeholder requirements also return no public row; clear current rows in configured development and valid production fixtures return only allowlisted fields; event detail/ticketing/map results agree; organizer bio/site/base city and all moderation/policy internals are absent; anon `select *` fails.
 
 - [ ] **Step 2: Run RED and characterize current leakage**
 
@@ -593,11 +610,11 @@ git commit -m "feat: add moderation review and reports"
 
 **Interfaces:**
 - Consumes: Tasks 3–9 generated database RPC/table types.
-- Produces: `EventRequirements`, `RequiredPolicy`, `AgreementStatus`, `ModerationCase`, `ModerationActionInput`, `ReportReason`; `moderationKeys`; typed API functions for requirements/acceptance/reviews/reports/staff.
+- Produces: `EventRequirements`, `PolicyStage`, `RequiredPolicy`, `AgreementStatus`, `ModerationCase`, `ModerationActionInput`, `ReportReason`; `moderationKeys`; typed API functions for requirements/acceptance/reviews/reports/staff.
 
 - [ ] **Step 1: Write schema/API/query RED tests**
 
-Test exact policy URLs/version IDs, seven disclosure values, no acceptance internals, report reason union, staff action union, expected revision/digest/version payload, owner-aware keys, identity-switch isolation, exact invalidation, safe not-found, and raw database error suppression.
+Test exact development policy routes/version IDs/stage, canonical HTTPS production policy URLs/stage, rejection of a relative production URL or a development-prefixed production version, seven disclosure values, no acceptance internals, report reason union, staff action union, expected revision/digest/version payload, owner-aware keys, identity-switch isolation, exact invalidation, safe not-found, and raw database error suppression.
 
 - [ ] **Step 2: Run RED before generating/implementing**
 
@@ -637,9 +654,15 @@ git commit -m "feat: add moderation browser contracts"
 - Create: `src/features/moderation/EventRequirementsStep.test.tsx`
 - Create: `src/features/moderation/OrganizerAgreementStep.tsx`
 - Create: `src/features/moderation/OrganizerAgreementStep.test.tsx`
+- Create: `src/features/moderation/OrganizerTermsPage.tsx`
+- Create: `src/features/moderation/OrganizerTermsPage.test.tsx`
+- Create: `src/features/moderation/EventPolicyPage.tsx`
+- Create: `src/features/moderation/EventPolicyPage.test.tsx`
 - Modify: `src/features/events/EventEditorPage.tsx`
 - Modify: `src/features/events/EventEditorPage.test.tsx`
 - Modify: `src/features/events/EventReviewStep.tsx`
+- Modify: `src/app/router/router.tsx`
+- Modify: `src/app/router/router.test.tsx`
 - Modify: `src/components/ui/StepRail.tsx`
 - Modify: `src/components/ui/ui.test.tsx`
 - Modify: `src/styles/global.css`
@@ -650,7 +673,7 @@ git commit -m "feat: add moderation browser contracts"
 
 - [ ] **Step 1: Write organizer-flow RED tests**
 
-Prove disclosures are late, minimum-age select plus six yes/no controls, exact agreement copy/links/supporting text, one checkbox, no legal scroll box, acceptance required before Preview, values reload, server error retains values, stale agreement after material edit, published owner edit allowed, and blocked/removed edits preserve safe status.
+Prove disclosures are late, minimum-age select plus six yes/no controls, exact agreement copy/links/supporting text, one checkbox, no legal scroll box, acceptance required before Preview, values reload, server error retains values, stale agreement after material edit, published owner edit allowed, and blocked/removed edits preserve safe status. Route tests must prove `/organizer-terms` renders only `Whereto Organizer Terms will be finalized before public launch.` and `/event-policy` renders only `Whereto Event Policy will be finalized before public launch.`, with visible `Development placeholder` labeling and no production-consent claim.
 
 - [ ] **Step 2: Run RED**
 
@@ -658,7 +681,7 @@ Expected: editor has only three steps, published events are read-only, and requi
 
 - [ ] **Step 3: Implement focused step components and editor state**
 
-Keep React Hook Form authoritative for editable values and TanStack Query for persisted requirements/agreement state. Saving content never forges acceptance. Checkbox submission calls `acceptCurrentEventPolicies(eventId)` after the latest save; Preview navigation only follows successful returned current agreement status. Any revision-changing edit resets the displayed agreement state.
+Keep React Hook Form authoritative for editable values and TanStack Query for persisted requirements/agreement state. Saving content never forges acceptance. Checkbox submission calls `acceptCurrentEventPolicies(eventId)` after the latest save; Preview navigation only follows successful returned current agreement status. Any revision-changing edit resets the displayed agreement state. Add the two temporary public routes as simple semantic pages containing only the exact development notices and a clear non-production label; do not invent legal obligations, warranties, prohibited-content clauses, or substantive policy text.
 
 - [ ] **Step 4: Implement published-edit navigation and unsaved-change safety**
 
@@ -670,12 +693,12 @@ Run editor/step/ui tests, typecheck, lint, and build. Assert 320/375px controls 
 
 - [ ] **Step 6: Review UX and security boundary**
 
-Verify browser never supplies versions/timestamp/actor, policy links are exact HTTPS results, agreement follows disclosures, no giant legal text, private disclosure row is read only through owner RPC, and published blocked/removed state cannot weaken.
+Verify browser never supplies versions/timestamp/actor, policy links match the server-returned development routes (and accept canonical HTTPS production URLs without client rewriting), agreement follows disclosures, placeholder pages cannot be mistaken for production legal consent, no giant legal text exists, private disclosure row is read only through owner RPC, and published blocked/removed state cannot weaken.
 
 - [ ] **Step 7: Commit organizer requirements UI**
 
 ```bash
-git add src/features/moderation/EventRequirementsStep.tsx src/features/moderation/EventRequirementsStep.test.tsx src/features/moderation/OrganizerAgreementStep.tsx src/features/moderation/OrganizerAgreementStep.test.tsx src/features/events/EventEditorPage.tsx src/features/events/EventEditorPage.test.tsx src/features/events/EventReviewStep.tsx src/components/ui/StepRail.tsx src/components/ui/ui.test.tsx src/styles/global.css
+git add src/features/moderation/EventRequirementsStep.tsx src/features/moderation/EventRequirementsStep.test.tsx src/features/moderation/OrganizerAgreementStep.tsx src/features/moderation/OrganizerAgreementStep.test.tsx src/features/moderation/OrganizerTermsPage.tsx src/features/moderation/OrganizerTermsPage.test.tsx src/features/moderation/EventPolicyPage.tsx src/features/moderation/EventPolicyPage.test.tsx src/features/events/EventEditorPage.tsx src/features/events/EventEditorPage.test.tsx src/features/events/EventReviewStep.tsx src/app/router/router.tsx src/app/router/router.test.tsx src/components/ui/StepRail.tsx src/components/ui/ui.test.tsx src/styles/global.css
 git commit -m "feat: add organizer event requirements"
 ```
 
@@ -915,11 +938,13 @@ Define mobile 390x844 and desktop 1440x900 projects. Cover low-risk create/discl
 
 - [ ] **Step 3: Implement the bounded fixture/cleanup runbook and browser proof**
 
-Provision exact disposable organizer, reporter actors, and staff role through an enclosing admin-only harness; Playwright receives only publishable/user credentials. Capture current-render screenshots, keyboard/focus/landmark/alert smoke, responsive overflow, reduced motion, policy links, and public-cache removal. EXIT cleanup removes exact reports/reviews/evaluations/actions/events/organizers/Auth rows in FK-safe order and proves zero residue.
+Provision exact disposable organizer, reporter actors, and staff role through an enclosing admin-only harness; Playwright receives only publishable/user credentials. Capture current-render screenshots, keyboard/focus/landmark/alert smoke, responsive overflow, reduced motion, both development-placeholder policy pages/labels, agreement links, and public-cache removal. EXIT cleanup removes exact reports/reviews/evaluations/actions/events/organizers/Auth rows in FK-safe order and proves zero residue.
+
+Add a dedicated **Pre-launch production policy gate** to the runbook. It must block real organizer/public launch until: (1) production Organizer Terms exist; (2) production Event Policy exists; (3) each has a stable canonical HTTPS URL; (4) each has an approved version identifier; (5) each has an effective date; (6) each has an exact content digest; (7) neither required row is `development_placeholder`; (8) `organizer_policy_requirements` references the approved production pair and the service/admin operation successfully changes the policy environment to `production`; and (9) real organizers accept the required production versions as appropriate. The production operation must reject the transition before items 1–8 are true, leaving publication and public projections fail closed. State explicitly that this checklist is not a Build 2.5 completion gate and not a Build 3 planning/build gate.
 
 - [ ] **Step 4: Run the full final verification gate**
 
-Add exact package scripts `test:build25` and `test:functions:moderation` whose file allowlists contain only the moderation feature, directly changed event/public/router/layout tests, and the two Build 2.5 Edge Functions. Run focused E2E mobile/desktop, `pnpm test:build25`, `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm test:functions:moderation`, `pnpm typecheck:functions`, `pnpm test:integration:moderation`, every new moderation pgTAP/concurrency proof plus Task 15's explicit Day 1/Day 2 database-compatibility allowlist, DB lint/history/dry-run, `git diff --check`, `.env.local` ignored/untracked proof, tracked/staged/build secret scans, and artifact redaction scans. Prove the two package allowlists and database allowlist contain no checkout, Connect, webhook, refund/dispute, Stripe function, or Stripe integration path; do not run any Stripe command or test.
+Add exact package scripts `test:build25` and `test:functions:moderation` whose file allowlists contain only the moderation feature, directly changed event/public/router/layout tests, and the two Build 2.5 Edge Functions. Run focused E2E mobile/desktop, `pnpm test:build25`, `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm test:functions:moderation`, `pnpm typecheck:functions`, `pnpm test:integration:moderation`, every new moderation pgTAP/concurrency proof plus Task 15's explicit Day 1/Day 2 database-compatibility allowlist, DB lint/history/dry-run, `git diff --check`, `.env.local` ignored/untracked proof, tracked/staged/build secret scans, and artifact redaction scans. The development gate must show policy acceptance journeys pass while `production_policy_configuration_is_ready()` remains false; a rollback-only valid production-pair fixture must make it true, and either placeholder in the required pair must make it false again. Prove the two package allowlists and database allowlist contain no checkout, Connect, webhook, refund/dispute, Stripe function, or Stripe integration path; do not run any Stripe command or test.
 
 - [ ] **Step 5: Run verification-before-completion and independent final code review**
 
@@ -944,6 +969,8 @@ Use `superpowers:finishing-a-development-branch`: confirm feature worktree clean
 - Schema/interfaces are defined before generated types and UI consume them.
 - Legacy migration enumerates all required combinations and quarantines unknown history.
 - Policy acceptance is immutable, server-versioned, owner/revision/digest-bound, non-activating, and legacy-safe.
+- Development policy placeholders are explicit, minimal, digest-bound, and usable only for internal Build 2.5 verification; no final legal document is required to execute or complete Build 2.5.
+- Production launch has a fail-closed nine-item policy gate; placeholder versions can never satisfy production readiness or be represented as production legal consent.
 - Deterministic low-risk publish remains immediate; contextual/high-risk failure stays held.
 - Human enforcement supersedes automation; blocked/removed edits and re-publish cannot restore.
 - Report dedupe is actor/event/revision; three actors prioritize but never auto-hide.
@@ -953,6 +980,7 @@ Use `superpowers:finishing-a-development-branch`: confirm feature worktree clean
 - Image behavior is a fail-closed seam only; no uploader or AI flyer subsystem exists.
 - Admin UI is minimal and contains no staff management, policy editor, chat, reputation, refund, SQL, or analytics features.
 - Build 3 has a projection contract and tests only; no map UI/rendering task exists.
+- Build 3 planning/build work is not blocked by final production policy documents.
 - Stripe tasks/tests/calls/credentials/fixtures count is zero.
 - Task order has no downstream interface before its producer.
 - Every task has RED, implementation, GREEN, review, and commit checkpoints.
