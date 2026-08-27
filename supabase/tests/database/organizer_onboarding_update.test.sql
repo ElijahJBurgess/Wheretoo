@@ -1,7 +1,17 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(5);
+select plan(6);
+
+select results_eq(
+  $$
+    select
+      pg_catalog.has_function_privilege('anon', 'public.save_owned_organizer_profile(jsonb)', 'EXECUTE'),
+      pg_catalog.has_function_privilege('authenticated', 'public.save_owned_organizer_profile(jsonb)', 'EXECUTE')
+  $$,
+  $$ values (false, true) $$,
+  'organizer profile persistence is exposed only to authenticated owners'
+);
 
 select results_eq(
   $$
@@ -55,17 +65,19 @@ set local role authenticated;
 
 select lives_ok(
   $$
-    update public.organizers
-    set display_name = 'Completed Organizer',
-        organizer_type = 'Community group',
-        bio = 'Neighborhood events made with care.',
-        website_url = 'https://baycity.example',
-        base_city = 'San Francisco',
-        country_code = 'US',
-        onboarding_completed_at = now()
-    where id = '10000000-0000-0000-0000-000000000071'
+    select public.save_owned_organizer_profile(
+      jsonb_build_object(
+        'display_name', 'Completed Organizer',
+        'organizer_type', 'Community group',
+        'bio', 'Neighborhood events made with care.',
+        'website_url', 'https://baycity.example',
+        'base_city', 'San Francisco',
+        'country_code', 'US',
+        'onboarding_completed_at', now()
+      )
+    )
   $$,
-  'An authenticated owner can complete an existing organizer profile without updating id'
+  'An authenticated owner can complete an existing organizer profile through the revision-safe boundary'
 );
 
 select results_eq(

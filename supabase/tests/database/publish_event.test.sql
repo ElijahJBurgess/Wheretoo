@@ -558,9 +558,10 @@ set local role anon;
 
 select results_eq(
   $$
-    select id
-    from public.events
-    where id = '20000000-0000-0000-0000-000000000002'
+    select (public_event.event_payload ->> 'id')::uuid
+    from public.get_public_event(
+      '20000000-0000-0000-0000-000000000002'
+    ) as public_event(event_payload)
   $$,
   $$ values ('20000000-0000-0000-0000-000000000002'::uuid) $$,
   'successful publication is immediately visible anonymously'
@@ -568,9 +569,10 @@ select results_eq(
 
 select is_empty(
   $$
-    select id
-    from public.events
-    where id = '20000000-0000-0000-0000-000000000013'
+    select public_event.event_payload
+    from public.get_public_event(
+      '20000000-0000-0000-0000-000000000013'
+    ) as public_event(event_payload)
   $$,
   'published under-review event remains hidden anonymously'
 );
