@@ -175,18 +175,13 @@ where id = '29000000-0000-4000-8000-000000000001';
 select set_config('request.jwt.claim.sub', '19000000-0000-4000-8000-000000000001', true);
 set local role authenticated;
 create temporary table review_request_snapshot on commit drop as
-select
-  public.request_event_review('29000000-0000-4000-8000-000000000001', 'reconsider') as id,
-  null::timestamptz as created_at,
-  null::integer as content_revision,
-  null::text as input_sha256,
-  null::text as status;
-select extensions.is(
-  public.request_event_review('29000000-0000-4000-8000-000000000001', 'reconsider'),
-  (select id from review_request_snapshot),
-  'the exact same review RPC retry returns the original request id'
-);
+select public.request_event_review('29000000-0000-4000-8000-000000000001', 'reconsider') as id;
 reset role;
+alter table review_request_snapshot
+  add column created_at timestamptz,
+  add column content_revision integer,
+  add column input_sha256 text,
+  add column status text;
 update review_request_snapshot as snapshot
 set created_at = requests.created_at,
     content_revision = requests.content_revision,
@@ -194,6 +189,14 @@ set created_at = requests.created_at,
     status = requests.status
 from private.moderation_review_requests as requests
 where requests.id = snapshot.id;
+select set_config('request.jwt.claim.sub', '19000000-0000-4000-8000-000000000001', true);
+set local role authenticated;
+select extensions.is(
+  public.request_event_review('29000000-0000-4000-8000-000000000001', 'reconsider'),
+  (select id from review_request_snapshot),
+  'the exact same review RPC retry returns the original request id'
+);
+reset role;
 select extensions.is(
   (select count(*)::integer from private.moderation_review_requests
    where event_id = '29000000-0000-4000-8000-000000000001' and status = 'open'),

@@ -17,6 +17,8 @@ fixture_network_actor_one="$(printf '%064x' 941)"
 fixture_network_actor_two="$(printf '%064x' 942)"
 actor_barrier=919001
 network_barrier=919002
+actor_secondary_gate=919003
+network_secondary_gate=919004
 actor_marker_one=919011
 actor_marker_two=919012
 network_marker_one=919021
@@ -52,6 +54,10 @@ cleanup() {
   set +e
   "$supabase_cli" db query --linked "$cleanup_sql" >"$temporary_directory/cleanup.log" 2>&1
   local cleanup_status=$?
+  if [[ $status -ne 0 ]]; then
+    echo 'report concurrency harness failed' >&2
+    rg -o 'ERROR: +[0-9A-Z]+|ASSERT_[A-Z0-9_]+' "$temporary_directory"/*.log | head -n 8 >&2 || true
+  fi
   find "$temporary_directory" -type f -delete
   rmdir "$temporary_directory"
   [[ $status -eq 0 ]] || exit "$status"
@@ -219,12 +225,14 @@ submit_after_event_lock() {
   local network="$3"
   local marker="$4"
   local barrier="$5"
+  local secondary_gate="$6"
   "$supabase_cli" db query --linked "
     begin;
     set local role service_role;
     select public.lock_event_ticketing_operation('$event_id');
     select pg_catalog.pg_advisory_xact_lock($marker);
-    select pg_catalog.pg_advisory_xact_lock($barrier);
+    select pg_catalog.pg_advisory_xact_lock_shared($barrier);
+    select pg_catalog.pg_advisory_xact_lock_shared($secondary_gate);
     select public.server_submit_event_report('$event_id', '$actor', '$network', 'unsafe');
     commit;
   " >"$temporary_directory/$event_id-$actor.log" 2>&1
@@ -232,23 +240,33 @@ submit_after_event_lock() {
 
 hold_barrier() {
   local barrier="$1"
+  local secondary_gate="$2"
   "$supabase_cli" db query --linked "
     select pg_catalog.pg_advisory_lock($barrier);
-    select pg_catalog.pg_sleep(8);
+    select pg_catalog.pg_advisory_lock($secondary_gate);
+    select pg_catalog.pg_sleep(4);
     select pg_catalog.pg_advisory_unlock($barrier);
+    select pg_catalog.pg_sleep(4);
+    select pg_catalog.pg_advisory_unlock($secondary_gate);
   " >"$temporary_directory/barrier-$barrier.log" 2>&1 &
   barrier_pid=$!
 }
 
 wait_for_barrier() {
   local barrier="$1"
+  local secondary_gate="$2"
   for _attempt in $(seq 1 24); do
     if "$supabase_cli" db query --linked "
       do \$assert\$
       begin
         if not exists (
           select 1 from pg_catalog.pg_locks
-          where locktype = 'advisory' and classid = 0 and objid = $barrier and granted
+          where locktype = 'advisory' and classid = 0 and objid = $barrier
+            and mode = 'ExclusiveLock' and granted
+        ) or not exists (
+          select 1 from pg_catalog.pg_locks
+          where locktype = 'advisory' and classid = 0 and objid = $secondary_gate
+            and mode = 'ExclusiveLock' and granted
         ) then
           raise exception using errcode = 'P0001', message = 'ASSERT_BARRIER_CONTROLLER_NOT_READY';
         end if;
@@ -265,6 +283,8 @@ wait_for_overlap() {
   local first_marker="$1"
   local second_marker="$2"
   local expected_bucket="$3"
+  local barrier="$4"
+  local secondary_gate="$5"
   for _attempt in $(seq 1 24); do
     if "$supabase_cli" db query --linked "
       do \$assert\$
@@ -273,6 +293,21 @@ wait_for_overlap() {
             where locktype = 'advisory' and classid = 0
               and objid in ($first_marker, $second_marker) and granted) <> 2 then
           raise exception using errcode = 'P0001', message = 'ASSERT_BARRIER_NOT_READY';
+        end if;
+        if (select count(*) from pg_catalog.pg_locks
+            where locktype = 'advisory' and classid = 0 and objid = $barrier
+              and mode = 'ShareLock' and granted) <> 2
+          or exists (
+            select 1 from pg_catalog.pg_locks
+            where locktype = 'advisory' and classid = 0 and objid = $barrier
+              and mode = 'ExclusiveLock' and granted
+          )
+          or not exists (
+            select 1 from pg_catalog.pg_locks
+            where locktype = 'advisory' and classid = 0 and objid = $secondary_gate
+              and mode = 'ExclusiveLock' and granted
+          ) then
+          raise exception using errcode = 'P0001', message = 'ASSERT_SHARED_OVERLAP_NOT_READY';
         end if;
         if not exists (
           select 1 from private.event_report_rate_buckets
@@ -302,11 +337,11 @@ assert_one_submitted_one_limited() {
 # Each worker first holds its own event operation lock and marker, then blocks
 # on the controller-held barrier. The marker proof and unchanged bucket prove
 # both distinct-event requests overlap before either can mutate the bucket.
-hold_barrier "$actor_barrier"
-wait_for_barrier "$actor_barrier"
-submit_after_event_lock "$fixture_event" "$fixture_actor" "$fixture_actor_network" "$actor_marker_one" "$actor_barrier" & actor_first_pid=$!
-submit_after_event_lock "$fixture_actor_limit_event" "$fixture_actor" "$fixture_actor_network" "$actor_marker_two" "$actor_barrier" & actor_second_pid=$!
-wait_for_overlap "$actor_marker_one" "$actor_marker_two" ""
+hold_barrier "$actor_barrier" "$actor_secondary_gate"
+wait_for_barrier "$actor_barrier" "$actor_secondary_gate"
+submit_after_event_lock "$fixture_event" "$fixture_actor" "$fixture_actor_network" "$actor_marker_one" "$actor_barrier" "$actor_secondary_gate" & actor_first_pid=$!
+submit_after_event_lock "$fixture_actor_limit_event" "$fixture_actor" "$fixture_actor_network" "$actor_marker_two" "$actor_barrier" "$actor_secondary_gate" & actor_second_pid=$!
+wait_for_overlap "$actor_marker_one" "$actor_marker_two" "" "$actor_barrier" "$actor_secondary_gate"
 wait "$barrier_pid"
 wait "$actor_first_pid"
 wait "$actor_second_pid"
@@ -316,11 +351,11 @@ assert_one_submitted_one_limited \
 
 # The network cap starts at 29. These contenders use independently locked
 # events, so exactly one may reach 30 and the other must be rate limited.
-hold_barrier "$network_barrier"
-wait_for_barrier "$network_barrier"
-submit_after_event_lock "$fixture_event" "$fixture_network_actor_one" "$fixture_network" "$network_marker_one" "$network_barrier" & network_first_pid=$!
-submit_after_event_lock "$fixture_actor_limit_event" "$fixture_network_actor_two" "$fixture_network" "$network_marker_two" "$network_barrier" & network_second_pid=$!
-wait_for_overlap "$network_marker_one" "$network_marker_two" "$fixture_network"
+hold_barrier "$network_barrier" "$network_secondary_gate"
+wait_for_barrier "$network_barrier" "$network_secondary_gate"
+submit_after_event_lock "$fixture_event" "$fixture_network_actor_one" "$fixture_network" "$network_marker_one" "$network_barrier" "$network_secondary_gate" & network_first_pid=$!
+submit_after_event_lock "$fixture_actor_limit_event" "$fixture_network_actor_two" "$fixture_network" "$network_marker_two" "$network_barrier" "$network_secondary_gate" & network_second_pid=$!
+wait_for_overlap "$network_marker_one" "$network_marker_two" "$fixture_network" "$network_barrier" "$network_secondary_gate"
 wait "$barrier_pid"
 wait "$network_first_pid"
 wait "$network_second_pid"
