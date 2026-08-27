@@ -187,6 +187,21 @@ export async function saveEventDraft(input: {
   return result.data
 }
 
+export async function saveEventRevision(input: {
+  eventId: string
+  organizerId: string
+  values: EventFormValues
+}): Promise<EventRow> {
+  const { data, error } = await supabase.rpc('save_owned_event_revision', {
+    p_event_id: input.eventId,
+    p_event: draftPayload(input.values),
+  })
+
+  if (error) throw error
+  if (!data) throw new Error('Saved event revision was not returned')
+  return data
+}
+
 export async function publishEvent(eventId: string): Promise<EventRow> {
   const { data, error } = await supabase.rpc('publish_event', { p_event_id: eventId })
 

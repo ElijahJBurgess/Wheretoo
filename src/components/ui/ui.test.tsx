@@ -34,9 +34,13 @@ describe('organizer UI primitives', () => {
   })
 
   it('marks the current real workflow step', () => {
-    render(<StepRail current={2} labels={['Details', 'Schedule & location', 'Review']} />)
+    render(<StepRail current={4} labels={[
+      'Basics', 'Date/location', 'Tickets/admission', 'Event details/requirements',
+      'Organizer agreement', 'Preview', 'Publish',
+    ]} />)
 
-    expect(screen.getByText('Schedule & location')).toHaveAttribute('aria-current', 'step')
+    expect(screen.getByText('Event details/requirements')).toHaveAttribute('aria-current', 'step')
+    expect(screen.getAllByRole('listitem')).toHaveLength(7)
   })
 
   it('renders a semantic button without changing its safe default type', () => {

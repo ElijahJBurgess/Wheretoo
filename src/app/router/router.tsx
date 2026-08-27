@@ -15,6 +15,8 @@ import { PublishedEventPage } from '../../features/events/PublishedEventPage'
 import { OrganizerSetupPage } from '../../features/organizers/OrganizerSetupPage'
 import { OrganizerPaymentsPage } from '../../features/payments/OrganizerPaymentsPage'
 import { OrderConfirmationPage } from '../../features/orders/OrderConfirmationPage'
+import { EventPolicyPage } from '../../features/moderation/EventPolicyPage'
+import { OrganizerTermsPage } from '../../features/moderation/OrganizerTermsPage'
 import { OrganizerTicketTiersPage } from '../../features/tickets/OrganizerTicketTiersPage'
 import { PublicTicketEventPage } from '../../features/tickets/PublicTicketEventPage'
 import { RequireOrganizer } from './RequireOrganizer'
@@ -48,6 +50,8 @@ export const appRouter = createBrowserRouter([
   { path: '/events/:eventId', element: <PublicTicketEventPage /> },
   { path: '/events/:eventId/checkout', element: <CheckoutPage /> },
   { path: '/orders/:confirmationToken', element: <OrderConfirmationPage /> },
+  { path: '/organizer-terms', element: <OrganizerTermsPage /> },
+  { path: '/event-policy', element: <EventPolicyPage /> },
   { path: '/auth/sign-up', element: <SignUpPage /> },
   { path: '/auth/check-email', element: <CheckEmailPage /> },
   { path: '/auth/sign-in', element: <SignInPage /> },

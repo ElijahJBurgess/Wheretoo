@@ -7,6 +7,20 @@ import { appRouter } from './router'
 
 describe('organizer-only routes', () => {
   it.each([
+    ['/organizer-terms', 'OrganizerTermsPage'],
+    ['/event-policy', 'EventPolicyPage'],
+  ])('keeps the development policy route %s public', (path, componentName) => {
+    const matches = matchRoutes(appRouter.routes, path)
+    const routeElement = matches?.at(-1)?.route.element
+
+    expect(matches?.at(-1)?.route.path).toBe(path)
+    expect(isValidElement(routeElement) && typeof routeElement.type === 'function' && routeElement.type.name).toBe(componentName)
+    expect(matches?.some((match) => isValidElement(match.route.element) && (
+      match.route.element.type === RequireOrganizer || match.route.element.type === RequireSession
+    ))).toBe(false)
+  })
+
+  it.each([
     '/organizer/settings/payments',
     '/organizer/events/event-1/tickets',
   ])('keeps %s behind the existing organizer guard', (path) => {

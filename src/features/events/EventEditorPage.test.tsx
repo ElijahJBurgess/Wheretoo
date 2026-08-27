@@ -4,15 +4,24 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EventRow } from './event.types'
 
-const { closeDialog, locationModuleLoaded, mutateAsync, refetch, showModal, useOwnedEvent, useSaveEventDraft, useSession } = vi.hoisted(() => ({
-  closeDialog: vi.fn(),
-  locationModuleLoaded: vi.fn(), mutateAsync: vi.fn(), refetch: vi.fn(), useOwnedEvent: vi.fn(),
-  showModal: vi.fn(),
-  useSaveEventDraft: vi.fn(), useSession: vi.fn(),
+const {
+  acceptPolicies, closeDialog, locationModuleLoaded, mutateAsync, refetch, saveRequirements,
+  saveRevision, showModal, useAcceptCurrentEventPolicies, useOwnedEvent,
+  useOwnedEventRequirements, useRequiredEventPolicies, useSaveEventDraft,
+  useSaveEventRequirements, useSaveEventRevision, useSession,
+} = vi.hoisted(() => ({
+  acceptPolicies: vi.fn(), closeDialog: vi.fn(), locationModuleLoaded: vi.fn(), mutateAsync: vi.fn(),
+  refetch: vi.fn(), saveRequirements: vi.fn(), saveRevision: vi.fn(), showModal: vi.fn(),
+  useAcceptCurrentEventPolicies: vi.fn(), useOwnedEvent: vi.fn(), useOwnedEventRequirements: vi.fn(),
+  useRequiredEventPolicies: vi.fn(), useSaveEventDraft: vi.fn(), useSaveEventRequirements: vi.fn(),
+  useSaveEventRevision: vi.fn(), useSession: vi.fn(),
 }))
 
 vi.mock('../auth/SessionProvider', () => ({ useSession }))
-vi.mock('./event.queries', () => ({ useOwnedEvent, useSaveEventDraft }))
+vi.mock('./event.queries', () => ({ useOwnedEvent, useSaveEventDraft, useSaveEventRevision }))
+vi.mock('../moderation/moderation.queries', () => ({
+  useAcceptCurrentEventPolicies, useOwnedEventRequirements, useRequiredEventPolicies, useSaveEventRequirements,
+}))
 vi.mock('../../lib/supabase/client', () => ({ supabase: {} }))
 vi.mock('./LocationSearchField', () => {
   locationModuleLoaded()
@@ -39,6 +48,20 @@ const row: EventRow = {
   animation_preset: 'generic', published_at: null, created_at: '2026-08-24T12:00:00.000Z',
   updated_at: '2026-08-24T13:00:00.000Z',
 }
+
+const organizerTerms = {
+  policyKind: 'organizer_terms', label: 'Organizer Terms', versionId: 'dev-organizer-terms-v1',
+  stage: 'development_placeholder', publicUrl: '/organizer-terms',
+} as const
+const eventPolicy = {
+  policyKind: 'event_policy', label: 'Event Policy', versionId: 'dev-event-policy-v1',
+  stage: 'development_placeholder', publicUrl: '/event-policy',
+} as const
+const requirements = {
+  minimumAge: '21_plus', alcoholPresent: true, cannabisPresent: false, explicitAdultContent: false,
+  gamblingPresent: false, weaponsPresent: false, highRiskActivity: false, needsAcceptance: true,
+  organizerTerms, eventPolicy,
+} as const
 
 type EditorQueryState = {
   data: EventRow | null | undefined
@@ -83,7 +106,13 @@ describe('EventEditorPage', () => {
       },
     })
     useSession.mockReturnValue({ status: 'authenticated', session: {}, user: { id: 'organizer-1' } })
+    mutateAsync.mockResolvedValue(row)
     useSaveEventDraft.mockReturnValue({ isPending: false, mutateAsync })
+    useSaveEventRevision.mockReturnValue({ isPending: false, mutateAsync: saveRevision })
+    useOwnedEventRequirements.mockReturnValue({ data: requirements, isPending: false, isError: false, refetch })
+    useRequiredEventPolicies.mockReturnValue({ data: [organizerTerms, eventPolicy], isPending: false, isError: false, refetch })
+    useSaveEventRequirements.mockReturnValue({ isPending: false, mutateAsync: saveRequirements })
+    useAcceptCurrentEventPolicies.mockReturnValue({ isPending: false, mutateAsync: acceptPolicies })
   })
 
   afterEach(() => {
@@ -91,20 +120,28 @@ describe('EventEditorPage', () => {
     restoreDialogMethod('close', originalClose)
   })
 
-  it('shows exactly three stages and does not load Mapbox or persist on step changes', async () => {
+  it('shows the approved seven late-flow stages and does not disclose requirements in the first three', async () => {
     const user = userEvent.setup()
     renderEditor()
     expect(useOwnedEvent).toHaveBeenCalledWith('', 'organizer-1')
     expect(screen.getAllByRole('navigation', { name: 'Event creation progress' })).toHaveLength(1)
-    expect(screen.getByText('Details')).toBeInTheDocument()
-    expect(screen.getByText('Schedule & location')).toBeInTheDocument()
-    expect(screen.getByText('Review')).toBeInTheDocument()
+    expect(screen.getByText('Basics')).toBeInTheDocument()
+    expect(screen.getByText('Date/location')).toBeInTheDocument()
+    expect(screen.getByText('Tickets/admission')).toBeInTheDocument()
+    expect(screen.getByText('Event details/requirements')).toBeInTheDocument()
+    expect(screen.getByText('Organizer agreement')).toBeInTheDocument()
+    expect(screen.getByText('Preview')).toBeInTheDocument()
+    expect(screen.getByText('Publish')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Minimum age')).not.toBeInTheDocument()
     expect(locationModuleLoaded).not.toHaveBeenCalled()
-    await user.click(screen.getByRole('button', { name: 'Continue to schedule' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to date & location' }))
     expect(await screen.findByRole('button', { name: 'Mock address search' })).toBeInTheDocument()
     expect(locationModuleLoaded).toHaveBeenCalledOnce()
-    await user.click(screen.getByRole('button', { name: 'Continue to review' }))
-    expect(mutateAsync).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Continue to tickets & admission' }))
+    expect(screen.queryByLabelText('Minimum age')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Continue to event requirements' }))
+    expect(screen.getByLabelText('Minimum age')).toBeInTheDocument()
+    expect(mutateAsync).toHaveBeenCalledOnce()
   })
 
   it('hydrates an owned row with Los Angeles datetime-local values and ignores a same-route refetch while dirty', async () => {
@@ -118,7 +155,7 @@ describe('EventEditorPage', () => {
     useOwnedEvent.mockReturnValue({ ...query, data: { ...row, title: 'Server refetch' } })
     view.rerender(<RouterProvider router={view.router} />)
     expect(screen.getByLabelText('Event title')).toHaveValue('Working title')
-    await user.click(screen.getByRole('button', { name: 'Continue to schedule' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to date & location' }))
     expect(screen.getByLabelText('Starts')).toHaveValue('2026-12-01T18:30')
     expect(screen.getByLabelText('Ends')).toHaveValue('2026-12-01T20:00')
   })
@@ -202,12 +239,19 @@ describe('EventEditorPage', () => {
     mutateAsync.mockReturnValue(new Promise<EventRow>((done) => { resolve = done }))
     const { router } = renderEditor()
     await user.type(screen.getByLabelText('Event title'), 'Preview draft')
-    await user.click(screen.getByRole('button', { name: 'Continue to schedule' }))
-    await user.click(screen.getByRole('button', { name: 'Continue to review' }))
-    const preview = screen.getByRole('button', { name: 'Preview event' })
-    await user.dblClick(preview)
+    await user.click(screen.getByRole('button', { name: 'Continue to date & location' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to tickets & admission' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to event requirements' }))
     expect(mutateAsync).toHaveBeenCalledOnce()
     await act(async () => resolve({ ...row, title: 'Preview draft' }))
+    await screen.findByLabelText('Minimum age')
+    saveRequirements.mockResolvedValue(requirements)
+    acceptPolicies.mockResolvedValue({ ...requirements, needsAcceptance: false })
+    await user.click(screen.getByRole('button', { name: 'Continue to organizer agreement' }))
+    await user.click(screen.getByRole('checkbox'))
+    const preview = screen.getByRole('button', { name: 'Save agreement and preview' })
+    await user.dblClick(preview)
+    expect(mutateAsync).toHaveBeenCalledOnce()
     await waitFor(() => expect(router.state.location.pathname).toBe('/organizer/events/event-1/preview'))
   })
 
@@ -215,10 +259,17 @@ describe('EventEditorPage', () => {
     const user = userEvent.setup()
     const { router } = renderEditor('/organizer/events/event-1/edit', { data: row, isPending: false, isError: false, refetch })
     await screen.findByDisplayValue('Saved title')
-    await user.click(screen.getByRole('button', { name: 'Continue to schedule' }))
-    await user.click(screen.getByRole('button', { name: 'Continue to review' }))
-    await user.click(screen.getByRole('button', { name: 'Preview event' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to date & location' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to tickets & admission' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to event requirements' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to organizer agreement' }))
+    await user.click(screen.getByRole('checkbox'))
+    saveRequirements.mockResolvedValue(requirements)
+    acceptPolicies.mockResolvedValue({ ...requirements, needsAcceptance: false })
+    await user.click(screen.getByRole('button', { name: 'Save agreement and preview' }))
     expect(mutateAsync).not.toHaveBeenCalled()
+    expect(saveRequirements).toHaveBeenCalled()
+    expect(saveRequirements.mock.invocationCallOrder[0]).toBeLessThan(acceptPolicies.mock.invocationCallOrder[0])
     expect(router.state.location.pathname).toBe('/organizer/events/event-1/preview')
   })
 
@@ -280,5 +331,127 @@ describe('EventEditorPage', () => {
 
     expect(screen.getByRole('dialog')).toHaveAttribute('open')
     expect(showModal).not.toHaveBeenCalled()
+  })
+
+  it('reloads persisted requirement values from the owner-scoped query', async () => {
+    const user = userEvent.setup()
+    renderEditor('/organizer/events/event-1/edit', { data: row, isPending: false, isError: false, refetch })
+
+    await screen.findByDisplayValue('Saved title')
+    await user.click(screen.getByRole('button', { name: 'Continue to date & location' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to tickets & admission' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to event requirements' }))
+
+    expect(screen.getByLabelText('Minimum age')).toHaveValue('21_plus')
+    expect(screen.getByRole('radio', { name: 'Yes', description: 'Alcohol present' })).toBeChecked()
+    expect(useOwnedEventRequirements).toHaveBeenCalledWith('organizer-1', 'event-1')
+  })
+
+  it('retains edited disclosure values and stays on requirements after a safe server error', async () => {
+    const user = userEvent.setup()
+    saveRequirements.mockRejectedValue(new Error('private.event_risk_disclosures leaked detail'))
+    renderEditor('/organizer/events/event-1/edit', { data: row, isPending: false, isError: false, refetch })
+
+    await screen.findByDisplayValue('Saved title')
+    await user.click(screen.getByRole('button', { name: 'Continue to date & location' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to tickets & admission' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to event requirements' }))
+    await user.click(screen.getByRole('radio', { name: 'Yes', description: 'Cannabis present' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to organizer agreement' }))
+
+    expect(await screen.findByText('Event requirements could not be saved. Check your connection and try again.')).toBeInTheDocument()
+    expect(screen.queryByText(/private\.event_risk_disclosures/)).not.toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'Yes', description: 'Cannabis present' })).toBeChecked()
+  })
+
+  it('requires the checkbox and a current returned agreement before navigating to Preview', async () => {
+    const user = userEvent.setup()
+    saveRequirements.mockResolvedValue(requirements)
+    acceptPolicies.mockResolvedValueOnce({ ...requirements, needsAcceptance: true })
+      .mockResolvedValueOnce({ ...requirements, needsAcceptance: false })
+    const { router } = renderEditor('/organizer/events/event-1/edit', { data: row, isPending: false, isError: false, refetch })
+
+    await screen.findByDisplayValue('Saved title')
+    await user.click(screen.getByRole('button', { name: 'Continue to date & location' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to tickets & admission' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to event requirements' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to organizer agreement' }))
+    await user.click(screen.getByRole('button', { name: 'Save agreement and preview' }))
+    expect(screen.getAllByText('Confirm the organizer agreement before previewing.')).toHaveLength(2)
+    expect(acceptPolicies).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('checkbox'))
+    await user.click(screen.getByRole('button', { name: 'Save agreement and preview' }))
+    expect(await screen.findByText('Your agreement could not be confirmed. Review it and try again.')).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe('/organizer/events/event-1/edit')
+
+    await user.click(screen.getByRole('button', { name: 'Try agreement again' }))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/organizer/events/event-1/preview'))
+  })
+
+  it('resets displayed agreement after a material event edit', async () => {
+    const user = userEvent.setup()
+    useOwnedEventRequirements.mockReturnValue({
+      data: { ...requirements, needsAcceptance: false }, isPending: false, isError: false, refetch,
+    })
+    saveRequirements.mockResolvedValue(requirements)
+    renderEditor('/organizer/events/event-1/edit', { data: row, isPending: false, isError: false, refetch })
+
+    await screen.findByDisplayValue('Saved title')
+    await user.click(screen.getByRole('button', { name: 'Continue to date & location' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to tickets & admission' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to event requirements' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to organizer agreement' }))
+    expect(screen.getByText('Agreement current for this saved event.')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+    const title = screen.getByLabelText('Event title')
+    await user.clear(title)
+    await user.type(title, 'Materially revised title')
+    await user.click(screen.getByRole('button', { name: 'Continue to date & location' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to tickets & admission' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to event requirements' }))
+    await user.click(screen.getByRole('button', { name: 'Continue to organizer agreement' }))
+
+    expect(screen.getByText('Agreement required for these changes.')).toBeInTheDocument()
+    expect(screen.getByRole('checkbox')).not.toBeChecked()
+  })
+
+  it('allows owner-safe published edits through the revision RPC and preserves blocked or removed status copy', async () => {
+    const user = userEvent.setup()
+    const publishedBlocked = { ...row, status: 'published', moderation_status: 'blocked', published_at: '2026-08-26T10:00:00Z' } as EventRow
+    saveRevision.mockResolvedValue({ ...publishedBlocked, title: 'Revised title', content_revision: 2 })
+    renderEditor('/organizer/events/event-1/edit', { data: publishedBlocked, isPending: false, isError: false, refetch })
+
+    expect(await screen.findByText('Blocked')).toBeInTheDocument()
+    expect(screen.queryByText(/read-only/i)).not.toBeInTheDocument()
+    const title = screen.getByLabelText('Event title')
+    await user.clear(title)
+    await user.type(title, 'Revised title')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    expect(saveRevision).toHaveBeenCalledWith(expect.objectContaining({ eventId: 'event-1', organizerId: 'organizer-1' }))
+    expect(await screen.findByText('Blocked')).toBeInTheDocument()
+    expect(mutateAsync).not.toHaveBeenCalled()
+  })
+
+  it('rejects a mismatched revision response without reset or navigation', async () => {
+    const user = userEvent.setup()
+    const publishedRemoved = { ...row, status: 'published', moderation_status: 'removed', published_at: '2026-08-26T10:00:00Z' } as EventRow
+    saveRevision.mockResolvedValue({ ...publishedRemoved, id: 'other-event', organizer_id: 'other-organizer', title: 'Unsafe returned title' })
+    renderEditor('/organizer/events/event-1/edit', { data: publishedRemoved, isPending: false, isError: false, refetch })
+
+    expect(await screen.findByText('Removed')).toBeInTheDocument()
+    const title = screen.getByLabelText('Event title')
+    await user.clear(title)
+    await user.type(title, 'Keep this local title')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    expect(await screen.findByText('Changes could not be saved. Check your connection and try again.')).toBeInTheDocument()
+    expect(title).toHaveValue('Keep this local title')
+    expect(screen.queryByDisplayValue('Unsafe returned title')).not.toBeInTheDocument()
   })
 })

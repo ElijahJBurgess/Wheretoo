@@ -1,7 +1,7 @@
-type EditorStepLabels = readonly ['Details', 'Schedule & location', 'Review']
+type EditorStepLabels = readonly [string, string, string, string, string, string, string]
 
 type StepRailProps = {
-  current: 1 | 2 | 3
+  current: 1 | 2 | 3 | 4 | 5 | 6 | 7
   labels: EditorStepLabels
 }
 
@@ -10,7 +10,7 @@ export function StepRail({ current, labels }: StepRailProps) {
     <nav aria-label="Event creation progress">
       <ol className="step-rail">
         {labels.map((label, index) => {
-          const step = (index + 1) as 1 | 2 | 3
+          const step = (index + 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7
 
           return (
             <li
