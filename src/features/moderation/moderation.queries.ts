@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { eventKeys } from '../events/event.queries'
 import {
   acceptCurrentEventPolicies,
+  getCurrentEventReviewRequest,
   getModerationCase,
   getMyStaffRole,
   getOwnedEventRequirements,
@@ -41,6 +42,14 @@ export function useOwnedEventRequirements(organizerId: string, eventId: string) 
   return useQuery({
     queryKey: moderationKeys.requirements(organizerId, eventId),
     queryFn: () => getOwnedEventRequirements(eventId),
+    enabled: organizerId.length > 0 && eventId.length > 0,
+  })
+}
+
+export function useCurrentEventReviewRequest(organizerId: string, eventId: string) {
+  return useQuery({
+    queryKey: moderationKeys.review(organizerId, eventId),
+    queryFn: () => getCurrentEventReviewRequest(eventId),
     enabled: organizerId.length > 0 && eventId.length > 0,
   })
 }

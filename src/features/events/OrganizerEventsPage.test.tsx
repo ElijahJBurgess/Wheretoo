@@ -93,6 +93,27 @@ describe('OrganizerEventsPage', () => {
     expect(await screen.findByText('edit destination')).toBeInTheDocument()
   })
 
+  it('maps only safe lifecycle and moderation states without public eligibility claims', () => {
+    useOwnedEvents.mockReturnValue({
+      data: [
+        { ...baseEvent, id: 'event-clear', status: 'published', moderation_status: 'clear', title: 'Clear event' },
+        { ...baseEvent, id: 'event-review', status: 'published', moderation_status: 'under_review', title: 'Review event' },
+        { ...baseEvent, id: 'event-blocked', status: 'published', moderation_status: 'blocked', title: 'Blocked event' },
+        { ...baseEvent, id: 'event-removed', status: 'published', moderation_status: 'removed', title: 'Removed event' },
+        { ...baseEvent, id: 'event-cancelled', status: 'cancelled', moderation_status: 'clear', title: 'Cancelled event' },
+      ],
+      isPending: false, isError: false, refetch,
+    })
+    renderPage()
+
+    expect(screen.getByRole('link', { name: 'Clear event, Published' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Review event, Under review' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Blocked event, Blocked' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Removed event, Removed' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Cancelled event, Cancelled' })).toBeInTheDocument()
+    expect(screen.queryByText(/publicly available|eligible|score|reason|reviewer/i)).not.toBeInTheDocument()
+  })
+
   it('routes a published event to its detail page', async () => {
     const user = userEvent.setup()
     useOwnedEvents.mockReturnValue({ data: [{ ...baseEvent, status: 'published' }], isPending: false, isError: false, refetch })

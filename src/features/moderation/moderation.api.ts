@@ -3,6 +3,7 @@ import { publicEventSchema } from '../events/event.schemas'
 import { supabase } from '../../lib/supabase/client'
 import {
   agreementStatusSchema,
+  currentReviewRequestSchema,
   eventRequirementsInputSchema,
   eventRequirementsSchema,
   moderationActionInputSchema,
@@ -14,6 +15,7 @@ import {
 } from './moderation.schemas'
 import type {
   AgreementStatus,
+  CurrentReviewRequest,
   EventRequirements,
   EventRequirementsInput,
   ModerationActionInput,
@@ -50,6 +52,9 @@ const disclosureRpcSchema = z.strictObject({
 const moderationQueueRpcRowSchema = z.strictObject({
   event_id: z.string(), moderation_status: z.string(), content_revision: z.number(), input_sha256: z.string(), moderation_version: z.number(),
   public_history_status: z.string(), queued_evaluation_count: z.number(), oldest_queued_at: z.string().nullable(),
+})
+const currentReviewRequestRpcRowSchema = z.strictObject({
+  id: z.string(), status: z.string(), created_at: z.string(), resolved_at: z.string().nullable(),
 })
 
 export type ModerationApiErrorCode = 'NOT_FOUND' | 'CONFLICT' | 'UNAVAILABLE' | 'INVALID'
@@ -189,6 +194,16 @@ export async function requestEventReview(eventId: string, organizerNote: string)
   const parsed = z.string().uuid().safeParse(data)
   if (!parsed.success) throw new ModerationApiError('UNAVAILABLE')
   return parsed.data
+}
+
+export async function getCurrentEventReviewRequest(eventId: string): Promise<CurrentReviewRequest | null> {
+  const { data, error } = await supabase.rpc('get_current_event_review_request', { p_event_id: eventId })
+  if (error) throw safeError(error)
+  const row = parseOne(currentReviewRequestRpcRowSchema, data)
+  if (row === null) return null
+  return parseContract(currentReviewRequestSchema, {
+    id: row.id, status: row.status, createdAt: row.created_at, resolvedAt: row.resolved_at,
+  })
 }
 
 export async function withdrawEventReview(eventId: string): Promise<string> {

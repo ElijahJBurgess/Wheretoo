@@ -5,13 +5,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Organizer } from '../organizers/organizer.api'
 import type { EventRow } from './event.types'
 
-const { mutateAsync, organizerRefetch, eventRefetch, useOrganizer, useOwnedEvent, usePublishEvent, useSession } = vi.hoisted(() => ({
+const { mutateAsync, organizerRefetch, eventRefetch, requirementsRefetch, useOrganizer, useOwnedEvent, useOwnedEventRequirements, usePublishEvent, useSession } = vi.hoisted(() => ({
   mutateAsync: vi.fn(), organizerRefetch: vi.fn(), eventRefetch: vi.fn(), useOrganizer: vi.fn(),
-  useOwnedEvent: vi.fn(), usePublishEvent: vi.fn(), useSession: vi.fn(),
+  requirementsRefetch: vi.fn(), useOwnedEvent: vi.fn(), useOwnedEventRequirements: vi.fn(), usePublishEvent: vi.fn(), useSession: vi.fn(),
 }))
 
 vi.mock('../auth/SessionProvider', () => ({ useSession }))
 vi.mock('../organizers/organizer.queries', () => ({ useOrganizer }))
+vi.mock('../moderation/moderation.queries', () => ({ useOwnedEventRequirements }))
 vi.mock('./event.queries', () => ({ useOwnedEvent, usePublishEvent }))
 vi.mock('../../lib/supabase/client', () => ({ supabase: {} }))
 
@@ -39,6 +40,12 @@ type QueryState<T> = { data: T | null | undefined; isPending: boolean; isError: 
 
 const eventLoaded: QueryState<EventRow> = { data: event, isPending: false, isError: false, refetch: eventRefetch }
 const organizerLoaded: QueryState<Organizer> = { data: organizer, isPending: false, isError: false, refetch: organizerRefetch }
+const requirements = {
+  minimumAge: 'all_ages', alcoholPresent: false, cannabisPresent: false, explicitAdultContent: false,
+  gamblingPresent: false, weaponsPresent: false, highRiskActivity: false, needsAcceptance: false,
+  organizerTerms: { policyKind: 'organizer_terms', label: 'Organizer Terms', versionId: 'dev-organizer-terms-v1', stage: 'development_placeholder', publicUrl: '/organizer-terms' },
+  eventPolicy: { policyKind: 'event_policy', label: 'Event Policy', versionId: 'dev-event-policy-v1', stage: 'development_placeholder', publicUrl: '/event-policy' },
+}
 
 function renderPreview() {
   const router = createMemoryRouter([
@@ -57,6 +64,7 @@ describe('EventPreviewPage', () => {
     useSession.mockReturnValue({ status: 'authenticated', session: {}, user: { id: 'organizer-1' } })
     useOwnedEvent.mockReturnValue(eventLoaded)
     useOrganizer.mockReturnValue(organizerLoaded)
+    useOwnedEventRequirements.mockReturnValue({ data: requirements, isPending: false, isError: false, refetch: requirementsRefetch })
     usePublishEvent.mockReturnValue({ isPending: false, mutateAsync })
   })
 
@@ -66,6 +74,7 @@ describe('EventPreviewPage', () => {
     expect(useOwnedEvent).toHaveBeenCalledWith('event-1', 'organizer-1')
     expect(useOrganizer).toHaveBeenCalledWith('organizer-1')
     expect(usePublishEvent).toHaveBeenCalledWith('organizer-1')
+    expect(useOwnedEventRequirements).toHaveBeenCalledWith('organizer-1', 'event-1')
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
     expect(screen.getByRole('heading', { level: 1, name: 'Preview your event' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 2, name: 'Friday Night Makers' })).toBeInTheDocument()
@@ -82,6 +91,37 @@ describe('EventPreviewPage', () => {
     expect(screen.getByLabelText('Whereto event artwork placeholder')).toBeInTheDocument()
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
     expect(screen.queryByText(/ticket selector|rsvp|ai artwork|animation picker|map preview/i)).not.toBeInTheDocument()
+  })
+
+  it('renders persisted requirements and policy labels, and gates publish on current acceptance', () => {
+    useOwnedEventRequirements.mockReturnValue({
+      data: { ...requirements, minimumAge: '21_plus', alcoholPresent: true, needsAcceptance: true },
+      isPending: false, isError: false, refetch: requirementsRefetch,
+    })
+    renderPreview()
+
+    expect(screen.getByRole('heading', { name: 'Event requirements' })).toBeInTheDocument()
+    expect(screen.getByText('21+')).toBeInTheDocument()
+    expect(screen.getByText('Alcohol present')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Organizer Terms' })).toHaveAttribute('href', '/organizer-terms')
+    expect(screen.getByRole('link', { name: 'Event Policy' })).toHaveAttribute('href', '/event-policy')
+    expect(screen.getByText('Agreement required before publishing.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Publish event' })).toBeDisabled()
+    expect(mutateAsync).not.toHaveBeenCalled()
+  })
+
+  it('keeps publish unavailable while persisted agreement status is loading or failed and offers retry', async () => {
+    const user = userEvent.setup()
+    useOwnedEventRequirements.mockReturnValue({ data: undefined, isPending: true, isError: false, refetch: requirementsRefetch })
+    const loading = renderPreview()
+    expect(screen.getByText('Loading event requirements')).toBeInTheDocument()
+    loading.unmount()
+
+    useOwnedEventRequirements.mockReturnValue({ data: undefined, isPending: false, isError: true, refetch: requirementsRefetch })
+    renderPreview()
+    await user.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(requirementsRefetch).toHaveBeenCalledOnce()
+    expect(mutateAsync).not.toHaveBeenCalled()
   })
 
   it('waits to enable the organizer query until the event supplies its organizer ID', async () => {
@@ -132,6 +172,31 @@ describe('EventPreviewPage', () => {
     expect(mutateAsync).toHaveBeenCalledWith('event-1')
     expect(router.state.location.pathname).toBe('/organizer/events/event-1/preview')
     await act(async () => resolve({ ...event, status: 'published', published_at: '2026-08-24T16:00:00.000Z' }))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/organizer/events/event-1'))
+  })
+
+  it('rejects a mismatched publish response', async () => {
+    const user = userEvent.setup()
+    useOwnedEvent.mockReturnValue({ ...eventLoaded, data: { ...event, status: 'published', moderation_status: 'blocked' } })
+    mutateAsync.mockResolvedValueOnce({ ...event, id: 'event-2', status: 'published', moderation_status: 'clear' })
+    const { router } = renderPreview()
+
+    await user.click(screen.getByRole('button', { name: 'Publish changes' }))
+    expect(await screen.findByText('Publishing failed. Try again.')).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe('/organizer/events/event-1/preview')
+  })
+
+  it.each(['blocked', 'removed'] as const)('preserves %s enforcement on re-publish', async (moderationStatus) => {
+    const user = userEvent.setup()
+    useOwnedEvent.mockReturnValue({
+      ...eventLoaded,
+      data: { ...event, status: 'published', moderation_status: moderationStatus },
+    })
+    mutateAsync.mockResolvedValueOnce({ ...event, status: 'published', moderation_status: moderationStatus })
+    const { router } = renderPreview()
+
+    await user.click(screen.getByRole('button', { name: 'Publish changes' }))
+    expect(mutateAsync).toHaveBeenCalledWith('event-1')
     await waitFor(() => expect(router.state.location.pathname).toBe('/organizer/events/event-1'))
   })
 

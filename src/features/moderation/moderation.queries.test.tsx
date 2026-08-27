@@ -3,17 +3,17 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import type { PropsWithChildren } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { acceptCurrentEventPolicies, getOwnedEventRequirements, requestEventReview, saveEventRequirements, submitModerationAction } = vi.hoisted(() => ({
-  acceptCurrentEventPolicies: vi.fn(), getOwnedEventRequirements: vi.fn(), requestEventReview: vi.fn(), saveEventRequirements: vi.fn(), submitModerationAction: vi.fn(),
+const { acceptCurrentEventPolicies, getCurrentEventReviewRequest, getOwnedEventRequirements, requestEventReview, saveEventRequirements, submitModerationAction, withdrawEventReview } = vi.hoisted(() => ({
+  acceptCurrentEventPolicies: vi.fn(), getCurrentEventReviewRequest: vi.fn(), getOwnedEventRequirements: vi.fn(), requestEventReview: vi.fn(), saveEventRequirements: vi.fn(), submitModerationAction: vi.fn(), withdrawEventReview: vi.fn(),
 }))
-vi.mock('./moderation.api', () => ({ acceptCurrentEventPolicies, getOwnedEventRequirements, requestEventReview, saveEventRequirements, submitModerationAction }))
+vi.mock('./moderation.api', () => ({ acceptCurrentEventPolicies, getCurrentEventReviewRequest, getOwnedEventRequirements, requestEventReview, saveEventRequirements, submitModerationAction, withdrawEventReview }))
 vi.mock('../events/event.queries', () => ({
   eventKeys: {
     detail: (organizerId: string, eventId: string) => ['events', 'detail', organizerId, eventId],
     ownedList: (organizerId: string) => ['events', 'owned', organizerId],
   },
 }))
-import { moderationKeys, useAcceptCurrentEventPolicies, useOwnedEventRequirements, useRequestEventReview, useSaveEventRequirements, useSubmitModerationAction } from './moderation.queries'
+import { moderationKeys, useAcceptCurrentEventPolicies, useCurrentEventReviewRequest, useOwnedEventRequirements, useRequestEventReview, useSaveEventRequirements, useSubmitModerationAction, useWithdrawEventReview } from './moderation.queries'
 
 const requirements = {
   minimumAge: 'all_ages' as const, alcoholPresent: false, cannabisPresent: false, explicitAdultContent: false,
@@ -49,6 +49,17 @@ describe('moderation query cache contracts', () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(result.current.data).toBeNull()
     expect(client.getQueryData(moderationKeys.requirements('organizer-a', 'event-1'))).toEqual(requirements)
+  })
+
+  it('loads current review status with an owner-scoped key and never reuses another identity', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    client.setQueryData(moderationKeys.review('organizer-a', 'event-1'), { id: 'old-review', status: 'open' })
+    getCurrentEventReviewRequest.mockResolvedValue(null)
+    const { result } = renderHook(() => useCurrentEventReviewRequest('organizer-b', 'event-1'), { wrapper: wrapper(client) })
+    expect(result.current.data).toBeUndefined()
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data).toBeNull()
+    expect(getCurrentEventReviewRequest).toHaveBeenCalledWith('event-1')
   })
 
   it('invalidates only exact owner and public event contracts after acceptance', async () => {
@@ -88,6 +99,16 @@ describe('moderation query cache contracts', () => {
     await act(async () => { await result.current.mutateAsync('Please review this event.') })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: moderationKeys.review('organizer-1', 'event-1'), exact: true })
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: moderationKeys.publicEvent('event-1'), exact: true })
+  })
+
+  it('invalidates the same exact owner review fact after withdrawal', async () => {
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    withdrawEventReview.mockResolvedValue('37beaa67-b2a2-4b56-9c6c-e91208925c45')
+    const { result } = renderHook(() => useWithdrawEventReview('organizer-1', 'event-1'), { wrapper: wrapper(client) })
+    await act(async () => { await result.current.mutateAsync() })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: moderationKeys.review('organizer-1', 'event-1'), exact: true })
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: moderationKeys.review('organizer-2', 'event-1'), exact: true })
   })
 
   it('invalidates only the acting staff member case, queue, and event public projection', async () => {

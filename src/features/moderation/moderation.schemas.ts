@@ -84,6 +84,13 @@ export const eventRequirementsSchema = disclosureValuesSchema.extend({
 export const agreementStatusSchema = eventRequirementsSchema
 export const eventRequirementsInputSchema = disclosureValuesSchema
 
+export const currentReviewRequestSchema = z.strictObject({
+  id: uuidSchema,
+  status: z.enum(['open', 'resolved', 'withdrawn']),
+  createdAt: z.string(),
+  resolvedAt: z.string().nullable(),
+})
+
 export const reportReasonSchema = z.enum([
   'scam_misleading', 'unsafe', 'prohibited_content', 'wrong_location', 'event_missing',
   'adult_misrepresented', 'hate_extremism', 'other',

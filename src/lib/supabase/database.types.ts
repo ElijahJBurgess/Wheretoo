@@ -988,6 +988,15 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      get_current_event_review_request: {
+        Args: { p_event_id: string }
+        Returns: {
+          created_at: string
+          id: string
+          resolved_at: string
+          status: string
+        }[]
+      }
       get_moderation_case: {
         Args: { p_event_id: string }
         Returns: {

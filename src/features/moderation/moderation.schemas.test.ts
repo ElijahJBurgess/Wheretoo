@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   agreementStatusSchema,
+  currentReviewRequestSchema,
   eventRequirementsSchema,
   moderationActionInputSchema,
   moderationSourceSchema,
@@ -28,6 +29,19 @@ const requirements = {
 }
 
 describe('moderation browser schemas', () => {
+  it('accepts only the narrow organizer-facing current review request contract', () => {
+    const review = {
+      id: '37beaa67-b2a2-4b56-9c6c-e91208925c45',
+      status: 'open',
+      createdAt: '2026-08-26T00:00:00Z',
+      resolvedAt: null,
+    }
+
+    expect(currentReviewRequestSchema.parse(review)).toEqual(review)
+    expect(() => currentReviewRequestSchema.parse({ ...review, organizerNote: 'private note' })).toThrow()
+    expect(() => currentReviewRequestSchema.parse({ ...review, reviewerId: 'staff-1' })).toThrow()
+    expect(() => currentReviewRequestSchema.parse({ ...review, status: 'superseded' })).toThrow()
+  })
   it('accepts only the exact development placeholder routes, versions, and stage', () => {
     expect(requiredPolicySchema.safeParse(developmentPolicies[0]).success).toBe(true)
     expect(requiredPolicySchema.safeParse({ ...developmentPolicies[0], publicUrl: 'https://whereto.example/organizer-terms' }).success).toBe(false)

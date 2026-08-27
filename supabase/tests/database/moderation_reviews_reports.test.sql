@@ -8,6 +8,8 @@ select has_function('public', 'request_event_review', array['uuid', 'text'],
   'owners can request review through one exact-revision boundary');
 select has_function('public', 'withdraw_event_review', array['uuid'],
   'owners can withdraw only their current open review request');
+select has_function('public', 'get_current_event_review_request', array['uuid'],
+  'owners can reload the current revision review request through a narrow projection');
 select has_function('public', 'server_submit_event_report', array['uuid', 'text', 'text', 'text'],
   'only the server submits report digests and structured reasons');
 
@@ -17,9 +19,11 @@ select results_eq(
     has_function_privilege('authenticated', 'public.server_submit_event_report(uuid,text,text,text)', 'execute'),
     has_function_privilege('service_role', 'public.server_submit_event_report(uuid,text,text,text)', 'execute'),
     has_function_privilege('anon', 'public.request_event_review(uuid,text)', 'execute'),
-    has_function_privilege('authenticated', 'public.request_event_review(uuid,text)', 'execute') $$,
-  $$ values (false, false, true, false, true) $$,
-  'report submission is service-only while review requests remain owner-authenticated'
+    has_function_privilege('authenticated', 'public.request_event_review(uuid,text)', 'execute'),
+    has_function_privilege('anon', 'public.get_current_event_review_request(uuid)', 'execute'),
+    has_function_privilege('authenticated', 'public.get_current_event_review_request(uuid)', 'execute') $$,
+  $$ values (false, false, true, false, true, false, true) $$,
+  'report submission is service-only while review request reads and writes remain owner-authenticated'
 );
 
 select results_eq(
@@ -28,9 +32,10 @@ select results_eq(
      where oid in (
        'public.request_event_review(uuid,text)'::regprocedure,
        'public.withdraw_event_review(uuid)'::regprocedure,
+       'public.get_current_event_review_request(uuid)'::regprocedure,
        'public.server_submit_event_report(uuid,text,text,text)'::regprocedure
      ) and proconfig @> array['search_path=""']::text[] $$,
-  $$ values (3::bigint) $$,
+  $$ values (4::bigint) $$,
   'review and report boundaries use empty search paths'
 );
 
@@ -211,8 +216,21 @@ select extensions.is(
      and requests.input_sha256 = snapshot.input_sha256),
   1, 'idempotent retry leaves the exact open row and snapshot unchanged'
 );
+select set_config('request.jwt.claim.sub', '19000000-0000-4000-8000-000000000001', true);
+set local role authenticated;
+select results_eq(
+  $$ select id, status, created_at is not null, resolved_at
+     from public.get_current_event_review_request('29000000-0000-4000-8000-000000000001') $$,
+  $$ select id, 'open'::text, true, null::timestamptz from review_request_snapshot $$,
+  'the owner reloads only the current open request identifier, status, and safe timestamps'
+);
+reset role;
 select set_config('request.jwt.claim.sub', '19000000-0000-4000-8000-000000000002', true);
 set local role authenticated;
+select is_empty(
+  $$ select * from public.get_current_event_review_request('29000000-0000-4000-8000-000000000001') $$,
+  'another organizer cannot read the current review request'
+);
 select throws_ok(
   $$ select public.request_event_review('29000000-0000-4000-8000-000000000001', null) $$,
   'P0001', 'EVENT_NOT_FOUND', 'a cross-owner request returns the safe not-found result'
@@ -230,6 +248,15 @@ select extensions."is"(
    where event_id = '29000000-0000-4000-8000-000000000001' order by created_at desc limit 1),
   'withdrawn'::text, 'withdrawal resolves only the request record and preserves moderation'
 );
+select set_config('request.jwt.claim.sub', '19000000-0000-4000-8000-000000000001', true);
+set local role authenticated;
+select results_eq(
+  $$ select status, resolved_at is not null
+     from public.get_current_event_review_request('29000000-0000-4000-8000-000000000001') $$,
+  $$ values ('withdrawn'::text, true) $$,
+  'the owner projection persists withdrawn status for retry UI after reload'
+);
+reset role;
 select set_config('request.jwt.claim.sub', '19000000-0000-4000-8000-000000000001', true);
 set local role authenticated;
 select isnt(
@@ -281,6 +308,13 @@ select extensions.is(
    where event_id = '29000000-0000-4000-8000-000000000001' order by created_at desc limit 1),
   'superseded'::text, 'the actual Task 6 revision boundary supersedes a stale open review request'
 );
+select set_config('request.jwt.claim.sub', '19000000-0000-4000-8000-000000000001', true);
+set local role authenticated;
+select is_empty(
+  $$ select * from public.get_current_event_review_request('29000000-0000-4000-8000-000000000001') $$,
+  'a material edit removes the superseded old-revision request from the current projection'
+);
+reset role;
 set local role service_role;
 select extensions.is(
   public.server_submit_event_report(

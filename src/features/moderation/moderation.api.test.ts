@@ -6,6 +6,7 @@ vi.mock('../../lib/supabase/client', () => ({ supabase: { functions: { invoke: f
 import {
   ModerationApiError,
   acceptCurrentEventPolicies,
+  getCurrentEventReviewRequest,
   getModerationCase,
   getMyStaffRole,
   getOwnedEventRequirements,
@@ -58,6 +59,24 @@ describe('moderation browser API', () => {
 
     rpc.mockResolvedValueOnce({ data: null, error: { code: 'P0001', message: 'EVENT_NOT_FOUND' } })
     await expect(getOwnedEventRequirements(eventId)).resolves.toBeNull()
+  })
+
+  it('loads only the current owner review request safe projection', async () => {
+    const reviewRow = {
+      id: '37beaa67-b2a2-4b56-9c6c-e91208925c45', status: 'open',
+      created_at: '2026-08-26T00:00:00Z', resolved_at: null,
+    }
+    rpc.mockResolvedValueOnce({ data: [reviewRow], error: null })
+    await expect(getCurrentEventReviewRequest(eventId)).resolves.toEqual({
+      id: reviewRow.id, status: 'open', createdAt: reviewRow.created_at, resolvedAt: null,
+    })
+    expect(rpc).toHaveBeenCalledWith('get_current_event_review_request', { p_event_id: eventId })
+
+    rpc.mockResolvedValueOnce({ data: [], error: null })
+    await expect(getCurrentEventReviewRequest(eventId)).resolves.toBeNull()
+
+    rpc.mockResolvedValueOnce({ data: [{ ...reviewRow, organizer_note: 'private' }], error: null })
+    await expect(getCurrentEventReviewRequest(eventId)).rejects.toEqual(new ModerationApiError('UNAVAILABLE'))
   })
 
   it('strictly parses the required-policy list boundary', async () => {
