@@ -10,6 +10,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:integration:moderation": "tests/integration/run-moderation-proof.sh",
     "test:integration:ticketing-db": "tests/integration/run-ticketing-database.sh",
     "test:e2e:ticketing": "tests/e2e/run-ticketing-browser-proof.sh",
     "test:watch": "vitest",
