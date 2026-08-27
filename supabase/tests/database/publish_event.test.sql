@@ -359,6 +359,51 @@ values (
   now()
 );
 
+insert into private.event_risk_disclosures (
+  event_id,
+  minimum_age,
+  alcohol_present,
+  cannabis_present,
+  explicit_adult_content,
+  gambling_present,
+  weapons_present,
+  high_risk_activity
+)
+select
+  events.id,
+  'all_ages',
+  false,
+  false,
+  false,
+  false,
+  false,
+  false
+from public.events as events;
+
+set local role service_role;
+select private.configure_policy_environment('development');
+reset role;
+
+insert into private.event_policy_acceptances (
+  event_id,
+  organizer_id,
+  accepted_by_user_id,
+  content_revision,
+  input_sha256,
+  organizer_terms_version_id,
+  event_policy_version_id
+)
+select
+  events.id,
+  events.organizer_id,
+  events.organizer_id,
+  events.content_revision,
+  private.compute_event_input_sha256(events.id),
+  'dev-organizer-terms-v1',
+  'dev-event-policy-v1'
+from public.events as events
+where events.organizer_id = '10000000-0000-0000-0000-000000000001';
+
 select set_config('request.jwt.claim.sub', '', true);
 set local role anon;
 

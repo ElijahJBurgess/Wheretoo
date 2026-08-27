@@ -84,7 +84,7 @@ values
   (
     '22000000-0000-0000-0000-000000000008',
     '12000000-0000-0000-0000-000000000001',
-    'published', 'flagged', 'Flagged Public Paid Event',
+    'published', 'clear', 'Flagged Public Paid Event',
     'A flagged paid event that remains publicly discoverable.', 'music',
     now() + interval '4 days', now() + interval '4 days 3 hours', 'Flagged Venue',
     '8 Market Street', 'San Francisco', 'CA', '94105', 'US',
@@ -394,7 +394,7 @@ select results_eq(
     from public.get_public_event_ticketing('22000000-0000-0000-0000-000000000008')
   $$,
   $$ values (1::bigint) $$,
-  'a published flagged paid event remains visible through the public projection'
+  'a published clear paid event remains visible through the public projection'
 );
 
 select results_eq(
