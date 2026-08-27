@@ -18,15 +18,19 @@ const anonymousTicketingClient = createClient<Database>(
   },
 )
 
+const retryableRpcStatuses = new Set([0, 408, 425, 429, 502, 503, 504])
+
 export async function getPublicEventTicketing(eventId: string): Promise<CanonicalPublicTicketingEvent | null> {
   const parsedEventId = lowercaseRfcUuidSchema.safeParse(eventId)
   if (!parsedEventId.success) return null
 
-  const { data, error } = await anonymousTicketingClient.rpc('get_public_event_ticketing', {
+  const { data, error, status } = await anonymousTicketingClient.rpc('get_public_event_ticketing', {
     p_event_id: parsedEventId.data,
   })
 
-  if (error) throw new PublicTicketingError('RETRYABLE')
+  if (error) {
+    throw new PublicTicketingError(retryableRpcStatuses.has(status) ? 'RETRYABLE' : 'INVALID_RESPONSE')
+  }
   if (data === null || data.length === 0) return null
 
   if (data.length !== 1) throw new PublicTicketingError('INVALID_RESPONSE')

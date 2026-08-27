@@ -122,11 +122,32 @@ describe('public ticketing API', () => {
     })
   })
 
-  it('maps a transport failure to bounded public copy', async () => {
-    rpc.mockResolvedValue({ data: null, error: { message: 'private schema detail' } })
+  it.each([0, 408, 425, 429, 502, 503, 504])('maps retryable status %s to bounded public copy', async (status) => {
+    rpc.mockResolvedValue({
+      data: null,
+      error: { message: 'Failed to fetch' },
+      status,
+    })
 
     await expect(getPublicEventTicketing(eventId)).rejects.toMatchObject({
       code: 'RETRYABLE',
+      message: 'Public event details are unavailable',
+    })
+  })
+
+  it.each([
+    [403, '42501'],
+    [404, 'PGRST202'],
+    [500, 'XX000'],
+  ])('fails closed for non-network RPC errors (status %s)', async (status, code) => {
+    rpc.mockResolvedValue({
+      data: null,
+      error: { code, message: 'private database detail' },
+      status,
+    })
+
+    await expect(getPublicEventTicketing(eventId)).rejects.toMatchObject({
+      code: 'INVALID_RESPONSE',
       message: 'Public event details are unavailable',
     })
   })
