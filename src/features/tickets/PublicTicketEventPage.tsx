@@ -4,6 +4,7 @@ import { AsyncState } from '../../components/ui/AsyncState'
 import { Button } from '../../components/ui/Button'
 import { ReportEventDialog } from '../moderation/ReportEventDialog'
 import { TicketTierList } from './TicketTierList'
+import { isRetryablePublicTicketingError } from './publicTicketing.errors'
 import { usePublicTicketingEvent } from './publicTicketing.queries'
 import type { PublicTicketTierTuple } from './ticket.types'
 
@@ -160,11 +161,15 @@ function PublicTicketPurchase({ eventId, tiers }: PublicTicketPurchaseProps) {
 export function PublicTicketEventPage() {
   const { eventId = '' } = useParams()
   const eventQuery = usePublicTicketingEvent(eventId)
+  const hasRetryableStaleEvent = eventQuery.isError
+    && eventQuery.data !== undefined
+    && eventQuery.data !== null
+    && isRetryablePublicTicketingError(eventQuery.error)
 
   if ((eventQuery.isPending || eventQuery.data === undefined) && !eventQuery.isError) {
     return <PublicEventState status="loading" title="Loading event" />
   }
-  if (eventQuery.isError && eventQuery.data === undefined) {
+  if (eventQuery.isError && !hasRetryableStaleEvent) {
     return <PublicEventState action={<Button onClick={() => void eventQuery.refetch()}>Try again</Button>} description="Check your connection, then try again." status="error" title="Event could not load" />
   }
   if (eventQuery.data === null) {
@@ -177,7 +182,7 @@ export function PublicTicketEventPage() {
 
   return (
     <main className="public-event-layout">
-      {eventQuery.isError ? (
+      {hasRetryableStaleEvent ? (
         <div className="public-event-refresh" role="status">
           <p>Showing the last event details we received. We could not check current availability.</p>
           <Button onClick={() => void eventQuery.refetch()} variant="secondary">Check again</Button>
@@ -209,7 +214,7 @@ export function PublicTicketEventPage() {
             eventId={event.id}
             tiers={tiers}
           />
-          <ReportEventDialog eventId={event.id} />
+          {!hasRetryableStaleEvent ? <ReportEventDialog eventId={event.id} /> : null}
         </div>
       </article>
     </main>

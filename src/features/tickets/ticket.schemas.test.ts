@@ -192,6 +192,8 @@ describe('publicTicketingEventSchema', () => {
           artwork_path: null,
           animation_preset: 'generic',
           admission_type: 'paid',
+          minimum_age: 'all_ages',
+          advisories: [],
           organizer: { id: '6b849fa0-4d5e-4faa-bf31-b169cb1bd7fe', display_name: 'Bay City Arts' },
         },
         tiers: [
@@ -231,6 +233,8 @@ describe('publicTicketingEventSchema', () => {
           artwork_path: null,
           animation_preset: 'generic',
           admission_type: 'paid',
+          minimum_age: 'all_ages',
+          advisories: ['alcohol'],
           organizer: { id: '6b849fa0-4d5e-4faa-bf31-b169cb1bd7fe', display_name: 'Bay City Arts' },
         },
         tiers: [
@@ -275,6 +279,8 @@ describe('publicTicketingEventSchema', () => {
         artwork_path: null,
         animation_preset: 'generic',
         admission_type: 'paid',
+        minimum_age: 'all_ages',
+        advisories: [],
         organizer: { id: '6b849fa0-4d5e-4faa-bf31-b169cb1bd7fe', display_name: 'Bay City Arts' },
       },
       tiers: [

@@ -3,6 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import type { PropsWithChildren } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PublicTicketingEvent } from './ticket.types'
+import { PublicTicketingError } from './publicTicketing.errors'
 
 const { getPublicEventTicketing } = vi.hoisted(() => ({ getPublicEventTicketing: vi.fn() }))
 vi.mock('./publicTicketing.api', () => ({ getPublicEventTicketing }))
@@ -37,6 +38,8 @@ const publicEvent: PublicTicketingEvent = {
     artwork_path: null,
     animation_preset: 'generic',
     admission_type: 'paid',
+    minimum_age: 'all_ages',
+    advisories: [],
     organizer: {
       id: '6b849fa0-4d5e-4faa-bf31-b169cb1bd7fe',
       display_name: 'Bay City Arts',
@@ -148,10 +151,21 @@ describe('public ticketing query', () => {
   it('retains last-known content only when a retryable refresh fails', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     client.setQueryData(ticketKeys.public(eventId), publicEvent)
-    getPublicEventTicketing.mockRejectedValue(new Error('network unavailable'))
+    getPublicEventTicketing.mockRejectedValue(new PublicTicketingError('RETRYABLE'))
     const { result } = renderHook(() => usePublicTicketingEvent(eventId), { wrapper: wrapper(client) })
 
     await waitFor(() => expect(result.current.isError).toBe(true))
     expect(result.current.data).toEqual(publicEvent)
+  })
+
+  it('fails an invalid projection immediately without query retries', async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: 3, retryDelay: 0 } },
+    })
+    getPublicEventTicketing.mockRejectedValue(new PublicTicketingError('INVALID_RESPONSE'))
+    const { result } = renderHook(() => usePublicTicketingEvent(eventId), { wrapper: wrapper(client) })
+
+    await waitFor(() => expect(result.current.isError).toBe(true))
+    expect(getPublicEventTicketing).toHaveBeenCalledTimes(1)
   })
 })

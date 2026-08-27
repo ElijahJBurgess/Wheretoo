@@ -21,6 +21,7 @@ const { mutateAsync, resetReport, useReportPublicEvent } = vi.hoisted(() => ({
 vi.mock('../moderation/moderation.queries', () => ({ useReportPublicEvent }))
 
 import { PublicTicketEventPage } from './PublicTicketEventPage'
+import { PublicTicketingError } from './publicTicketing.errors'
 
 const eventId = 'eb0fd9d5-d7d5-45dd-a99f-0c8a191bdc6f'
 const tierId = '900a9142-9111-4f87-84d5-b8545a94c7fb'
@@ -45,6 +46,8 @@ const publicEvent: PublicTicketingEvent = {
     artwork_path: null,
     animation_preset: 'generic',
     admission_type: 'paid',
+    minimum_age: 'all_ages',
+    advisories: [],
     organizer: { id: '6b849fa0-4d5e-4faa-bf31-b169cb1bd7fe', display_name: 'Bay City Arts' },
   },
   tiers: [{
@@ -243,6 +246,7 @@ describe('PublicTicketEventPage', () => {
       data: publicEvent,
       isPending: false,
       isError: true,
+      error: new PublicTicketingError('RETRYABLE'),
       refetch,
     })
     const user = userEvent.setup()
@@ -251,9 +255,26 @@ describe('PublicTicketEventPage', () => {
     expect(screen.getByRole('heading', { name: 'Night Market' })).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent('Showing the last event details we received')
     expect(screen.queryByRole('heading', { name: 'Event could not load' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Report this event' })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Check again' }))
     expect(refetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('fails closed instead of displaying cached content after an invalid public projection', () => {
+    usePublicTicketingEvent.mockReturnValue({
+      data: publicEvent,
+      isPending: false,
+      isError: true,
+      error: new PublicTicketingError('INVALID_RESPONSE'),
+      refetch: vi.fn(),
+    })
+
+    renderPage()
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Event could not load' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Night Market' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Report this event' })).not.toBeInTheDocument()
   })
 
   it('labels an event with no purchasable tiers as unavailable instead of enabling checkout', () => {

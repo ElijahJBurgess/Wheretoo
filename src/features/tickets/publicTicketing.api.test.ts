@@ -39,6 +39,8 @@ const projection = {
     artwork_path: null,
     animation_preset: 'generic',
     admission_type: 'paid',
+    minimum_age: 'all_ages',
+    advisories: ['alcohol'],
     organizer: { id: '6b849fa0-4d5e-4faa-bf31-b169cb1bd7fe', display_name: 'Bay City Arts' },
   },
   tiers: [{
@@ -85,7 +87,24 @@ describe('public ticketing API', () => {
   it('does not cache or expose a malformed server projection', async () => {
     rpc.mockResolvedValue({ data: [{ ...projection, tiers: [{ ...projection.tiers[0], currency: 'cad' }] }], error: null })
 
-    await expect(getPublicEventTicketing(eventId)).rejects.toThrow('Public event details are unavailable')
+    await expect(getPublicEventTicketing(eventId)).rejects.toMatchObject({
+      code: 'INVALID_RESPONSE',
+      message: 'Public event details are unavailable',
+    })
+  })
+
+  it('requires the complete canonical safe-event projection', async () => {
+    const eventWithoutMinimumAge = { ...projection.event }
+    Reflect.deleteProperty(eventWithoutMinimumAge, 'minimum_age')
+    rpc.mockResolvedValue({
+      data: [{ ...projection, event: eventWithoutMinimumAge }],
+      error: null,
+    })
+
+    await expect(getPublicEventTicketing(eventId)).rejects.toMatchObject({
+      code: 'INVALID_RESPONSE',
+      message: 'Public event details are unavailable',
+    })
   })
 
   it('rejects moderation fields instead of exposing them through the public projection', async () => {
@@ -97,12 +116,18 @@ describe('public ticketing API', () => {
       error: null,
     })
 
-    await expect(getPublicEventTicketing(eventId)).rejects.toThrow('Public event details are unavailable')
+    await expect(getPublicEventTicketing(eventId)).rejects.toMatchObject({
+      code: 'INVALID_RESPONSE',
+      message: 'Public event details are unavailable',
+    })
   })
 
   it('maps a transport failure to bounded public copy', async () => {
     rpc.mockResolvedValue({ data: null, error: { message: 'private schema detail' } })
 
-    await expect(getPublicEventTicketing(eventId)).rejects.toThrow('Public event details are unavailable')
+    await expect(getPublicEventTicketing(eventId)).rejects.toMatchObject({
+      code: 'RETRYABLE',
+      message: 'Public event details are unavailable',
+    })
   })
 })

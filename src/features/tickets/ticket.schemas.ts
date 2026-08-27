@@ -113,6 +113,8 @@ export const publicTicketingEventSchema = z
         artwork_path: z.string().trim().min(1).nullable(),
         animation_preset: z.string().trim().min(1),
         admission_type: z.literal('paid'),
+        minimum_age: z.enum(['all_ages', '18_plus', '21_plus']),
+        advisories: z.array(z.enum(['alcohol', 'cannabis', 'mature_content'])),
         organizer: z
           .object({
             id: lowercaseRfcUuidSchema,

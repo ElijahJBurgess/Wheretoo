@@ -1,8 +1,9 @@
 import { createClient } from '@supabase/supabase-js'
 import { publicEnv } from '../../lib/env'
 import type { Database } from '../../lib/supabase/database.types'
+import { PublicTicketingError } from './publicTicketing.errors'
 import { lowercaseRfcUuidSchema, publicTicketingEventSchema } from './ticket.schemas'
-import type { PublicTicketingEvent } from './ticket.types'
+import type { CanonicalPublicTicketingEvent } from './ticket.types'
 
 const anonymousTicketingClient = createClient<Database>(
   publicEnv.supabaseUrl,
@@ -17,7 +18,7 @@ const anonymousTicketingClient = createClient<Database>(
   },
 )
 
-export async function getPublicEventTicketing(eventId: string): Promise<PublicTicketingEvent | null> {
+export async function getPublicEventTicketing(eventId: string): Promise<CanonicalPublicTicketingEvent | null> {
   const parsedEventId = lowercaseRfcUuidSchema.safeParse(eventId)
   if (!parsedEventId.success) return null
 
@@ -25,13 +26,13 @@ export async function getPublicEventTicketing(eventId: string): Promise<PublicTi
     p_event_id: parsedEventId.data,
   })
 
-  if (error) throw new Error('Public event details are unavailable')
+  if (error) throw new PublicTicketingError('RETRYABLE')
   if (data === null || data.length === 0) return null
 
-  if (data.length !== 1) throw new Error('Public event details are unavailable')
+  if (data.length !== 1) throw new PublicTicketingError('INVALID_RESPONSE')
 
   const parsedProjection = publicTicketingEventSchema.safeParse(data[0])
-  if (!parsedProjection.success) throw new Error('Public event details are unavailable')
+  if (!parsedProjection.success) throw new PublicTicketingError('INVALID_RESPONSE')
 
   return parsedProjection.data
 }
