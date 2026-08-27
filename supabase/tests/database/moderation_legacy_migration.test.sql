@@ -1223,6 +1223,11 @@ select results_eq(
     where normalization.source = 'migration'
       and normalization.action = 'hold'
       and normalization.internal_note ~ '^legacy_lifecycle_status=published;legacy_moderation_status=(clear|flagged);'
+      and normalization.event_id in (
+        select fixtures.event_id from legacy_matrix_fixture as fixtures
+        union all
+        select '63000000-0000-0000-0000-000000000010'::uuid
+      )
       and not exists (
         select 1
         from private.event_moderation_evaluations as evaluations

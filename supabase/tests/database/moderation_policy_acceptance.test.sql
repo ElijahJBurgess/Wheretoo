@@ -777,12 +777,13 @@ select lives_ok(
 set local role anon;
 select results_eq(
   $$
-    select id
-    from public.events
-    where id = '73100000-0000-4000-8000-000000000002'
+    select (projection.value ->> 'id')::uuid
+    from public.get_public_event(
+      '73100000-0000-4000-8000-000000000002'
+    ) as projection(value)
   $$,
-  $$ values ('73100000-0000-4000-8000-000000000002'::uuid) $$,
-  'a policy-version change does not hide an untouched published event'
+  $$ select null::uuid where false $$,
+  'the canonical public projection fails closed while the required development pair is invalid'
 );
 reset role;
 
