@@ -1,4 +1,5 @@
 import { act, render, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -122,5 +123,38 @@ describe('SessionProvider', () => {
 
     await act(async () => rejectSession(new Error('Unmounted session failure')))
     expect(unsubscribe).toHaveBeenCalledOnce()
+  })
+
+  it('evicts private event and moderation caches before A signs out and back in while retaining public data', async () => {
+    getSession.mockResolvedValue({ data: { session }, error: null })
+    let authListener: ((event: AuthChangeEvent, nextSession: Session | null) => void) | undefined
+    onAuthStateChange.mockImplementation((listener) => {
+      authListener = listener
+      return { data: { subscription: { unsubscribe } } }
+    })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SessionProvider queryClient={queryClient}><SessionProbe /></SessionProvider>
+      </QueryClientProvider>,
+    )
+    expect(await screen.findByText('authenticated:user-1')).toBeInTheDocument()
+
+    queryClient.setQueryData(['events', 'detail', 'user-1', 'event-1'], 'private event')
+    queryClient.setQueryData(['moderation', 'requirements', 'user-1', 'event-1'], 'private requirements')
+    queryClient.setQueryData(['public-event', 'event-1'], 'public event')
+    queryClient.setQueryData(['moderation', 'policies'], 'public policies')
+
+    act(() => authListener?.('SIGNED_OUT', null))
+    expect(screen.getByText('anonymous')).toBeInTheDocument()
+    expect(queryClient.getQueryData(['events', 'detail', 'user-1', 'event-1'])).toBeUndefined()
+    expect(queryClient.getQueryData(['moderation', 'requirements', 'user-1', 'event-1'])).toBeUndefined()
+    expect(queryClient.getQueryData(['public-event', 'event-1'])).toBe('public event')
+    expect(queryClient.getQueryData(['moderation', 'policies'])).toBe('public policies')
+
+    act(() => authListener?.('SIGNED_IN', session))
+    expect(screen.getByText('authenticated:user-1')).toBeInTheDocument()
+    expect(queryClient.getQueryData(['events', 'detail', 'user-1', 'event-1'])).toBeUndefined()
+    expect(queryClient.getQueryData(['moderation', 'requirements', 'user-1', 'event-1'])).toBeUndefined()
   })
 })

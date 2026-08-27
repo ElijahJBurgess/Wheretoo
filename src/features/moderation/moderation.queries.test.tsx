@@ -7,6 +7,12 @@ const { acceptCurrentEventPolicies, getOwnedEventRequirements, requestEventRevie
   acceptCurrentEventPolicies: vi.fn(), getOwnedEventRequirements: vi.fn(), requestEventReview: vi.fn(), saveEventRequirements: vi.fn(), submitModerationAction: vi.fn(),
 }))
 vi.mock('./moderation.api', () => ({ acceptCurrentEventPolicies, getOwnedEventRequirements, requestEventReview, saveEventRequirements, submitModerationAction }))
+vi.mock('../events/event.queries', () => ({
+  eventKeys: {
+    detail: (organizerId: string, eventId: string) => ['events', 'detail', organizerId, eventId],
+    ownedList: (organizerId: string) => ['events', 'owned', organizerId],
+  },
+}))
 import { moderationKeys, useAcceptCurrentEventPolicies, useOwnedEventRequirements, useRequestEventReview, useSaveEventRequirements, useSubmitModerationAction } from './moderation.queries'
 
 const requirements = {
@@ -60,12 +66,18 @@ describe('moderation query cache contracts', () => {
   it('invalidates only the exact owner families after a requirements save', async () => {
     const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
+    client.setQueryData(['events', 'detail', 'organizer-2', 'event-1'], 'other organizer event')
+    client.setQueryData(moderationKeys.requirements('organizer-2', 'event-1'), 'other organizer requirements')
     saveEventRequirements.mockResolvedValue(requirements)
     const { result } = renderHook(() => useSaveEventRequirements('organizer-1', 'event-1'), { wrapper: wrapper(client) })
     await act(async () => { await result.current.mutateAsync(requirements) })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: moderationKeys.review('organizer-1', 'event-1'), exact: true })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: moderationKeys.publicEvent('event-1'), exact: true })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['events', 'detail', 'organizer-1', 'event-1'], exact: true })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['events', 'owned', 'organizer-1'], exact: true })
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: moderationKeys.review('organizer-2', 'event-1'), exact: true })
+    expect(client.getQueryState(['events', 'detail', 'organizer-2', 'event-1'])?.isInvalidated).toBe(false)
+    expect(client.getQueryState(moderationKeys.requirements('organizer-2', 'event-1'))?.isInvalidated).toBe(false)
   })
 
   it('invalidates the initiating owner review facts without a public invalidation', async () => {
@@ -81,8 +93,9 @@ describe('moderation query cache contracts', () => {
   it('invalidates only the acting staff member case, queue, and event public projection', async () => {
     const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
+    client.setQueryData(moderationKeys.case('staff-2', 'b4ee321a-bdf6-43b2-a7f4-d6478d942908'), 'other staff case')
     submitModerationAction.mockResolvedValue('37beaa67-b2a2-4b56-9c6c-e91208925c45')
-    const { result } = renderHook(() => useSubmitModerationAction('staff-1'), { wrapper: wrapper(client) })
+    const { result } = renderHook(() => useSubmitModerationAction('staff-1', 'organizer-1'), { wrapper: wrapper(client) })
     await act(async () => {
       await result.current.mutateAsync({
         eventId: 'b4ee321a-bdf6-43b2-a7f4-d6478d942908', expectedContentRevision: 2,
@@ -92,6 +105,9 @@ describe('moderation query cache contracts', () => {
     })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: moderationKeys.case('staff-1', 'b4ee321a-bdf6-43b2-a7f4-d6478d942908'), exact: true })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: moderationKeys.queue('staff-1'), exact: true })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['events', 'detail', 'organizer-1', 'b4ee321a-bdf6-43b2-a7f4-d6478d942908'], exact: true })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['events', 'owned', 'organizer-1'], exact: true })
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: moderationKeys.case('staff-2', 'b4ee321a-bdf6-43b2-a7f4-d6478d942908'), exact: true })
+    expect(client.getQueryState(moderationKeys.case('staff-2', 'b4ee321a-bdf6-43b2-a7f4-d6478d942908'))?.isInvalidated).toBe(false)
   })
 })

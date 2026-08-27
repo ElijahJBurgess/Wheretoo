@@ -42,6 +42,15 @@ describe('moderation browser schemas', () => {
     expect(requiredPolicySchema.safeParse(production).success).toBe(true)
     expect(requiredPolicySchema.safeParse({ ...production, publicUrl: '/legal/terms' }).success).toBe(false)
     expect(requiredPolicySchema.safeParse({ ...production, versionId: 'dev-organizer-terms-v2' }).success).toBe(false)
+    expect(requiredPolicySchema.safeParse({ ...production, versionId: ` ${production.versionId}` }).success).toBe(false)
+    expect(requiredPolicySchema.safeParse({ ...production, versionId: 'x'.repeat(121) }).success).toBe(false)
+    expect(requiredPolicySchema.safeParse({ ...production, publicUrl: 'https://' }).success).toBe(false)
+    expect(requiredPolicySchema.safeParse({ ...production, publicUrl: ' https://whereto.example.com/legal/organizer-terms-v2' }).success).toBe(false)
+    expect(requiredPolicySchema.safeParse({ ...production, publicUrl: 'https://user@whereto.example.com/legal' }).success).toBe(false)
+    expect(requiredPolicySchema.safeParse({ ...production, publicUrl: 'https://whereto.example.com:443/legal' }).success).toBe(false)
+    expect(requiredPolicySchema.safeParse({ ...production, publicUrl: 'https://whereto.example.com/legal?draft=1' }).success).toBe(false)
+    expect(requiredPolicySchema.safeParse({ ...production, publicUrl: 'https://whereto.example.com/legal#section' }).success).toBe(false)
+    expect(requiredPolicySchema.safeParse({ ...production, publicUrl: 'https://Whereto.example.com/legal' }).success).toBe(false)
   })
 
   it('accepts all seven owner disclosure values but no acceptance internals', () => {

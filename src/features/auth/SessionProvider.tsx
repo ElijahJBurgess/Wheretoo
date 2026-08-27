@@ -1,6 +1,8 @@
 import type { Session, User } from '@supabase/supabase-js'
+import type { QueryClient } from '@tanstack/react-query'
 import { createContext, useContext, useEffect, useState, type PropsWithChildren } from 'react'
 import { supabase } from '../../lib/supabase/client'
+import { evictPrivateIdentityQueries } from './privateQueryCache'
 
 export type SessionState =
   | { status: 'loading'; session: null; user: null }
@@ -17,29 +19,38 @@ function stateFromSession(session: Session | null): SessionState {
     : { status: 'authenticated', session, user: session.user }
 }
 
-export function SessionProvider({ children }: PropsWithChildren) {
+type SessionProviderProps = PropsWithChildren<{ queryClient?: QueryClient }>
+
+export function SessionProvider({ children, queryClient }: SessionProviderProps) {
   const [state, setState] = useState<SessionState>(loadingState)
 
   useEffect(() => {
     let active = true
     let authEventReceived = false
+    let activeUserId: string | null = null
+    const applySession = (session: Session | null) => {
+      const nextUserId = session?.user.id ?? null
+      if (nextUserId !== activeUserId) {
+        if (queryClient) evictPrivateIdentityQueries(queryClient)
+        activeUserId = nextUserId
+      }
+      if (active) setState(stateFromSession(session))
+    }
     const { data } = supabase.auth.onAuthStateChange((_event, session) => {
       authEventReceived = true
-      if (active) {
-        setState(stateFromSession(session))
-      }
+      applySession(session)
     })
 
     void supabase.auth
       .getSession()
       .then(({ data: sessionData }) => {
         if (active && !authEventReceived) {
-          setState(stateFromSession(sessionData.session))
+          applySession(sessionData.session)
         }
       })
       .catch(() => {
         if (active && !authEventReceived) {
-          setState(anonymousState)
+          applySession(null)
         }
       })
 
@@ -47,7 +58,7 @@ export function SessionProvider({ children }: PropsWithChildren) {
       active = false
       data.subscription.unsubscribe()
     }
-  }, [])
+  }, [queryClient])
 
   return <SessionContext.Provider value={state}>{children}</SessionContext.Provider>
 }

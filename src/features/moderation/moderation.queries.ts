@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { eventKeys } from '../events/event.queries'
 import {
   acceptCurrentEventPolicies,
   getModerationCase,
@@ -55,6 +56,7 @@ export function useSaveEventRequirements(organizerId: string, eventId: string) {
     onSuccess: async () => exactInvalidation(queryClient, [
       moderationKeys.requirements(organizerId, eventId), moderationKeys.agreement(organizerId, eventId),
       moderationKeys.review(organizerId, eventId), moderationKeys.publicEvent(eventId),
+      eventKeys.detail(organizerId, eventId), eventKeys.ownedList(organizerId),
     ]),
   })
 }
@@ -102,13 +104,14 @@ export function useModerationCase(staffUserId: string, eventId: string) {
   return useQuery({ queryKey: moderationKeys.case(staffUserId, eventId), queryFn: () => getModerationCase(eventId), enabled: staffUserId.length > 0 && eventId.length > 0 })
 }
 
-export function useSubmitModerationAction(staffUserId: string) {
+export function useSubmitModerationAction(staffUserId: string, organizerId: string) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (input: ModerationActionInput) => submitModerationAction(input),
     onSuccess: async (_actionId, input) => exactInvalidation(queryClient, [
       moderationKeys.case(staffUserId, input.eventId), moderationKeys.queue(staffUserId),
-      moderationKeys.publicEvent(input.eventId),
+      moderationKeys.publicEvent(input.eventId), eventKeys.detail(organizerId, input.eventId),
+      eventKeys.ownedList(organizerId),
     ]),
   })
 }

@@ -40,8 +40,12 @@ const requiredPolicyRpcRowSchema = z.strictObject({
 const moderationCaseRpcRowSchema = z.strictObject({
   event_id: z.string(), moderation_status: z.string(), content_revision: z.number(), input_sha256: z.string(), moderation_version: z.number(), public_history_status: z.string(),
   first_publicly_eligible_at: z.string().nullable(), title: z.string(), description: z.string(), category: z.string(), starts_at: z.string(), ends_at: z.string(), timezone: z.string(),
-  venue_name: z.string(), address_line1: z.string(), address_line2: z.string(), city: z.string(), region: z.string(), postal_code: z.string(), country_code: z.string(),
+  venue_name: z.string(), address_line1: z.string(), address_line2: z.string().nullable(), city: z.string(), region: z.string(), postal_code: z.string(), country_code: z.string(),
   mapbox_feature_id: z.string(), latitude: z.number(), longitude: z.number(), disclosures: z.unknown(), legacy_resolution: z.unknown(), actions: z.unknown(), evaluations: z.unknown(),
+})
+const disclosureRpcSchema = z.strictObject({
+  minimum_age: z.string(), alcohol_present: z.boolean(), cannabis_present: z.boolean(), explicit_adult_content: z.boolean(),
+  gambling_present: z.boolean(), weapons_present: z.boolean(), high_risk_activity: z.boolean(),
 })
 const moderationQueueRpcRowSchema = z.strictObject({
   event_id: z.string(), moderation_status: z.string(), content_revision: z.number(), input_sha256: z.string(), moderation_version: z.number(),
@@ -118,15 +122,8 @@ function requiredPolicyFromRpc(row: z.infer<typeof requiredPolicyRpcRowSchema>):
   })
 }
 
-function asJsonObject(value: unknown): Record<string, unknown> {
-  return parseContract(z.record(z.string(), z.unknown()), value)
-}
-
-function asJsonArray(value: unknown): unknown[] {
-  return parseContract(z.array(z.unknown()), value)
-}
-
 function moderationCaseFromRpc(row: z.infer<typeof moderationCaseRpcRowSchema>): ModerationCase {
+  const disclosures = parseContract(disclosureRpcSchema, row.disclosures)
   return parseContract(moderationCaseSchema, {
     eventId: row.event_id, moderationStatus: row.moderation_status, contentRevision: row.content_revision,
     inputSha256: row.input_sha256, moderationVersion: row.moderation_version, publicHistoryStatus: row.public_history_status,
@@ -135,8 +132,13 @@ function moderationCaseFromRpc(row: z.infer<typeof moderationCaseRpcRowSchema>):
     venueName: row.venue_name, addressLine1: row.address_line1, addressLine2: row.address_line2,
     city: row.city, region: row.region, postalCode: row.postal_code, countryCode: row.country_code,
     mapboxFeatureId: row.mapbox_feature_id, latitude: row.latitude, longitude: row.longitude,
-    disclosures: asJsonObject(row.disclosures), legacyResolution: asJsonObject(row.legacy_resolution),
-    actions: asJsonArray(row.actions), evaluations: asJsonArray(row.evaluations),
+    disclosures: {
+      minimumAge: disclosures.minimum_age, alcoholPresent: disclosures.alcohol_present,
+      cannabisPresent: disclosures.cannabis_present, explicitAdultContent: disclosures.explicit_adult_content,
+      gamblingPresent: disclosures.gambling_present, weaponsPresent: disclosures.weapons_present,
+      highRiskActivity: disclosures.high_risk_activity,
+    },
+    legacyResolution: row.legacy_resolution, actions: row.actions, evaluations: row.evaluations,
   })
 }
 
@@ -198,16 +200,20 @@ export async function withdrawEventReview(eventId: string): Promise<string> {
 
 export async function getMyStaffRole(): Promise<StaffRole | null> {
   const { data, error } = await supabase.rpc('get_my_staff_role')
-  if (error) throw safeError(error)
+  if (error) {
+    if (error.message === 'STAFF_ROLE_REQUIRED') return null
+    throw safeError(error)
+  }
   const parsed = staffRoleSchema.safeParse(data)
-  return parsed.success ? parsed.data : null
+  if (!parsed.success) throw new ModerationApiError('UNAVAILABLE')
+  return parsed.data
 }
 
 export async function listModerationQueue(limit: number): Promise<ModerationQueueItem[]> {
   const { data, error } = await supabase.rpc('list_moderation_queue', { p_limit: limit })
   if (error) throw safeError(error)
-  return (data ?? []).map((unparsedRow) => {
-    const row = parseContract(moderationQueueRpcRowSchema, unparsedRow)
+  const rows = parseContract(z.array(moderationQueueRpcRowSchema), data ?? [])
+  return rows.map((row) => {
     return parseContract(moderationQueueItemSchema, {
     eventId: row.event_id, moderationStatus: row.moderation_status, contentRevision: row.content_revision,
     inputSha256: row.input_sha256, moderationVersion: row.moderation_version,

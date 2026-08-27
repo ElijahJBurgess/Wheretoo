@@ -12,7 +12,7 @@ export function AppProviders({ children }: PropsWithChildren) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <SessionProvider>{children}</SessionProvider>
+      <SessionProvider queryClient={queryClient}>{children}</SessionProvider>
     </QueryClientProvider>
   )
 }
