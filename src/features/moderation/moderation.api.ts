@@ -145,7 +145,8 @@ function moderationCaseFromRpc(row: z.infer<typeof moderationCaseRpcRowSchema>):
 export async function getRequiredEventPolicies(): Promise<RequiredPolicy[]> {
   const { data, error } = await supabase.rpc('get_required_event_policies')
   if (error) throw safeError(error)
-  return (data ?? []).map((row) => requiredPolicyFromRpc(parseContract(requiredPolicyRpcRowSchema, row)))
+  const rows = parseContract(z.array(requiredPolicyRpcRowSchema), data)
+  return parseContract(z.array(requiredPolicySchema), rows.map(requiredPolicyFromRpc))
 }
 
 export async function getOwnedEventRequirements(eventId: string): Promise<EventRequirements | null> {

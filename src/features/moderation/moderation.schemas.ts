@@ -12,7 +12,7 @@ export const moderationHistoryActionSchema = z.enum([
   'record_revision', 'authorize_publication', 'clear', 'hold', 'block', 'remove', 'restore',
   'resolve_legacy_history', 'request_review', 'resolve_review',
 ])
-export const moderationSourceSchema = z.enum(['publish', 'edit', 'evaluation', 'review_request', 'manual', 'migration'])
+export const moderationSourceSchema = z.enum(['publish', 'edit', 'evaluation', 'review_request', 'manual', 'migration', 'report_escalation'])
 export const moderationActorTypeSchema = z.enum(['system', 'organizer', 'moderator', 'admin'])
 
 export const requiredPolicySchema = z

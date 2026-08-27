@@ -10,6 +10,7 @@ import {
   getMyStaffRole,
   getOwnedEventRequirements,
   getPublicEvent,
+  getRequiredEventPolicies,
   listModerationQueue,
   reportPublicEvent,
   submitModerationAction,
@@ -25,6 +26,16 @@ const requirementsRow = {
   event_policy_label: 'Event Policy', event_policy_version_id: 'dev-event-policy-v1',
   event_policy_stage: 'development_placeholder', event_policy_url: '/event-policy',
 }
+const requiredPolicyRows = [
+  {
+    policy_kind: 'organizer_terms', label: 'Organizer Terms', version_id: 'dev-organizer-terms-v1',
+    stage: 'development_placeholder', public_url: '/organizer-terms', effective_at: '2026-08-26T00:00:00Z',
+  },
+  {
+    policy_kind: 'event_policy', label: 'Event Policy', version_id: 'dev-event-policy-v1',
+    stage: 'development_placeholder', public_url: '/event-policy', effective_at: '2026-08-26T00:00:00Z',
+  },
+]
 const staffCaseRow = {
   event_id: eventId, moderation_status: 'under_review', content_revision: 2, input_sha256: 'a'.repeat(64), moderation_version: 4,
   public_history_status: 'never_public', first_publicly_eligible_at: null, title: 'Night market', description: 'Food and local makers.',
@@ -47,6 +58,26 @@ describe('moderation browser API', () => {
 
     rpc.mockResolvedValueOnce({ data: null, error: { code: 'P0001', message: 'EVENT_NOT_FOUND' } })
     await expect(getOwnedEventRequirements(eventId)).resolves.toBeNull()
+  })
+
+  it('strictly parses the required-policy list boundary', async () => {
+    rpc.mockResolvedValueOnce({ data: requiredPolicyRows, error: null })
+    await expect(getRequiredEventPolicies()).resolves.toEqual([
+      {
+        policyKind: 'organizer_terms', label: 'Organizer Terms', versionId: 'dev-organizer-terms-v1',
+        stage: 'development_placeholder', publicUrl: '/organizer-terms', effectiveAt: '2026-08-26T00:00:00Z',
+      },
+      {
+        policyKind: 'event_policy', label: 'Event Policy', versionId: 'dev-event-policy-v1',
+        stage: 'development_placeholder', publicUrl: '/event-policy', effectiveAt: '2026-08-26T00:00:00Z',
+      },
+    ])
+    expect(rpc).toHaveBeenCalledWith('get_required_event_policies')
+
+    for (const malformedResult of [{}, null, 'not-an-array']) {
+      rpc.mockResolvedValueOnce({ data: malformedResult, error: null })
+      await expect(getRequiredEventPolicies()).rejects.toEqual(new ModerationApiError('UNAVAILABLE'))
+    }
   })
 
   it('sends only the event identifier for policy acceptance', async () => {

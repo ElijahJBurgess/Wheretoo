@@ -3,6 +3,7 @@ import {
   agreementStatusSchema,
   eventRequirementsSchema,
   moderationActionInputSchema,
+  moderationSourceSchema,
   policyStageSchema,
   reportReasonSchema,
   requiredPolicySchema,
@@ -79,5 +80,13 @@ describe('moderation browser schemas', () => {
       expectedInputSha256: 'A'.repeat(64), expectedModerationVersion: 7,
       action: 'delete', reasonCode: 'user_report', internalNote: null,
     }).success).toBe(false)
+  })
+
+  it('keeps moderation sources an exact closed union including report escalation', () => {
+    expect(moderationSourceSchema.options).toEqual([
+      'publish', 'edit', 'evaluation', 'review_request', 'manual', 'migration', 'report_escalation',
+    ])
+    expect(moderationSourceSchema.safeParse('report_escalation').success).toBe(true)
+    expect(moderationSourceSchema.safeParse('report').success).toBe(false)
   })
 })
