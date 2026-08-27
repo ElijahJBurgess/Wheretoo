@@ -83,7 +83,15 @@ insert into public.events (
   ('28000000-0000-4000-8000-000000000003', '18000000-0000-4000-8000-000000000005', 'published', 'under_review', 'Remove Fixture', 'A complete staff moderation fixture formerly available to the public.', 'community', now() + interval '4 days', now() + interval '4 days 2 hours', 'America/Los_Angeles', 'Staff Hall', '3 Market Street', 'San Francisco', 'CA', '94105', 'US', 'mapbox.staff-remove', 37.7936, -122.3958, 'free', 100, now(), 1, null, 30, 'previously_public', now() - interval '1 day'),
   ('28000000-0000-4000-8000-000000000004', '18000000-0000-4000-8000-000000000005', 'published', 'blocked', 'Clear Fixture', 'A complete staff moderation fixture blocked before public availability.', 'community', now() + interval '5 days', now() + interval '5 days 2 hours', 'America/Los_Angeles', 'Staff Hall', '4 Market Street', 'San Francisco', 'CA', '94105', 'US', 'mapbox.staff-clear', 37.7936, -122.3958, 'free', 100, now(), 1, null, 40, 'never_public', null),
   ('28000000-0000-4000-8000-000000000005', '18000000-0000-4000-8000-000000000005', 'published', 'removed', 'Restore Fixture', 'A complete staff moderation fixture removed after public availability.', 'community', now() + interval '6 days', now() + interval '6 days 2 hours', 'America/Los_Angeles', 'Staff Hall', '5 Market Street', 'San Francisco', 'CA', '94105', 'US', 'mapbox.staff-restore', 37.7936, -122.3958, 'free', 100, now(), 1, null, 50, 'previously_public', now() - interval '1 day'),
-  ('28000000-0000-4000-8000-000000000006', '18000000-0000-4000-8000-000000000005', 'published', 'under_review', 'Unknown Fixture', 'A complete staff moderation fixture with unresolved legacy public evidence.', 'community', now() + interval '7 days', now() + interval '7 days 2 hours', 'America/Los_Angeles', 'Staff Hall', '6 Market Street', 'San Francisco', 'CA', '94105', 'US', 'mapbox.staff-unknown', 37.7936, -122.3958, 'free', 100, now(), 1, null, 60, 'unknown', null);
+  ('28000000-0000-4000-8000-000000000006', '18000000-0000-4000-8000-000000000005', 'published', 'under_review', 'Unknown Fixture', 'A complete staff moderation fixture with unresolved legacy public evidence.', 'community', now() + interval '7 days', now() + interval '7 days 2 hours', 'America/Los_Angeles', 'Staff Hall', '6 Market Street', 'San Francisco', 'CA', '94105', 'US', 'mapbox.staff-unknown', 37.7936, -122.3958, 'free', 100, now(), 1, null, 60, 'unknown', null),
+  ('28000000-0000-4000-8000-000000000007', '18000000-0000-4000-8000-000000000005', 'published', 'clear', 'Hold Clear Fixture', 'A clear source fixture for a valid hold transition.', 'community', now() + interval '8 days', now() + interval '8 days 2 hours', 'America/Los_Angeles', 'Staff Hall', '7 Market Street', 'San Francisco', 'CA', '94105', 'US', 'mapbox.staff-hold-clear', 37.7936, -122.3958, 'free', 100, now(), 1, 1, 70, 'never_public', null),
+  ('28000000-0000-4000-8000-000000000008', '18000000-0000-4000-8000-000000000005', 'published', 'not_evaluated', 'Block New Fixture', 'A not-evaluated source fixture for blocking.', 'community', now() + interval '9 days', now() + interval '9 days 2 hours', 'America/Los_Angeles', 'Staff Hall', '8 Market Street', 'San Francisco', 'CA', '94105', 'US', 'mapbox.staff-block-new', 37.7936, -122.3958, 'free', 100, now(), 1, null, 80, 'never_public', null),
+  ('28000000-0000-4000-8000-000000000009', '18000000-0000-4000-8000-000000000005', 'published', 'under_review', 'Block Review Fixture', 'An under-review source fixture for blocking.', 'community', now() + interval '10 days', now() + interval '10 days 2 hours', 'America/Los_Angeles', 'Staff Hall', '9 Market Street', 'San Francisco', 'CA', '94105', 'US', 'mapbox.staff-block-review', 37.7936, -122.3958, 'free', 100, now(), 1, null, 90, 'never_public', null),
+  ('28000000-0000-4000-8000-000000000010', '18000000-0000-4000-8000-000000000005', 'published', 'clear', 'Remove Clear Fixture', 'A clear source fixture formerly available to the public.', 'community', now() + interval '11 days', now() + interval '11 days 2 hours', 'America/Los_Angeles', 'Staff Hall', '10 Market Street', 'San Francisco', 'CA', '94105', 'US', 'mapbox.staff-remove-clear', 37.7936, -122.3958, 'free', 100, now(), 1, 1, 100, 'previously_public', now() - interval '1 day'),
+  ('28000000-0000-4000-8000-000000000011', '18000000-0000-4000-8000-000000000005', 'published', 'not_evaluated', 'Clear New Never Fixture', 'A not-evaluated never-public clear fixture.', 'community', now() + interval '12 days', now() + interval '12 days 2 hours', 'America/Los_Angeles', 'Staff Hall', '11 Market Street', 'San Francisco', 'CA', '94105', 'US', 'mapbox.staff-clear-new-never', 37.7936, -122.3958, 'free', 100, now(), 1, null, 110, 'never_public', null),
+  ('28000000-0000-4000-8000-000000000012', '18000000-0000-4000-8000-000000000005', 'published', 'not_evaluated', 'Clear New Public Fixture', 'A not-evaluated previously-public clear fixture.', 'community', now() + interval '13 days', now() + interval '13 days 2 hours', 'America/Los_Angeles', 'Staff Hall', '12 Market Street', 'San Francisco', 'CA', '94105', 'US', 'mapbox.staff-clear-new-public', 37.7936, -122.3958, 'free', 100, now(), 1, null, 120, 'previously_public', now() - interval '1 day'),
+  ('28000000-0000-4000-8000-000000000013', '18000000-0000-4000-8000-000000000005', 'published', 'under_review', 'Clear Review Public Fixture', 'An under-review previously-public clear fixture.', 'community', now() + interval '14 days', now() + interval '14 days 2 hours', 'America/Los_Angeles', 'Staff Hall', '13 Market Street', 'San Francisco', 'CA', '94105', 'US', 'mapbox.staff-clear-review-public', 37.7936, -122.3958, 'free', 100, now(), 1, null, 130, 'previously_public', now() - interval '1 day'),
+  ('28000000-0000-4000-8000-000000000014', '18000000-0000-4000-8000-000000000005', 'published', 'removed', 'Restore Authorized Fixture', 'A removed previously-public fixture with exact current authorization.', 'community', now() + interval '15 days', now() + interval '15 days 2 hours', 'America/Los_Angeles', 'Staff Hall', '14 Market Street', 'San Francisco', 'CA', '94105', 'US', 'mapbox.staff-restore-authorized', 37.7936, -122.3958, 'free', 100, now(), 1, null, 140, 'previously_public', now() - interval '1 day');
 
 insert into private.event_risk_disclosures (
   event_id, minimum_age, alcohol_present, cannabis_present,
@@ -92,7 +100,7 @@ insert into private.event_risk_disclosures (
 select id, 'all_ages', false, false, false, false, false, false
 from public.events
 where id between '28000000-0000-4000-8000-000000000001'::uuid
-  and '28000000-0000-4000-8000-000000000006'::uuid;
+  and '28000000-0000-4000-8000-000000000014'::uuid;
 
 insert into private.event_policy_legacy_exemptions (
   id, event_id, grandfathered_content_revision, input_sha256, migration_identifier
@@ -119,6 +127,32 @@ update public.events
 set publicly_authorized_revision = 1,
     publicly_authorized_action_id = '48000000-0000-4000-8000-000000000001'
 where id = '28000000-0000-4000-8000-000000000001';
+
+insert into private.event_policy_legacy_exemptions (
+  id, event_id, grandfathered_content_revision, input_sha256, migration_identifier
+) values (
+  '58000000-0000-4000-8000-000000000014',
+  '28000000-0000-4000-8000-000000000014', 1,
+  private.compute_event_input_sha256('28000000-0000-4000-8000-000000000014'),
+  'staff-restore-fixture'
+);
+insert into private.event_moderation_actions (
+  id, event_id, content_revision, input_sha256, actor_type, source, action,
+  previous_status, new_status, previous_public_history_status,
+  new_public_history_status, reason_code, policy_legacy_exemption_id,
+  moderation_version
+) values (
+  '48000000-0000-4000-8000-000000000014',
+  '28000000-0000-4000-8000-000000000014', 1,
+  private.compute_event_input_sha256('28000000-0000-4000-8000-000000000014'),
+  'system', 'migration', 'authorize_publication',
+  'removed', 'removed', 'previously_public', 'previously_public',
+  'other', '58000000-0000-4000-8000-000000000014', 139
+);
+update public.events
+set publicly_authorized_revision = 1,
+    publicly_authorized_action_id = '48000000-0000-4000-8000-000000000014'
+where id = '28000000-0000-4000-8000-000000000014';
 
 insert into private.event_moderation_actions (
   id, event_id, content_revision, input_sha256, actor_type, actor_user_id,
@@ -152,6 +186,36 @@ insert into private.event_moderation_evaluations (
 ) values
   ('38000000-0000-4000-8000-000000000001', '28000000-0000-4000-8000-000000000001', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000001'), 10, 'queued', 'contextual'),
   ('38000000-0000-4000-8000-000000000002', '28000000-0000-4000-8000-000000000006', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000006'), 60, 'processing', 'report');
+
+insert into private.event_moderation_actions (
+  id, event_id, content_revision, input_sha256, actor_type, source, action,
+  previous_status, new_status, previous_public_history_status,
+  new_public_history_status, reason_code, moderation_version, created_at
+)
+select
+  ('4a000000-0000-4000-8000-' || lpad(series::text, 12, '0'))::uuid,
+  '28000000-0000-4000-8000-000000000006'::uuid, 1,
+  private.compute_event_input_sha256('28000000-0000-4000-8000-000000000006'),
+  'system', 'migration', 'hold', 'under_review', 'under_review',
+  'unknown', 'unknown', 'other', series,
+  timestamptz '2000-01-01 00:00:00+00' + series * interval '1 second'
+from generate_series(1, 51) as series;
+
+insert into private.event_moderation_evaluations (
+  id, event_id, content_revision, input_sha256, queued_moderation_version,
+  status, source, outcome, risk_level, reason_codes, provider_reference,
+  model_version, attempt_count, started_at, finished_at, created_at
+)
+select
+  ('3a000000-0000-4000-8000-' || lpad(series::text, 12, '0'))::uuid,
+  '28000000-0000-4000-8000-000000000006'::uuid, 1,
+  private.compute_event_input_sha256('28000000-0000-4000-8000-000000000006'),
+  1000 + series, 'succeeded', 'contextual', 'review_required', 'high',
+  array['other']::text[], 'sha256:' || repeat('a', 64), 'sha256:' || repeat('b', 64), 1,
+  timestamptz '2000-01-01 00:00:00+00' + series * interval '1 second',
+  timestamptz '2000-01-01 00:00:00+00' + (series + 1) * interval '1 second',
+  timestamptz '2000-01-01 00:00:00+00' + series * interval '1 second'
+from generate_series(1, 51) as series;
 
 grant usage on schema private to authenticated;
 grant execute on function private.compute_event_input_sha256(uuid) to authenticated;
@@ -202,6 +266,11 @@ select throws_ok(
   'a moderator cannot delete staff roles directly'
 );
 select throws_ok(
+  $$ select * from private.event_legacy_history_resolutions $$,
+  '42501', null,
+  'a moderator cannot read legacy-resolution evidence directly'
+);
+select throws_ok(
   $$ insert into private.event_legacy_history_resolutions (event_id, action_id, resolved_by_user_id, resolved_public_history_status, evidence_code) values ('28000000-0000-4000-8000-000000000001', '48000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000001', 'never_public', 'legacy_archive_verified_never_public') $$,
   '42501', null,
   'a moderator cannot insert legacy-resolution evidence directly'
@@ -240,6 +309,11 @@ select throws_ok(
   'a stale moderation version conflicts before action insertion'
 );
 select throws_ok(
+  $$ select public.moderate_event('28000000-0000-4000-8000-000000000004', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000004'), 40, 'restore', 'no_violation', null) $$,
+  'P0001', 'MODERATION_TRANSITION_INVALID',
+  'restore-from-blocked is rejected from an actually blocked source'
+);
+select throws_ok(
   $$ select public.moderate_event('28000000-0000-4000-8000-000000000004', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000004'), 40, 'hold', 'other', null) $$,
   'P0001', 'MODERATION_TRANSITION_INVALID',
   'hold cannot weaken blocked enforcement'
@@ -260,9 +334,18 @@ select lives_ok(
 );
 reset role;
 select results_eq(
-  $$ select moderation_status, moderation_version from public.events where id = '28000000-0000-4000-8000-000000000001' $$,
-  $$ values ('under_review'::text, 11::bigint) $$,
-  'hold atomically advances the event state and moderation version'
+  $$
+    select events.moderation_status, events.moderation_version,
+      actions.previous_status, actions.new_status, intervals.eligibility_state
+    from public.events as events
+    join private.event_moderation_actions as actions
+      on actions.event_id = events.id and actions.moderation_version = 11
+    join private.event_public_eligibility_intervals as intervals
+      on intervals.event_id = events.id and intervals.ended_at is null
+    where events.id = '28000000-0000-4000-8000-000000000001'
+  $$,
+  $$ values ('under_review'::text, 11::bigint, 'not_evaluated'::text, 'under_review'::text, 'ineligible'::text) $$,
+  'hold atomically records state/action/version while preserving its ineligible epoch'
 );
 select results_eq(
   $$ select status, failure_code from private.event_moderation_evaluations where id = '38000000-0000-4000-8000-000000000001' $$,
@@ -280,6 +363,24 @@ select lives_ok(
   $$ select public.moderate_event('28000000-0000-4000-8000-000000000001', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000001'), 11, 'hold', 'other', null) $$,
   'under-review hold is an approved same-state audited signal'
 );
+reset role;
+select results_eq(
+  $$
+    select events.moderation_status, events.moderation_version,
+      actions.previous_status, actions.new_status,
+      intervals.public_eligibility_version, intervals.eligibility_state
+    from public.events as events
+    join private.event_moderation_actions as actions
+      on actions.event_id = events.id and actions.moderation_version = 12
+    join private.event_public_eligibility_intervals as intervals
+      on intervals.event_id = events.id and intervals.ended_at is null
+    where events.id = '28000000-0000-4000-8000-000000000001'
+  $$,
+  $$ values ('under_review'::text, 12::bigint, 'under_review'::text, 'under_review'::text, 0::bigint, 'ineligible'::text) $$,
+  'same-state hold appends its own action/version without changing the current epoch'
+);
+select set_config('request.jwt.claim.sub', '18000000-0000-4000-8000-000000000001', true);
+set local role authenticated;
 select lives_ok(
   $$ select public.moderate_event('28000000-0000-4000-8000-000000000001', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000001'), 12, 'clear', 'no_violation', null) $$,
   'a moderator may clear a known-history under-review revision'
@@ -345,11 +446,6 @@ select lives_ok(
   'a moderator may clear a never-public blocked event'
 );
 select throws_ok(
-  $$ select public.moderate_event('28000000-0000-4000-8000-000000000004', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000004'), 41, 'restore', 'no_violation', null) $$,
-  'P0001', 'MODERATION_TRANSITION_INVALID',
-  'restore-from-blocked is rejected even with a current exact revision'
-);
-select throws_ok(
   $$ select public.moderate_event('28000000-0000-4000-8000-000000000005', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000005'), 50, 'clear', 'no_violation', null) $$,
   'P0001', 'MODERATION_TRANSITION_INVALID',
   'clear-from-removed is rejected even for previously-public history'
@@ -358,17 +454,76 @@ select lives_ok(
   $$ select public.moderate_event('28000000-0000-4000-8000-000000000005', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000005'), 50, 'restore', 'no_violation', null) $$,
   'a moderator may restore a previously-public removed event'
 );
-select throws_ok(
-  $$ select public.moderate_event('28000000-0000-4000-8000-000000000002', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000002'), 21, 'remove', 'other', null) $$,
-  'P0001', 'MODERATION_TRANSITION_INVALID',
-  'remove-before-public is rejected'
+select lives_ok(
+  $$ select public.moderate_event('28000000-0000-4000-8000-000000000007', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000007'), 70, 'hold', 'other', null) $$,
+  'a moderator may hold from a clear source'
 );
-select throws_ok(
-  $$ select public.moderate_event('28000000-0000-4000-8000-000000000003', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000003'), 31, 'block', 'other', null) $$,
-  'P0001', 'MODERATION_TRANSITION_INVALID',
-  'block-after-public is rejected'
+select lives_ok(
+  $$ select public.moderate_event('28000000-0000-4000-8000-000000000008', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000008'), 80, 'block', 'other', null) $$,
+  'a moderator may block from a never-public not-evaluated source'
+);
+select lives_ok(
+  $$ select public.moderate_event('28000000-0000-4000-8000-000000000009', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000009'), 90, 'block', 'other', null) $$,
+  'a moderator may block from a never-public under-review source'
+);
+select lives_ok(
+  $$ select public.moderate_event('28000000-0000-4000-8000-000000000010', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000010'), 100, 'remove', 'other', null) $$,
+  'a moderator may remove from a previously-public clear source'
+);
+select lives_ok(
+  $$ select public.moderate_event('28000000-0000-4000-8000-000000000011', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000011'), 110, 'clear', 'no_violation', null) $$,
+  'a moderator may clear from a never-public not-evaluated source'
+);
+select lives_ok(
+  $$ select public.moderate_event('28000000-0000-4000-8000-000000000012', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000012'), 120, 'clear', 'no_violation', null) $$,
+  'a moderator may clear from a previously-public not-evaluated source'
+);
+select lives_ok(
+  $$ select public.moderate_event('28000000-0000-4000-8000-000000000013', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000013'), 130, 'clear', 'no_violation', null) $$,
+  'a moderator may clear from a previously-public under-review source'
+);
+select lives_ok(
+  $$ select public.moderate_event('28000000-0000-4000-8000-000000000014', 1, private.compute_event_input_sha256('28000000-0000-4000-8000-000000000014'), 140, 'restore', 'no_violation', null) $$,
+  'a moderator may restore a previously-public removed event with exact current authorization'
 );
 reset role;
+select results_eq(
+  $$
+    select id, moderation_status, moderation_version
+    from public.events
+    where id between '28000000-0000-4000-8000-000000000007'::uuid
+      and '28000000-0000-4000-8000-000000000013'::uuid
+    order by id
+  $$,
+  $$ values
+    ('28000000-0000-4000-8000-000000000007'::uuid, 'under_review'::text, 71::bigint),
+    ('28000000-0000-4000-8000-000000000008'::uuid, 'blocked'::text, 81::bigint),
+    ('28000000-0000-4000-8000-000000000009'::uuid, 'blocked'::text, 91::bigint),
+    ('28000000-0000-4000-8000-000000000010'::uuid, 'removed'::text, 101::bigint),
+    ('28000000-0000-4000-8000-000000000011'::uuid, 'clear'::text, 111::bigint),
+    ('28000000-0000-4000-8000-000000000012'::uuid, 'clear'::text, 121::bigint),
+    ('28000000-0000-4000-8000-000000000013'::uuid, 'clear'::text, 131::bigint) $$,
+  'independent fresh fixtures prove every approved source/history matrix entry'
+);
+select results_eq(
+  $$
+    select events.moderation_status, events.moderation_version,
+      actions.action, actions.previous_status, actions.new_status,
+      actions.previous_public_history_status, actions.new_public_history_status,
+      events.publicly_authorized_revision, events.publicly_authorized_action_id,
+      events.public_eligibility_version, intervals.eligibility_state
+    from public.events as events
+    join private.event_moderation_actions as actions
+      on actions.event_id = events.id and actions.moderation_version = 141
+    join private.event_public_eligibility_intervals as intervals
+      on intervals.event_id = events.id and intervals.ended_at is null
+    where events.id = '28000000-0000-4000-8000-000000000014'
+  $$,
+  $$ values ('clear'::text, 141::bigint, 'restore'::text, 'removed'::text, 'clear'::text,
+    'previously_public'::text, 'previously_public'::text, 1::bigint,
+    '48000000-0000-4000-8000-000000000014'::uuid, 1::bigint, 'eligible'::text) $$,
+  'authorized restore atomically records status/action/history/version and opens an eligible epoch'
+);
 
 select set_config('request.jwt.claim.sub', '18000000-0000-4000-8000-000000000002', true);
 set local role authenticated;
@@ -404,31 +559,84 @@ select results_eq(
 select results_eq(
   $$
     select
-      to_jsonb(cases) ?& array[
-        'title', 'description', 'category', 'starts_at', 'ends_at', 'timezone',
-        'venue_name', 'address_line1', 'address_line2', 'city', 'region',
-        'postal_code', 'country_code', 'mapbox_feature_id', 'latitude',
-        'longitude', 'disclosures', 'legacy_resolution'
-      ]
-      and (to_jsonb(cases) -> 'disclosures') ?& array[
-        'minimum_age', 'alcohol_present', 'cannabis_present',
-        'explicit_adult_content', 'gambling_present', 'weapons_present',
-        'high_risk_activity'
-      ]
-      and (to_jsonb(cases) -> 'legacy_resolution') ?& array[
-        'resolved_public_history_status', 'evidence_code',
-        'observed_public_at', 'created_at'
-      ]
+      array(select key from jsonb_object_keys(to_jsonb(cases)) as key order by key)
+        = array[
+          'actions', 'address_line1', 'address_line2', 'category', 'city',
+          'content_revision', 'country_code', 'description', 'disclosures',
+          'ends_at', 'evaluations', 'event_id', 'first_publicly_eligible_at',
+          'input_sha256', 'latitude', 'legacy_resolution', 'longitude',
+          'mapbox_feature_id', 'moderation_status', 'moderation_version',
+          'postal_code', 'public_history_status', 'region', 'starts_at',
+          'timezone', 'title', 'venue_name'
+        ]::text[]
+      and array(select key from jsonb_object_keys(cases.disclosures) as key order by key)
+        = array[
+          'alcohol_present', 'cannabis_present', 'explicit_adult_content',
+          'gambling_present', 'high_risk_activity', 'minimum_age',
+          'weapons_present'
+        ]::text[]
+      and array(select key from jsonb_object_keys(cases.legacy_resolution) as key order by key)
+        = array[
+          'created_at', 'evidence_code', 'observed_public_at',
+          'resolved_public_history_status'
+        ]::text[]
       and not to_jsonb(cases) ?| array[
-        'organizer_id', 'actor_user_id', 'reviewer_user_id',
-        'email', 'provider_reference', 'model_version'
+        'organizer_id', 'owner_id', 'actor_user_id', 'reviewer_user_id',
+        'email', 'provider_reference', 'model_version', 'raw_output',
+        'provider_reasoning', 'internal_reasoning'
       ]
-      and jsonb_array_length(cases.actions) <= 50
-      and jsonb_array_length(cases.evaluations) <= 50
+      and jsonb_array_length(cases.actions) = 50
+      and jsonb_array_length(cases.evaluations) = 50
+      and cases.actions @> jsonb_build_array(jsonb_build_object(
+        'id', '4a000000-0000-4000-8000-000000000051'::uuid
+      ))
+      and not cases.actions @> jsonb_build_array(jsonb_build_object(
+        'id', '4a000000-0000-4000-8000-000000000001'::uuid
+      ))
+      and not cases.actions @> jsonb_build_array(jsonb_build_object(
+        'id', '4a000000-0000-4000-8000-000000000002'::uuid
+      ))
+      and cases.evaluations @> jsonb_build_array(jsonb_build_object(
+        'id', '3a000000-0000-4000-8000-000000000051'::uuid
+      ))
+      and not cases.evaluations @> jsonb_build_array(jsonb_build_object(
+        'id', '3a000000-0000-4000-8000-000000000001'::uuid
+      ))
+      and not cases.evaluations @> jsonb_build_array(jsonb_build_object(
+        'id', '3a000000-0000-4000-8000-000000000002'::uuid
+      ))
+      and not exists (
+        select 1
+        from jsonb_array_elements(cases.actions) as action_row(value)
+        where array(select key from jsonb_object_keys(action_row.value) as key order by key)
+          is distinct from array[
+            'action', 'created_at', 'id', 'internal_note',
+            'moderation_version', 'new_status', 'previous_status', 'reason_code'
+          ]::text[]
+          or action_row.value ?| array[
+            'actor_user_id', 'reviewer_user_id', 'provider_reference',
+            'model_version', 'input_sha256', 'evaluation_id', 'raw_output',
+            'provider_reasoning', 'internal_reasoning'
+          ]
+      )
+      and not exists (
+        select 1
+        from jsonb_array_elements(cases.evaluations) as evaluation_row(value)
+        where array(select key from jsonb_object_keys(evaluation_row.value) as key order by key)
+          is distinct from array[
+            'content_revision', 'created_at', 'failure_code', 'finished_at',
+            'id', 'outcome', 'reason_codes', 'risk_level', 'source', 'status'
+          ]::text[]
+          or evaluation_row.value ?| array[
+            'actor_user_id', 'reviewer_user_id', 'provider_reference',
+            'model_version', 'input_sha256', 'raw_output', 'provider_reasoning',
+            'internal_reasoning'
+          ]
+      )
     from public.get_moderation_case('28000000-0000-4000-8000-000000000006') as cases
   $$,
   $$ values (true) $$,
-  'staff case has the exact bounded workflow allowlist and excludes PII/provider internals'
+  'staff case has exact bounded allowlists, excludes unsafe nested fields, and returns precisely the newest fifty records'
 );
 reset role;
 
