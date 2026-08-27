@@ -98,6 +98,26 @@ Deno.test("IPv4 canonicalization masks the approved /24 and rejects malformed ad
   }
 });
 
+Deno.test("IPv4-mapped IPv6 canonicalizes to the same IPv4 actor and /24", () => {
+  const ipv4 = canonicalizeClientAddress("203.0.113.24");
+  const mappedCompressed = canonicalizeClientAddress("::ffff:203.0.113.24");
+  const mappedExpanded = canonicalizeClientAddress(
+    "0:0:0:0:0:ffff:cb00:7118",
+  );
+  const otherPrefix = canonicalizeClientAddress("::ffff:203.0.114.1");
+  assertEquals(mappedCompressed, ipv4);
+  assertEquals(mappedExpanded, ipv4);
+  assertEquals(
+    mappedCompressed?.networkInput === otherPrefix?.networkInput,
+    false,
+  );
+  for (
+    const malformed of ["::ffff:203.0.113.999", "::ffff:203.0.113.24%zone"]
+  ) {
+    assertEquals(canonicalizeClientAddress(malformed), null);
+  }
+});
+
 Deno.test("report endpoint returns bounded success for dedupe and safe not-found", async () => {
   const calls: unknown[] = [];
   const handler = createReportEventHandler({

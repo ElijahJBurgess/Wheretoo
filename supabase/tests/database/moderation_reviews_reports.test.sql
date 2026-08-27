@@ -174,15 +174,39 @@ where id = '29000000-0000-4000-8000-000000000001';
 
 select set_config('request.jwt.claim.sub', '19000000-0000-4000-8000-000000000001', true);
 set local role authenticated;
-select isnt(
+create temporary table review_request_snapshot on commit drop as
+select
+  public.request_event_review('29000000-0000-4000-8000-000000000001', 'reconsider') as id,
+  null::timestamptz as created_at,
+  null::integer as content_revision,
+  null::text as input_sha256,
+  null::text as status;
+select extensions.is(
   public.request_event_review('29000000-0000-4000-8000-000000000001', 'reconsider'),
-  null::uuid, 'the owner creates one revision-bound review request through the RPC'
+  (select id from review_request_snapshot),
+  'the exact same review RPC retry returns the original request id'
 );
 reset role;
+update review_request_snapshot as snapshot
+set created_at = requests.created_at,
+    content_revision = requests.content_revision,
+    input_sha256 = requests.input_sha256,
+    status = requests.status
+from private.moderation_review_requests as requests
+where requests.id = snapshot.id;
 select extensions.is(
   (select count(*)::integer from private.moderation_review_requests
    where event_id = '29000000-0000-4000-8000-000000000001' and status = 'open'),
-  1, 'retry is idempotent and keeps one open request'
+  1, 'retry keeps exactly one open request'
+);
+select extensions.is(
+  (select count(*)::integer from private.moderation_review_requests as requests
+   join review_request_snapshot as snapshot on snapshot.id = requests.id
+   where requests.status = snapshot.status
+     and requests.created_at = snapshot.created_at
+     and requests.content_revision = snapshot.content_revision
+     and requests.input_sha256 = snapshot.input_sha256),
+  1, 'idempotent retry leaves the exact open row and snapshot unchanged'
 );
 select set_config('request.jwt.claim.sub', '19000000-0000-4000-8000-000000000002', true);
 set local role authenticated;
@@ -253,6 +277,64 @@ select extensions.is(
   (select status::text from private.moderation_review_requests
    where event_id = '29000000-0000-4000-8000-000000000001' order by created_at desc limit 1),
   'superseded'::text, 'the actual Task 6 revision boundary supersedes a stale open review request'
+);
+set local role service_role;
+select extensions.is(
+  public.server_submit_event_report(
+    '29000000-0000-4000-8000-000000000001', repeat('a', 64), repeat('0', 64), 'unsafe'
+  ), 'not_found', 'the service report RPC returns safe not-found while the edited revision is nonpublic'
+);
+reset role;
+insert into private.event_policy_legacy_exemptions (
+  id, event_id, grandfathered_content_revision, input_sha256, migration_identifier
+) values (
+  '59000000-0000-4000-8000-000000000002',
+  '29000000-0000-4000-8000-000000000001',
+  (select content_revision from public.events where id = '29000000-0000-4000-8000-000000000001'),
+  private.compute_event_input_sha256('29000000-0000-4000-8000-000000000001'),
+  'report-revision-fixture'
+);
+insert into private.event_moderation_actions (
+  id, event_id, content_revision, input_sha256, actor_type, source, action,
+  previous_status, new_status, previous_public_history_status, new_public_history_status,
+  reason_code, policy_legacy_exemption_id, moderation_version
+) values (
+  '49000000-0000-4000-8000-000000000002',
+  '29000000-0000-4000-8000-000000000001',
+  (select content_revision from public.events where id = '29000000-0000-4000-8000-000000000001'),
+  private.compute_event_input_sha256('29000000-0000-4000-8000-000000000001'),
+  'system', 'migration', 'authorize_publication', 'under_review', 'clear',
+  'previously_public', 'previously_public', 'other',
+  '59000000-0000-4000-8000-000000000002',
+  (select moderation_version from public.events where id = '29000000-0000-4000-8000-000000000001')
+);
+update private.event_public_eligibility_intervals
+set ended_at = clock_timestamp(), ended_action_id = '49000000-0000-4000-8000-000000000002'
+where event_id = '29000000-0000-4000-8000-000000000001' and ended_at is null;
+update public.events
+set moderation_status = 'clear',
+    moderated_revision = content_revision,
+    publicly_authorized_revision = content_revision,
+    publicly_authorized_action_id = '49000000-0000-4000-8000-000000000002',
+    public_eligibility_version = public_eligibility_version + 1
+where id = '29000000-0000-4000-8000-000000000001';
+insert into private.event_public_eligibility_intervals (
+  event_id, public_eligibility_version, eligibility_state, started_at, started_action_id, transition_reason
+) select id, public_eligibility_version, 'eligible', clock_timestamp(),
+  '49000000-0000-4000-8000-000000000002', 'policy_authorization'
+from public.events where id = '29000000-0000-4000-8000-000000000001';
+set local role service_role;
+select extensions.is(
+  public.server_submit_event_report(
+    '29000000-0000-4000-8000-000000000001', repeat('a', 64), repeat('0', 64), 'unsafe'
+  ), 'submitted', 'the same actor can report the newly public later revision after actual edit supersession'
+);
+reset role;
+select extensions.is(
+  (select count(*)::integer from private.event_reports
+   where event_id = '29000000-0000-4000-8000-000000000001'
+     and content_revision = 1 and status = 'superseded'),
+  3, 'the later revision supersedes all open reports from the former revision'
 );
 
 insert into private.event_reports (

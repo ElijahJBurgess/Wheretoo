@@ -90,20 +90,34 @@ function ipv6Text(bytes: Uint8Array): string {
     : `${left}::${right}`;
 }
 
+function canonicalIpv4(bytes: Uint8Array): CanonicalClientAddress {
+  const actor = Array.from(bytes).join(".");
+  return {
+    actorInput: `ipv4:${actor}`,
+    networkInput: `ipv4:${bytes[0]}.${bytes[1]}.${bytes[2]}.0/24`,
+  };
+}
+
+function ipv4MappedIpv6(bytes: Uint8Array): Uint8Array | null {
+  if (
+    bytes.length !== 16 || bytes.slice(0, 10).some((byte) => byte !== 0) ||
+    bytes[10] !== 0xff || bytes[11] !== 0xff
+  ) return null;
+  return bytes.slice(12);
+}
+
 export function canonicalizeClientAddress(
   value: string | null,
 ): CanonicalClientAddress | null {
   if (value === null || value !== value.trim()) return null;
   const ipv4 = parseIpv4(value);
   if (ipv4 !== null) {
-    const actor = Array.from(ipv4).join(".");
-    return {
-      actorInput: `ipv4:${actor}`,
-      networkInput: `ipv4:${ipv4[0]}.${ipv4[1]}.${ipv4[2]}.0/24`,
-    };
+    return canonicalIpv4(ipv4);
   }
   const ipv6 = parseIpv6(value);
   if (ipv6 === null) return null;
+  const mappedIpv4 = ipv4MappedIpv6(ipv6);
+  if (mappedIpv4 !== null) return canonicalIpv4(mappedIpv4);
   const network = ipv6.slice();
   network.fill(0, 8);
   return {
