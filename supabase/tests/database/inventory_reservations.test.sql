@@ -227,12 +227,12 @@ select results_eq(
     order by private_name
   $$,
   $$ values
-    (array[false, false, true]),
-    (array[false, false, true]),
-    (array[false, false, true]),
-    (array[false, false, true])
+    (array[true, false, true]),
+    (array[true, false, true]),
+    (array[true, false, true]),
+    (array[true, false, true])
   $$,
-  'the service role receives only the four narrow public wrappers'
+  'service-role private schema usage grants no direct reservation execution'
 );
 
 select results_eq(
@@ -425,6 +425,24 @@ values (
   '15000000-0000-0000-0000-000000000001', 'acct_inventoryreservation',
   'active', 'active', 'clear', 0, 0, now()
 );
+
+insert into private.event_risk_disclosures (
+  event_id, minimum_age, alcohol_present, cannabis_present,
+  explicit_adult_content, gambling_present, weapons_present, high_risk_activity
+)
+values
+  ('25000000-0000-0000-0000-000000000001', 'all_ages', false, false, false, false, false, false),
+  ('25000000-0000-0000-0000-000000000002', 'all_ages', false, false, false, false, false, false);
+
+select set_config(
+  'request.jwt.claim.sub', '15000000-0000-0000-0000-000000000001', true
+);
+set local role authenticated;
+select public.accept_current_event_policies('25000000-0000-0000-0000-000000000001');
+select public.publish_event('25000000-0000-0000-0000-000000000001');
+select public.accept_current_event_policies('25000000-0000-0000-0000-000000000002');
+select public.publish_event('25000000-0000-0000-0000-000000000002');
+reset role;
 
 set local role service_role;
 create temporary table first_reservation on commit drop as

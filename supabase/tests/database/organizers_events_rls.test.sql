@@ -267,50 +267,54 @@ reset role;
 select set_config('request.jwt.claim.sub', '', true);
 set local role anon;
 
-select is_empty(
+select throws_ok(
   $$
     select id
     from public.events
     where id = '30000000-0000-0000-0000-000000000001'
   $$,
-  'Anonymous cannot see a draft'
+  '42501', 'permission denied for table events',
+  'Anonymous cannot select a draft from the base event table'
 );
 
-select results_eq(
+select throws_ok(
   $$
     select id
     from public.events
     where id = '30000000-0000-0000-0000-000000000002'
   $$,
-  $$ values ('30000000-0000-0000-0000-000000000002'::uuid) $$,
-  'Anonymous can see a published clear event'
+  '42501', 'permission denied for table events',
+  'Anonymous cannot bypass projections for a published clear event'
 );
 
-select is_empty(
+select throws_ok(
   $$
     select id
     from public.events
     where id = '30000000-0000-0000-0000-000000000003'
   $$,
-  'Anonymous cannot see a published under-review event'
+  '42501', 'permission denied for table events',
+  'Anonymous cannot select an under-review event from the base table'
 );
 
-select is_empty(
+select throws_ok(
   $$
     select id
     from public.events
     where id = '30000000-0000-0000-0000-000000000004'
   $$,
-  'Anonymous cannot see a published blocked event'
+  '42501', 'permission denied for table events',
+  'Anonymous cannot select a blocked event from the base table'
 );
 
-select is_empty(
+select throws_ok(
   $$
     select id
     from public.events
     where id = '30000000-0000-0000-0000-000000000005'
   $$,
-  'Anonymous cannot see a published removed event'
+  '42501', 'permission denied for table events',
+  'Anonymous cannot select a removed event from the base table'
 );
 
 reset role;

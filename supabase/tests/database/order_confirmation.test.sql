@@ -109,6 +109,23 @@ values (
   'active', 'active', 'clear', now()
 );
 
+insert into private.event_risk_disclosures (
+  event_id, minimum_age, alcohol_present, cannabis_present,
+  explicit_adult_content, gambling_present, weapons_present, high_risk_activity
+)
+values (
+  '26000000-0000-4000-8000-000000000001', 'all_ages',
+  false, false, false, false, false, false
+);
+
+select set_config(
+  'request.jwt.claim.sub', '16000000-0000-4000-8000-000000000001', true
+);
+set local role authenticated;
+select public.accept_current_event_policies('26000000-0000-4000-8000-000000000001');
+select public.publish_event('26000000-0000-4000-8000-000000000001');
+reset role;
+
 set local role service_role;
 
 create temporary table confirmation_reservation on commit drop as

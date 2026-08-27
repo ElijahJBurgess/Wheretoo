@@ -2,7 +2,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(44);
+select plan(45);
 
 select results_eq(
   $$
@@ -136,6 +136,23 @@ values (
   '16000000-0000-4000-8000-000000000001', 'acct_fulfillmentowner',
   'active', 'active', 'clear', 0, 0, now()
 );
+
+insert into private.event_risk_disclosures (
+  event_id, minimum_age, alcohol_present, cannabis_present,
+  explicit_adult_content, gambling_present, weapons_present, high_risk_activity
+)
+values (
+  '26000000-0000-4000-8000-000000000001', 'all_ages',
+  false, false, false, false, false, false
+);
+
+select set_config(
+  'request.jwt.claim.sub', '16000000-0000-4000-8000-000000000001', true
+);
+set local role authenticated;
+select public.accept_current_event_policies('26000000-0000-4000-8000-000000000001');
+select public.publish_event('26000000-0000-4000-8000-000000000001');
+reset role;
 
 create or replace function pg_temp.create_checkout_order(
   p_tier_id uuid,
@@ -786,6 +803,44 @@ select results_eq(
   $$ values (7::bigint) $$,
   'every durable payment transition completes exactly one webhook receipt'
 );
+
+create temporary table after_end_order (id uuid primary key) on commit drop;
+insert into after_end_order
+values (pg_temp.create_checkout_order(
+  '36000000-0000-4000-8000-000000000001',
+  '46000000-0000-4000-8000-000000000006', repeat('9', 64),
+  'cs_test_afterendfulfillment'
+));
+
+update public.events
+set starts_at = now() - interval '3 hours', ends_at = now() - interval '1 hour'
+where id = '26000000-0000-4000-8000-000000000001';
+
+select * from public.server_record_webhook_receipt(
+  'evt_afterendfulfillment', 'checkout.session.completed', false,
+  'cs_test_afterendfulfillment', '2025-08-27.basil',
+  '2026-08-25 12:08:00+00', repeat('9', 64)
+);
+
+select results_eq(
+  $$
+    select order_status, ticket_id is not null
+    from public.server_fulfill_paid_order(
+      'evt_afterendfulfillment', (select id from after_end_order),
+      'cs_test_afterendfulfillment', 'pi_afterendfulfillment',
+      'ch_afterendfulfillment', 'tr_afterendfulfillment',
+      'fee_afterendfulfillment', 'txn_afterendfulfillment',
+      'cus_afterendfulfillment', 'payment', 'paid', 'usd',
+      2000, 2000, 150, 'acct_fulfillmentowner'
+    )
+  $$,
+  $$ values ('paid'::text, true) $$,
+  'an accepted in-flight Session can fulfill after event end without schedule reclassification'
+);
+
+update public.events
+set starts_at = now() + interval '2 days', ends_at = now() + interval '2 days 2 hours'
+where id = '26000000-0000-4000-8000-000000000001';
 
 reset role;
 select * from finish();
