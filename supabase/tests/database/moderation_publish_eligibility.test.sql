@@ -1381,6 +1381,117 @@ select results_eq(
   'production eligibility is bound to one exact production acceptance and authorization action'
 );
 
+create temporary table policy_pair_advance_before on commit drop as
+select
+  events.status,
+  events.moderation_status,
+  events.moderated_revision,
+  events.public_history_status,
+  events.first_publicly_eligible_at,
+  events.public_eligibility_version,
+  events.publicly_authorized_revision,
+  events.publicly_authorized_action_id,
+  (
+    select count(*)
+    from private.event_moderation_actions as actions
+    where actions.event_id = events.id
+  ) as action_count,
+  (
+    select count(*)
+    from private.event_public_eligibility_intervals as intervals
+    where intervals.event_id = events.id
+  ) as interval_count
+from public.events as events
+where events.id = '74100000-0000-4000-8000-000000000030';
+
+insert into private.organizer_policy_versions (
+  id, policy_kind, stage, public_url, content_sha256, effective_at
+)
+values
+  (
+    'prod-organizer-terms-moderation-v2',
+    'organizer_terms', 'production_approved',
+    'https://whereto.example/legal/organizer-terms/moderation-v2',
+    repeat('c', 64), '2026-08-28 00:00:00+00'
+  ),
+  (
+    'prod-event-policy-moderation-v2',
+    'event_policy', 'production_approved',
+    'https://whereto.example/legal/event-policy/moderation-v2',
+    repeat('d', 64), '2026-08-28 00:00:00+00'
+  );
+
+update private.organizer_policy_requirements
+set
+  policy_version_id = case policy_kind
+    when 'organizer_terms' then 'prod-organizer-terms-moderation-v2'
+    else 'prod-event-policy-moderation-v2'
+  end,
+  updated_at = statement_timestamp();
+
+select set_config(
+  'request.jwt.claim.sub',
+  '74000000-0000-4000-8000-000000000001',
+  true
+);
+set local role authenticated;
+select throws_ok(
+  $$ select public.publish_event('74100000-0000-4000-8000-000000000030') $$,
+  'P0001', 'EVENT_POLICY_ACCEPTANCE_REQUIRED',
+  'a current real authorization cannot bypass acceptance after the required pair advances'
+);
+select lives_ok(
+  $$ select public.publish_event('74100000-0000-4000-8000-000000000027') $$,
+  'an unchanged legacy authorization remains idempotent after the required pair advances'
+);
+reset role;
+
+select results_eq(
+  $$
+    select
+      events.status,
+      events.moderation_status,
+      events.moderated_revision,
+      events.public_history_status,
+      events.first_publicly_eligible_at,
+      events.public_eligibility_version,
+      events.publicly_authorized_revision,
+      events.publicly_authorized_action_id,
+      (
+        select count(*)
+        from private.event_moderation_actions as actions
+        where actions.event_id = events.id
+      ),
+      (
+        select count(*)
+        from private.event_public_eligibility_intervals as intervals
+        where intervals.event_id = events.id
+      )
+    from public.events as events
+    where events.id = '74100000-0000-4000-8000-000000000030'
+  $$,
+  $$ select * from policy_pair_advance_before $$,
+  'a required-pair advance and rejected re-publish leave existing public eligibility unchanged'
+);
+
+select results_eq(
+  $$
+    select
+      private.event_meets_public_candidate(
+        '74100000-0000-4000-8000-000000000030',
+        statement_timestamp()
+      ),
+      count(*) filter (
+        where intervals.eligibility_state = 'eligible'
+          and intervals.ended_at is null
+      )::bigint
+    from private.event_public_eligibility_intervals as intervals
+    where intervals.event_id = '74100000-0000-4000-8000-000000000030'
+  $$,
+  $$ values (true, 1::bigint) $$,
+  'policy-pair advance alone does not close an existing eligible interval'
+);
+
 update private.organizer_policy_requirements
 set
   policy_version_id = 'dev-event-policy-v1',
