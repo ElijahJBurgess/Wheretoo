@@ -165,8 +165,8 @@ values
     '30000000-0000-0000-0000-000000000003',
     '10000000-0000-0000-0000-000000000001',
     'published',
-    'flagged',
-    'Published Flagged Event'
+    'under_review',
+    'Published Under Review Event'
   ),
   (
     '30000000-0000-0000-0000-000000000004',
@@ -238,14 +238,13 @@ select results_eq(
   'Anonymous can see a published clear event'
 );
 
-select results_eq(
+select is_empty(
   $$
     select id
     from public.events
     where id = '30000000-0000-0000-0000-000000000003'
   $$,
-  $$ values ('30000000-0000-0000-0000-000000000003'::uuid) $$,
-  'Anonymous can see a published flagged event'
+  'Anonymous cannot see a published under-review event'
 );
 
 select is_empty(

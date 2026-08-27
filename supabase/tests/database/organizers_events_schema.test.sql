@@ -1,5 +1,7 @@
 begin;
-select plan(16);
+create extension if not exists pgtap with schema extensions;
+set local search_path = public, extensions;
+select plan(18);
 
 select has_extension('postgis', 'postgis is enabled');
 select has_table('public', 'organizers', 'organizers exists');
@@ -9,7 +11,9 @@ select col_is_fk('public', 'organizers', 'id', 'organizer id references auth.use
 select col_is_fk('public', 'events', 'organizer_id', 'event belongs to an organizer');
 select col_type_is('public', 'events', 'location', 'geography(Point,4326)', 'event location is geography');
 select col_default_is('public', 'events', 'status', 'draft', 'events default to draft');
-select col_default_is('public', 'events', 'moderation_status', 'clear', 'events default to clear moderation');
+select col_default_is('public', 'events', 'moderation_status', 'not_evaluated', 'events default to unevaluated moderation');
+select col_default_is('public', 'events', 'public_history_status', 'never_public', 'events default to never-public history');
+select col_not_null('public', 'events', 'public_history_status', 'event public history is explicit');
 select has_check('public', 'organizers', 'organizers have check constraints');
 select has_check('public', 'events', 'events have check constraints');
 select has_index('public', 'events', 'events_organizer_id_idx', 'organizer index exists');

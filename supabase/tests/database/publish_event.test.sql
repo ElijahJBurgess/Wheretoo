@@ -264,9 +264,9 @@ values
   (
     '20000000-0000-0000-0000-000000000013',
     '10000000-0000-0000-0000-000000000001',
-    'flagged',
-    'Flagged Event',
-    'A sufficiently detailed description for a flagged event.',
+    'under_review',
+    'Under Review Event',
+    'A sufficiently detailed description for an under-review event.',
     'community',
     now() + interval '2 days',
     now() + interval '2 days 2 hours',
@@ -275,7 +275,7 @@ values
     'CA',
     '94105',
     'US',
-    'mapbox.flagged-event',
+    'mapbox.under-review-event',
     37.7936,
     -122.3958,
     'free'
@@ -494,7 +494,7 @@ select results_eq(
 
 select lives_ok(
   $$ select public.publish_event('20000000-0000-0000-0000-000000000013') $$,
-  'flagged event publishes without changing moderation'
+  'under-review event publishes without changing moderation'
 );
 
 select results_eq(
@@ -503,8 +503,8 @@ select results_eq(
     from public.events
     where id = '20000000-0000-0000-0000-000000000013'
   $$,
-  $$ values ('flagged'::text) $$,
-  'flagged moderation status persists through publish RPC'
+  $$ values ('under_review'::text) $$,
+  'under-review moderation status persists through publish RPC'
 );
 
 reset role;
@@ -521,14 +521,13 @@ select results_eq(
   'successful publication is immediately visible anonymously'
 );
 
-select results_eq(
+select is_empty(
   $$
-    select moderation_status
+    select id
     from public.events
     where id = '20000000-0000-0000-0000-000000000013'
   $$,
-  $$ values ('flagged'::text) $$,
-  'published flagged event remains anonymously visible'
+  'published under-review event remains hidden anonymously'
 );
 
 reset role;

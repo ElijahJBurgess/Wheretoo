@@ -44,7 +44,7 @@ select results_eq(
       'moderated_revision:bigint:YES',
       'moderation_version:bigint:NO',
       'moderation_updated_at:timestamp with time zone:YES',
-      'public_history_status:text:YES',
+      'public_history_status:text:NO',
       'first_publicly_eligible_at:timestamp with time zone:YES',
       'public_eligibility_version:bigint:NO',
       'publicly_authorized_revision:bigint:YES',
@@ -700,33 +700,35 @@ values (
 
 select lives_ok(
   $$ update public.events set moderation_status = 'not_evaluated' where id = '62000000-0000-0000-0000-000000000010' $$,
-  'transitional moderation vocabulary accepts not_evaluated'
+  'final moderation vocabulary accepts not_evaluated'
 );
 select lives_ok(
   $$ update public.events set moderation_status = 'clear' where id = '62000000-0000-0000-0000-000000000010' $$,
-  'transitional moderation vocabulary accepts clear'
+  'final moderation vocabulary accepts clear'
 );
 select lives_ok(
   $$ update public.events set moderation_status = 'under_review' where id = '62000000-0000-0000-0000-000000000010' $$,
-  'transitional moderation vocabulary accepts under_review'
+  'final moderation vocabulary accepts under_review'
 );
-select lives_ok(
+select throws_ok(
   $$ update public.events set moderation_status = 'flagged' where id = '62000000-0000-0000-0000-000000000010' $$,
-  'transitional moderation vocabulary preserves legacy flagged'
+  '23514',
+  'new row for relation "events" violates check constraint "events_moderation_status_check"',
+  'final moderation vocabulary rejects legacy flagged'
 );
 select lives_ok(
   $$ update public.events set moderation_status = 'blocked' where id = '62000000-0000-0000-0000-000000000010' $$,
-  'transitional moderation vocabulary accepts blocked'
+  'final moderation vocabulary accepts blocked'
 );
 select lives_ok(
   $$ update public.events set moderation_status = 'removed' where id = '62000000-0000-0000-0000-000000000010' $$,
-  'transitional moderation vocabulary accepts removed'
+  'final moderation vocabulary accepts removed'
 );
 select throws_ok(
   $$ update public.events set moderation_status = 'approved' where id = '62000000-0000-0000-0000-000000000010' $$,
   '23514',
   'new row for relation "events" violates check constraint "events_moderation_status_check"',
-  'transitional moderation vocabulary rejects unapproved states'
+  'final moderation vocabulary rejects unapproved states'
 );
 
 update public.events
@@ -869,14 +871,6 @@ select lives_ok(
       '62000000-0000-0000-0000-000000000001'
     );
 
-    insert into private.event_public_eligibility_intervals (
-      event_id, public_eligibility_version, eligibility_state, transition_reason
-    ) values (
-      '62000000-0000-0000-0000-000000000010',
-      0,
-      'ineligible',
-      'initialization'
-    );
     end
     $fixture_block$;
   $fixtures$,
