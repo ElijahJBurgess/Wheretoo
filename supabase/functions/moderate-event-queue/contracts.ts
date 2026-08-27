@@ -17,8 +17,8 @@ export const moderationReasonCodeSchema = z.enum([
 
 const nullableText = z.string().nullable();
 const opaqueProviderMetadataSchema = z.string().regex(
-  /^[a-z][a-z0-9_-]{0,31}\/(?!sk(?:_|-)|rk(?:_|-)|whsec(?:_|-))(?![A-Fa-f0-9]{32,}$)[A-Za-z0-9_-]{6,40}$/,
-  "provider metadata must be a bounded opaque identifier",
+  /^sha256:[a-f0-9]{64}$/,
+  "provider metadata must be a server-derived digest",
 );
 
 const canonicalInputSchema = z.object({
@@ -74,7 +74,7 @@ export const moderationJobSchema = z.object({
   input: canonicalInputSchema,
 }).strict();
 
-export const contextualModerationResultSchema = z.object({
+const moderationResultShape = {
   outcome: z.enum([
     "clear_candidate",
     "review_required",
@@ -82,9 +82,22 @@ export const contextualModerationResultSchema = z.object({
   ]),
   riskLevel: z.enum(["low", "high"]),
   reasonCodes: z.array(moderationReasonCodeSchema).min(1).max(12),
-  providerReference: opaqueProviderMetadataSchema.nullable(),
-  modelVersion: opaqueProviderMetadataSchema.nullable(),
-}).strict().superRefine((value, context) => {
+};
+
+type ModerationResultSemantics = {
+  outcome: "clear_candidate" | "review_required" | "prohibited_candidate";
+  riskLevel: "low" | "high";
+  reasonCodes: Array<z.infer<typeof moderationReasonCodeSchema>>;
+};
+
+type RefinementContext = {
+  addIssue(issue: { code: "custom"; message: string }): void;
+};
+
+function validateResultSemantics(
+  value: ModerationResultSemantics,
+  context: RefinementContext,
+): void {
   if (
     value.outcome === "clear_candidate" &&
     (value.riskLevel !== "low" || value.reasonCodes.length !== 1 ||
@@ -116,7 +129,19 @@ export const contextualModerationResultSchema = z.object({
       message: "reason codes must be unique",
     });
   }
-});
+}
+
+export const contextualModerationProviderResultSchema = z.object({
+  ...moderationResultShape,
+  providerReference: z.string().min(1).max(255).nullable(),
+  modelVersion: z.string().min(1).max(120).nullable(),
+}).strict().superRefine(validateResultSemantics);
+
+export const contextualModerationResultSchema = z.object({
+  ...moderationResultShape,
+  providerReference: opaqueProviderMetadataSchema.nullable(),
+  modelVersion: opaqueProviderMetadataSchema.nullable(),
+}).strict().superRefine(validateResultSemantics);
 
 export type ModerationJob = z.infer<typeof moderationJobSchema>;
 export type ContextualModerationResult = z.infer<

@@ -8,6 +8,7 @@ temporary_directory="$(mktemp -d)"
 claim_session_pid=""
 
 fixture_user='17000000-0000-0000-0000-000000000009'
+fixture_staff='17000000-0000-0000-0000-000000000011'
 fixture_event_one='27000000-0000-0000-0000-000000000009'
 fixture_event_two='27000000-0000-0000-0000-000000000010'
 fixture_evaluation_one='37000000-0000-4000-8000-000000000009'
@@ -66,7 +67,7 @@ where event_id in ('$fixture_event_one'::uuid, '$fixture_event_two'::uuid);
 delete from public.events
 where id in ('$fixture_event_one'::uuid, '$fixture_event_two'::uuid);
 delete from public.organizers where id = '$fixture_user'::uuid;
-delete from auth.users where id = '$fixture_user'::uuid;
+delete from auth.users where id in ('$fixture_user'::uuid, '$fixture_staff'::uuid);
 commit;"
 
 cleanup() {
@@ -144,8 +145,9 @@ run_query "pre-cleanup" "$cleanup_sql"
 
 run_query "setup" "
   begin;
-  insert into auth.users (id, email)
-  values ('$fixture_user', 'queue-concurrency@example.invalid');
+  insert into auth.users (id, email) values
+    ('$fixture_user', 'queue-concurrency@example.invalid'),
+    ('$fixture_staff', 'queue-staff@example.invalid');
   insert into public.organizers (
     id, display_name, organizer_type, base_city, country_code,
     onboarding_completed_at
@@ -274,24 +276,65 @@ run_query "overlap-state" "
   \$assert\$;
 "
 
-run_query "revision-supersession" "
+run_query "staff-action-supersession" "
   begin;
-  select private.invalidate_event_public_revision(
-    '$fixture_event_one', 'full_review', '$fixture_user'
+  select public.lock_event_ticketing_operation('$fixture_event_one');
+  select id from public.events where id = '$fixture_event_one'::uuid for update;
+  insert into private.event_moderation_actions (
+    event_id, content_revision, input_sha256, actor_type, actor_user_id,
+    source, action, previous_status, new_status,
+    previous_public_history_status, new_public_history_status,
+    reason_code, moderation_version
+  ) values (
+    '$fixture_event_one', 1,
+    private.compute_event_input_sha256('$fixture_event_one'),
+    'admin', '$fixture_staff', 'manual', 'block', 'under_review', 'blocked',
+    'never_public', 'never_public', 'other', 2
+  );
+  update public.events
+  set moderation_status = 'blocked',
+      moderated_revision = null,
+      moderation_version = 2,
+      moderation_updated_at = statement_timestamp()
+  where id = '$fixture_event_one'::uuid
+    and content_revision = 1
+    and moderation_version = 1;
+  update private.event_moderation_evaluations
+  set status = 'superseded',
+      finished_at = statement_timestamp(),
+      failure_code = 'HUMAN_OR_RESULT_SUPERSEDED'
+  where event_id = '$fixture_event_one'::uuid
+    and status in ('queued', 'processing');
+  select private.transition_event_public_eligibility(
+    '$fixture_event_one', false,
+    (
+      select id from private.event_moderation_actions
+      where event_id = '$fixture_event_one'::uuid
+        and actor_type = 'admin'
+        and source = 'manual'
+        and moderation_version = 2
+    )
   );
   do \$assert\$
   declare
     apply_result text;
+    fail_result text;
   begin
     if not exists (
-      select 1
-      from public.events
-      where id = '$fixture_event_one'::uuid
-        and content_revision = 2
-        and moderation_version = 2
-        and moderation_status = 'under_review'
+      select 1 from public.events as events
+      join private.event_moderation_evaluations as evaluations
+        on evaluations.event_id = events.id
+      where evaluations.id = '$fixture_evaluation_one'::uuid
+        and events.id = evaluations.event_id
+        and events.content_revision = evaluations.content_revision
+        and private.compute_event_input_sha256(events.id) = evaluations.input_sha256
+        and events.moderation_version = 2
+        and evaluations.queued_moderation_version = 1
+        and events.moderation_version <> evaluations.queued_moderation_version
+        and events.moderation_status = 'blocked'
+        and events.moderated_revision is null
     ) then
-      raise exception using errcode = 'P0001', message = 'ASSERT_REVISION_VERSION_NOT_ADVANCED';
+      raise exception using errcode = 'P0001', message = 'ASSERT_STAFF_FOUR_FACT_PRECEDENCE_MISSING';
     end if;
     if not exists (
       select 1
@@ -299,22 +342,35 @@ run_query "revision-supersession" "
       where id = '$fixture_evaluation_one'::uuid
         and status = 'superseded'
         and attempt_count = 1
-        and failure_code = 'CONTENT_REVISION_CHANGED'
+        and failure_code = 'HUMAN_OR_RESULT_SUPERSEDED'
     ) then
-      raise exception using errcode = 'P0001', message = 'ASSERT_CLAIM_NOT_SUPERSEDED';
+      raise exception using errcode = 'P0001', message = 'ASSERT_STAFF_CLAIM_NOT_SUPERSEDED';
     end if;
     if (
       select count(*)
       from private.event_moderation_actions
       where event_id = '$fixture_event_one'::uuid
-        and actor_type = 'organizer'
-        and actor_user_id = '$fixture_user'::uuid
-        and source = 'edit'
-        and previous_content_revision = 1
-        and content_revision = 2
+        and actor_type = 'admin'
+        and actor_user_id = '$fixture_staff'::uuid
+        and source = 'manual'
+        and action = 'block'
+        and content_revision = 1
         and moderation_version = 2
     ) <> 1 then
-      raise exception using errcode = 'P0001', message = 'ASSERT_ORGANIZER_ACTION_MISSING';
+      raise exception using errcode = 'P0001', message = 'ASSERT_STAFF_ACTION_MISSING';
+    end if;
+    if not exists (
+      select 1 from public.events as events
+      where events.id = '$fixture_event_one'::uuid
+        and events.public_eligibility_version = 0
+        and (
+          select count(*) from private.event_public_eligibility_intervals as intervals
+          where intervals.event_id = events.id
+            and intervals.eligibility_state = 'ineligible'
+            and intervals.ended_at is null
+        ) = 1
+    ) then
+      raise exception using errcode = 'P0001', message = 'ASSERT_STAFF_EPOCH_INVALID';
     end if;
 
     select public.server_apply_moderation_evaluation(
@@ -333,7 +389,30 @@ run_query "revision-supersession" "
     where evaluations.id = '$fixture_evaluation_one'::uuid;
 
     if apply_result is distinct from 'superseded' then
-      raise exception using errcode = 'P0001', message = 'ASSERT_STALE_APPLY_NOT_SUPERSEDED';
+      raise exception using errcode = 'P0001', message = 'ASSERT_STAFF_APPLY_NOT_SUPERSEDED';
+    end if;
+
+    select public.server_fail_moderation_evaluation(
+      evaluations.id,
+      evaluations.content_revision,
+      evaluations.input_sha256,
+      evaluations.queued_moderation_version,
+      'MODERATOR_TIMEOUT'
+    )
+    into fail_result
+    from private.event_moderation_evaluations as evaluations
+    where evaluations.id = '$fixture_evaluation_one'::uuid;
+
+    if fail_result is distinct from 'superseded' then
+      raise exception using errcode = 'P0001', message = 'ASSERT_STAFF_FAIL_NOT_SUPERSEDED';
+    end if;
+    if not exists (
+      select 1 from public.events
+      where id = '$fixture_event_one'::uuid
+        and moderation_status = 'blocked'
+        and moderation_version = 2
+    ) then
+      raise exception using errcode = 'P0001', message = 'ASSERT_STAFF_ENFORCEMENT_RELEASED';
     end if;
   end
   \$assert\$;
@@ -346,7 +425,8 @@ run_query "leakage" "
   do \$assert\$
   begin
     if exists (
-      select 1 from auth.users where id = '$fixture_user'::uuid
+      select 1 from auth.users
+        where id in ('$fixture_user'::uuid, '$fixture_staff'::uuid)
       union all
       select 1 from public.organizers where id = '$fixture_user'::uuid
       union all
@@ -371,4 +451,4 @@ run_query "leakage" "
   \$assert\$;
 "
 
-echo "moderation queue SKIP LOCKED and organizer-revision supersession: PASS"
+echo "moderation queue SKIP LOCKED and privileged staff-action supersession: PASS"

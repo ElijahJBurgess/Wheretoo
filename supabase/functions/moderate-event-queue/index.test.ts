@@ -1,4 +1,9 @@
-import { assertEquals, assertRejects, assertThrows } from "@std/assert";
+import {
+  assertEquals,
+  assertMatch,
+  assertRejects,
+  assertThrows,
+} from "@std/assert";
 import {
   contextualModerationResultSchema,
   type ModerationJob,
@@ -66,8 +71,8 @@ const result = {
   outcome: "clear_candidate" as const,
   riskLevel: "low" as const,
   reasonCodes: ["no_violation" as const],
-  providerReference: "provider/opaque-ref",
-  modelVersion: "provider/model-v1",
+  providerReference: `sha256:${"a".repeat(64)}`,
+  modelVersion: `sha256:${"b".repeat(64)}`,
 };
 
 function request(token: string | null = workerToken): Request {
@@ -215,20 +220,42 @@ Deno.test("provider outage persists only its safe code and never logs raw provid
   assertEquals(JSON.stringify(logs).includes(rawProviderDetail), false);
 });
 
-Deno.test("provider adapter sends minimized input and validates a structured success", async () => {
+Deno.test("provider adapter sends minimized input and hashes all raw provider metadata", async () => {
   let sentBody: unknown;
   let sentAuthorization: string | null = null;
+  const rawProviderReference =
+    "sk_live_abcdef0123456789:private-contact@example.invalid";
+  const rawModelVersion = "raw provider model prose from input excerpt";
   const moderator = createContextualModerator({
     endpoint: "https://moderator.example/v1/evaluate",
     bearerToken: "provider-private-token",
     fetch: (_url, init) => {
       sentBody = JSON.parse(String(init?.body));
       sentAuthorization = new Headers(init?.headers).get("authorization");
-      return Promise.resolve(Response.json(result));
+      return Promise.resolve(Response.json({
+        ...result,
+        providerReference: rawProviderReference,
+        modelVersion: rawModelVersion,
+      }));
     },
   });
 
-  assertEquals(await moderator(job), result);
+  const moderated = await moderator(job);
+  assertMatch(moderated.providerReference ?? "", /^sha256:[a-f0-9]{64}$/);
+  assertMatch(moderated.modelVersion ?? "", /^sha256:[a-f0-9]{64}$/);
+  assertEquals(moderated.providerReference === moderated.modelVersion, false);
+  const persistedResult = JSON.stringify(moderated);
+  for (
+    const rawSubstring of [
+      rawProviderReference,
+      "sk_live_",
+      "private-contact@example.invalid",
+      rawModelVersion,
+      "input excerpt",
+    ]
+  ) {
+    assertEquals(persistedResult.includes(rawSubstring), false);
+  }
   assertEquals(sentAuthorization, "Bearer provider-private-token");
   assertEquals(sentBody, {
     title: job.input.event.title,
@@ -250,6 +277,22 @@ Deno.test("provider adapter sends minimized input and validates a structured suc
     ticketTiers: [],
     artworkVerificationState: "not_present",
     priorReasonCodes: [],
+  });
+
+  const nullMetadataModerator = createContextualModerator({
+    endpoint: "https://moderator.example/v1/evaluate",
+    bearerToken: null,
+    fetch: () =>
+      Promise.resolve(Response.json({
+        ...result,
+        providerReference: null,
+        modelVersion: null,
+      })),
+  });
+  assertEquals(await nullMetadataModerator(job), {
+    ...result,
+    providerReference: null,
+    modelVersion: null,
   });
 });
 

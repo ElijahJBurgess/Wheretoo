@@ -1,4 +1,5 @@
 import {
+  contextualModerationProviderResultSchema,
   type ContextualModerationResult,
   contextualModerationResultSchema,
   type ModerationFailureCode,
@@ -7,6 +8,21 @@ import {
 
 const DEFAULT_TIMEOUT_MS = 8_000;
 const MAX_PROVIDER_RESPONSE_BYTES = 32_768;
+
+async function digestProviderMetadata(
+  value: string | null,
+): Promise<string | null> {
+  if (value === null) return null;
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(value),
+  );
+  const hex = Array.from(
+    new Uint8Array(digest),
+    (byte) => byte.toString(16).padStart(2, "0"),
+  ).join("");
+  return `sha256:${hex}`;
+}
 
 type Fetch = (
   input: string | URL | Request,
@@ -104,11 +120,21 @@ export function createContextualModerator(
       } catch {
         throw new ModerationAdapterError("MODERATOR_MALFORMED");
       }
-      const validated = contextualModerationResultSchema.safeParse(parsed);
+      const validated = contextualModerationProviderResultSchema.safeParse(
+        parsed,
+      );
       if (!validated.success) {
         throw new ModerationAdapterError("MODERATOR_MALFORMED");
       }
-      return validated.data;
+      const [providerReference, modelVersion] = await Promise.all([
+        digestProviderMetadata(validated.data.providerReference),
+        digestProviderMetadata(validated.data.modelVersion),
+      ]);
+      return contextualModerationResultSchema.parse({
+        ...validated.data,
+        providerReference,
+        modelVersion,
+      });
     } catch (error) {
       if (error instanceof ModerationAdapterError) throw error;
       if (

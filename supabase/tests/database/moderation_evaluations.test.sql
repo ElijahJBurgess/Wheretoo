@@ -2,7 +2,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(48);
+select plan(49);
 
 select has_function(
   'public', 'server_claim_moderation_evaluation', array['text'],
@@ -165,7 +165,7 @@ select results_eq(
     select public.server_apply_moderation_evaluation(
       evaluations.id, evaluations.content_revision, evaluations.input_sha256,
       evaluations.queued_moderation_version, 'clear_candidate', 'low',
-      array['no_violation'], 'provider/opaque-ref', 'provider/model-v1'
+      array['no_violation'], 'sha256:' || repeat('a', 64), 'sha256:' || repeat('b', 64)
     )
     from private.event_moderation_evaluations as evaluations
     where evaluations.id = '37000000-0000-4000-8000-000000000001'
@@ -188,7 +188,7 @@ select results_eq(
     select public.server_apply_moderation_evaluation(
       evaluations.id, evaluations.content_revision, evaluations.input_sha256,
       evaluations.queued_moderation_version, 'clear_candidate', 'low',
-      array['no_violation'], 'provider/opaque-ref', 'provider/model-v1'
+      array['no_violation'], 'sha256:' || repeat('a', 64), 'sha256:' || repeat('b', 64)
     )
     from private.event_moderation_evaluations as evaluations
     where evaluations.id = '37000000-0000-4000-8000-000000000001'
@@ -424,6 +424,18 @@ select throws_ok(
   $$,
   '22023', 'MODERATION_RESULT_INVALID',
   'provider metadata rejects token-like identifiers'
+);
+select throws_ok(
+  $$
+    select public.server_apply_moderation_evaluation(
+      evaluations.id, evaluations.content_revision, evaluations.input_sha256,
+      evaluations.queued_moderation_version, 'clear_candidate', 'low',
+      array['no_violation'], 'provider/opaque-ref', 'provider/model-v1'
+    ) from private.event_moderation_evaluations as evaluations
+    where evaluations.id = '37000000-0000-4000-8000-000000000004'
+  $$,
+  '22023', 'MODERATION_RESULT_INVALID',
+  'direct service calls reject raw metadata even when it looks opaque'
 );
 select throws_ok(
   $$
