@@ -47,7 +47,7 @@ const staffCaseRow = {
   current_open_review_request: true, current_report_count: 2,
   disclosures: { minimum_age: 'all_ages', alcohol_present: false, cannabis_present: false, explicit_adult_content: false, gambling_present: false, weapons_present: false, high_risk_activity: false },
   legacy_resolution: {},
-  actions: [{ id: '37beaa67-b2a2-4b56-9c6c-e91208925c45', action: 'hold', previous_status: 'clear', new_status: 'under_review', reason_code: 'user_report', internal_note: null, created_at: '2026-08-26T00:00:00Z', moderation_version: 4 }],
+  actions: [{ id: '37beaa67-b2a2-4b56-9c6c-e91208925c45', action: 'hold', previous_status: 'clear', new_status: 'under_review', reason_code: 'user_report', created_at: '2026-08-26T00:00:00Z', moderation_version: 4 }],
   evaluations: [{ id: '2c3c855f-cdd2-495e-8ccd-5f82648aa535', content_revision: 2, status: 'queued', source: 'report', outcome: null, risk_level: null, reason_codes: ['user_report'], failure_code: null, created_at: '2026-08-26T00:00:00Z', finished_at: null }],
 }
 
@@ -162,6 +162,9 @@ describe('moderation browser API', () => {
     await expect(getModerationCase(eventId)).resolves.toMatchObject({ addressLine2: null, moderationStatus: 'under_review' })
 
     rpc.mockResolvedValueOnce({ data: [{ ...staffCaseRow, actions: [{ ...staffCaseRow.actions[0], actor_type: 'admin' }] }], error: null })
+    await expect(getModerationCase(eventId)).rejects.toEqual(new ModerationApiError('UNAVAILABLE'))
+
+    rpc.mockResolvedValueOnce({ data: [{ ...staffCaseRow, actions: [{ ...staffCaseRow.actions[0], internal_note: 'private' }] }], error: null })
     await expect(getModerationCase(eventId)).rejects.toEqual(new ModerationApiError('UNAVAILABLE'))
 
     rpc.mockResolvedValueOnce({ data: [{ ...staffCaseRow, moderation_status: 'flagged' }], error: null })

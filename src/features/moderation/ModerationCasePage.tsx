@@ -56,10 +56,8 @@ function availableActions(moderationStatus: ModerationCase['moderationStatus'], 
   if (moderationStatus === 'under_review') {
     return historyStatus === 'never_public' ? ['clear', 'hold', 'block'] : ['clear', 'hold', 'remove']
   }
-  if (moderationStatus === 'clear' || moderationStatus === 'not_evaluated') {
-    const prohibitAction: StaffAction = historyStatus === 'never_public' ? 'block' : 'remove'
-    return moderationStatus === 'not_evaluated' ? ['clear', 'hold', prohibitAction] : ['hold', prohibitAction]
-  }
+  if (moderationStatus === 'not_evaluated') return historyStatus === 'never_public' ? ['clear', 'hold', 'block'] : ['clear', 'hold']
+  if (moderationStatus === 'clear') return historyStatus === 'never_public' ? ['hold', 'block'] : ['hold', 'remove']
   return []
 }
 
@@ -285,7 +283,6 @@ export function ModerationCasePage() {
                   <li key={action.id}>
                     <div><strong>{action.action.replaceAll('_', ' ').replace(/^./, (letter) => letter.toUpperCase())}</strong><span>{formatDate(action.created_at)}</span></div>
                     <p>{statusLabel(action.previous_status)} → {statusLabel(action.new_status)} · {reasonLabels.get(action.reason_code) ?? 'Other'}</p>
-                    {action.internal_note ? <blockquote>{action.internal_note}</blockquote> : null}
                   </li>
                 ))}
               </ol>

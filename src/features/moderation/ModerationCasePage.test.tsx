@@ -24,7 +24,7 @@ const baseCase = {
   mapboxFeatureId: 'address.1', latitude: 37.78, longitude: -122.42,
   disclosures: { minimumAge: 'all_ages' as const, alcoholPresent: false, cannabisPresent: false, explicitAdultContent: false, gamblingPresent: false, weaponsPresent: false, highRiskActivity: true },
   legacyResolution: {},
-  actions: [{ id: '37beaa67-b2a2-4b56-9c6c-e91208925c45', action: 'hold' as const, previous_status: 'clear' as const, new_status: 'under_review' as const, reason_code: 'user_report' as const, internal_note: 'Checked current content.', created_at: '2026-08-26T00:00:00Z', moderation_version: 8 }],
+  actions: [{ id: '37beaa67-b2a2-4b56-9c6c-e91208925c45', action: 'hold' as const, previous_status: 'clear' as const, new_status: 'under_review' as const, reason_code: 'user_report' as const, created_at: '2026-08-26T00:00:00Z', moderation_version: 8 }],
   evaluations: [{ id: '2c3c855f-cdd2-495e-8ccd-5f82648aa535', content_revision: 3, status: 'succeeded' as const, source: 'contextual' as const, outcome: 'review_required' as const, risk_level: 'high' as const, reason_codes: ['unsafe_activity' as const], failure_code: null, created_at: '2026-08-26T00:00:00Z', finished_at: '2026-08-26T00:00:01Z' }],
 }
 
@@ -63,6 +63,7 @@ describe('ModerationCasePage', () => {
     expect(screen.getByText('High-risk activity')).toBeInTheDocument()
     expect(screen.getAllByText('Unsafe activity')).toHaveLength(2)
     expect(screen.getAllByText('Hold')).toHaveLength(2)
+    expect(screen.queryByText('Checked current content.')).not.toBeInTheDocument()
     expect(screen.queryByText(/reporter|fingerprint|provider reference|model version|reasoning/i)).not.toBeInTheDocument()
   })
 
@@ -90,6 +91,7 @@ describe('ModerationCasePage', () => {
     [{ moderationStatus: 'blocked', publicHistoryStatus: 'never_public' }, ['Clear']],
     [{ moderationStatus: 'removed', publicHistoryStatus: 'previously_public' }, ['Restore']],
     [{ moderationStatus: 'under_review', publicHistoryStatus: 'previously_public' }, ['Clear', 'Hold', 'Remove']],
+    [{ moderationStatus: 'not_evaluated', publicHistoryStatus: 'previously_public' }, ['Clear', 'Hold']],
   ])('maps state/history %o to only its server-valid actions', (facts, expectedActions) => {
     useModerationCase.mockReturnValue({ data: { ...baseCase, ...facts }, isPending: false, isError: false, refetch })
     renderPage()

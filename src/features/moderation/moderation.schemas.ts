@@ -145,7 +145,6 @@ const actionHistorySchema = z.array(z.strictObject({
   previous_status: moderationStatusSchema,
   new_status: moderationStatusSchema,
   reason_code: moderationReasonCodeSchema,
-  internal_note: z.string().nullable(),
   created_at: z.string(),
   moderation_version: z.number().int().nonnegative(),
 }))

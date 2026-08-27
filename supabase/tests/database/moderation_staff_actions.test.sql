@@ -646,13 +646,13 @@ select results_eq(
         from jsonb_array_elements(cases.actions) as action_row(value)
         where array(select key from jsonb_object_keys(action_row.value) as key order by key)
           is distinct from array[
-            'action', 'created_at', 'id', 'internal_note',
+            'action', 'created_at', 'id',
             'moderation_version', 'new_status', 'previous_status', 'reason_code'
           ]::text[]
           or action_row.value ?| array[
             'actor_user_id', 'reviewer_user_id', 'provider_reference',
             'model_version', 'input_sha256', 'evaluation_id', 'raw_output',
-            'provider_reasoning', 'internal_reasoning'
+            'provider_reasoning', 'internal_reasoning', 'internal_note'
           ]
       )
       and not exists (
