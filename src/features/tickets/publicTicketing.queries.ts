@@ -9,5 +9,12 @@ export function usePublicTicketingEvent(eventId: string) {
     queryKey: ticketKeys.public(publicEventId),
     queryFn: () => getPublicEventTicketing(publicEventId),
     enabled: publicEventId.length > 0,
+    staleTime: 0,
+    refetchInterval: () => (
+      typeof document === 'undefined' || document.visibilityState === 'visible' ? 15_000 : false
+    ),
+    refetchIntervalInBackground: false,
+    refetchOnReconnect: true,
+    refetchOnWindowFocus: true,
   })
 }

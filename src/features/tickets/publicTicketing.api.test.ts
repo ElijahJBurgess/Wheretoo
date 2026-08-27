@@ -87,4 +87,22 @@ describe('public ticketing API', () => {
 
     await expect(getPublicEventTicketing(eventId)).rejects.toThrow('Public event details are unavailable')
   })
+
+  it('rejects moderation fields instead of exposing them through the public projection', async () => {
+    rpc.mockResolvedValue({
+      data: [{
+        ...projection,
+        event: { ...projection.event, moderation_status: 'clear', moderation_version: 4 },
+      }],
+      error: null,
+    })
+
+    await expect(getPublicEventTicketing(eventId)).rejects.toThrow('Public event details are unavailable')
+  })
+
+  it('maps a transport failure to bounded public copy', async () => {
+    rpc.mockResolvedValue({ data: null, error: { message: 'private schema detail' } })
+
+    await expect(getPublicEventTicketing(eventId)).rejects.toThrow('Public event details are unavailable')
+  })
 })

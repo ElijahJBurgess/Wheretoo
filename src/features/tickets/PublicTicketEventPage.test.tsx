@@ -11,10 +11,14 @@ vi.mock('react', async (importOriginal) => ({
 }))
 
 const { usePublicTicketingEvent } = vi.hoisted(() => ({ usePublicTicketingEvent: vi.fn() }))
-vi.mock('./publicTicketing.queries', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('./publicTicketing.queries')>()),
-  usePublicTicketingEvent,
+vi.mock('./publicTicketing.queries', () => ({ usePublicTicketingEvent }))
+
+const { mutateAsync, resetReport, useReportPublicEvent } = vi.hoisted(() => ({
+  mutateAsync: vi.fn(),
+  resetReport: vi.fn(),
+  useReportPublicEvent: vi.fn(),
 }))
+vi.mock('../moderation/moderation.queries', () => ({ useReportPublicEvent }))
 
 import { PublicTicketEventPage } from './PublicTicketEventPage'
 
@@ -73,6 +77,8 @@ describe('PublicTicketEventPage', () => {
     vi.clearAllMocks()
     startTransition.mockImplementation((callback: () => void) => callback())
     usePublicTicketingEvent.mockReturnValue({ data: publicEvent, isPending: false, isError: false, refetch: vi.fn() })
+    useReportPublicEvent.mockReturnValue({ isPending: false, mutateAsync, reset: resetReport })
+    mutateAsync.mockResolvedValue({ status: 'received' })
   })
 
   it('presents persisted published event facts and price without organizer or financial internals', () => {
@@ -219,6 +225,35 @@ describe('PublicTicketEventPage', () => {
     expect(screen.getByRole('heading', { level: 1, name: title })).toBeInTheDocument()
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
     expect(screen.queryByText(/PGRST|postgres|private/i)).not.toBeInTheDocument()
+  })
+
+  it('offers reporting only while the canonical public projection returns the event', async () => {
+    const { router } = renderPage()
+    expect(screen.getByRole('button', { name: 'Report this event' })).toBeInTheDocument()
+
+    usePublicTicketingEvent.mockReturnValue({ data: null, isPending: false, isError: false, refetch: vi.fn() })
+    await act(async () => { await router.navigate(`/events/${eventId}?refresh=removed`) })
+
+    expect(screen.queryByRole('button', { name: 'Report this event' })).not.toBeInTheDocument()
+  })
+
+  it('keeps last-known details with retry status on a transient refresh failure', async () => {
+    const refetch = vi.fn()
+    usePublicTicketingEvent.mockReturnValue({
+      data: publicEvent,
+      isPending: false,
+      isError: true,
+      refetch,
+    })
+    const user = userEvent.setup()
+    renderPage()
+
+    expect(screen.getByRole('heading', { name: 'Night Market' })).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Showing the last event details we received')
+    expect(screen.queryByRole('heading', { name: 'Event could not load' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Check again' }))
+    expect(refetch).toHaveBeenCalledTimes(1)
   })
 
   it('labels an event with no purchasable tiers as unavailable instead of enabling checkout', () => {

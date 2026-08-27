@@ -2,6 +2,7 @@ import { useLayoutEffect, useState, useSyncExternalStore, type ReactNode } from 
 import { useNavigate, useParams } from 'react-router-dom'
 import { AsyncState } from '../../components/ui/AsyncState'
 import { Button } from '../../components/ui/Button'
+import { ReportEventDialog } from '../moderation/ReportEventDialog'
 import { TicketTierList } from './TicketTierList'
 import { usePublicTicketingEvent } from './publicTicketing.queries'
 import type { PublicTicketTierTuple } from './ticket.types'
@@ -163,7 +164,7 @@ export function PublicTicketEventPage() {
   if ((eventQuery.isPending || eventQuery.data === undefined) && !eventQuery.isError) {
     return <PublicEventState status="loading" title="Loading event" />
   }
-  if (eventQuery.isError) {
+  if (eventQuery.isError && eventQuery.data === undefined) {
     return <PublicEventState action={<Button onClick={() => void eventQuery.refetch()}>Try again</Button>} description="Check your connection, then try again." status="error" title="Event could not load" />
   }
   if (eventQuery.data === null) {
@@ -176,6 +177,12 @@ export function PublicTicketEventPage() {
 
   return (
     <main className="public-event-layout">
+      {eventQuery.isError ? (
+        <div className="public-event-refresh" role="status">
+          <p>Showing the last event details we received. We could not check current availability.</p>
+          <Button onClick={() => void eventQuery.refetch()} variant="secondary">Check again</Button>
+        </div>
+      ) : null}
       <article aria-labelledby="public-event-title" className="public-event">
         <div aria-label="Whereto event artwork placeholder" className="public-event__artwork" role="img">
           <span>Whereto presents</span>
@@ -202,6 +209,7 @@ export function PublicTicketEventPage() {
             eventId={event.id}
             tiers={tiers}
           />
+          <ReportEventDialog eventId={event.id} />
         </div>
       </article>
     </main>
