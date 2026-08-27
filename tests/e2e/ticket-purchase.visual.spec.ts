@@ -15,6 +15,10 @@ test('captures deliberate application-only ticketing states', async ({ page }, t
   await signInTicketingOrganizer(page, fixture)
   await page.goto('/organizer/settings/payments')
   await expect(page.getByText('Ready for paid sales', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Manage payment details' }).click()
+  await expect(page.getByRole('region', { name: 'Stripe payment setup' })).toBeVisible()
+  await expect(page.locator('stripe-connect-account-management')).toBeVisible({ timeout: 15_000 })
+  await page.getByRole('button', { name: 'Done managing payments' }).click()
   await assertTicketingAccessibilitySmoke(page)
   await captureTicketingState(page, testInfo, 'payments-ready')
 
