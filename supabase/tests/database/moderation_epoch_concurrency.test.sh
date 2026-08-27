@@ -18,7 +18,13 @@ staff_id="$(new_uuid)"
 event_id="$(new_uuid)"
 tier_id="$(new_uuid)"
 request_id="$(new_uuid)"
-marker=$((16#${run_id:0:6}))
+marker="$(RUN_ID="$run_id" node -e "console.log((BigInt('0x' + process.env.RUN_ID.slice(0, 16)) & ((1n << 63n) - 1n)).toString())")"
+marker_class=$((marker >> 32))
+marker_object=$((marker & 4294967295))
+
+monotonic_seconds() {
+  node -e "console.log(Number(process.hrtime.bigint() / 1000000000n))"
+}
 
 if [[ ! -x "$supabase_cli" ]]; then
   echo "Supabase CLI is not installed at the project-local path." >&2
@@ -93,14 +99,19 @@ trap cleanup EXIT
 
 wait_for_marker() {
   local log_file="$temporary_directory/marker.log"
-  for _attempt in 1 2 3 4 5 6 7 8 9 10; do
+  local deadline=$(( $(monotonic_seconds) + 45 ))
+  while (( $(monotonic_seconds) < deadline )); do
+    if [[ -n "$reservation_pid" ]] && ! kill -0 "$reservation_pid" 2>/dev/null; then
+      break
+    fi
     if "$supabase_cli" db query --linked "
       do \$assert\$
       begin
         if not exists (
           select 1 from pg_catalog.pg_locks
-          where locktype = 'advisory' and classid = 0
-            and objid = '$marker'::oid and granted
+          where locktype = 'advisory'
+            and classid = '$marker_class'::oid
+            and objid = '$marker_object'::oid and granted
         ) then
           raise exception using errcode = 'P0001', message = 'ASSERT_EPOCH_MARKER_NOT_READY';
         end if;
@@ -109,6 +120,7 @@ wait_for_marker() {
     " >"$log_file" 2>&1; then
       return 0
     fi
+    sleep 0.2
   done
   sanitize_log "$log_file"
   return 1
@@ -355,6 +367,21 @@ run_query final-restore-and-invariants "
 
   do \$assert\$
   begin
+    if exists (
+      select 1
+      from (values
+        ('public.moderate_event(uuid,bigint,text,bigint,text,text,text)'::regprocedure),
+        ('private.transition_event_public_eligibility(uuid,boolean,uuid)'::regprocedure),
+        ('public.lock_event_ticketing_operation(uuid)'::regprocedure)
+      ) as routines(routine_oid)
+      cross join unnest(array[
+        'public.orders', 'public.order_items', 'public.tickets',
+        'public.refunds', 'public.disputes', 'public.stripe_webhook_events'
+      ]::text[]) as forbidden(table_name)
+      where strpos(lower(pg_catalog.pg_get_functiondef(routines.routine_oid)), forbidden.table_name) > 0
+    ) then
+      raise exception using errcode = 'P0001', message = 'ASSERT_MODERATION_PAYMENT_TABLE_TOUCH';
+    end if;
     if (select count(*) from private.event_public_eligibility_intervals
         where event_id = '$event_id' and ended_at is null) <> 1
        or not private.event_has_current_public_eligibility('$event_id')

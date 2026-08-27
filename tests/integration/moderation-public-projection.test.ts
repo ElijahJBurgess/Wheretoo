@@ -10,11 +10,18 @@ const repositoryRoot = path.resolve(fileURLToPath(new URL('../..', import.meta.u
 const supabaseCli = path.join(repositoryRoot, 'node_modules/.bin/supabase')
 
 async function linkedQuery(sql: string) {
-  return execFileAsync(supabaseCli, ['db', 'query', '--linked', sql], {
-    cwd: repositoryRoot,
-    maxBuffer: 2 * 1024 * 1024,
-    timeout: 90_000,
-  })
+  try {
+    return await execFileAsync(supabaseCli, ['db', 'query', '--linked', sql], {
+      cwd: repositoryRoot,
+      maxBuffer: 2 * 1024 * 1024,
+      timeout: 90_000,
+    })
+  } catch (error) {
+    const output = error as { stderr?: string; stdout?: string }
+    throw new Error(output.stdout ?? output.stderr ?? 'Linked database query failed', {
+      cause: error,
+    })
+  }
 }
 
 describe('moderation public projection and RLS boundary', () => {
@@ -74,6 +81,7 @@ describe('moderation public projection and RLS boundary', () => {
       select public.publish_event('${eventId}');
       reset role;
 
+      set local role anon;
       do $assert$
       declare projection jsonb;
       begin
@@ -93,6 +101,12 @@ describe('moderation public projection and RLS boundary', () => {
            or projection->'organizer' ?| array['bio', 'website_url', 'base_city'] then
           raise exception using errcode = 'P0001', message = 'ASSERT_SAFE_PUBLIC_PROJECTION';
         end if;
+      end
+      $assert$;
+      reset role;
+
+      do $assert$
+      begin
         if pg_catalog.has_table_privilege('anon', 'public.events', 'select')
            or pg_catalog.has_table_privilege('anon', 'public.organizers', 'select')
            or pg_catalog.has_table_privilege('authenticated', 'private.event_moderation_actions', 'select') then

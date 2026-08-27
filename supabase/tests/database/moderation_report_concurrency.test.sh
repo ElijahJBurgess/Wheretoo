@@ -16,7 +16,13 @@ new_uuid() {
 owner_id="$(new_uuid)"
 staff_id="$(new_uuid)"
 event_id="$(new_uuid)"
-marker=$((16#${run_id:0:6}))
+marker="$(RUN_ID="$run_id" node -e "console.log((BigInt('0x' + process.env.RUN_ID.slice(0, 16)) & ((1n << 63n) - 1n)).toString())")"
+marker_class=$((marker >> 32))
+marker_object=$((marker & 4294967295))
+
+monotonic_seconds() {
+  node -e "console.log(Number(process.hrtime.bigint() / 1000000000n))"
+}
 actor_one="$(printf 'task15-%s-actor-1' "$run_id" | shasum -a 256 | cut -d ' ' -f 1)"
 actor_two="$(printf 'task15-%s-actor-2' "$run_id" | shasum -a 256 | cut -d ' ' -f 1)"
 actor_three="$(printf 'task15-%s-actor-3' "$run_id" | shasum -a 256 | cut -d ' ' -f 1)"
@@ -96,20 +102,26 @@ trap cleanup EXIT
 
 wait_for_marker() {
   local log_file="$temporary_directory/marker.log"
-  for _attempt in 1 2 3 4 5 6 7 8 9 10; do
+  local deadline=$(( $(monotonic_seconds) + 45 ))
+  while (( $(monotonic_seconds) < deadline )); do
+    if [[ -n "$report_pid" ]] && ! kill -0 "$report_pid" 2>/dev/null; then
+      break
+    fi
     if "$supabase_cli" db query --linked "
       do \$assert\$
       begin
         if not exists (
           select 1 from pg_catalog.pg_locks
-          where locktype = 'advisory' and classid = 0
-            and objid = '$marker'::oid and granted
+          where locktype = 'advisory'
+            and classid = '$marker_class'::oid
+            and objid = '$marker_object'::oid and granted
         ) then
           raise exception using errcode = 'P0001', message = 'ASSERT_REPORT_MARKER_NOT_READY';
         end if;
       end
       \$assert\$;
     " >"$log_file" 2>&1; then return 0; fi
+    sleep 0.2
   done
   sanitize_log "$log_file"
   return 1
