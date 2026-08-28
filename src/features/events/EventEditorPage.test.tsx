@@ -153,6 +153,17 @@ describe('EventEditorPage', () => {
     expect(mutateAsync).toHaveBeenCalledOnce()
   })
 
+  it('opens the requirements stage when ticket setup returns through the canonical editor route', async () => {
+    renderEditor(
+      '/organizer/events/event-1/edit?step=requirements',
+      { data: row, isPending: false, isError: false, refetch },
+    )
+
+    expect(await screen.findByLabelText('Minimum age')).toHaveValue('21_plus')
+    expect(screen.queryByLabelText('Event title')).not.toBeInTheDocument()
+    expect(screen.getByText('Event details/requirements')).toBeInTheDocument()
+  })
+
   it('hydrates an owned row with Los Angeles datetime-local values and ignores a same-route refetch while dirty', async () => {
     const query = { data: row, isPending: false, isError: false, refetch }
     const view = renderEditor('/organizer/events/event-1/edit', query)

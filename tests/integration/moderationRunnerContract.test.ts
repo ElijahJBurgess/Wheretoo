@@ -23,6 +23,7 @@ const browserSpecPaths = [
 const packagePath = path.join(repositoryRoot, 'package.json')
 
 const build25UnitPaths = [
+  'src/features/auth/SessionProvider.test.tsx',
   'src/features/moderation/EventPolicyPage.test.tsx',
   'src/features/moderation/EventRequirementsStep.test.tsx',
   'src/features/moderation/ModerationCasePage.test.tsx',
@@ -40,9 +41,12 @@ const build25UnitPaths = [
   'src/features/events/LocationSearchField.test.tsx',
   'src/features/events/OrganizerEventsPage.test.tsx',
   'src/features/events/PublishedEventPage.test.tsx',
+  'src/features/events/event.schemas.test.ts',
+  'src/features/tickets/OrganizerTicketTiersPage.test.tsx',
   'src/features/tickets/PublicTicketEventPage.test.tsx',
   'src/features/tickets/publicTicketing.api.test.ts',
   'src/features/tickets/publicTicketing.queries.test.tsx',
+  'src/features/tickets/ticket.queries.test.tsx',
   'src/features/tickets/ticket.schemas.test.ts',
   'src/app/router/router.test.tsx',
   'src/components/layout/OrganizerLayout.test.tsx',
@@ -58,6 +62,7 @@ const moderationSqlChildren = [
   'moderation_evaluations',
   'moderation_staff_actions',
   'moderation_reviews_reports',
+  'moderation_retention_schedule',
 ] as const
 
 const compatibilitySqlChildren = [
@@ -154,7 +159,7 @@ case "$*" in
     printf '%s\\n' '[{"id":"abcdefghijklmnopqrst","linked":true,"status":"ACTIVE_HEALTHY"}]'
     ;;
   "migration list --linked")
-    printf '%s\\n' '{"migrations":[{"local":"20260826011200","remote":"20260826011200"}]}'
+    printf '%s\\n' '{"migrations":[{"local":"20260826011350","remote":"20260826011350"}]}'
     ;;
   *"test db --linked"*)
     printf '%s\\n' 'LegacyDockerRunError: Docker Desktop is a prerequisite for local development.' >&2
@@ -345,14 +350,14 @@ describe('Build 2.5 moderation proof runner', () => {
   })
 
   it('runs the closed database-only child allowlist through the Docker fallback', async () => {
-    expect(expectedChildren).toHaveLength(23)
+    expect(expectedChildren).toHaveLength(24)
     const source = await readRunnerSource()
     expect(source, 'the canonical moderation proof runner is missing').not.toBeNull()
     if (source === null) return
 
     const result = await executeRunner(source)
     expect(result.exitCode, result.stderr).toBe(0)
-    expect(result.stdout).toContain('Moderation database proof passed (23/23 children).')
+    expect(result.stdout).toContain('Moderation database proof passed (24/24 children).')
 
     for (const child of [...moderationSqlChildren, ...compatibilitySqlChildren]) {
       expect(result.log).toContain('supabase:db query --linked --file ')

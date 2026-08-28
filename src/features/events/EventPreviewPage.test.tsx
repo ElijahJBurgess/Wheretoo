@@ -2,13 +2,13 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Organizer } from '../organizers/organizer.api'
 import type { EventRow } from './event.types'
 
-const { mutateAsync, organizerRefetch, eventRefetch, requirementsRefetch, useOrganizer, useOwnedEvent, useOwnedEventRequirements, usePublishEvent, useSession } = vi.hoisted(() => ({
+const { mutateAsync, organizerRefetch, eventRefetch, requirementsRefetch, tiersRefetch, useOrganizer, useOwnedEvent, useOwnedEventRequirements, useOwnedTicketTiers, usePublishEvent, useSession } = vi.hoisted(() => ({
   mutateAsync: vi.fn(), organizerRefetch: vi.fn(), eventRefetch: vi.fn(), useOrganizer: vi.fn(),
-  requirementsRefetch: vi.fn(), useOwnedEvent: vi.fn(), useOwnedEventRequirements: vi.fn(), usePublishEvent: vi.fn(), useSession: vi.fn(),
+  requirementsRefetch: vi.fn(), tiersRefetch: vi.fn(), useOwnedEvent: vi.fn(), useOwnedEventRequirements: vi.fn(), useOwnedTicketTiers: vi.fn(), usePublishEvent: vi.fn(), useSession: vi.fn(),
 }))
 
 vi.mock('../auth/SessionProvider', () => ({ useSession }))
@@ -18,6 +18,7 @@ vi.mock('../moderation/moderation.queries', () => ({
   useOwnedEventRequirements,
 }))
 vi.mock('./event.queries', () => ({ useOwnedEvent, usePublishEvent }))
+vi.mock('../tickets/ticket.queries', () => ({ useOwnedTicketTiers }))
 vi.mock('../../lib/supabase/client', () => ({ supabase: {} }))
 
 import { EventPreviewPage } from './EventPreviewPage'
@@ -68,12 +69,15 @@ function renderPreview() {
 }
 
 describe('EventPreviewPage', () => {
+  afterEach(() => vi.useRealTimers())
+
   beforeEach(() => {
     vi.clearAllMocks()
     useSession.mockReturnValue({ status: 'authenticated', session: {}, user: { id: 'organizer-1' } })
     useOwnedEvent.mockReturnValue(eventLoaded)
     useOrganizer.mockReturnValue(organizerLoaded)
     useOwnedEventRequirements.mockReturnValue({ data: requirements, isPending: false, isError: false, refetch: requirementsRefetch })
+    useOwnedTicketTiers.mockReturnValue({ data: [], isPending: false, isError: false, refetch: tiersRefetch })
     usePublishEvent.mockReturnValue({ isPending: false, mutateAsync })
   })
 
@@ -162,12 +166,54 @@ describe('EventPreviewPage', () => {
     expect(screen.queryByText(/owner|permission|another organizer/i)).not.toBeInTheDocument()
   })
 
-  it('sends paid drafts to ticket setup and keeps direct preview publication unavailable', () => {
+  it('sends a paid draft without tiers to ticket setup and keeps publication unavailable', () => {
     useOwnedEvent.mockReturnValue({ ...eventLoaded, data: { ...event, admission_type: 'paid' } })
     renderPreview()
+    expect(screen.getByText('Finish ticket setup, then confirm the current agreement and publish this version.')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Set up paid tickets' })).toHaveAttribute('href', '/organizer/events/event-1/tickets')
     expect(screen.queryByRole('button', { name: /Publish event|Try publishing again/ })).not.toBeInTheDocument()
     expect(mutateAsync).not.toHaveBeenCalled()
+  })
+
+  it('publishes a paid draft after owned tiers are configured and the current agreement is accepted', async () => {
+    const user = userEvent.setup()
+    const paidDraft = { ...event, admission_type: 'paid' } as EventRow
+    useOwnedEvent.mockReturnValue({ ...eventLoaded, data: paidDraft })
+    useOwnedTicketTiers.mockReturnValue({
+      data: [{ id: 'tier-1' }], isPending: false, isError: false, refetch: tiersRefetch,
+    })
+    mutateAsync.mockResolvedValue({ ...paidDraft, status: 'published', published_at: '2026-08-25T14:00:00.000Z' })
+    const { router } = renderPreview()
+
+    expect(useOwnedTicketTiers).toHaveBeenCalledWith('organizer-1', 'event-1')
+    await user.click(screen.getByRole('button', { name: 'Publish event' }))
+
+    expect(mutateAsync).toHaveBeenCalledWith('event-1')
+    await waitFor(() => expect(router.state.location.pathname).toBe('/organizer/events/event-1'))
+  })
+
+  it('allows an accepted happening-now paid revision to re-publish through the existing preview action', async () => {
+    const user = userEvent.setup()
+    const now = Date.now()
+    const activePaidEvent = {
+      ...event,
+      status: 'published',
+      moderation_status: 'under_review',
+      admission_type: 'paid',
+      starts_at: new Date(now - 60 * 60 * 1000).toISOString(),
+      ends_at: new Date(now + 60 * 60 * 1000).toISOString(),
+      published_at: new Date(now - 24 * 60 * 60 * 1000).toISOString(),
+    } as EventRow
+    useOwnedEvent.mockReturnValue({ ...eventLoaded, data: activePaidEvent })
+    mutateAsync.mockResolvedValue({ ...activePaidEvent, moderation_status: 'clear', moderated_revision: 1 })
+
+    const { router } = renderPreview()
+    const publish = screen.getByRole('button', { name: 'Publish changes' })
+    expect(publish).toBeEnabled()
+    await user.click(publish)
+
+    expect(mutateAsync).toHaveBeenCalledWith('event-1')
+    await waitFor(() => expect(router.state.location.pathname).toBe('/organizer/events/event-1'))
   })
 
   it('publishes exactly once under rapid clicks and navigates only after a published row returns', async () => {

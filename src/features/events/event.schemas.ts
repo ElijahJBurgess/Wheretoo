@@ -38,7 +38,8 @@ export const eventDraftSchema = z.object({
   capacity: z.number().int().positive().max(2_147_483_647).nullable(),
 })
 
-export const eventPublishSchema = eventDraftSchema.superRefine((values, context) => {
+function publicationSchema(requireFutureStart: boolean) {
+  return eventDraftSchema.superRefine((values, context) => {
   const titleLength = values.title.trim().length
   if (titleLength < 3 || titleLength > 120) {
     context.addIssue({
@@ -89,29 +90,25 @@ export const eventPublishSchema = eventDraftSchema.superRefine((values, context)
 
   const startsAt = losAngelesWallTimeToInstant(values.startsAt)?.getTime()
   const endsAt = losAngelesWallTimeToInstant(values.endsAt)?.getTime()
-  if (startsAt === undefined || startsAt <= Date.now()) {
+  if (startsAt === undefined || (requireFutureStart && startsAt <= Date.now())) {
     context.addIssue({
       code: 'custom',
       path: ['startsAt'],
       message: 'Choose a future start time.',
     })
   }
-  if (endsAt === undefined || startsAt === undefined || endsAt <= startsAt) {
+  if (endsAt === undefined || startsAt === undefined || endsAt <= startsAt || (!requireFutureStart && endsAt <= Date.now())) {
     context.addIssue({
       code: 'custom',
       path: ['endsAt'],
-      message: 'Choose an end time after the start time.',
+      message: requireFutureStart ? 'Choose an end time after the start time.' : 'This event must not have ended.',
     })
   }
+  })
+}
 
-  if (values.admissionType !== 'free') {
-    context.addIssue({
-      code: 'custom',
-      path: ['admissionType'],
-      message: 'Paid event publishing is not available in this milestone. Choose Free to publish.',
-    })
-  }
-})
+export const eventPublishSchema = publicationSchema(true)
+export const eventRepublishSchema = publicationSchema(false)
 
 export const publicEventSchema = z.strictObject({
   id: z.string().uuid(),

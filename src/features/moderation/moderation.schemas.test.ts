@@ -67,6 +67,11 @@ describe('moderation browser schemas', () => {
     expect(requiredPolicySchema.safeParse({ ...production, publicUrl: 'https://whereto.example.com/legal?draft=1' }).success).toBe(false)
     expect(requiredPolicySchema.safeParse({ ...production, publicUrl: 'https://whereto.example.com/legal#section' }).success).toBe(false)
     expect(requiredPolicySchema.safeParse({ ...production, publicUrl: 'https://Whereto.example.com/legal' }).success).toBe(false)
+    expect(requiredPolicySchema.safeParse({ ...production, publicUrl: 'https://./' }).success).toBe(false)
+    expect(requiredPolicySchema.safeParse({ ...production, publicUrl: 'https://bad..example/legal' }).success).toBe(false)
+    expect(requiredPolicySchema.safeParse({ ...production, publicUrl: 'https://-bad.example/legal' }).success).toBe(false)
+    expect(requiredPolicySchema.safeParse({ ...production, publicUrl: 'https://bad-.example/legal' }).success).toBe(false)
+    expect(requiredPolicySchema.safeParse({ ...production, publicUrl: 'https://127.0.0.1/legal' }).success).toBe(false)
   })
 
   it('accepts all seven owner disclosure values but no acceptance internals', () => {

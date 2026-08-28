@@ -4,11 +4,11 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EventRow } from '../events/event.types'
 
-const { activateMutate, saveMutate, useActivatePaidSales, useConnectStatus, useOwnedEvent, useOwnedTicketTiers, useSaveTicketTiers, useSession } = vi.hoisted(() => ({
-  activateMutate: vi.fn(), saveMutate: vi.fn(), useActivatePaidSales: vi.fn(), useConnectStatus: vi.fn(), useOwnedEvent: vi.fn(), useOwnedTicketTiers: vi.fn(), useSaveTicketTiers: vi.fn(), useSession: vi.fn(),
+const { activateMutate, saveMutate, saveRevisionMutate, useActivatePaidSales, useConnectStatus, useOwnedEvent, useOwnedTicketTiers, useSaveEventRevision, useSaveTicketTiers, useSession } = vi.hoisted(() => ({
+  activateMutate: vi.fn(), saveMutate: vi.fn(), saveRevisionMutate: vi.fn(), useActivatePaidSales: vi.fn(), useConnectStatus: vi.fn(), useOwnedEvent: vi.fn(), useOwnedTicketTiers: vi.fn(), useSaveEventRevision: vi.fn(), useSaveTicketTiers: vi.fn(), useSession: vi.fn(),
 }))
 vi.mock('../auth/SessionProvider', () => ({ useSession }))
-vi.mock('../events/event.queries', () => ({ useOwnedEvent }))
+vi.mock('../events/event.queries', () => ({ useOwnedEvent, useSaveEventRevision }))
 vi.mock('../payments/payment.queries', () => ({ useConnectStatus }))
 vi.mock('./ticket.queries', () => ({ useActivatePaidSales, useOwnedTicketTiers, useSaveTicketTiers }))
 import { OrganizerTicketTiersPage } from './OrganizerTicketTiersPage'
@@ -23,6 +23,7 @@ function renderPage() {
     { path: '/organizer/events/:eventId/tickets', element: <OrganizerTicketTiersPage /> },
     { path: '/organizer/settings/payments', element: <p>payments destination</p> },
     { path: '/organizer/events/:eventId', element: <p>published destination</p> },
+    { path: '/organizer/events/:eventId/edit', element: <p>event requirements destination</p> },
     { path: '/away', element: <p>away destination</p> },
   ], { initialEntries: ['/organizer/events/event-1/tickets'] })
   return { router, ...render(<RouterProvider router={router} />) }
@@ -35,6 +36,7 @@ describe('OrganizerTicketTiersPage', () => {
     useOwnedEvent.mockReturnValue({ data: event, isPending: false, isError: false, refetch: vi.fn() })
     useOwnedTicketTiers.mockReturnValue({ data: [tier], isPending: false, isError: false, refetch: vi.fn() })
     useSaveTicketTiers.mockReturnValue({ mutateAsync: saveMutate, isPending: false })
+    useSaveEventRevision.mockReturnValue({ mutateAsync: saveRevisionMutate, isPending: false })
     useActivatePaidSales.mockReturnValue({ mutateAsync: activateMutate, isPending: false })
     useConnectStatus.mockReturnValue({ data: { status: 'ready', requirements_currently_due_count: 0, requirements_past_due_count: 0, last_status_code: null, last_synced_at: '2026-08-25T12:00:00.000Z' }, isPending: false })
   })
@@ -74,18 +76,21 @@ describe('OrganizerTicketTiersPage', () => {
   it('guides incomplete Connect setup to payments and never renders a fee editor', () => {
     useConnectStatus.mockReturnValue({ data: { status: 'action_required', requirements_currently_due_count: 1, requirements_past_due_count: 0, last_status_code: 'requirements_due', last_synced_at: '2026-08-25T12:00:00.000Z' }, isPending: false })
     renderPage()
+    expect(useConnectStatus).toHaveBeenCalledWith('organizer-1')
     expect(screen.getByRole('link', { name: 'Finish payment setup' })).toHaveAttribute('href', '/organizer/settings/payments')
-    expect(screen.getByRole('button', { name: 'Activate paid sales' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Save and continue to event requirements' })).toBeDisabled()
     expect(screen.queryByText(/platform fee|fee percentage|payout/i)).not.toBeInTheDocument()
   })
 
-  it('activates an owned draft event and keeps the setup route owner-aware', async () => {
+  it('routes an owned paid draft through requirements and publish without direct activation', async () => {
     const user = userEvent.setup()
-    activateMutate.mockResolvedValue({ ...event, status: 'published', published_at: '2026-08-25T14:00:00.000Z' })
+    saveMutate.mockResolvedValue([tier])
     const { router } = renderPage()
-    await user.click(screen.getByRole('button', { name: 'Activate paid sales' }))
-    await waitFor(() => expect(activateMutate).toHaveBeenCalledWith('event-1'))
-    expect(router.state.location.pathname).toBe('/organizer/events/event-1')
+    await user.click(screen.getByRole('button', { name: 'Save and continue to event requirements' }))
+    await waitFor(() => expect(saveMutate).toHaveBeenCalledOnce())
+    expect(activateMutate).not.toHaveBeenCalled()
+    expect(router.state.location.pathname).toBe('/organizer/events/event-1/edit')
+    expect(router.state.location.search).toBe('?step=requirements')
     expect(useOwnedTicketTiers).toHaveBeenCalledWith('organizer-1', 'event-1')
   })
 
@@ -127,22 +132,120 @@ describe('OrganizerTicketTiersPage', () => {
     expect(saveMutate.mock.calls[0]?.[0]?.[1]).not.toHaveProperty('id')
   })
 
-  it('navigates only after the returned published-free conversion row retains its ID and first publication time', async () => {
+  it('routes a published free-to-paid conversion through tier save, owned revision, and event requirements', async () => {
     const user = userEvent.setup()
-    const publishedAt = '2026-08-25T08:00:00.000Z'
-    const publishedFree = { ...event, status: 'published', admission_type: 'free', published_at: publishedAt } as const
-    const converted = { ...publishedFree, admission_type: 'paid', published_at: publishedAt }
-    let resolveActivation!: (value: typeof converted) => void
+    const publishedFree = {
+      ...event,
+      status: 'published',
+      moderation_status: 'clear',
+      moderated_revision: 1,
+      admission_type: 'free',
+      published_at: '2026-08-25T08:00:00.000Z',
+    } as EventRow
+    const converted = { ...publishedFree, admission_type: 'paid', content_revision: 2 }
     useOwnedEvent.mockReturnValue({ data: publishedFree, isPending: false, isError: false, refetch: vi.fn() })
-    activateMutate.mockReturnValue(new Promise<typeof converted>((resolve) => { resolveActivation = resolve }))
+    saveMutate.mockResolvedValue([tier])
+    saveRevisionMutate.mockResolvedValue(converted)
     const { router } = renderPage()
-    expect(screen.getByRole('heading', { name: 'Ticket tiers' })).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Activate paid sales' }))
+
+    expect(useConnectStatus).toHaveBeenCalledWith('organizer-1')
+    await user.click(screen.getByRole('button', { name: 'Save and continue to event requirements' }))
+
+    expect(saveMutate).toHaveBeenCalledOnce()
+    expect(saveRevisionMutate).toHaveBeenCalledWith(expect.objectContaining({
+      eventId: event.id,
+      organizerId: event.organizer_id,
+      values: expect.objectContaining({ admissionType: 'paid' }),
+    }))
+    expect(saveMutate.mock.invocationCallOrder[0]).toBeLessThan(saveRevisionMutate.mock.invocationCallOrder[0]!)
+    expect(activateMutate).not.toHaveBeenCalled()
+    await waitFor(() => expect(router.state.location.pathname).toBe('/organizer/events/event-1/edit'))
+    expect(router.state.location.search).toBe('?step=requirements')
+  })
+
+  it('routes a paid public-tier text edit back through current agreement and publish without reactivating sales', async () => {
+    const user = userEvent.setup()
+    const publishedPaid = {
+      ...event,
+      status: 'published',
+      moderation_status: 'clear',
+      moderated_revision: 1,
+      admission_type: 'paid',
+      published_at: '2026-08-25T08:00:00.000Z',
+    } as EventRow
+    const activeTier = { ...tier, status: 'active' }
+    useOwnedEvent.mockReturnValue({ data: publishedPaid, isPending: false, isError: false, refetch: vi.fn() })
+    useOwnedTicketTiers.mockReturnValue({ data: [activeTier], isPending: false, isError: false, refetch: vi.fn() })
+    saveMutate.mockResolvedValue([{ ...activeTier, name: 'Evening admission' }])
+    const { router } = renderPage()
+
+    await user.clear(screen.getByLabelText('Name'))
+    await user.type(screen.getByLabelText('Name'), 'Evening admission')
+    await user.click(screen.getByRole('button', { name: 'Save and continue to event requirements' }))
+
+    expect(saveMutate).toHaveBeenCalledWith([expect.objectContaining({ name: 'Evening admission' })])
+    expect(saveRevisionMutate).not.toHaveBeenCalled()
+    expect(activateMutate).not.toHaveBeenCalled()
+    await waitFor(() => expect(router.state.location.pathname).toBe('/organizer/events/event-1/edit'))
+    expect(router.state.location.search).toBe('?step=requirements')
+  })
+
+  it('reauthorizes already-active paid tiers without querying or requiring Connect readiness', async () => {
+    const user = userEvent.setup()
+    const publishedPaid = {
+      ...event,
+      status: 'published',
+      moderation_status: 'clear',
+      moderated_revision: 1,
+      admission_type: 'paid',
+      published_at: '2026-08-25T08:00:00.000Z',
+    } as EventRow
+    const activeTier = { ...tier, status: 'active' }
+    useOwnedEvent.mockReturnValue({ data: publishedPaid, isPending: false, isError: false, refetch: vi.fn() })
+    useOwnedTicketTiers.mockReturnValue({ data: [activeTier], isPending: false, isError: false, refetch: vi.fn() })
+    useConnectStatus.mockReturnValue({ data: { status: 'action_required' }, isPending: false })
+    saveMutate.mockResolvedValue([{ ...activeTier, name: 'Current admission' }])
+    const { router } = renderPage()
+
+    await user.clear(screen.getByLabelText('Name'))
+    await user.type(screen.getByLabelText('Name'), 'Current admission')
+    const continueButton = screen.getByRole('button', { name: 'Save and continue to event requirements' })
+    expect(continueButton).toBeEnabled()
+    expect(useConnectStatus).toHaveBeenCalledWith('')
+    expect(screen.queryByRole('link', { name: 'Finish payment setup' })).not.toBeInTheDocument()
+    await user.click(continueButton)
+
+    await waitFor(() => expect(router.state.location.pathname).toBe('/organizer/events/event-1/edit'))
+  })
+
+  it.each([
+    ['past start', new Date(Date.now() - 15 * 60 * 1_000).toISOString()],
+    ['missing start', null],
+    ['malformed start', 'not-a-date'],
+  ] as const)('blocks every tier-persistence path for a published free event with a %s', async (_case, startsAt) => {
+    const user = userEvent.setup()
+    const activeFree = {
+      ...event,
+      status: 'published',
+      admission_type: 'free',
+      starts_at: startsAt,
+      ends_at: new Date(Date.now() + 60 * 60 * 1_000).toISOString(),
+      published_at: '2026-08-25T08:00:00.000Z',
+    } as EventRow
+    useOwnedEvent.mockReturnValue({ data: activeFree, isPending: false, isError: false, refetch: vi.fn() })
+
+    const { router } = renderPage()
+
+    expect(screen.getByText(/Paid conversion must be completed before the event starts/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Save ticket tiers' }))
+    expect(await screen.findByText('Paid conversion must be completed before the event starts.', { selector: '[role="alert"] *' })).toBeInTheDocument()
+    expect(saveMutate).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Save and continue to event requirements' }))
+    expect(await screen.findByText('Paid conversion must be completed before the event starts.', { selector: '[role="alert"] *' })).toBeInTheDocument()
+    expect(useConnectStatus).toHaveBeenCalledWith('')
+    expect(saveMutate).not.toHaveBeenCalled()
+    expect(saveRevisionMutate).not.toHaveBeenCalled()
     expect(router.state.location.pathname).toBe('/organizer/events/event-1/tickets')
-    await act(async () => { resolveActivation(converted) })
-    await waitFor(() => expect(activateMutate).toHaveBeenCalledWith(converted.id))
-    expect(router.state.location.pathname).toBe('/organizer/events/event-1')
-    expect(converted).toMatchObject({ id: publishedFree.id, published_at: publishedAt })
   })
 
   it('normalizes an owned-tier RPC EVENT_NOT_FOUND response to the safe missing state', () => {
@@ -197,26 +300,26 @@ describe('OrganizerTicketTiersPage', () => {
     expect(await screen.findByText('away destination')).toBeInTheDocument()
   })
 
-  it('does not navigate when a deferred activation resolves after organizer identity changes', async () => {
+  it('does not navigate when a deferred continue save resolves after organizer identity changes', async () => {
     const user = userEvent.setup()
-    let resolveActivation!: (value: typeof event) => void
-    activateMutate.mockReturnValue(new Promise<typeof event>((resolve) => { resolveActivation = resolve }))
+    let resolveSave!: (value: (typeof tier)[]) => void
+    saveMutate.mockReturnValue(new Promise<(typeof tier)[]>((resolve) => { resolveSave = resolve }))
     const { router } = renderPage()
-    await user.click(screen.getByRole('button', { name: 'Activate paid sales' }))
+    await user.click(screen.getByRole('button', { name: 'Save and continue to event requirements' }))
     useSession.mockReturnValue({ status: 'authenticated', user: { id: 'organizer-2' } })
     await act(async () => { await router.navigate('/organizer/events/event-1/tickets?organizer=organizer-2') })
-    await act(async () => { resolveActivation({ ...event, status: 'published', published_at: '2026-08-25T14:00:00.000Z' }) })
+    await act(async () => { resolveSave([tier]) })
     expect(router.state.location.pathname).toBe('/organizer/events/event-1/tickets')
   })
 
-  it('does not navigate when a deferred activation resolves after unmount', async () => {
+  it('does not navigate when a deferred continue save resolves after unmount', async () => {
     const user = userEvent.setup()
-    let resolveActivation!: (value: typeof event) => void
-    activateMutate.mockReturnValue(new Promise<typeof event>((resolve) => { resolveActivation = resolve }))
+    let resolveSave!: (value: (typeof tier)[]) => void
+    saveMutate.mockReturnValue(new Promise<(typeof tier)[]>((resolve) => { resolveSave = resolve }))
     const { router, unmount } = renderPage()
-    await user.click(screen.getByRole('button', { name: 'Activate paid sales' }))
+    await user.click(screen.getByRole('button', { name: 'Save and continue to event requirements' }))
     unmount()
-    await act(async () => { resolveActivation({ ...event, status: 'published', published_at: '2026-08-25T14:00:00.000Z' }) })
+    await act(async () => { resolveSave([tier]) })
     expect(router.state.location.pathname).toBe('/organizer/events/event-1/tickets')
   })
 })

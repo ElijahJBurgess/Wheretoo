@@ -45,8 +45,14 @@ function isCanonicalProductionUrl(value: string): boolean {
   if (value !== value.trim() || !/^https:\/\/[A-Za-z0-9.-]+(?:\/[A-Za-z0-9._~:/-]*)?$/.test(value)) return false
   try {
     const parsed = new URL(value)
+    const labels = parsed.hostname.split('.')
+    const labelsAreCanonical = parsed.hostname.length <= 253
+      && labels.length >= 2
+      && labels.every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))
+      && /[a-z]/.test(labels.at(-1) ?? '')
     return parsed.protocol === 'https:'
       && parsed.hostname.length > 0
+      && labelsAreCanonical
       && parsed.username === ''
       && parsed.password === ''
       && parsed.port === ''

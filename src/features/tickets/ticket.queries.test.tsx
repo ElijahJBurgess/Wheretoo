@@ -61,7 +61,7 @@ describe('ticket query contracts', () => {
     expect(client.getQueryData(ticketKeys.owned('organizer-2', 'event-1'))).toBeUndefined()
   })
 
-  it('invalidates only this event public projection after tiers are saved', async () => {
+  it('refreshes this owned event revision and public projection after tiers are saved', async () => {
     const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     saveTicketTiers.mockResolvedValue([{ id: 'tier-1', event_id: 'event-1' }])
@@ -71,7 +71,10 @@ describe('ticket query contracts', () => {
       await result.current.mutateAsync([{ name: 'General', description: null, unitAmountMinor: 2_500, currency: 'usd', quantityTotal: 80, sortOrder: 1 }])
     })
 
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: eventKeys.detail('organizer-1', 'event-1'), exact: true })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: eventKeys.ownedList('organizer-1'), exact: true })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ticketKeys.public('event-1'), exact: true })
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: eventKeys.detail('organizer-2', 'event-1'), exact: true })
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ticketKeys.public('event-2'), exact: true })
   })
 })

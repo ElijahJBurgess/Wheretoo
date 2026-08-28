@@ -35,11 +35,16 @@ test.describe('Build 2.5 moderation and public eligibility', () => {
     await expect(page.getByText('This event is publicly available.', { exact: true })).toBeVisible()
     expect(await anonymousPublicEvent(event.eventId)).toMatchObject({ id: event.eventId, title: event.title })
 
-    await page.goto(`/organizer/events/${event.eventId}/edit`)
+    await page.getByRole('link', { name: 'Edit event' }).click()
+    await expect(page).toHaveURL(new RegExp(`/organizer/events/${event.eventId}/edit$`))
     await page.getByLabel('Description').fill(
       'A materially revised Task 16 event that must receive a new server-bound agreement.',
     )
-    await advanceExistingEditorToAgreement(page)
+    const activeAt = Date.now()
+    await advanceExistingEditorToAgreement(page, {
+      startsAt: new Date(activeAt - 15 * 60 * 1_000),
+      endsAt: new Date(activeAt + 60 * 60 * 1_000),
+    })
     await expect(page.getByRole('checkbox', { name: /I confirm that this event information/ })).not.toBeChecked()
     await expect(page.getByText('Agreement required for these changes.')).toBeVisible()
     await acceptAgreementAndPreview(page, event)
@@ -73,7 +78,8 @@ test.describe('Build 2.5 moderation and public eligibility', () => {
 
     await page.reload()
     await expect(page.getByRole('heading', { name: 'Blocked', level: 1 })).toBeVisible()
-    await page.goto(`/organizer/events/${event.eventId}/edit`)
+    await page.getByRole('link', { name: 'Edit event' }).click()
+    await expect(page).toHaveURL(new RegExp(`/organizer/events/${event.eventId}/edit$`))
     await page.getByLabel('Description').fill(
       'A blocked Task 16 event whose owner edit must not weaken human enforcement.',
     )

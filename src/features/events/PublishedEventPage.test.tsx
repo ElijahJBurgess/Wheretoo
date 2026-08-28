@@ -69,6 +69,18 @@ describe('PublishedEventPage', () => {
     expect(screen.queryByText(/map|checkout/i)).not.toBeInTheDocument()
   })
 
+  it('exposes the owner edit route from the published status surface', async () => {
+    const user = userEvent.setup()
+    const { router } = renderPage()
+
+    const edit = screen.getByRole('link', { name: 'Edit event' })
+    expect(edit).toHaveAttribute('href', '/organizer/events/event-1/edit')
+    await user.click(edit)
+
+    expect(await screen.findByText('edit destination')).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe('/organizer/events/event-1/edit')
+  })
+
   it('shows an under-review event as held without inferring public eligibility', () => {
     usePublicEvent.mockReturnValue({ data: null, isPending: false, isError: false, refetch: publicEventRefetch })
     renderPage({ ...event, moderation_status: 'under_review' })

@@ -44,6 +44,10 @@ select has_function(
   'private', 'production_policy_configuration_is_ready', array[]::text[],
   'production readiness has one operational boolean boundary'
 );
+select has_function(
+  'private', 'is_canonical_production_policy_url', array['text'],
+  'production policy URL validation has one database-owned canonical boundary'
+);
 
 select function_privs_are(
   'public', 'get_required_event_policies', array[]::text[],
@@ -104,6 +108,11 @@ select function_privs_are(
   'private', 'production_policy_configuration_is_ready', array[]::text[],
   'service_role', array['EXECUTE'],
   'the service boundary can evaluate production readiness'
+);
+select function_privs_are(
+  'private', 'is_canonical_production_policy_url', array['text'],
+  'service_role', array[]::text[],
+  'the service role cannot bypass the policy write boundaries with the URL helper'
 );
 
 select results_eq(
@@ -900,6 +909,76 @@ select throws_ok(
   '23514',
   null,
   'a production-approved version requires a canonical HTTPS URL'
+);
+
+select throws_ok(
+  $$
+    insert into private.organizer_policy_versions (
+      id, policy_kind, stage, public_url, content_sha256, effective_at
+    )
+    values (
+      'prod-dot-host-v1', 'organizer_terms', 'production_approved',
+      'https://./', repeat('e', 64), '2026-08-27 00:00:00+00'
+    )
+  $$,
+  '23514', null,
+  'a production policy rejects a dot-only host'
+);
+
+select throws_ok(
+  $$
+    insert into private.organizer_policy_versions (
+      id, policy_kind, stage, public_url, content_sha256, effective_at
+    )
+    values (
+      'prod-empty-label-v1', 'organizer_terms', 'production_approved',
+      'https://bad..example/legal', repeat('e', 64), '2026-08-27 00:00:00+00'
+    )
+  $$,
+  '23514', null,
+  'a production policy rejects an empty DNS label'
+);
+
+select throws_ok(
+  $$
+    insert into private.organizer_policy_versions (
+      id, policy_kind, stage, public_url, content_sha256, effective_at
+    )
+    values (
+      'prod-leading-hyphen-v1', 'organizer_terms', 'production_approved',
+      'https://-bad.example/legal', repeat('e', 64), '2026-08-27 00:00:00+00'
+    )
+  $$,
+  '23514', null,
+  'a production policy rejects a DNS label with a leading hyphen'
+);
+
+select throws_ok(
+  $$
+    insert into private.organizer_policy_versions (
+      id, policy_kind, stage, public_url, content_sha256, effective_at
+    )
+    values (
+      'prod-trailing-hyphen-v1', 'organizer_terms', 'production_approved',
+      'https://bad-.example/legal', repeat('e', 64), '2026-08-27 00:00:00+00'
+    )
+  $$,
+  '23514', null,
+  'a production policy rejects a DNS label with a trailing hyphen'
+);
+
+select throws_ok(
+  $$
+    insert into private.organizer_policy_versions (
+      id, policy_kind, stage, public_url, content_sha256, effective_at
+    )
+    values (
+      'prod-ip-host-v1', 'organizer_terms', 'production_approved',
+      'https://127.0.0.1/legal', repeat('e', 64), '2026-08-27 00:00:00+00'
+    )
+  $$,
+  '23514', null,
+  'a production policy requires a DNS hostname rather than an IP literal'
 );
 
 select throws_ok(

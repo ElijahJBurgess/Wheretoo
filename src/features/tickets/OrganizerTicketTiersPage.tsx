@@ -6,11 +6,13 @@ import { Field } from '../../components/ui/Field'
 import { FormErrorSummary } from '../../components/ui/FormErrorSummary'
 import { useSession } from '../auth/SessionProvider'
 import { UnsavedChangesDialog } from '../events/UnsavedChangesDialog'
-import { useOwnedEvent } from '../events/event.queries'
+import { eventRowToFormValues } from '../events/event.api'
+import { useOwnedEvent, useSaveEventRevision } from '../events/event.queries'
+import type { EventRow } from '../events/event.types'
 import { useConnectStatus } from '../payments/payment.queries'
 import { getPaidSalesErrorMessage } from './paidSalesErrors'
 import { usdToMinor } from './ticket.api'
-import { useActivatePaidSales, useOwnedTicketTiers, useSaveTicketTiers } from './ticket.queries'
+import { useOwnedTicketTiers, useSaveTicketTiers } from './ticket.queries'
 import { ticketTiersInputSchema } from './ticket.schemas'
 import type { TicketTierInput, TicketTierRow } from './ticket.types'
 
@@ -113,23 +115,54 @@ function connectReady(status: ReturnType<typeof useConnectStatus>['data']): bool
   return status?.status === 'ready'
 }
 
+function publishedFreeConversionIsClosed(event: EventRow | null | undefined, now: number): boolean {
+  if (event?.status !== 'published' || event.admission_type !== 'free') return false
+  if (event.starts_at === null) return true
+  const startsAt = Date.parse(event.starts_at)
+  return !Number.isFinite(startsAt) || startsAt <= now
+}
+
+function publicTierTextChanged(tiers: EditableTier[], persisted: TicketTierRow[]): boolean {
+  const editableText = tiers
+    .map((tier) => ({ id: tier.id ?? null, name: tier.name.trim(), description: tier.description.trim(), sortOrder: tier.sortOrder }))
+    .sort((left, right) => left.sortOrder - right.sortOrder)
+  const persistedText = persisted
+    .filter((tier) => tier.status !== 'archived')
+    .map((tier) => ({ id: tier.id, name: tier.name, description: tier.description?.trim() ?? '', sortOrder: tier.sort_order }))
+    .sort((left, right) => left.sortOrder - right.sortOrder)
+  return JSON.stringify(editableText) !== JSON.stringify(persistedText)
+}
+
 export function OrganizerTicketTiersPage() {
   const { eventId = '' } = useParams()
   const navigate = useNavigate()
+  const [pageOpenedAt] = useState(Date.now)
   const sessionState = useSession()
   const organizerId = sessionState.status === 'authenticated' ? sessionState.user.id : ''
   const eventQuery = useOwnedEvent(eventId, organizerId)
   const ownedEventId = eventQuery.data?.organizer_id === organizerId ? eventQuery.data.id : ''
   const tiersQuery = useOwnedTicketTiers(organizerId, ownedEventId)
-  const connectQuery = useConnectStatus(organizerId)
+  const retainedTiers = tiersQuery.data?.filter((tier) => tier.status !== 'archived')
+  const paidSalesAlreadyActive = eventQuery.data?.status === 'published'
+    && eventQuery.data.admission_type === 'paid'
+    && retainedTiers !== undefined
+    && retainedTiers.length >= 1
+    && retainedTiers.length <= 3
+    && retainedTiers.every((tier) => tier.status === 'active')
+  const freeConversionAlreadyStarted = publishedFreeConversionIsClosed(eventQuery.data, pageOpenedAt)
+  const connectRequired = ownedEventId.length > 0
+    && tiersQuery.data !== undefined
+    && !paidSalesAlreadyActive
+    && !freeConversionAlreadyStarted
+  const connectQuery = useConnectStatus(connectRequired ? organizerId : '')
   const saveMutation = useSaveTicketTiers(organizerId, eventId)
-  const activateMutation = useActivatePaidSales(organizerId)
+  const saveRevisionMutation = useSaveEventRevision()
   const [draft, setDraft] = useState<TierDraft>({ sourceKey: '', tiers: [], dirty: false })
   const [formError, setFormError] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [serverError, setServerError] = useState<string | null>(null)
-  const [activationIdentity, setActivationIdentity] = useState<ActionIdentity | null>(null)
-  const [leaveApproved, setLeaveApproved] = useState(false)
+  const [continueIdentity, setContinueIdentity] = useState<ActionIdentity | null>(null)
+  const leaveApprovedRef = useRef(false)
   const mountedRef = useRef(false)
   const currentIdentityRef = useRef<ActionIdentity>({ eventId, organizerId, version: 0 })
 
@@ -155,22 +188,23 @@ export function OrganizerTicketTiersPage() {
   const loadedTiers = useMemo(() => tiersQuery.data?.map(rowToEditableTier) ?? [], [tiersQuery.data])
   const tiers = !draft.dirty && draft.sourceKey !== sourceKey ? loadedTiers : draft.tiers
   const dirty = draft.dirty
-  const isActivating = activationIdentity?.eventId === eventId && activationIdentity.organizerId === organizerId
+  const isContinuing = continueIdentity?.eventId === eventId && continueIdentity.organizerId === organizerId
 
   function isCurrentIdentity(identity: ActionIdentity): boolean {
     return mountedRef.current && currentIdentityRef.current === identity
   }
 
-  const shouldBlock = useCallback(() => dirty && !leaveApproved, [dirty, leaveApproved])
+  const shouldBlock = useCallback(() => dirty && !leaveApprovedRef.current, [dirty])
   const blocker = useBlocker(shouldBlock)
   useBeforeUnload(useCallback((browserEvent) => {
-    if (dirty && !leaveApproved) {
+    if (dirty && !leaveApprovedRef.current) {
       browserEvent.preventDefault()
       browserEvent.returnValue = ''
     }
-  }, [dirty, leaveApproved]))
+  }, [dirty]))
 
   function updateTier(index: number, patch: Partial<EditableTier>) {
+    leaveApprovedRef.current = false
     setDraft({ sourceKey, tiers: tiers.map((tier, tierIndex) => tierIndex === index ? { ...tier, ...patch } : tier), dirty: true })
     setFormError(null)
     setFieldErrors({})
@@ -178,12 +212,14 @@ export function OrganizerTicketTiersPage() {
   }
 
   function addTier() {
+    leaveApprovedRef.current = false
     const slot = nextAvailableSlot(tiers)
     if (slot === null) return
     setDraft({ sourceKey, tiers: [...tiers, newTier(slot)], dirty: true })
   }
 
   function removeTier(index: number) {
+    leaveApprovedRef.current = false
     if (tiers.length <= 1) return
     setDraft({ sourceKey, tiers: tiers.filter((_, tierIndex) => tierIndex !== index), dirty: true })
   }
@@ -192,6 +228,10 @@ export function OrganizerTicketTiersPage() {
     setFormError(null)
     setFieldErrors({})
     setServerError(null)
+    if (publishedFreeConversionIsClosed(eventQuery.data, Date.now())) {
+      setServerError('Paid conversion must be completed before the event starts.')
+      return false
+    }
     let payload: TicketTierInput[]
     try {
       payload = toPayload(tiers)
@@ -219,26 +259,36 @@ export function OrganizerTicketTiersPage() {
     }
   }
 
-  async function activateSales() {
+  async function continueToRequirements() {
     const identity = currentIdentityRef.current
-    if (isActivating || !connectReady(connectQuery.data)) return
+    if (isContinuing || (connectRequired && !connectReady(connectQuery.data))) return
     setServerError(null)
     setFormError(null)
-    setActivationIdentity(identity)
+    if (publishedFreeConversionIsClosed(eventQuery.data, Date.now())) {
+      setServerError('Paid conversion must be completed before the event starts.')
+      return
+    }
+    setContinueIdentity(identity)
     try {
-      if (dirty && !(await saveTiers(identity))) return
+      if (!(await saveTiers(identity))) return
       if (!isCurrentIdentity(identity)) return
-      const activated = await activateMutation.mutateAsync(eventId)
-      if (!isCurrentIdentity(identity)) return
-      if (activated.id !== eventId || activated.organizer_id !== organizerId || activated.status !== 'published') {
-        throw new Error('Unexpected activation response')
+      if (eventQuery.data?.status === 'published' && eventQuery.data.admission_type === 'free') {
+        const converted = await saveRevisionMutation.mutateAsync({
+          eventId,
+          organizerId,
+          values: { ...eventRowToFormValues(eventQuery.data), admissionType: 'paid' },
+        })
+        if (!isCurrentIdentity(identity)) return
+        if (converted.id !== eventId || converted.organizer_id !== organizerId || converted.admission_type !== 'paid') {
+          throw new Error('Unexpected revision response')
+        }
       }
-      setLeaveApproved(true)
-      void navigate(`/organizer/events/${eventId}`)
+      leaveApprovedRef.current = true
+      void navigate(`/organizer/events/${eventId}/edit?step=requirements`)
     } catch (error) {
       if (isCurrentIdentity(identity)) setServerError(getPaidSalesErrorMessage(error))
     } finally {
-      if (isCurrentIdentity(identity)) setActivationIdentity(null)
+      if (isCurrentIdentity(identity)) setContinueIdentity(null)
     }
   }
 
@@ -265,9 +315,15 @@ export function OrganizerTicketTiersPage() {
     return <AsyncState action={<Button onClick={() => void tiersQuery.refetch()}>Try again</Button>} description="Check your connection, then try again." status="error" title="Ticket setup could not load" />
   }
 
-  const pending = saveMutation.isPending || isActivating || activateMutation.isPending
+  const eventNeedsPublicationFlow = event.status === 'draft'
+    || event.admission_type === 'free'
+    || (event.status === 'published' && event.admission_type === 'paid' && (
+      publicTierTextChanged(tiers, tiersQuery.data ?? [])
+      || event.moderated_revision !== event.content_revision
+    ))
+  const pending = saveMutation.isPending || isContinuing || saveRevisionMutation.isPending
   const errors = [formError, serverError].filter((message): message is string => message !== null)
-  const ready = connectReady(connectQuery.data)
+  const connectSatisfied = !connectRequired || connectReady(connectQuery.data)
 
   return (
     <section aria-labelledby="ticket-tiers-title" className="ticket-tiers-page">
@@ -300,14 +356,20 @@ export function OrganizerTicketTiersPage() {
           </div>
         </form>
         <aside className="ticket-activation-panel" aria-labelledby="ticket-activation-title">
-          <p className="organizer-eyebrow">Ready to sell</p>
-          <h2 id="ticket-activation-title">Activate paid sales</h2>
-          {ready ? <p>Ticket sales will be available as soon as this eligible event is activated.</p> : <p>Finish secure payment setup before guests can buy tickets.</p>}
-          {!ready ? <Link className="ui-button ui-button--secondary" to="/organizer/settings/payments">Finish payment setup</Link> : null}
-          <Button disabled={pending || !ready || tiers.length < 1} onClick={() => void activateSales()}>{isActivating ? 'Activating paid sales…' : 'Activate paid sales'}</Button>
+          <p className="organizer-eyebrow">Publication check</p>
+          <h2 id="ticket-activation-title">Review event requirements</h2>
+          {connectSatisfied
+            ? <p>{event.status === 'published' && event.admission_type === 'free' ? 'Paid conversion must be completed before the event starts. Save these tiers, then confirm the current agreement and publish.' : eventNeedsPublicationFlow ? 'Save these tiers, confirm the current agreement, and publish this version.' : 'Paid sales remain active. Save price or capacity changes from the tier form.'}</p>
+            : <p>Finish secure payment setup before continuing to event requirements.</p>}
+          {connectRequired && !connectSatisfied ? <Link className="ui-button ui-button--secondary" to="/organizer/settings/payments">Finish payment setup</Link> : null}
+          {eventNeedsPublicationFlow ? (
+            <Button disabled={pending || !connectSatisfied || tiers.length < 1} onClick={() => void continueToRequirements()}>
+              {isContinuing ? 'Saving and continuing…' : 'Save and continue to event requirements'}
+            </Button>
+          ) : null}
         </aside>
       </div>
-      {blocker.state === 'blocked' ? <UnsavedChangesDialog onLeave={() => { setLeaveApproved(true); blocker.proceed() }} onStay={() => blocker.reset()} /> : null}
+      {blocker.state === 'blocked' ? <UnsavedChangesDialog onLeave={() => { leaveApprovedRef.current = true; blocker.proceed() }} onStay={() => blocker.reset()} /> : null}
     </section>
   )
 }

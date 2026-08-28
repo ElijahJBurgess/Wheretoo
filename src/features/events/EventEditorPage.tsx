@@ -76,7 +76,8 @@ export function EventEditorPage() {
   const saveRevisionMutation = useSaveEventRevision()
   const saveRequirementsMutation = useSaveEventRequirements(organizerId, eventId)
   const acceptPoliciesMutation = useAcceptCurrentEventPolicies(organizerId, eventId)
-  const [activeStep, setActiveStep] = useState<ActiveStep>(1)
+  const initialStep = !isNew && new URLSearchParams(routeLocation.search).get('step') === 'requirements' ? 4 : 1
+  const [activeStep, setActiveStep] = useState<ActiveStep>(initialStep)
   const [serverError, setServerError] = useState<string | null>(null)
   const [agreementError, setAgreementError] = useState<string | null>(null)
   const hydratedEventIdRef = useRef<string | null>(null)

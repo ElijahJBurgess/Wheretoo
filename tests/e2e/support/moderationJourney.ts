@@ -37,13 +37,17 @@ export function observeModerationBrowserFailures(page: Page) {
   let conflictExpected = false
   let conflictResponses = 0
   let genericBadRequestConsoleErrors = 0
+  let genericUnauthorizedConsoleErrors = 0
   let staffRoleDenials = 0
   const unexpectedBadRequestPaths: string[] = []
+  const unexpectedUnauthorizedPaths: string[] = []
   page.on('console', (message) => {
     if (message.type() === 'error') {
       const text = message.text().replace(/https?:\/\/[^\s"'<>]+/g, '<redacted-url>')
       if (text === 'Failed to load resource: the server responded with a status of 400 ()') {
         genericBadRequestConsoleErrors += 1
+      } else if (text === 'Failed to load resource: the server responded with a status of 401 ()') {
+        genericUnauthorizedConsoleErrors += 1
       } else {
         failures.push(`console: ${text}`)
       }
@@ -61,6 +65,9 @@ export function observeModerationBrowserFailures(page: Page) {
         unexpectedBadRequestPaths.push(url.pathname)
       }
     }
+    if (response.status() === 401) {
+      unexpectedUnauthorizedPaths.push(new URL(response.url()).pathname)
+    }
     if (
       conflictExpected
       && response.status() === 400
@@ -77,8 +84,12 @@ export function observeModerationBrowserFailures(page: Page) {
   })
   const assertNoFailures = () => {
     expect(genericBadRequestConsoleErrors).toBe(staffRoleDenials + conflictResponses)
+    expect(genericUnauthorizedConsoleErrors).toBe(unexpectedUnauthorizedPaths.length)
     if (unexpectedBadRequestPaths.length > 0) {
       failures.push(`response: unexpected HTTP 400 from ${[...new Set(unexpectedBadRequestPaths)].join(', ')}`)
+    }
+    if (unexpectedUnauthorizedPaths.length > 0) {
+      failures.push(`response: unexpected HTTP 401 from ${[...new Set(unexpectedUnauthorizedPaths)].join(', ')}`)
     }
     if (conflictExpected) {
       expect(conflictResponses).toBe(1)
@@ -98,6 +109,8 @@ export async function newObservedPage(context: BrowserContext) {
 }
 
 export async function signInThroughUi(page: Page, email: string, password: string) {
+  const readinessClient = await authenticatedClient(email, password)
+  await readinessClient.auth.signOut({ scope: 'local' })
   await page.goto('/auth/sign-in')
   await page.getByLabel('Email').fill(email)
   await page.getByLabel('Password').fill(password)
@@ -196,9 +209,16 @@ export async function continueRequirementsToAgreement(page: Page) {
   await expect(page.getByText('Agreement required for these changes.')).toBeVisible()
 }
 
-export async function advanceExistingEditorToAgreement(page: Page) {
+export async function advanceExistingEditorToAgreement(
+  page: Page,
+  schedule?: { startsAt: Date; endsAt: Date },
+) {
   await page.getByRole('button', { name: 'Continue to date & location' }).click()
   await expect(page.locator('[aria-current="step"]')).toHaveText('Date/location')
+  if (schedule) {
+    await page.getByLabel('Starts').fill(losAngelesWallMinute(schedule.startsAt))
+    await page.getByLabel('Ends').fill(losAngelesWallMinute(schedule.endsAt))
+  }
   await page.getByRole('button', { name: 'Continue to tickets & admission' }).click()
   await page.getByRole('button', { name: 'Continue to event requirements' }).click()
   await expect(page.getByRole('heading', { name: 'Event details and requirements', level: 2 })).toBeVisible()
@@ -317,7 +337,10 @@ export async function publicMapFixtureRows() {
     p_starts_at: startsAt,
     p_ends_at: endsAt,
   })
-  if (error) throw new Error('Anonymous map-safe projection failed.')
+  if (error) {
+    const safeCode = /^[A-Z0-9_]+$/.test(error.code) ? error.code : 'UNKNOWN'
+    throw new Error(`Anonymous map-safe projection failed (${safeCode}).`)
+  }
   return data
 }
 

@@ -230,6 +230,7 @@ export function PublishedEventPage() {
       ) : null}
       <footer className="published-event__actions">
         {canSetUpPaidTickets ? <Link className="ui-button ui-button--primary" to={`/organizer/events/${event.id}/tickets`}>Set up paid tickets</Link> : null}
+        <Link className="ui-button ui-button--secondary" to={`/organizer/events/${event.id}/edit`}>Edit event</Link>
         <Link className="ui-button ui-button--secondary" to="/organizer/events">Back to events</Link>
       </footer>
     </section>

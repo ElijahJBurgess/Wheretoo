@@ -82,21 +82,25 @@ projection. Paid projection data retains precedence; free events render a public
 shell without ticket tiers or checkout; absence from both projections renders not
 found.
 
-The visual inventory includes organizer requirements/agreement/preview, free public
-event/report dialog, both policy placeholders, staff queue/case/conflict/feedback,
-and 320 reflow. Each captured route checks one visible `main` and `h1`, no horizontal
-overflow, 44px non-link controls, reduced motion, approved fonts/canvas, and keyboard
-focus indication on desktop. Touch emulation verifies focus ownership without
-requiring desktop-only `:focus-visible` matching. The repository has no compatible
-Axe dependency, so the run uses semantic landmark/dialog/status/alert, keyboard,
-focus, target-size, contrast, and geometry smoke without installing one.
+The visual inventory includes organizer requirements/agreement/preview/published
+status, free public event/report dialog, both policy placeholders, staff
+queue/case/conflict/feedback, and 320 reflow. Each captured route checks one visible
+`main` and `h1`, no horizontal overflow, 44px non-link controls, reduced motion,
+approved fonts/canvas, and keyboard focus indication on desktop. Touch emulation
+verifies focus ownership without requiring desktop-only `:focus-visible` matching.
+The repository has no compatible Axe dependency, so the run uses semantic
+landmark/dialog/status/alert, keyboard, focus, target-size, contrast, and geometry
+smoke without installing one.
 
 The exact non-staff response from `get_my_staff_role` is an intentional authorization
 diagnostic. Browser evidence allows only status 400 on that exact RPC path, correlates
 every generic 400 console line to one observed denial, and asserts that ordinary
 organizers do not receive the Moderation navigation link. Every other console error,
-failed request, or unapproved 400 remains fatal. The single staff conflict test also
-allows exactly one 400 on `moderate_event` and proves the visible conflict recovery.
+failed request, unapproved 400, or 401 remains fatal and is correlated to its exact
+request path. The disposable sign-in helper primes the committed JWT-acceptance
+probe before UI sign-in so a newly created account cannot race its first protected
+RPC. The single staff conflict test also allows exactly one 400 on `moderate_event`
+and proves the visible conflict recovery.
 
 Screenshots and reports live only under ignored `test-results/`. Traces, video, and
 automatic screenshots are disabled. Do not commit screenshot output. Staff identity
@@ -151,7 +155,7 @@ must remain blocked until all nine items are true:
 
 1. Production Organizer Terms exist.
 2. A production Event Policy exists.
-3. Each document has a stable canonical HTTPS URL.
+3. Each document has a stable canonical HTTPS URL whose host uses valid DNS labels.
 4. Each document has an approved immutable version identifier.
 5. Each document has an effective date.
 6. Each document has an exact content digest.
@@ -171,15 +175,19 @@ it must then prove either placeholder makes readiness false again.
 - Static browser inventory: 14 intended tests discovered; empty configuration listed
   exactly the 22 required names.
 - Linked browser proof: 14/14 passed; exact cleanup verification passed.
-- Build 2.5 unit allowlist: 23 files, 223 tests passed.
+- Build 2.5 unit allowlist: 27 files, 303 tests passed.
 - Moderation Edge Function allowlist: 16 tests passed.
-- UI-first publication pgTAP: RED at 1 failed of 75 before the forward migration,
-  then 75/75 passed after it. Independent review added the human/system-hold
-  provenance regression, which was RED at 3 failed of 81 before the follow-up
-  forward migration and then passed 81/81.
+- UI-first publication pgTAP: RED at 1 failed of 75 before the first forward
+  migration, then 75/75 passed. Independent review added the human/system-hold
+  provenance regression, which was RED at 3 failed of 81 before its follow-up
+  migration and then passed 81/81. The final lifecycle round passed 87/87 through
+  migration head `20260826011350`, including active-event republication and paid
+  tier preservation/activation boundaries.
+- Production-policy URL proof passed 82/82, including canonical HTTPS and malformed
+  DNS-host rejection. The owned daily retention scheduler proof passed 6/6.
 - Public eligibility, published-edit, all three moderation concurrency, and live
   public projection proofs passed.
-- Canonical database/integration proof passed all 23 closed children through the
+- Canonical database/integration proof passed all 24 closed children through the
   documented linked-query fallback after the approved Task 15 `publish_event`
   compatibility expectations were updated for the low-risk clear path. Its exact
   pgTAP/fixture residue, ACL, lint, migration-history, and no-op dry-run checks
@@ -189,11 +197,18 @@ it must then prove either placeholder makes readiness false again.
   Auth identity, and the real run again reported exact cleanup success.
 - The linked policy environment remained `development`, and production readiness
   remained false after verification.
-- Final independent re-review: zero Critical and zero Important findings.
 - Bundled visual sweep: zero errors and zero horizontal overflow at `320x844`,
   `390x844`, and `1440x900`; only intentional centered whitespace/static-placeholder
-  warnings remained. All 25 unique journey screenshots and six sweep screenshots
+  warnings remained. All 27 unique journey screenshots and six sweep screenshots
   were opened and inspected.
+- Final canonical browser proof passed 14/14 in 2.3 minutes with the JWT readiness
+  probe, every secondary-page observer, navigation-based published edit journey,
+  active edit/reaccept/republish journey, and exact zero-residue cleanup.
+- The active owned retention job and its service-role-only target were verified;
+  the monitored rotation/failure runbook names `REPORT_FINGERPRINT_SECRET` without
+  reading or recording its value.
+- Final independent full-diff re-review: zero Critical, zero Important, and zero
+  Minor findings after the table-driven all-persistence lifecycle regression passed.
 - Exact fixture cleanup passed after every completed, failed, and interrupted browser
   run. No screenshot/report fixture residue is tracked.
 

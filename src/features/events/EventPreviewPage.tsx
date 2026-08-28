@@ -7,9 +7,10 @@ import { FormErrorSummary } from '../../components/ui/FormErrorSummary'
 import { useSession } from '../auth/SessionProvider'
 import { moderationKeys, useOwnedEventRequirements } from '../moderation/moderation.queries'
 import { useOrganizer } from '../organizers/organizer.queries'
+import { useOwnedTicketTiers } from '../tickets/ticket.queries'
 import { eventRowToFormValues } from './event.api'
 import { useOwnedEvent, usePublishEvent } from './event.queries'
-import { eventPublishSchema } from './event.schemas'
+import { eventPublishSchema, eventRepublishSchema } from './event.schemas'
 import { EventSummary } from './EventSummary'
 import { getPublishErrorMessage } from './publishErrors'
 
@@ -20,6 +21,10 @@ export function EventPreviewPage() {
   const authenticatedOrganizerId = sessionState.status === 'authenticated' ? sessionState.user.id : ''
   const eventQuery = useOwnedEvent(eventId, authenticatedOrganizerId)
   const requirementsQuery = useOwnedEventRequirements(authenticatedOrganizerId, eventId)
+  const paidDraftEventId = eventQuery.data?.status === 'draft' && eventQuery.data.admission_type === 'paid'
+    ? eventId
+    : ''
+  const paidDraftTiersQuery = useOwnedTicketTiers(authenticatedOrganizerId, paidDraftEventId)
   const queryClient = useQueryClient()
   const persistedOrganizerId = eventQuery.data?.organizer_id ?? ''
   const organizerQuery = useOrganizer(persistedOrganizerId)
@@ -60,6 +65,21 @@ export function EventPreviewPage() {
 
   if (event.status === 'cancelled') {
     return <Navigate replace to={`/organizer/events/${event.id}`} />
+  }
+
+  const isPaidDraft = event.status === 'draft' && event.admission_type === 'paid'
+  if (isPaidDraft && (paidDraftTiersQuery.isPending || paidDraftTiersQuery.data === undefined) && !paidDraftTiersQuery.isError) {
+    return <AsyncState status="loading" title="Loading ticket setup" />
+  }
+  if (isPaidDraft && paidDraftTiersQuery.isError) {
+    return (
+      <AsyncState
+        action={<Button onClick={() => void paidDraftTiersQuery.refetch()}>Try again</Button>}
+        description="Check your connection, then try again."
+        status="error"
+        title="Ticket setup could not load"
+      />
+    )
   }
 
   if ((organizerQuery.isPending || organizerQuery.data === undefined) && !organizerQuery.isError) {
@@ -114,8 +134,9 @@ export function EventPreviewPage() {
     )
   }
 
-  const needsPaidSetup = event.admission_type === 'paid' && event.status === 'draft'
-  const publishResult = needsPaidSetup ? null : eventPublishSchema.safeParse(eventRowToFormValues(event))
+  const needsPaidSetup = isPaidDraft && (paidDraftTiersQuery.data?.length ?? 0) === 0
+  const publicationSchema = event.status === 'published' ? eventRepublishSchema : eventPublishSchema
+  const publishResult = needsPaidSetup ? null : publicationSchema.safeParse(eventRowToFormValues(event))
   const persistedEventId = event.id
   const validationMessages = publishResult === null || publishResult.success
     ? []
@@ -183,7 +204,7 @@ export function EventPreviewPage() {
       <footer className="event-preview__publish">
         {needsPaidSetup ? (
           <div id="publish-guidance">
-            <p>Finish ticket setup and activate paid sales from the ticket tiers page.</p>
+            <p>Finish ticket setup, then confirm the current agreement and publish this version.</p>
             <Link className="ui-button ui-button--primary" to={`/organizer/events/${event.id}/tickets`}>Set up paid tickets</Link>
           </div>
         ) : (

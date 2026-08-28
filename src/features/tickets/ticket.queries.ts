@@ -27,7 +27,11 @@ export function useSaveTicketTiers(organizerId: string, eventId: string) {
         throw new Error('Ticket tiers returned for a different event')
       }
       queryClient.setQueryData(ticketKeys.owned(organizerId, eventId), tiers)
-      await queryClient.invalidateQueries({ queryKey: ticketKeys.public(eventId), exact: true })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: eventKeys.ownedList(organizerId), exact: true }),
+        queryClient.invalidateQueries({ queryKey: eventKeys.detail(organizerId, eventId), exact: true }),
+        queryClient.invalidateQueries({ queryKey: ticketKeys.public(eventId), exact: true }),
+      ])
     },
   })
 }

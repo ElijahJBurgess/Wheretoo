@@ -149,10 +149,10 @@ describe('eventPublishSchema', () => {
     expect(publish({ location: { ...validLocation, ...locationPatch } }).success).toBe(false)
   })
 
-  it('rejects paid publishing while retaining paid as a draft value', () => {
+  it('accepts complete future paid publication data while retaining paid as a draft value', () => {
     vi.useFakeTimers()
     expect(eventDraftSchema.safeParse({ ...validValues, admissionType: 'paid' }).success).toBe(true)
-    expect(publish({ admissionType: 'paid' }).success).toBe(false)
+    expect(publish({ admissionType: 'paid' }).success).toBe(true)
   })
 })
 

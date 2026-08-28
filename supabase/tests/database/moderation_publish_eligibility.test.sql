@@ -405,6 +405,18 @@ values
     'America/Los_Angeles', '1 Market Street', 'San Francisco', 'CA', '94105', 'US',
     'mapbox.moderation-mismatched-pair', 37.7936, -122.3958, 'free', null,
     'never_public', null, null
+  ),
+  (
+    '74100000-0000-4000-8000-000000000034',
+    '74000000-0000-4000-8000-000000000001',
+    'draft', 'not_evaluated', null,
+    'Expired draft schedule fixture',
+    'A never-published draft cannot use the active-event re-publication allowance.',
+    'community', 'Past Draft Hall',
+    now() - interval '1 hour', now() + interval '1 hour',
+    'America/Los_Angeles', '1 Market Street', 'San Francisco', 'CA', '94105', 'US',
+    'mapbox.moderation-past-draft', 37.7936, -122.3958, 'free', null,
+    'never_public', null, null
   );
 
 insert into public.ticket_tiers (
@@ -458,7 +470,8 @@ values
   ('74100000-0000-4000-8000-000000000026', 'all_ages', false, false, false, false, false, false),
   ('74100000-0000-4000-8000-000000000028', 'all_ages', false, false, false, false, false, false),
   ('74100000-0000-4000-8000-000000000030', 'all_ages', false, false, false, false, false, false),
-  ('74100000-0000-4000-8000-000000000031', 'all_ages', false, false, false, false, false, false);
+  ('74100000-0000-4000-8000-000000000031', 'all_ages', false, false, false, false, false, false),
+  ('74100000-0000-4000-8000-000000000034', 'all_ages', false, false, false, false, false, false);
 
 select results_eq(
   $$
@@ -1628,6 +1641,99 @@ select results_eq(
     )
   $$,
   'production eligibility is bound to one exact production acceptance and authorization action'
+);
+
+select set_config(
+  'request.jwt.claim.sub',
+  '74000000-0000-4000-8000-000000000001',
+  true
+);
+set local role authenticated;
+select lives_ok(
+  $$
+    select public.save_owned_event_revision(
+      '74100000-0000-4000-8000-000000000030',
+      (
+        select jsonb_build_object(
+          'title', 'Active production pair fixture',
+          'description', events.description,
+          'category', events.category,
+          'starts_at', statement_timestamp() - interval '1 hour',
+          'ends_at', statement_timestamp() + interval '1 hour',
+          'timezone', events.timezone,
+          'venue_name', events.venue_name,
+          'address_line1', events.address_line1,
+          'address_line2', events.address_line2,
+          'city', events.city,
+          'region', events.region,
+          'postal_code', events.postal_code,
+          'country_code', events.country_code,
+          'mapbox_feature_id', events.mapbox_feature_id,
+          'latitude', events.latitude,
+          'longitude', events.longitude,
+          'admission_type', events.admission_type,
+          'capacity', events.capacity
+        )
+        from public.events as events
+        where events.id = '74100000-0000-4000-8000-000000000030'
+      )
+    )
+  $$,
+  'an already-published event can save a material edit while it is happening'
+);
+select lives_ok(
+  $$
+    select *
+    from public.accept_current_event_policies(
+      '74100000-0000-4000-8000-000000000030'
+    )
+  $$,
+  'the active event accepts the exact current pair for its edited revision'
+);
+select lives_ok(
+  $$ select public.publish_event('74100000-0000-4000-8000-000000000030') $$,
+  'the accepted active-event revision re-publishes through the canonical boundary'
+);
+select throws_ok(
+  $$ select public.publish_event('74100000-0000-4000-8000-000000000034') $$,
+  'P0001', 'EVENT_TIME_INVALID',
+  'the active-event allowance never permits an expired never-published draft'
+);
+reset role;
+
+select results_eq(
+  $$
+    select
+      events.status,
+      events.moderation_status,
+      events.content_revision,
+      events.moderated_revision,
+      events.publicly_authorized_revision,
+      events.starts_at <= statement_timestamp(),
+      events.ends_at > statement_timestamp(),
+      projection.event_payload ->> 'title'
+    from public.events as events
+    cross join lateral public.get_public_event(events.id)
+      as projection(event_payload)
+    where events.id = '74100000-0000-4000-8000-000000000030'
+  $$,
+  $$
+    values (
+      'published'::text, 'clear'::text, 2::bigint, 2::bigint, 2::bigint,
+      true, true, 'Active production pair fixture'::text
+    )
+  $$,
+  'active edit, current acceptance, re-publish, and anonymous public projection stay revision-bound'
+);
+
+select results_eq(
+  $$
+    select status, moderation_status, public_history_status
+    from public.events
+    where id = '74100000-0000-4000-8000-000000000034'
+  $$,
+  $$ values ('draft'::text, 'not_evaluated'::text, 'never_public'::text) $$,
+  'rejected expired draft publication leaves lifecycle and eligibility untouched'
 );
 
 create temporary table policy_pair_advance_before on commit drop as
