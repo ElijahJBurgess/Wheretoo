@@ -1391,6 +1391,29 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      save_ticket_tiers_without_active_free_guard: {
+        Args: { p_event_id: string; p_tiers: Json }
+        Returns: {
+          created_at: string
+          currency: string
+          description: string | null
+          event_id: string
+          id: string
+          name: string
+          quantity_total: number
+          sort_order: number
+          status: string
+          unit_amount_minor: number
+          updated_at: string
+          version: number
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "ticket_tiers"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       save_ticket_tiers_without_revision: {
         Args: { p_event_id: string; p_tiers: Json }
         Returns: {

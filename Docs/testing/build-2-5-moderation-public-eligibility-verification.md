@@ -215,9 +215,12 @@ it must then prove either placeholder makes readiness false again.
 - The active owned retention job and its service-role-only target were verified;
   the monitored rotation/failure runbook names `REPORT_FINGERPRINT_SECRET` without
   reading or recording its value.
-- The prior final-fix independent review was clean before the authoritative
-  persistence and dot-path corrections; the current final verdict is recorded only
-  after fresh scoped and original global re-review.
+- Fresh scoped re-review of the authoritative persistence and dot-path corrections
+  returned C0/I0/M0. The original global re-review then returned C0/I0/M1 solely
+  because generated public database types predated the renamed revoked internal
+  tier routine. Those types were regenerated mechanically from the aligned linked
+  schema through `20260826011475`; a final original-review verdict is recorded only
+  after re-reviewing that correction.
 - Exact fixture cleanup passed after every completed, failed, and interrupted browser
   run. No screenshot/report fixture residue is tracked.
 
