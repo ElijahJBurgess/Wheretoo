@@ -2,7 +2,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(61);
+select plan(73);
 
 select has_function(
   'public',
@@ -58,10 +58,20 @@ select results_eq(
         'service_role',
         'public.save_owned_organizer_profile_without_value_validation(jsonb)',
         'EXECUTE'
+      ),
+      pg_catalog.has_function_privilege(
+        'authenticated',
+        'public.save_ticket_tiers_without_active_free_guard(uuid,jsonb)',
+        'EXECUTE'
+      ),
+      pg_catalog.has_function_privilege(
+        'service_role',
+        'public.save_ticket_tiers_without_active_free_guard(uuid,jsonb)',
+        'EXECUTE'
       )
   $$,
-  $$ values (false, false, false, false) $$,
-  'renamed coercing implementations have no browser or service execution path'
+  $$ values (false, false, false, false, false, false) $$,
+  'renamed coercing and tier implementations have no browser or service execution path'
 );
 
 select results_eq(
@@ -77,6 +87,54 @@ select results_eq(
   $$,
   $$ values (3::bigint) $$,
   'all organizer mutation boundaries have empty search paths'
+);
+
+select results_eq(
+  $$
+    select
+      pg_catalog.has_function_privilege('anon', 'public.save_ticket_tiers(uuid,jsonb)', 'EXECUTE'),
+      pg_catalog.has_function_privilege('authenticated', 'public.save_ticket_tiers(uuid,jsonb)', 'EXECUTE'),
+      pg_catalog.has_function_privilege('service_role', 'public.save_ticket_tiers(uuid,jsonb)', 'EXECUTE'),
+      pg_catalog.has_function_privilege('anon', 'public.save_owned_event_revision(uuid,jsonb)', 'EXECUTE'),
+      pg_catalog.has_function_privilege('authenticated', 'public.save_owned_event_revision(uuid,jsonb)', 'EXECUTE'),
+      pg_catalog.has_function_privilege('service_role', 'public.save_owned_event_revision(uuid,jsonb)', 'EXECUTE')
+  $$,
+  $$ values (false, true, false, false, true, false) $$,
+  'active-free guards retain the exact authenticated-only owner mutation ACLs'
+);
+
+select results_eq(
+  $$
+    select count(*)::bigint
+    from pg_catalog.pg_proc
+    where oid in (
+      'public.save_ticket_tiers(uuid,jsonb)'::regprocedure,
+      'public.save_owned_event_revision(uuid,jsonb)'::regprocedure
+    )
+      and prosecdef
+      and proconfig = array['search_path=""']::text[]
+  $$,
+  $$ values (2::bigint) $$,
+  'both active-free owner mutation guards remain security definers with empty search paths'
+);
+
+select results_eq(
+  $$
+    select
+      pg_catalog.strpos(
+        pg_catalog.pg_get_functiondef(
+          'public.save_ticket_tiers(uuid,jsonb)'::regprocedure
+        ),
+        'and events.organizer_id = auth.uid()'
+      ) < pg_catalog.strpos(
+        pg_catalog.pg_get_functiondef(
+          'public.save_ticket_tiers(uuid,jsonb)'::regprocedure
+        ),
+        'perform public.lock_event_ticketing_operation(p_event_id)'
+      )
+  $$,
+  $$ values (true) $$,
+  'the tier boundary rejects non-owners before acquiring event or tier locks'
 );
 
 insert into auth.users (id, email)
@@ -809,6 +867,177 @@ select results_eq(
   'canonical schedule validation keeps an active event clear while its end is future'
 );
 
+select set_config('request.jwt.claim.sub', '16000000-0000-0000-0000-000000000002', true);
+set local role authenticated;
+select lives_ok(
+  $$ select public.accept_current_event_policies('26000000-0000-0000-0000-000000000009') $$,
+  'the active nonpayment revision accepts the exact current policy pair'
+);
+select lives_ok(
+  $$ select public.publish_event('26000000-0000-0000-0000-000000000009') $$,
+  'the accepted active nonpayment revision returns to public eligibility'
+);
+reset role;
+
+select results_eq(
+  $$
+    select
+      events.publicly_authorized_revision = events.content_revision,
+      events.publicly_authorized_action_id is not null,
+      private.event_has_current_public_eligibility(events.id)
+    from public.events as events
+    where events.id = '26000000-0000-0000-0000-000000000009'
+  $$,
+  $$ values (true, true, true) $$,
+  'the active-free guard fixture has non-vacuous current authorization and eligibility'
+);
+
+create temporary table active_free_persistence_before on commit drop as
+select
+  pg_catalog.to_jsonb(events) as event_state,
+  coalesce((
+    select pg_catalog.jsonb_agg(pg_catalog.to_jsonb(tiers) order by tiers.id)
+    from public.ticket_tiers as tiers
+    where tiers.event_id = events.id
+  ), '[]'::jsonb) as tier_state,
+  coalesce((
+    select pg_catalog.jsonb_agg(pg_catalog.to_jsonb(actions) order by actions.id)
+    from private.event_moderation_actions as actions
+    where actions.event_id = events.id
+  ), '[]'::jsonb) as action_state,
+  coalesce((
+    select pg_catalog.jsonb_agg(pg_catalog.to_jsonb(evaluations) order by evaluations.id)
+    from private.event_moderation_evaluations as evaluations
+    where evaluations.event_id = events.id
+  ), '[]'::jsonb) as evaluation_state,
+  coalesce((
+    select pg_catalog.jsonb_agg(
+      pg_catalog.to_jsonb(intervals)
+      order by intervals.public_eligibility_version
+    )
+    from private.event_public_eligibility_intervals as intervals
+    where intervals.event_id = events.id
+  ), '[]'::jsonb) as eligibility_state
+from public.events as events
+where events.id = '26000000-0000-0000-0000-000000000009';
+
+select set_config('request.jwt.claim.sub', '16000000-0000-0000-0000-000000000002', true);
+set local role authenticated;
+select throws_ok(
+  $$
+    select * from public.save_ticket_tiers(
+      '26000000-0000-0000-0000-000000000009',
+      '[{"name":"Late paid admission","description":"Must never persist","unit_amount_minor":2500,"currency":"usd","quantity_total":30,"sort_order":1}]'::jsonb
+    )
+  $$,
+  'P0001', 'EVENT_TIME_INVALID',
+  'a started published-free event cannot gain ticket tiers'
+);
+select throws_ok(
+  $$
+    select public.save_owned_event_revision(
+      '26000000-0000-0000-0000-000000000009',
+      (
+        select pg_catalog.jsonb_build_object(
+          'title', events.title, 'description', events.description,
+          'category', events.category, 'starts_at', events.starts_at,
+          'ends_at', events.ends_at, 'timezone', events.timezone,
+          'venue_name', events.venue_name, 'address_line1', events.address_line1,
+          'address_line2', events.address_line2, 'city', events.city,
+          'region', events.region, 'postal_code', events.postal_code,
+          'country_code', events.country_code, 'mapbox_feature_id', events.mapbox_feature_id,
+          'latitude', events.latitude, 'longitude', events.longitude,
+          'admission_type', 'paid', 'capacity', events.capacity
+        )
+        from public.events as events
+        where events.id = '26000000-0000-0000-0000-000000000009'
+      )
+    )
+  $$,
+  'P0001', 'EVENT_TIME_INVALID',
+  'a started published-free event cannot change admission to paid'
+);
+reset role;
+
+select results_eq(
+  $$
+    select
+      pg_catalog.to_jsonb(events) = before.event_state,
+      coalesce((
+        select pg_catalog.jsonb_agg(pg_catalog.to_jsonb(tiers) order by tiers.id)
+        from public.ticket_tiers as tiers where tiers.event_id = events.id
+      ), '[]'::jsonb) = before.tier_state,
+      coalesce((
+        select pg_catalog.jsonb_agg(pg_catalog.to_jsonb(actions) order by actions.id)
+        from private.event_moderation_actions as actions where actions.event_id = events.id
+      ), '[]'::jsonb) = before.action_state,
+      coalesce((
+        select pg_catalog.jsonb_agg(pg_catalog.to_jsonb(evaluations) order by evaluations.id)
+        from private.event_moderation_evaluations as evaluations where evaluations.event_id = events.id
+      ), '[]'::jsonb) = before.evaluation_state,
+      coalesce((
+        select pg_catalog.jsonb_agg(
+          pg_catalog.to_jsonb(intervals)
+          order by intervals.public_eligibility_version
+        )
+        from private.event_public_eligibility_intervals as intervals where intervals.event_id = events.id
+      ), '[]'::jsonb) = before.eligibility_state
+    from public.events as events
+    cross join active_free_persistence_before as before
+    where events.id = '26000000-0000-0000-0000-000000000009'
+  $$,
+  $$ values (true, true, true, true, true) $$,
+  'rejected active-free payment mutations preserve the exact event, tier, authorization, moderation, and eligibility state'
+);
+
+select set_config('request.jwt.claim.sub', '16000000-0000-0000-0000-000000000002', true);
+set local role authenticated;
+select lives_ok(
+  $$
+    select * from public.save_ticket_tiers(
+      '26000000-0000-0000-0000-000000000006',
+      '[{"name":"Future admission","description":"Future conversion tier","unit_amount_minor":2500,"currency":"usd","quantity_total":40,"sort_order":1}]'::jsonb
+    )
+  $$,
+  'a future published-free event may prepare paid tiers'
+);
+select lives_ok(
+  $$
+    select public.save_owned_event_revision(
+      '26000000-0000-0000-0000-000000000006',
+      (
+        select pg_catalog.jsonb_build_object(
+          'title', events.title, 'description', events.description,
+          'category', events.category, 'starts_at', events.starts_at,
+          'ends_at', events.ends_at, 'timezone', events.timezone,
+          'venue_name', events.venue_name, 'address_line1', events.address_line1,
+          'address_line2', events.address_line2, 'city', events.city,
+          'region', events.region, 'postal_code', events.postal_code,
+          'country_code', events.country_code, 'mapbox_feature_id', events.mapbox_feature_id,
+          'latitude', events.latitude, 'longitude', events.longitude,
+          'admission_type', 'paid', 'capacity', events.capacity
+        )
+        from public.events as events
+        where events.id = '26000000-0000-0000-0000-000000000006'
+      )
+    )
+  $$,
+  'a future published-free event may enter the existing paid reauthorization path'
+);
+reset role;
+
+select results_eq(
+  $$
+    select events.admission_type, events.content_revision, count(tiers.id)::bigint
+    from public.events as events
+    join public.ticket_tiers as tiers on tiers.event_id = events.id and tiers.status <> 'archived'
+    where events.id = '26000000-0000-0000-0000-000000000006'
+    group by events.id
+  $$,
+  $$ values ('paid'::text, 3::bigint, 1::bigint) $$,
+  'the future free-to-paid path persists one tier and serializes its tier and admission revisions'
+);
+
 select set_config('request.jwt.claim.sub', '16000000-0000-0000-0000-000000000001', true);
 set local role authenticated;
 
@@ -914,7 +1143,7 @@ select results_eq(
 );
 select results_eq(
   $$ select content_revision from public.events where id = '26000000-0000-0000-0000-000000000006' $$,
-  $$ values (1::bigint) $$,
+  $$ values (3::bigint) $$,
   'a display-name change leaves another organizer events untouched'
 );
 

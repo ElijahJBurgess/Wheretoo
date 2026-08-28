@@ -159,7 +159,7 @@ case "$*" in
     printf '%s\\n' '[{"id":"abcdefghijklmnopqrst","linked":true,"status":"ACTIVE_HEALTHY"}]'
     ;;
   "migration list --linked")
-    printf '%s\\n' '{"migrations":[{"local":"20260826011350","remote":"20260826011350"}]}'
+    printf '%s\\n' '{"migrations":[{"local":"20260826011475","remote":"20260826011475"}]}'
     ;;
   *"test db --linked"*)
     printf '%s\\n' 'LegacyDockerRunError: Docker Desktop is a prerequisite for local development.' >&2

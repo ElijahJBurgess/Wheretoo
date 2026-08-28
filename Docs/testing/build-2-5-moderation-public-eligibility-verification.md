@@ -181,10 +181,18 @@ it must then prove either placeholder makes readiness false again.
   migration, then 75/75 passed. Independent review added the human/system-hold
   provenance regression, which was RED at 3 failed of 81 before its follow-up
   migration and then passed 81/81. The final lifecycle round passed 87/87 through
-  migration head `20260826011350`, including active-event republication and paid
+  migration head `20260826011475`, including active-event republication and paid
   tier preservation/activation boundaries.
-- Production-policy URL proof passed 82/82, including canonical HTTPS and malformed
-  DNS-host rejection. The owned daily retention scheduler proof passed 6/6.
+- Production-policy URL proof passed 87/87, including canonical HTTPS, malformed
+  DNS-host rejection, plain/encoded dot-path rejection, and the helper's exact
+  private ACL/search-path contract. The owned daily
+  retention scheduler proof passed 6/6.
+- Published-edit proof passed 73/73. Both locked owner persistence boundaries reject
+  payment conversion for a started published-free event before mutation and prove
+  exact event/tier/authorization/moderation/eligibility state preservation, while
+  future conversion, active-free nonpayment edits, and already-paid edits remain.
+  The tier boundary also rejects non-owners before acquiring advisory or tier locks,
+  then rechecks ownership after acquiring the established locks.
 - Public eligibility, published-edit, all three moderation concurrency, and live
   public projection proofs passed.
 - Canonical database/integration proof passed all 24 closed children through the
@@ -201,14 +209,15 @@ it must then prove either placeholder makes readiness false again.
   `390x844`, and `1440x900`; only intentional centered whitespace/static-placeholder
   warnings remained. All 27 unique journey screenshots and six sweep screenshots
   were opened and inspected.
-- Final canonical browser proof passed 14/14 in 2.3 minutes with the JWT readiness
+- Final canonical browser proof passed 14/14 in 2.2 minutes with the JWT readiness
   probe, every secondary-page observer, navigation-based published edit journey,
   active edit/reaccept/republish journey, and exact zero-residue cleanup.
 - The active owned retention job and its service-role-only target were verified;
   the monitored rotation/failure runbook names `REPORT_FINGERPRINT_SECRET` without
   reading or recording its value.
-- Final independent full-diff re-review: zero Critical, zero Important, and zero
-  Minor findings after the table-driven all-persistence lifecycle regression passed.
+- The prior final-fix independent review was clean before the authoritative
+  persistence and dot-path corrections; the current final verdict is recorded only
+  after fresh scoped and original global re-review.
 - Exact fixture cleanup passed after every completed, failed, and interrupted browser
   run. No screenshot/report fixture residue is tracked.
 

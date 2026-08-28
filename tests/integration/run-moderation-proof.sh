@@ -141,8 +141,8 @@ const payload = JSON.parse(fs.readFileSync(process.env.MIGRATIONS_FILE, 'utf8'))
 const migrations = payload.migrations
 if (!Array.isArray(migrations) || migrations.length === 0 ||
     migrations.some((migration) => !migration.local || migration.local !== migration.remote) ||
-    migrations.at(-1)?.remote !== '20260826011350') {
-  console.error('Local and linked migration histories must be fully aligned through 20260826011350.')
+    migrations.at(-1)?.remote !== '20260826011475') {
+  console.error('Local and linked migration histories must be fully aligned through 20260826011475.')
   process.exit(1)
 }
 NODE

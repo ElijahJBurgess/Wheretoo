@@ -117,6 +117,21 @@ select function_privs_are(
 
 select results_eq(
   $$
+    select
+      pg_catalog.has_function_privilege('anon', 'private.is_canonical_production_policy_url(text)', 'EXECUTE'),
+      pg_catalog.has_function_privilege('authenticated', 'private.is_canonical_production_policy_url(text)', 'EXECUTE'),
+      pg_catalog.has_function_privilege('service_role', 'private.is_canonical_production_policy_url(text)', 'EXECUTE'),
+      procedures.prosecdef,
+      procedures.proconfig = array['search_path=""']::text[]
+    from pg_catalog.pg_proc as procedures
+    where procedures.oid = 'private.is_canonical_production_policy_url(text)'::regprocedure
+  $$,
+  $$ values (false, false, false, true, true) $$,
+  'the canonical URL helper retains its exact denied ACL and empty-path security-definer boundary'
+);
+
+select results_eq(
+  $$
     select count(*)::bigint
     from information_schema.role_table_grants
     where table_schema = 'private'
@@ -979,6 +994,62 @@ select throws_ok(
   $$,
   '23514', null,
   'a production policy requires a DNS hostname rather than an IP literal'
+);
+
+select throws_ok(
+  $$
+    insert into private.organizer_policy_versions (
+      id, policy_kind, stage, public_url, content_sha256, effective_at
+    )
+    values (
+      'prod-dot-path-v1', 'organizer_terms', 'production_approved',
+      'https://whereto.example/legal/./terms', repeat('e', 64), '2026-08-27 00:00:00+00'
+    )
+  $$,
+  '23514', null,
+  'a production policy rejects a current-directory path segment'
+);
+
+select throws_ok(
+  $$
+    insert into private.organizer_policy_versions (
+      id, policy_kind, stage, public_url, content_sha256, effective_at
+    )
+    values (
+      'prod-parent-path-v1', 'organizer_terms', 'production_approved',
+      'https://whereto.example/legal/../terms', repeat('e', 64), '2026-08-27 00:00:00+00'
+    )
+  $$,
+  '23514', null,
+  'a production policy rejects a parent-directory path segment'
+);
+
+select throws_ok(
+  $$
+    insert into private.organizer_policy_versions (
+      id, policy_kind, stage, public_url, content_sha256, effective_at
+    )
+    values (
+      'prod-encoded-dot-path-v1', 'organizer_terms', 'production_approved',
+      'https://whereto.example/legal/%2e/terms', repeat('e', 64), '2026-08-27 00:00:00+00'
+    )
+  $$,
+  '23514', null,
+  'a production policy rejects an encoded current-directory path segment'
+);
+
+select throws_ok(
+  $$
+    insert into private.organizer_policy_versions (
+      id, policy_kind, stage, public_url, content_sha256, effective_at
+    )
+    values (
+      'prod-encoded-parent-path-v1', 'organizer_terms', 'production_approved',
+      'https://whereto.example/legal/%2E%2E/terms', repeat('e', 64), '2026-08-27 00:00:00+00'
+    )
+  $$,
+  '23514', null,
+  'a production policy rejects an encoded parent-directory path segment'
 );
 
 select throws_ok(

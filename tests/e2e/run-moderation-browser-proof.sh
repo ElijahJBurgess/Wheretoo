@@ -217,8 +217,8 @@ import fs from 'node:fs'
 const payload = JSON.parse(fs.readFileSync(process.env.MIGRATIONS_FILE, 'utf8'))
 if (!Array.isArray(payload.migrations) || payload.migrations.length === 0 ||
     payload.migrations.some((row) => !row.local || row.local !== row.remote) ||
-    payload.migrations.at(-1)?.remote !== '20260826011350') {
-  console.error('Local and linked migrations must align through 20260826011350.')
+    payload.migrations.at(-1)?.remote !== '20260826011475') {
+  console.error('Local and linked migrations must align through 20260826011475.')
   process.exit(1)
 }
 NODE
