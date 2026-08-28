@@ -2,9 +2,11 @@ import { useLayoutEffect, useState, useSyncExternalStore, type ReactNode } from 
 import { useNavigate, useParams } from 'react-router-dom'
 import { AsyncState } from '../../components/ui/AsyncState'
 import { Button } from '../../components/ui/Button'
+import { ReportEventDialog } from '../moderation/ReportEventDialog'
 import { TicketTierList } from './TicketTierList'
+import { isRetryablePublicTicketingError } from './publicTicketing.errors'
 import { usePublicTicketingEvent } from './publicTicketing.queries'
-import type { PublicTicketTierTuple } from './ticket.types'
+import type { CanonicalPublicTicketingEvent, PublicTicketTierTuple } from './ticket.types'
 
 const dateFormatter = new Intl.DateTimeFormat('en-US', {
   timeZone: 'America/Los_Angeles',
@@ -159,11 +161,15 @@ function PublicTicketPurchase({ eventId, tiers }: PublicTicketPurchaseProps) {
 export function PublicTicketEventPage() {
   const { eventId = '' } = useParams()
   const eventQuery = usePublicTicketingEvent(eventId)
+  const hasRetryableStaleEvent = eventQuery.isError
+    && eventQuery.data !== undefined
+    && eventQuery.data !== null
+    && isRetryablePublicTicketingError(eventQuery.error)
 
   if ((eventQuery.isPending || eventQuery.data === undefined) && !eventQuery.isError) {
     return <PublicEventState status="loading" title="Loading event" />
   }
-  if (eventQuery.isError) {
+  if (eventQuery.isError && !hasRetryableStaleEvent) {
     return <PublicEventState action={<Button onClick={() => void eventQuery.refetch()}>Try again</Button>} description="Check your connection, then try again." status="error" title="Event could not load" />
   }
   if (eventQuery.data === null) {
@@ -171,11 +177,20 @@ export function PublicTicketEventPage() {
   }
 
   const publicEvent = eventQuery.data
-  const { event, tiers } = publicEvent
+  const { event } = publicEvent
+  const paidPublicEvent = publicEvent.event.admission_type === 'paid'
+    ? publicEvent as Extract<CanonicalPublicTicketingEvent, { event: { admission_type: 'paid' } }>
+    : null
   const dateAndTime = formatDateAndTime(event.starts_at, event.ends_at)
 
   return (
     <main className="public-event-layout">
+      {hasRetryableStaleEvent ? (
+        <div className="public-event-refresh" role="status">
+          <p>Showing the last event details we received. We could not check current availability.</p>
+          <Button onClick={() => void eventQuery.refetch()} variant="secondary">Check again</Button>
+        </div>
+      ) : null}
       <article aria-labelledby="public-event-title" className="public-event">
         <div aria-label="Whereto event artwork placeholder" className="public-event__artwork" role="img">
           <span>Whereto presents</span>
@@ -198,10 +213,19 @@ export function PublicTicketEventPage() {
             <h2 id="public-event-about">About this event</h2>
             <p>{event.description}</p>
           </section>
-          <PublicTicketPurchase
-            eventId={event.id}
-            tiers={tiers}
-          />
+          {paidPublicEvent !== null ? (
+            <PublicTicketPurchase
+              eventId={event.id}
+              tiers={paidPublicEvent.tiers}
+            />
+          ) : (
+            <section aria-labelledby="public-event-admission" className="public-event__tickets">
+              <p className="public-event__eyebrow">Admission</p>
+              <h2 id="public-event-admission">Free event</h2>
+              <p>No ticket purchase is required.</p>
+            </section>
+          )}
+          {!hasRetryableStaleEvent ? <ReportEventDialog eventId={event.id} /> : null}
         </div>
       </article>
     </main>

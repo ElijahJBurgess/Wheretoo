@@ -103,18 +103,27 @@ export type Database = {
           capacity: number | null
           category: string | null
           city: string | null
+          content_revision: number
           country_code: string
           created_at: string
           description: string | null
           ends_at: string | null
+          first_publicly_eligible_at: string | null
           id: string
           latitude: number | null
           location: unknown
           longitude: number | null
           mapbox_feature_id: string | null
+          moderated_revision: number | null
           moderation_status: string
+          moderation_updated_at: string | null
+          moderation_version: number
           organizer_id: string
           postal_code: string | null
+          public_eligibility_version: number
+          public_history_status: string
+          publicly_authorized_action_id: string | null
+          publicly_authorized_revision: number | null
           published_at: string | null
           region: string | null
           starts_at: string | null
@@ -133,18 +142,27 @@ export type Database = {
           capacity?: number | null
           category?: string | null
           city?: string | null
+          content_revision?: number
           country_code?: string
           created_at?: string
           description?: string | null
           ends_at?: string | null
+          first_publicly_eligible_at?: string | null
           id?: string
           latitude?: number | null
           location?: unknown
           longitude?: number | null
           mapbox_feature_id?: string | null
+          moderated_revision?: number | null
           moderation_status?: string
+          moderation_updated_at?: string | null
+          moderation_version?: number
           organizer_id: string
           postal_code?: string | null
+          public_eligibility_version?: number
+          public_history_status?: string
+          publicly_authorized_action_id?: string | null
+          publicly_authorized_revision?: number | null
           published_at?: string | null
           region?: string | null
           starts_at?: string | null
@@ -163,18 +181,27 @@ export type Database = {
           capacity?: number | null
           category?: string | null
           city?: string | null
+          content_revision?: number
           country_code?: string
           created_at?: string
           description?: string | null
           ends_at?: string | null
+          first_publicly_eligible_at?: string | null
           id?: string
           latitude?: number | null
           location?: unknown
           longitude?: number | null
           mapbox_feature_id?: string | null
+          moderated_revision?: number | null
           moderation_status?: string
+          moderation_updated_at?: string | null
+          moderation_version?: number
           organizer_id?: string
           postal_code?: string | null
+          public_eligibility_version?: number
+          public_history_status?: string
+          publicly_authorized_action_id?: string | null
+          publicly_authorized_revision?: number | null
           published_at?: string | null
           region?: string | null
           starts_at?: string | null
@@ -844,6 +871,27 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      accept_current_event_policies: {
+        Args: { p_event_id: string }
+        Returns: {
+          alcohol_present: boolean
+          cannabis_present: boolean
+          event_policy_label: string
+          event_policy_stage: string
+          event_policy_url: string
+          event_policy_version_id: string
+          explicit_adult_content: boolean
+          gambling_present: boolean
+          high_risk_activity: boolean
+          minimum_age: string
+          needs_acceptance: boolean
+          organizer_terms_label: string
+          organizer_terms_stage: string
+          organizer_terms_url: string
+          organizer_terms_version_id: string
+          weapons_present: boolean
+        }[]
+      }
       activate_paid_sales: {
         Args: { p_event_id: string }
         Returns: {
@@ -855,18 +903,27 @@ export type Database = {
           capacity: number | null
           category: string | null
           city: string | null
+          content_revision: number
           country_code: string
           created_at: string
           description: string | null
           ends_at: string | null
+          first_publicly_eligible_at: string | null
           id: string
           latitude: number | null
           location: unknown
           longitude: number | null
           mapbox_feature_id: string | null
+          moderated_revision: number | null
           moderation_status: string
+          moderation_updated_at: string | null
+          moderation_version: number
           organizer_id: string
           postal_code: string | null
+          public_eligibility_version: number
+          public_history_status: string
+          publicly_authorized_action_id: string | null
+          publicly_authorized_revision: number | null
           published_at: string | null
           region: string | null
           starts_at: string | null
@@ -894,18 +951,27 @@ export type Database = {
           capacity: number | null
           category: string | null
           city: string | null
+          content_revision: number
           country_code: string
           created_at: string
           description: string | null
           ends_at: string | null
+          first_publicly_eligible_at: string | null
           id: string
           latitude: number | null
           location: unknown
           longitude: number | null
           mapbox_feature_id: string | null
+          moderated_revision: number | null
           moderation_status: string
+          moderation_updated_at: string | null
+          moderation_version: number
           organizer_id: string
           postal_code: string | null
+          public_eligibility_version: number
+          public_history_status: string
+          publicly_authorized_action_id: string | null
+          publicly_authorized_revision: number | null
           published_at: string | null
           region: string | null
           starts_at: string | null
@@ -922,9 +988,131 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      get_current_event_review_request: {
+        Args: { p_event_id: string }
+        Returns: {
+          created_at: string
+          id: string
+          resolved_at: string
+          status: string
+        }[]
+      }
+      get_moderation_case: {
+        Args: { p_event_id: string }
+        Returns: {
+          actions: Json
+          address_line1: string
+          address_line2: string
+          category: string
+          city: string
+          content_revision: number
+          country_code: string
+          current_open_review_request: boolean
+          current_report_count: number
+          description: string
+          disclosures: Json
+          ends_at: string
+          evaluations: Json
+          event_id: string
+          first_publicly_eligible_at: string
+          input_sha256: string
+          latitude: number
+          legacy_resolution: Json
+          longitude: number
+          mapbox_feature_id: string
+          moderation_status: string
+          moderation_version: number
+          organizer_id: string
+          postal_code: string
+          public_history_status: string
+          region: string
+          starts_at: string
+          timezone: string
+          title: string
+          venue_name: string
+        }[]
+      }
+      get_my_staff_role: { Args: never; Returns: string }
+      get_owned_event_requirements: {
+        Args: { p_event_id: string }
+        Returns: {
+          alcohol_present: boolean
+          cannabis_present: boolean
+          event_policy_label: string
+          event_policy_stage: string
+          event_policy_url: string
+          event_policy_version_id: string
+          explicit_adult_content: boolean
+          gambling_present: boolean
+          high_risk_activity: boolean
+          minimum_age: string
+          needs_acceptance: boolean
+          organizer_terms_label: string
+          organizer_terms_stage: string
+          organizer_terms_url: string
+          organizer_terms_version_id: string
+          weapons_present: boolean
+        }[]
+      }
+      get_public_event: { Args: { p_event_id: string }; Returns: Json[] }
       get_public_event_ticketing: {
         Args: { p_event_id: string }
         Returns: Json[]
+      }
+      get_public_map_events: {
+        Args: {
+          p_categories?: string[]
+          p_east: number
+          p_ends_at: string
+          p_north: number
+          p_south: number
+          p_starts_at: string
+          p_west: number
+        }
+        Returns: {
+          admission_type: string
+          advisories: string[]
+          animation_preset: string
+          artwork_reference: string
+          category: string
+          ends_at: string
+          event_id: string
+          latitude: number
+          longitude: number
+          minimum_age: string
+          minimum_price_minor: number
+          starts_at: string
+          timezone: string
+          title: string
+          venue_label: string
+        }[]
+      }
+      get_required_event_policies: {
+        Args: never
+        Returns: {
+          effective_at: string
+          label: string
+          policy_kind: string
+          public_url: string
+          stage: string
+          version_id: string
+        }[]
+      }
+      list_moderation_queue: {
+        Args: { p_limit: number }
+        Returns: {
+          content_revision: number
+          current_open_review_request: boolean
+          current_report_count: number
+          event_id: string
+          input_sha256: string
+          moderation_status: string
+          moderation_version: number
+          oldest_queued_at: string
+          organizer_id: string
+          public_history_status: string
+          queued_evaluation_count: number
+        }[]
       }
       list_owned_ticket_tiers: {
         Args: { p_event_id: string }
@@ -953,6 +1141,18 @@ export type Database = {
         Args: { p_event_id: string }
         Returns: undefined
       }
+      moderate_event: {
+        Args: {
+          p_action: string
+          p_event_id: string
+          p_expected_content_revision: number
+          p_expected_input_sha256: string
+          p_expected_moderation_version: number
+          p_internal_note: string
+          p_reason_code: string
+        }
+        Returns: string
+      }
       publish_event: {
         Args: { p_event_id: string }
         Returns: {
@@ -964,18 +1164,27 @@ export type Database = {
           capacity: number | null
           category: string | null
           city: string | null
+          content_revision: number
           country_code: string
           created_at: string
           description: string | null
           ends_at: string | null
+          first_publicly_eligible_at: string | null
           id: string
           latitude: number | null
           location: unknown
           longitude: number | null
           mapbox_feature_id: string | null
+          moderated_revision: number | null
           moderation_status: string
+          moderation_updated_at: string | null
+          moderation_version: number
           organizer_id: string
           postal_code: string | null
+          public_eligibility_version: number
+          public_history_status: string
+          publicly_authorized_action_id: string | null
+          publicly_authorized_revision: number | null
           published_at: string | null
           region: string | null
           starts_at: string | null
@@ -992,7 +1201,220 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      request_event_review: {
+        Args: { p_event_id: string; p_organizer_note: string }
+        Returns: string
+      }
+      resolve_legacy_public_history: {
+        Args: {
+          p_event_id: string
+          p_evidence_code: string
+          p_expected_content_revision: number
+          p_expected_input_sha256: string
+          p_expected_moderation_version: number
+          p_internal_note: string
+          p_observed_public_at: string
+          p_public_history_status: string
+        }
+        Returns: string
+      }
+      save_owned_event_requirements: {
+        Args: { p_event_id: string; p_requirements: Json }
+        Returns: {
+          alcohol_present: boolean
+          cannabis_present: boolean
+          explicit_adult_content: boolean
+          gambling_present: boolean
+          high_risk_activity: boolean
+          minimum_age: string
+          weapons_present: boolean
+        }[]
+      }
+      save_owned_event_revision: {
+        Args: { p_event: Json; p_event_id: string }
+        Returns: {
+          address_line1: string | null
+          address_line2: string | null
+          admission_type: string
+          animation_preset: string
+          artwork_path: string | null
+          capacity: number | null
+          category: string | null
+          city: string | null
+          content_revision: number
+          country_code: string
+          created_at: string
+          description: string | null
+          ends_at: string | null
+          first_publicly_eligible_at: string | null
+          id: string
+          latitude: number | null
+          location: unknown
+          longitude: number | null
+          mapbox_feature_id: string | null
+          moderated_revision: number | null
+          moderation_status: string
+          moderation_updated_at: string | null
+          moderation_version: number
+          organizer_id: string
+          postal_code: string | null
+          public_eligibility_version: number
+          public_history_status: string
+          publicly_authorized_action_id: string | null
+          publicly_authorized_revision: number | null
+          published_at: string | null
+          region: string | null
+          starts_at: string | null
+          status: string
+          timezone: string
+          title: string | null
+          updated_at: string
+          venue_name: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "events"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      save_owned_event_revision_without_value_validation: {
+        Args: { p_event: Json; p_event_id: string }
+        Returns: {
+          address_line1: string | null
+          address_line2: string | null
+          admission_type: string
+          animation_preset: string
+          artwork_path: string | null
+          capacity: number | null
+          category: string | null
+          city: string | null
+          content_revision: number
+          country_code: string
+          created_at: string
+          description: string | null
+          ends_at: string | null
+          first_publicly_eligible_at: string | null
+          id: string
+          latitude: number | null
+          location: unknown
+          longitude: number | null
+          mapbox_feature_id: string | null
+          moderated_revision: number | null
+          moderation_status: string
+          moderation_updated_at: string | null
+          moderation_version: number
+          organizer_id: string
+          postal_code: string | null
+          public_eligibility_version: number
+          public_history_status: string
+          publicly_authorized_action_id: string | null
+          publicly_authorized_revision: number | null
+          published_at: string | null
+          region: string | null
+          starts_at: string | null
+          status: string
+          timezone: string
+          title: string | null
+          updated_at: string
+          venue_name: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "events"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      save_owned_organizer_profile: {
+        Args: { p_profile: Json }
+        Returns: {
+          base_city: string | null
+          bio: string | null
+          country_code: string
+          created_at: string
+          display_name: string
+          id: string
+          onboarding_completed_at: string | null
+          organizer_type: string | null
+          updated_at: string
+          website_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "organizers"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      save_owned_organizer_profile_without_value_validation: {
+        Args: { p_profile: Json }
+        Returns: {
+          base_city: string | null
+          bio: string | null
+          country_code: string
+          created_at: string
+          display_name: string
+          id: string
+          onboarding_completed_at: string | null
+          organizer_type: string | null
+          updated_at: string
+          website_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "organizers"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       save_ticket_tiers: {
+        Args: { p_event_id: string; p_tiers: Json }
+        Returns: {
+          created_at: string
+          currency: string
+          description: string | null
+          event_id: string
+          id: string
+          name: string
+          quantity_total: number
+          sort_order: number
+          status: string
+          unit_amount_minor: number
+          updated_at: string
+          version: number
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "ticket_tiers"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      save_ticket_tiers_without_active_free_guard: {
+        Args: { p_event_id: string; p_tiers: Json }
+        Returns: {
+          created_at: string
+          currency: string
+          description: string | null
+          event_id: string
+          id: string
+          name: string
+          quantity_total: number
+          sort_order: number
+          status: string
+          unit_amount_minor: number
+          updated_at: string
+          version: number
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "ticket_tiers"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      save_ticket_tiers_without_revision: {
         Args: { p_event_id: string; p_tiers: Json }
         Returns: {
           created_at: string
@@ -1025,6 +1447,20 @@ export type Database = {
           p_status: string
           p_stripe_dispute_id: string
           p_stripe_event_id: string
+        }
+        Returns: string
+      }
+      server_apply_moderation_evaluation: {
+        Args: {
+          p_content_revision: number
+          p_evaluation_id: string
+          p_input_sha256: string
+          p_model_version: string
+          p_outcome: string
+          p_provider_reference: string
+          p_queued_moderation_version: number
+          p_reason_codes: string[]
+          p_risk_level: string
         }
         Returns: string
       }
@@ -1097,6 +1533,19 @@ export type Database = {
         Args: { p_order_id: string; p_reason: string }
         Returns: string
       }
+      server_claim_moderation_evaluation: {
+        Args: { p_worker_reference: string }
+        Returns: {
+          attempt_count: number
+          content_revision: number
+          evaluation_id: string
+          event_id: string
+          input_sha256: string
+          moderation_input: Json
+          prior_reason_codes: string[]
+          queued_moderation_version: number
+        }[]
+      }
       server_consume_checkout_rate_limit: {
         Args: { p_identity_hash: string }
         Returns: {
@@ -1107,6 +1556,17 @@ export type Database = {
       server_expire_checkout_reservations: {
         Args: { p_now: string }
         Returns: number
+      }
+      server_expire_event_report_fingerprints: { Args: never; Returns: number }
+      server_fail_moderation_evaluation: {
+        Args: {
+          p_content_revision: number
+          p_evaluation_id: string
+          p_failure_code: string
+          p_input_sha256: string
+          p_queued_moderation_version: number
+        }
+        Returns: string
       }
       server_finalize_webhook_receipt: {
         Args: {
@@ -1309,6 +1769,16 @@ export type Database = {
           subtotal_minor: number
         }[]
       }
+      server_submit_event_report: {
+        Args: {
+          p_event_id: string
+          p_network_fingerprint: string
+          p_reason: string
+          p_reporter_fingerprint: string
+        }
+        Returns: string
+      }
+      withdraw_event_review: { Args: { p_event_id: string }; Returns: string }
     }
     Enums: {
       [_ in never]: never

@@ -38,14 +38,24 @@ import {
   listOwnedEvents,
   publishEvent,
   saveEventDraft,
+  saveEventRevision,
 } from './event.api'
-import { eventKeys, useOwnedEvent, usePublishEvent, useSaveEventDraft } from './event.queries'
+import { eventKeys, useOwnedEvent, usePublishEvent, useSaveEventDraft, useSaveEventRevision } from './event.queries'
 
 const event: EventRow = {
   id: 'event-returned',
   organizer_id: 'organizer-1',
   status: 'draft',
   moderation_status: 'clear',
+  content_revision: 1,
+  moderated_revision: null,
+  moderation_version: 0,
+  moderation_updated_at: null,
+  public_history_status: 'never_public',
+  first_publicly_eligible_at: null,
+  public_eligibility_version: 0,
+  publicly_authorized_revision: null,
+  publicly_authorized_action_id: null,
   title: 'Night Market',
   description: 'An evening market featuring local food and neighborhood makers.',
   category: 'community',
@@ -310,6 +320,25 @@ describe('owned event API', () => {
     expect(from).not.toHaveBeenCalled()
   })
 
+  it('saves a published owner edit through the revision RPC without browser-authored authority fields', async () => {
+    const revised = { ...event, status: 'published', content_revision: 2 }
+    rpc.mockResolvedValue({ data: revised, error: null })
+
+    await expect(saveEventRevision({ eventId: 'event-returned', organizerId: 'organizer-1', values })).resolves.toEqual(revised)
+
+    expect(rpc).toHaveBeenCalledWith('save_owned_event_revision', {
+      p_event_id: 'event-returned',
+      p_event: expect.objectContaining({ title: 'Night Market', admission_type: 'free' }),
+    })
+    const payload = rpc.mock.calls[0]?.[1]?.p_event as Record<string, unknown>
+    expectSafePayload(payload)
+    expect(payload).not.toHaveProperty('organizer_id')
+    expect(payload).not.toHaveProperty('content_revision')
+    expect(payload).not.toHaveProperty('moderation_version')
+    expect(payload).not.toHaveProperty('accepted_at')
+    expect(payload).not.toHaveProperty('accepted_by_user_id')
+  })
+
   it.each(['list', 'insert', 'update', 'publish'] as const)(
     'propagates %s errors unchanged',
     async (operation) => {
@@ -371,6 +400,23 @@ describe('event query cache contracts', () => {
     expect(queryClient.getQueryData(eventKeys.detail('organizer-2', 'unrelated'))).toBe(
       'unrelated detail',
     )
+  })
+
+  it('published revision cache seeding requires the requested event and organizer identity', async () => {
+    const mismatched = { ...event, id: 'other-event', organizer_id: 'other-organizer', status: 'published' }
+    rpc.mockResolvedValue({ data: mismatched, error: null })
+    const { queryClient, wrapper } = setupQueryClient()
+    queryClient.setQueryData(eventKeys.detail('organizer-1', 'event-returned'), 'original')
+    queryClient.setQueryData(eventKeys.ownedList('organizer-1'), ['original list'])
+    const { result } = renderHook(() => useSaveEventRevision(), { wrapper })
+
+    await act(async () => {
+      await result.current.mutateAsync({ eventId: 'event-returned', organizerId: 'organizer-1', values })
+    })
+
+    expect(queryClient.getQueryData(eventKeys.detail('organizer-1', 'event-returned'))).toBe('original')
+    expect(queryClient.getQueryData(eventKeys.detail('other-organizer', 'other-event'))).toBeUndefined()
+    expect(queryClient.getQueryState(eventKeys.ownedList('organizer-1'))?.isInvalidated).toBe(true)
   })
 
   it('an account switch never reuses another organizer cached owned draft', async () => {

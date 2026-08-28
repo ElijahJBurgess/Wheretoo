@@ -1,18 +1,24 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Organizer } from '../organizers/organizer.api'
 import type { EventRow } from './event.types'
 
-const { mutateAsync, organizerRefetch, eventRefetch, useOrganizer, useOwnedEvent, usePublishEvent, useSession } = vi.hoisted(() => ({
+const { mutateAsync, organizerRefetch, eventRefetch, requirementsRefetch, tiersRefetch, useOrganizer, useOwnedEvent, useOwnedEventRequirements, useOwnedTicketTiers, usePublishEvent, useSession } = vi.hoisted(() => ({
   mutateAsync: vi.fn(), organizerRefetch: vi.fn(), eventRefetch: vi.fn(), useOrganizer: vi.fn(),
-  useOwnedEvent: vi.fn(), usePublishEvent: vi.fn(), useSession: vi.fn(),
+  requirementsRefetch: vi.fn(), tiersRefetch: vi.fn(), useOwnedEvent: vi.fn(), useOwnedEventRequirements: vi.fn(), useOwnedTicketTiers: vi.fn(), usePublishEvent: vi.fn(), useSession: vi.fn(),
 }))
 
 vi.mock('../auth/SessionProvider', () => ({ useSession }))
 vi.mock('../organizers/organizer.queries', () => ({ useOrganizer }))
+vi.mock('../moderation/moderation.queries', () => ({
+  moderationKeys: { publicEvent: (eventId: string) => ['public-event', eventId] },
+  useOwnedEventRequirements,
+}))
 vi.mock('./event.queries', () => ({ useOwnedEvent, usePublishEvent }))
+vi.mock('../tickets/ticket.queries', () => ({ useOwnedTicketTiers }))
 vi.mock('../../lib/supabase/client', () => ({ supabase: {} }))
 
 import { EventPreviewPage } from './EventPreviewPage'
@@ -25,7 +31,7 @@ const organizer: Organizer = {
 }
 
 const event: EventRow = {
-  id: 'event-1', organizer_id: 'organizer-1', status: 'draft', moderation_status: 'clear',
+  id: 'event-1', organizer_id: 'organizer-1', status: 'draft', moderation_status: 'clear', content_revision: 1, moderated_revision: null, moderation_version: 0, moderation_updated_at: null, public_history_status: 'never_public', first_publicly_eligible_at: null, public_eligibility_version: 0, publicly_authorized_revision: null, publicly_authorized_action_id: null,
   title: 'Friday Night Makers', description: 'Meet neighborhood artists and makers for an open studio evening.',
   category: 'art_culture', starts_at: '2027-01-15T20:30:00.000Z', ends_at: '2027-01-15T22:00:00.000Z',
   timezone: 'America/Los_Angeles', venue_name: 'The Workshop', address_line1: '123 Valencia St',
@@ -39,8 +45,15 @@ type QueryState<T> = { data: T | null | undefined; isPending: boolean; isError: 
 
 const eventLoaded: QueryState<EventRow> = { data: event, isPending: false, isError: false, refetch: eventRefetch }
 const organizerLoaded: QueryState<Organizer> = { data: organizer, isPending: false, isError: false, refetch: organizerRefetch }
+const requirements = {
+  minimumAge: 'all_ages', alcoholPresent: false, cannabisPresent: false, explicitAdultContent: false,
+  gamblingPresent: false, weaponsPresent: false, highRiskActivity: false, needsAcceptance: false,
+  organizerTerms: { policyKind: 'organizer_terms', label: 'Organizer Terms', versionId: 'dev-organizer-terms-v1', stage: 'development_placeholder', publicUrl: '/organizer-terms' },
+  eventPolicy: { policyKind: 'event_policy', label: 'Event Policy', versionId: 'dev-event-policy-v1', stage: 'development_placeholder', publicUrl: '/event-policy' },
+}
 
 function renderPreview() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   const router = createMemoryRouter([
     { path: '/organizer/events/:eventId/preview', element: <EventPreviewPage /> },
     { path: '/organizer/events/:eventId/edit', element: <p>edit destination</p> },
@@ -48,15 +61,23 @@ function renderPreview() {
     { path: '/organizer/events/:eventId', element: <p>published destination</p> },
     { path: '/organizer/events', element: <p>events destination</p> },
   ], { initialEntries: ['/organizer/events/event-1/preview'] })
-  return { router, ...render(<RouterProvider router={router} />) }
+  return {
+    client,
+    router,
+    ...render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>),
+  }
 }
 
 describe('EventPreviewPage', () => {
+  afterEach(() => vi.useRealTimers())
+
   beforeEach(() => {
     vi.clearAllMocks()
     useSession.mockReturnValue({ status: 'authenticated', session: {}, user: { id: 'organizer-1' } })
     useOwnedEvent.mockReturnValue(eventLoaded)
     useOrganizer.mockReturnValue(organizerLoaded)
+    useOwnedEventRequirements.mockReturnValue({ data: requirements, isPending: false, isError: false, refetch: requirementsRefetch })
+    useOwnedTicketTiers.mockReturnValue({ data: [], isPending: false, isError: false, refetch: tiersRefetch })
     usePublishEvent.mockReturnValue({ isPending: false, mutateAsync })
   })
 
@@ -66,6 +87,7 @@ describe('EventPreviewPage', () => {
     expect(useOwnedEvent).toHaveBeenCalledWith('event-1', 'organizer-1')
     expect(useOrganizer).toHaveBeenCalledWith('organizer-1')
     expect(usePublishEvent).toHaveBeenCalledWith('organizer-1')
+    expect(useOwnedEventRequirements).toHaveBeenCalledWith('organizer-1', 'event-1')
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
     expect(screen.getByRole('heading', { level: 1, name: 'Preview your event' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 2, name: 'Friday Night Makers' })).toBeInTheDocument()
@@ -82,6 +104,37 @@ describe('EventPreviewPage', () => {
     expect(screen.getByLabelText('Whereto event artwork placeholder')).toBeInTheDocument()
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
     expect(screen.queryByText(/ticket selector|rsvp|ai artwork|animation picker|map preview/i)).not.toBeInTheDocument()
+  })
+
+  it('renders persisted requirements and policy labels, and gates publish on current acceptance', () => {
+    useOwnedEventRequirements.mockReturnValue({
+      data: { ...requirements, minimumAge: '21_plus', alcoholPresent: true, needsAcceptance: true },
+      isPending: false, isError: false, refetch: requirementsRefetch,
+    })
+    renderPreview()
+
+    expect(screen.getByRole('heading', { name: 'Event requirements' })).toBeInTheDocument()
+    expect(screen.getByText('21+')).toBeInTheDocument()
+    expect(screen.getByText('Alcohol present')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Organizer Terms' })).toHaveAttribute('href', '/organizer-terms')
+    expect(screen.getByRole('link', { name: 'Event Policy' })).toHaveAttribute('href', '/event-policy')
+    expect(screen.getByText('Agreement required before publishing.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Publish event' })).toBeDisabled()
+    expect(mutateAsync).not.toHaveBeenCalled()
+  })
+
+  it('keeps publish unavailable while persisted agreement status is loading or failed and offers retry', async () => {
+    const user = userEvent.setup()
+    useOwnedEventRequirements.mockReturnValue({ data: undefined, isPending: true, isError: false, refetch: requirementsRefetch })
+    const loading = renderPreview()
+    expect(screen.getByText('Loading event requirements')).toBeInTheDocument()
+    loading.unmount()
+
+    useOwnedEventRequirements.mockReturnValue({ data: undefined, isPending: false, isError: true, refetch: requirementsRefetch })
+    renderPreview()
+    await user.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(requirementsRefetch).toHaveBeenCalledOnce()
+    expect(mutateAsync).not.toHaveBeenCalled()
   })
 
   it('waits to enable the organizer query until the event supplies its organizer ID', async () => {
@@ -113,12 +166,54 @@ describe('EventPreviewPage', () => {
     expect(screen.queryByText(/owner|permission|another organizer/i)).not.toBeInTheDocument()
   })
 
-  it('sends paid drafts to ticket setup and keeps direct preview publication unavailable', () => {
+  it('sends a paid draft without tiers to ticket setup and keeps publication unavailable', () => {
     useOwnedEvent.mockReturnValue({ ...eventLoaded, data: { ...event, admission_type: 'paid' } })
     renderPreview()
+    expect(screen.getByText('Finish ticket setup, then confirm the current agreement and publish this version.')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Set up paid tickets' })).toHaveAttribute('href', '/organizer/events/event-1/tickets')
     expect(screen.queryByRole('button', { name: /Publish event|Try publishing again/ })).not.toBeInTheDocument()
     expect(mutateAsync).not.toHaveBeenCalled()
+  })
+
+  it('publishes a paid draft after owned tiers are configured and the current agreement is accepted', async () => {
+    const user = userEvent.setup()
+    const paidDraft = { ...event, admission_type: 'paid' } as EventRow
+    useOwnedEvent.mockReturnValue({ ...eventLoaded, data: paidDraft })
+    useOwnedTicketTiers.mockReturnValue({
+      data: [{ id: 'tier-1' }], isPending: false, isError: false, refetch: tiersRefetch,
+    })
+    mutateAsync.mockResolvedValue({ ...paidDraft, status: 'published', published_at: '2026-08-25T14:00:00.000Z' })
+    const { router } = renderPreview()
+
+    expect(useOwnedTicketTiers).toHaveBeenCalledWith('organizer-1', 'event-1')
+    await user.click(screen.getByRole('button', { name: 'Publish event' }))
+
+    expect(mutateAsync).toHaveBeenCalledWith('event-1')
+    await waitFor(() => expect(router.state.location.pathname).toBe('/organizer/events/event-1'))
+  })
+
+  it('allows an accepted happening-now paid revision to re-publish through the existing preview action', async () => {
+    const user = userEvent.setup()
+    const now = Date.now()
+    const activePaidEvent = {
+      ...event,
+      status: 'published',
+      moderation_status: 'under_review',
+      admission_type: 'paid',
+      starts_at: new Date(now - 60 * 60 * 1000).toISOString(),
+      ends_at: new Date(now + 60 * 60 * 1000).toISOString(),
+      published_at: new Date(now - 24 * 60 * 60 * 1000).toISOString(),
+    } as EventRow
+    useOwnedEvent.mockReturnValue({ ...eventLoaded, data: activePaidEvent })
+    mutateAsync.mockResolvedValue({ ...activePaidEvent, moderation_status: 'clear', moderated_revision: 1 })
+
+    const { router } = renderPreview()
+    const publish = screen.getByRole('button', { name: 'Publish changes' })
+    expect(publish).toBeEnabled()
+    await user.click(publish)
+
+    expect(mutateAsync).toHaveBeenCalledWith('event-1')
+    await waitFor(() => expect(router.state.location.pathname).toBe('/organizer/events/event-1'))
   })
 
   it('publishes exactly once under rapid clicks and navigates only after a published row returns', async () => {
@@ -133,6 +228,33 @@ describe('EventPreviewPage', () => {
     expect(router.state.location.pathname).toBe('/organizer/events/event-1/preview')
     await act(async () => resolve({ ...event, status: 'published', published_at: '2026-08-24T16:00:00.000Z' }))
     await waitFor(() => expect(router.state.location.pathname).toBe('/organizer/events/event-1'))
+  })
+
+  it('rejects a mismatched publish response', async () => {
+    const user = userEvent.setup()
+    useOwnedEvent.mockReturnValue({ ...eventLoaded, data: { ...event, status: 'published', moderation_status: 'blocked' } })
+    mutateAsync.mockResolvedValueOnce({ ...event, id: 'event-2', status: 'published', moderation_status: 'clear' })
+    const { router } = renderPreview()
+
+    await user.click(screen.getByRole('button', { name: 'Publish changes' }))
+    expect(await screen.findByText('Publishing failed. Try again.')).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe('/organizer/events/event-1/preview')
+  })
+
+  it.each(['blocked', 'removed'] as const)('preserves %s enforcement on re-publish', async (moderationStatus) => {
+    const user = userEvent.setup()
+    useOwnedEvent.mockReturnValue({
+      ...eventLoaded,
+      data: { ...event, status: 'published', moderation_status: moderationStatus },
+    })
+    mutateAsync.mockResolvedValueOnce({ ...event, status: 'published', moderation_status: moderationStatus })
+    const { client, router } = renderPreview()
+    client.setQueryData(['public-event', 'event-1'], { id: 'stale-public-event' })
+
+    await user.click(screen.getByRole('button', { name: 'Publish changes' }))
+    expect(mutateAsync).toHaveBeenCalledWith('event-1')
+    await waitFor(() => expect(router.state.location.pathname).toBe('/organizer/events/event-1'))
+    expect(client.getQueryData(['public-event', 'event-1'])).toBeUndefined()
   })
 
   it.each([

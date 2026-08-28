@@ -11,12 +11,17 @@ vi.mock('react', async (importOriginal) => ({
 }))
 
 const { usePublicTicketingEvent } = vi.hoisted(() => ({ usePublicTicketingEvent: vi.fn() }))
-vi.mock('./publicTicketing.queries', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('./publicTicketing.queries')>()),
-  usePublicTicketingEvent,
+vi.mock('./publicTicketing.queries', () => ({ usePublicTicketingEvent }))
+
+const { mutateAsync, resetReport, useReportPublicEvent } = vi.hoisted(() => ({
+  mutateAsync: vi.fn(),
+  resetReport: vi.fn(),
+  useReportPublicEvent: vi.fn(),
 }))
+vi.mock('../moderation/moderation.queries', () => ({ useReportPublicEvent }))
 
 import { PublicTicketEventPage } from './PublicTicketEventPage'
+import { PublicTicketingError } from './publicTicketing.errors'
 
 const eventId = 'eb0fd9d5-d7d5-45dd-a99f-0c8a191bdc6f'
 const tierId = '900a9142-9111-4f87-84d5-b8545a94c7fb'
@@ -41,6 +46,8 @@ const publicEvent: PublicTicketingEvent = {
     artwork_path: null,
     animation_preset: 'generic',
     admission_type: 'paid',
+    minimum_age: 'all_ages',
+    advisories: [],
     organizer: { id: '6b849fa0-4d5e-4faa-bf31-b169cb1bd7fe', display_name: 'Bay City Arts' },
   },
   tiers: [{
@@ -59,6 +66,10 @@ const publicEvent: PublicTicketingEvent = {
     availability_status: 'sold_out',
   }],
 }
+const freePublicEvent = {
+  event: { ...publicEvent.event, admission_type: 'free' as const },
+  tiers: [] as const,
+}
 
 function renderPage() {
   const router = createMemoryRouter([
@@ -73,6 +84,8 @@ describe('PublicTicketEventPage', () => {
     vi.clearAllMocks()
     startTransition.mockImplementation((callback: () => void) => callback())
     usePublicTicketingEvent.mockReturnValue({ data: publicEvent, isPending: false, isError: false, refetch: vi.fn() })
+    useReportPublicEvent.mockReturnValue({ isPending: false, mutateAsync, reset: resetReport })
+    mutateAsync.mockResolvedValue({ status: 'received' })
   })
 
   it('presents persisted published event facts and price without organizer or financial internals', () => {
@@ -84,6 +97,23 @@ describe('PublicTicketEventPage', () => {
     expect(screen.getByText('$25.00')).toBeInTheDocument()
     expect(screen.getByText('Civic Center Plaza')).toBeInTheDocument()
     expect(screen.queryByText(/6b849|platform fee|destination|stripe|reserved_quantity/i)).not.toBeInTheDocument()
+  })
+
+  it('renders the free public shell and reporting without ticket or checkout controls', () => {
+    usePublicTicketingEvent.mockReturnValue({
+      data: freePublicEvent,
+      isPending: false,
+      isError: false,
+      refetch: vi.fn(),
+    })
+
+    renderPage()
+
+    expect(screen.getByRole('heading', { name: 'Night Market' })).toBeInTheDocument()
+    expect(screen.getByText('Free event')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Report this event' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Choose your ticket' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Continue to checkout' })).not.toBeInTheDocument()
   })
 
   it('requires exactly one available tier and navigates with its exact ID', async () => {
@@ -219,6 +249,53 @@ describe('PublicTicketEventPage', () => {
     expect(screen.getByRole('heading', { level: 1, name: title })).toBeInTheDocument()
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
     expect(screen.queryByText(/PGRST|postgres|private/i)).not.toBeInTheDocument()
+  })
+
+  it('offers reporting only while the canonical public projection returns the event', async () => {
+    const { router } = renderPage()
+    expect(screen.getByRole('button', { name: 'Report this event' })).toBeInTheDocument()
+
+    usePublicTicketingEvent.mockReturnValue({ data: null, isPending: false, isError: false, refetch: vi.fn() })
+    await act(async () => { await router.navigate(`/events/${eventId}?refresh=removed`) })
+
+    expect(screen.queryByRole('button', { name: 'Report this event' })).not.toBeInTheDocument()
+  })
+
+  it('keeps last-known details with retry status on a transient refresh failure', async () => {
+    const refetch = vi.fn()
+    usePublicTicketingEvent.mockReturnValue({
+      data: publicEvent,
+      isPending: false,
+      isError: true,
+      error: new PublicTicketingError('RETRYABLE'),
+      refetch,
+    })
+    const user = userEvent.setup()
+    renderPage()
+
+    expect(screen.getByRole('heading', { name: 'Night Market' })).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Showing the last event details we received')
+    expect(screen.queryByRole('heading', { name: 'Event could not load' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Report this event' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Check again' }))
+    expect(refetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('fails closed instead of displaying cached content after an invalid public projection', () => {
+    usePublicTicketingEvent.mockReturnValue({
+      data: publicEvent,
+      isPending: false,
+      isError: true,
+      error: new PublicTicketingError('INVALID_RESPONSE'),
+      refetch: vi.fn(),
+    })
+
+    renderPage()
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Event could not load' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Night Market' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Report this event' })).not.toBeInTheDocument()
   })
 
   it('labels an event with no purchasable tiers as unavailable instead of enabling checkout', () => {

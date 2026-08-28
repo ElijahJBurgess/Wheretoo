@@ -16,7 +16,7 @@ vi.mock('./event.queries', () => ({ useOwnedEvents }))
 import { OrganizerEventsPage } from './OrganizerEventsPage'
 
 const baseEvent: EventRow = {
-  id: 'event-1', organizer_id: 'organizer-1', status: 'draft', moderation_status: 'clear',
+  id: 'event-1', organizer_id: 'organizer-1', status: 'draft', moderation_status: 'clear', content_revision: 1, moderated_revision: null, moderation_version: 0, moderation_updated_at: null, public_history_status: 'never_public', first_publicly_eligible_at: null, public_eligibility_version: 0, publicly_authorized_revision: null, publicly_authorized_action_id: null,
   title: 'Night Market', description: null, category: null, starts_at: '2026-08-25T02:00:00.000Z',
   ends_at: null, timezone: 'America/Los_Angeles', venue_name: null, address_line1: null,
   address_line2: null, city: null, region: null, postal_code: null, country_code: 'US',
@@ -74,7 +74,7 @@ describe('OrganizerEventsPage', () => {
     useOwnedEvents.mockReturnValue({
       data: [
         baseEvent,
-        { ...baseEvent, id: 'event-2', title: null, status: 'published', starts_at: null },
+        { ...baseEvent, id: 'event-2', title: null, status: 'published', moderated_revision: 1, starts_at: null },
       ],
       isPending: false,
       isError: false,
@@ -91,6 +91,29 @@ describe('OrganizerEventsPage', () => {
 
     await user.click(screen.getByRole('link', { name: /Night Market/ }))
     expect(await screen.findByText('edit destination')).toBeInTheDocument()
+  })
+
+  it('maps only safe lifecycle and moderation states without public eligibility claims', () => {
+    useOwnedEvents.mockReturnValue({
+      data: [
+        { ...baseEvent, id: 'event-clear', status: 'published', moderation_status: 'clear', moderated_revision: 1, title: 'Clear event' },
+        { ...baseEvent, id: 'event-stale', status: 'published', moderation_status: 'clear', moderated_revision: null, title: 'Stale event' },
+        { ...baseEvent, id: 'event-review', status: 'published', moderation_status: 'under_review', title: 'Review event' },
+        { ...baseEvent, id: 'event-blocked', status: 'published', moderation_status: 'blocked', title: 'Blocked event' },
+        { ...baseEvent, id: 'event-removed', status: 'published', moderation_status: 'removed', title: 'Removed event' },
+        { ...baseEvent, id: 'event-cancelled', status: 'cancelled', moderation_status: 'clear', title: 'Cancelled event' },
+      ],
+      isPending: false, isError: false, refetch,
+    })
+    renderPage()
+
+    expect(screen.getByRole('link', { name: 'Clear event, Published' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Stale event, Under review' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Review event, Under review' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Blocked event, Blocked' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Removed event, Removed' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Cancelled event, Cancelled' })).toBeInTheDocument()
+    expect(screen.queryByText(/publicly available|eligible|score|reason|reviewer/i)).not.toBeInTheDocument()
   })
 
   it('routes a published event to its detail page', async () => {

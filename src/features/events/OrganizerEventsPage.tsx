@@ -22,6 +22,21 @@ function eventDestination(event: EventRow): string {
     : `/organizer/events/${event.id}`
 }
 
+function organizerEventStatus(event: EventRow): { label: string; style: string } {
+  if (event.status === 'cancelled') return { label: 'Cancelled', style: 'cancelled' }
+  if (event.status === 'draft') return { label: 'Draft', style: 'draft' }
+  if (event.moderation_status === 'blocked') return { label: 'Blocked', style: 'blocked' }
+  if (event.moderation_status === 'removed') return { label: 'Removed', style: 'removed' }
+  if (
+    event.moderation_status === 'under_review'
+    || event.moderation_status === 'not_evaluated'
+    || event.moderated_revision !== event.content_revision
+  ) {
+    return { label: 'Under review', style: 'under-review' }
+  }
+  return { label: 'Published', style: 'published' }
+}
+
 export function OrganizerEventsPage() {
   const sessionState = useSession()
   const organizerId = sessionState.status === 'authenticated' ? sessionState.user.id : ''
@@ -66,11 +81,11 @@ export function OrganizerEventsPage() {
       <ul className="event-list">
         {eventsQuery.data.map((event) => {
           const title = event.title?.trim() || 'Untitled event'
-          const status = event.status.charAt(0).toUpperCase() + event.status.slice(1)
+          const status = organizerEventStatus(event)
           return (
             <li className="event-list__item" key={event.id}>
-              <Link aria-label={`${title}, ${status}`} to={eventDestination(event)}>
-                <span className={`event-status event-status--${event.status}`}>{status}</span>
+              <Link aria-label={`${title}, ${status.label}`} to={eventDestination(event)}>
+                <span className={`event-status event-status--${status.style}`}>{status.label}</span>
                 <strong>{title}</strong>
                 <span className="event-list__dates">
                   {event.starts_at ? <span>Starts {formatInstant(event.starts_at)}</span> : null}

@@ -54,7 +54,8 @@ select results_eq(
     join pg_catalog.pg_namespace as namespaces on namespaces.oid = procedures.pronamespace
     where namespaces.nspname = 'public'
       and procedures.proname in (
-        'activate_paid_sales', 'get_public_event_ticketing',
+        'activate_paid_sales', 'get_public_event', 'get_public_event_ticketing',
+        'get_public_map_events',
         'list_owned_ticket_tiers', 'save_ticket_tiers'
       )
       and procedures.prosecdef
@@ -62,11 +63,12 @@ select results_eq(
   $$,
   $$
     values ((array[
-      'activate_paid_sales', 'get_public_event_ticketing',
+      'activate_paid_sales', 'get_public_event', 'get_public_event_ticketing',
+      'get_public_map_events',
       'list_owned_ticket_tiers', 'save_ticket_tiers'
     ]::text[]) collate "C")
   $$,
-  'all four browser RPCs are security definers with an empty search path'
+  'all six browser RPCs are security definers with an empty search path'
 );
 
 select results_eq(
@@ -79,14 +81,15 @@ select results_eq(
     ) as privileges
     where namespaces.nspname = 'public'
       and procedures.proname in (
-        'activate_paid_sales', 'get_public_event_ticketing',
+        'activate_paid_sales', 'get_public_event', 'get_public_event_ticketing',
+        'get_public_map_events',
         'list_owned_ticket_tiers', 'save_ticket_tiers'
       )
       and privileges.grantee = 0
       and privileges.privilege_type = 'EXECUTE'
   $$,
   $$ values (0::bigint) $$,
-  'PUBLIC has no implicit execution on the four browser RPCs'
+  'PUBLIC has no implicit execution on the six browser RPCs'
 );
 
 select results_eq(

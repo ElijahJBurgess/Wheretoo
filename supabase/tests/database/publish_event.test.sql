@@ -264,9 +264,9 @@ values
   (
     '20000000-0000-0000-0000-000000000013',
     '10000000-0000-0000-0000-000000000001',
-    'flagged',
-    'Flagged Event',
-    'A sufficiently detailed description for a flagged event.',
+    'under_review',
+    'Under Review Event',
+    'A sufficiently detailed description for an under-review event.',
     'community',
     now() + interval '2 days',
     now() + interval '2 days 2 hours',
@@ -275,7 +275,7 @@ values
     'CA',
     '94105',
     'US',
-    'mapbox.flagged-event',
+    'mapbox.under-review-event',
     37.7936,
     -122.3958,
     'free'
@@ -358,6 +358,51 @@ values (
   'clear',
   now()
 );
+
+insert into private.event_risk_disclosures (
+  event_id,
+  minimum_age,
+  alcohol_present,
+  cannabis_present,
+  explicit_adult_content,
+  gambling_present,
+  weapons_present,
+  high_risk_activity
+)
+select
+  events.id,
+  'all_ages',
+  false,
+  false,
+  false,
+  false,
+  false,
+  false
+from public.events as events;
+
+set local role service_role;
+select private.configure_policy_environment('development');
+reset role;
+
+insert into private.event_policy_acceptances (
+  event_id,
+  organizer_id,
+  accepted_by_user_id,
+  content_revision,
+  input_sha256,
+  organizer_terms_version_id,
+  event_policy_version_id
+)
+select
+  events.id,
+  events.organizer_id,
+  events.organizer_id,
+  events.content_revision,
+  private.compute_event_input_sha256(events.id),
+  'dev-organizer-terms-v1',
+  'dev-event-policy-v1'
+from public.events as events
+where events.organizer_id = '10000000-0000-0000-0000-000000000001';
 
 select set_config('request.jwt.claim.sub', '', true);
 set local role anon;
@@ -494,7 +539,7 @@ select results_eq(
 
 select lives_ok(
   $$ select public.publish_event('20000000-0000-0000-0000-000000000013') $$,
-  'flagged event publishes without changing moderation'
+  'provenance-free under-review event publishes without changing moderation'
 );
 
 select results_eq(
@@ -503,8 +548,8 @@ select results_eq(
     from public.events
     where id = '20000000-0000-0000-0000-000000000013'
   $$,
-  $$ values ('flagged'::text) $$,
-  'flagged moderation status persists through publish RPC'
+  $$ values ('under_review'::text) $$,
+  'provenance-free under-review moderation status persists through publish RPC'
 );
 
 reset role;
@@ -513,22 +558,23 @@ set local role anon;
 
 select results_eq(
   $$
-    select id
-    from public.events
-    where id = '20000000-0000-0000-0000-000000000002'
+    select (public_event.event_payload ->> 'id')::uuid
+    from public.get_public_event(
+      '20000000-0000-0000-0000-000000000002'
+    ) as public_event(event_payload)
   $$,
   $$ values ('20000000-0000-0000-0000-000000000002'::uuid) $$,
   'successful publication is immediately visible anonymously'
 );
 
-select results_eq(
+select is_empty(
   $$
-    select moderation_status
-    from public.events
-    where id = '20000000-0000-0000-0000-000000000013'
+    select public_event.event_payload
+    from public.get_public_event(
+      '20000000-0000-0000-0000-000000000013'
+    ) as public_event(event_payload)
   $$,
-  $$ values ('flagged'::text) $$,
-  'published flagged event remains anonymously visible'
+  'published provenance-free under-review event remains hidden anonymously'
 );
 
 reset role;

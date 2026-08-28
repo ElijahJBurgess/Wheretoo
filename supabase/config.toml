@@ -314,6 +314,12 @@ verify_jwt = false
 [functions.order-confirmation]
 verify_jwt = false
 
+[functions.moderate-event-queue]
+verify_jwt = false
+
+[functions.report-event]
+verify_jwt = false
+
 # Multi-factor-authentication is available to Supabase Pro plan.
 [auth.mfa]
 # Control how many MFA factors can be enrolled at once per user.

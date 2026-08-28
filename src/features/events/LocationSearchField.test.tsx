@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState, type ComponentProps } from 'react'
 import type {
@@ -190,7 +190,8 @@ describe('LocationSearchField', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Choose a verified California address')
   })
 
-  it('immediately invalidates verified coordinates when freeform text changes', () => {
+  it('requires an explicit clear before accepting replacement freeform text', async () => {
+    const user = userEvent.setup()
     const onChange = vi.fn()
     function Harness() {
       const [location, setLocation] = useState<NormalizedLocation | null>(verifiedLocation)
@@ -208,37 +209,27 @@ describe('LocationSearchField', () => {
 
     render(<Harness />)
 
+    await user.click(screen.getByRole('button', { name: 'Clear address' }))
     act(() => searchBoxProps().onChange?.('An edited but unverified address'))
 
     expect(onChange).toHaveBeenCalledOnce()
     expect(onChange).toHaveBeenCalledWith(null)
-    expect(screen.getByLabelText('Search for a California address')).toHaveValue(
-      'An edited but unverified address',
-    )
+    await waitFor(() => {
+      expect(screen.getByLabelText('Search for a California address')).toHaveValue(
+        'An edited but unverified address',
+      )
+    })
     expect(screen.queryByText('Verified address')).not.toBeInTheDocument()
-    expect(screen.getByRole('alert')).toHaveTextContent('Choose a verified California address')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it('deduplicates the vendor input and clear events when the final character is deleted', () => {
     const onChange = vi.fn()
-    function Harness() {
-      const [location, setLocation] = useState<NormalizedLocation | null>(verifiedLocation)
-
-      return (
-        <LocationSearchField
-          value={location}
-          onChange={(nextLocation) => {
-            onChange(nextLocation)
-            setLocation(nextLocation)
-          }}
-        />
-      )
-    }
-
-    render(<Harness />)
+    render(<LocationSearchField value={null} onChange={onChange} />)
 
     act(() => {
       const props = searchBoxProps()
+      props.onChange?.('x')
       props.onChange?.('')
       props.onClear?.()
     })
@@ -253,18 +244,14 @@ describe('LocationSearchField', () => {
   it('does not suppress an independent vendor clear after external verified hydration', () => {
     const onChange = vi.fn()
     const { rerender } = render(
-      <LocationSearchField value={verifiedLocation} onChange={onChange} />,
+      <LocationSearchField value={null} onChange={onChange} />,
     )
 
-    act(() => {
-      const props = searchBoxProps()
-      props.onChange?.('')
-      props.onClear?.()
-    })
+    act(() => searchBoxProps().onClear?.())
     expect(onChange).toHaveBeenCalledTimes(1)
 
-    rerender(<LocationSearchField value={null} onChange={onChange} />)
     rerender(<LocationSearchField value={verifiedLocation} onChange={onChange} />)
+    rerender(<LocationSearchField value={null} onChange={onChange} />)
     act(() => searchBoxProps().onClear?.())
 
     expect(onChange).toHaveBeenCalledTimes(2)
@@ -300,36 +287,39 @@ describe('LocationSearchField', () => {
     act(() => searchBoxProps().onRetrieve?.(makeResponse()))
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(screen.getByText('Verified address')).toBeInTheDocument()
-
-    act(() => searchBoxProps().onSuggestError?.(new Error('network unavailable')))
-    act(() => searchBoxProps().onRetrieve?.(makeResponse(0)))
-    expect(screen.getByRole('alert')).toHaveTextContent('Choose a verified California address')
   })
 
-  it('keeps an existing verified location safe when suggestions fail', () => {
+  it('keeps an existing verified location outside the vendor search lifecycle', () => {
     const onChange = vi.fn()
     render(<LocationSearchField value={verifiedLocation} onChange={onChange} />)
 
-    act(() => searchBoxProps().onSuggestError?.(new Error('network unavailable')))
-
+    expect(latestSearchBoxProps).toBeNull()
+    expect(screen.getByLabelText('Search for a California address')).toHaveAttribute('readonly')
     expect(screen.getByText('Verified address')).toBeInTheDocument()
-    expect(screen.getByRole('alert')).toHaveTextContent(
-      'Address search is unavailable. Check your connection and try again.',
-    )
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(onChange).not.toHaveBeenCalled()
   })
 
-  it('reflects a verified value supplied after the field first renders', () => {
+  it('reflects a verified value supplied after the field first renders', async () => {
     const { rerender } = render(<LocationSearchField value={null} onChange={vi.fn()} />)
 
     rerender(<LocationSearchField value={verifiedLocation} onChange={vi.fn()} />)
 
-    expect(screen.getByLabelText('Search for a California address')).toHaveValue(
-      '1 Dr Carlton B Goodlett Place, San Francisco, CA 94102',
-    )
+    await waitFor(() => {
+      expect(screen.getByLabelText('Search for a California address')).toHaveValue(
+        '1 Dr Carlton B Goodlett Place, San Francisco, CA 94102',
+      )
+    })
   })
 
-  it('reflects an externally updated address even when its Mapbox ID is unchanged', () => {
+  it('does not mount the unsafe vendor control for an initial verified address', () => {
+    render(<LocationSearchField value={verifiedLocation} onChange={vi.fn()} />)
+
+    expect(latestSearchBoxProps).toBeNull()
+    expect(screen.getByLabelText('Search for a California address')).toHaveAttribute('readonly')
+  })
+
+  it('reflects an externally updated address even when its Mapbox ID is unchanged', async () => {
     const { rerender } = render(
       <LocationSearchField value={verifiedLocation} onChange={vi.fn()} />,
     )
@@ -341,9 +331,11 @@ describe('LocationSearchField', () => {
 
     rerender(<LocationSearchField value={updatedLocation} onChange={vi.fn()} />)
 
-    expect(screen.getByLabelText('Search for a California address')).toHaveValue(
-      '2 Dr Carlton B Goodlett Place, San Francisco, CA 94103',
-    )
+    await waitFor(() => {
+      expect(screen.getByLabelText('Search for a California address')).toHaveValue(
+        '2 Dr Carlton B Goodlett Place, San Francisco, CA 94103',
+      )
+    })
     expect(screen.getByText('2 Dr Carlton B Goodlett Place')).toBeInTheDocument()
     expect(screen.getByText('San Francisco, CA 94103')).toBeInTheDocument()
   })
@@ -372,12 +364,14 @@ describe('LocationSearchField', () => {
     expect(onChange).toHaveBeenCalledOnce()
     expect(onChange).toHaveBeenCalledWith(null)
     expect(screen.queryByText('Verified address')).not.toBeInTheDocument()
-    expect(screen.getByLabelText('Search for a California address')).toHaveFocus()
+    await waitFor(() => {
+      expect(screen.getByLabelText('Search for a California address')).toHaveFocus()
+    })
   })
 
   it('clears through the vendor clear callback without a duplicate loop', () => {
     const onChange = vi.fn()
-    render(<LocationSearchField value={verifiedLocation} onChange={onChange} />)
+    render(<LocationSearchField value={null} onChange={onChange} />)
 
     act(() => searchBoxProps().onClear?.())
 
@@ -398,9 +392,7 @@ describe('LocationSearchField', () => {
     const group = screen.getByRole('group', { name: 'Event address' })
     expect(group).toHaveAttribute('aria-describedby', 'event-location-error')
     expect(screen.getByRole('alert')).toHaveAttribute('aria-live', 'assertive')
-    expect(onChange).not.toHaveBeenCalled()
-
-    act(() => searchBoxProps().onChange?.('1 Dr Carlton B Goodlett Place, San Francisco, CA 94102'))
+    expect(screen.getByLabelText('Search for a California address')).toHaveAttribute('readonly')
     expect(onChange).not.toHaveBeenCalled()
   })
 })

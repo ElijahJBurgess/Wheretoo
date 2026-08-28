@@ -38,7 +38,8 @@ export const eventDraftSchema = z.object({
   capacity: z.number().int().positive().max(2_147_483_647).nullable(),
 })
 
-export const eventPublishSchema = eventDraftSchema.superRefine((values, context) => {
+function publicationSchema(requireFutureStart: boolean) {
+  return eventDraftSchema.superRefine((values, context) => {
   const titleLength = values.title.trim().length
   if (titleLength < 3 || titleLength > 120) {
     context.addIssue({
@@ -89,26 +90,47 @@ export const eventPublishSchema = eventDraftSchema.superRefine((values, context)
 
   const startsAt = losAngelesWallTimeToInstant(values.startsAt)?.getTime()
   const endsAt = losAngelesWallTimeToInstant(values.endsAt)?.getTime()
-  if (startsAt === undefined || startsAt <= Date.now()) {
+  if (startsAt === undefined || (requireFutureStart && startsAt <= Date.now())) {
     context.addIssue({
       code: 'custom',
       path: ['startsAt'],
       message: 'Choose a future start time.',
     })
   }
-  if (endsAt === undefined || startsAt === undefined || endsAt <= startsAt) {
+  if (endsAt === undefined || startsAt === undefined || endsAt <= startsAt || (!requireFutureStart && endsAt <= Date.now())) {
     context.addIssue({
       code: 'custom',
       path: ['endsAt'],
-      message: 'Choose an end time after the start time.',
+      message: requireFutureStart ? 'Choose an end time after the start time.' : 'This event must not have ended.',
     })
   }
+  })
+}
 
-  if (values.admissionType !== 'free') {
-    context.addIssue({
-      code: 'custom',
-      path: ['admissionType'],
-      message: 'Paid event publishing is not available in this milestone. Choose Free to publish.',
-    })
-  }
+export const eventPublishSchema = publicationSchema(true)
+export const eventRepublishSchema = publicationSchema(false)
+
+export const publicEventSchema = z.strictObject({
+  id: z.string().uuid(),
+  title: z.string().min(1),
+  description: z.string().min(1),
+  category: z.enum(eventCategories),
+  startsAt: z.string().min(1),
+  endsAt: z.string().min(1),
+  timezone: z.literal('America/Los_Angeles'),
+  venueName: z.string().min(1),
+  addressLine1: z.string().min(1),
+  addressLine2: z.string().nullable(),
+  city: z.string().min(1),
+  region: z.literal('CA'),
+  postalCode: z.string().min(1),
+  countryCode: z.literal('US'),
+  latitude: z.number().finite().min(-90).max(90),
+  longitude: z.number().finite().min(-180).max(180),
+  artworkPath: z.string().nullable(),
+  animationPreset: z.string().min(1),
+  admissionType: z.enum(['free', 'paid']),
+  minimumAge: z.enum(['all_ages', '18_plus', '21_plus']),
+  advisories: z.array(z.enum(['alcohol', 'cannabis', 'mature_content'])),
+  organizer: z.strictObject({ id: z.string().uuid(), displayName: z.string().min(1) }),
 })

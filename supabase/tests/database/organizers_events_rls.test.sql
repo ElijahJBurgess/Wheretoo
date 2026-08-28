@@ -1,7 +1,43 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(31);
+select plan(38);
+
+select function_privs_are(
+  'public', 'get_required_event_policies', array[]::text[],
+  'anon', array['EXECUTE'],
+  'Anonymous can execute only the narrow required-policy display RPC'
+);
+
+select function_privs_are(
+  'public', 'get_owned_event_requirements', array['uuid'],
+  'anon', array[]::text[],
+  'Anonymous cannot execute the owned requirements RPC'
+);
+
+select function_privs_are(
+  'public', 'get_owned_event_requirements', array['uuid'],
+  'authenticated', array['EXECUTE'],
+  'Authenticated organizers can execute the owner-safe requirements RPC'
+);
+
+select function_privs_are(
+  'public', 'accept_current_event_policies', array['uuid'],
+  'authenticated', array['EXECUTE'],
+  'Authenticated organizers can execute the policy acceptance RPC'
+);
+
+select function_privs_are(
+  'private', 'configure_policy_environment', array['text'],
+  'authenticated', array[]::text[],
+  'Authenticated browsers cannot configure the policy environment'
+);
+
+select function_privs_are(
+  'private', 'production_policy_configuration_is_ready', array[]::text[],
+  'authenticated', array[]::text[],
+  'Authenticated browsers cannot probe production readiness'
+);
 
 select results_eq(
   $$
@@ -165,8 +201,8 @@ values
     '30000000-0000-0000-0000-000000000003',
     '10000000-0000-0000-0000-000000000001',
     'published',
-    'flagged',
-    'Published Flagged Event'
+    'under_review',
+    'Published Under Review Event'
   ),
   (
     '30000000-0000-0000-0000-000000000004',
@@ -195,6 +231,18 @@ select is_empty(
   'Organizer B cannot select Organizer A draft'
 );
 
+select throws_ok(
+  $$
+    select *
+    from public.get_owned_event_requirements(
+      '30000000-0000-0000-0000-000000000001'
+    )
+  $$,
+  'P0001',
+  'EVENT_NOT_FOUND',
+  'Organizer B gets authorization-safe not found for Organizer A requirements'
+);
+
 select is_empty(
   $$
     update public.events
@@ -219,51 +267,54 @@ reset role;
 select set_config('request.jwt.claim.sub', '', true);
 set local role anon;
 
-select is_empty(
+select throws_ok(
   $$
     select id
     from public.events
     where id = '30000000-0000-0000-0000-000000000001'
   $$,
-  'Anonymous cannot see a draft'
+  '42501', 'permission denied for table events',
+  'Anonymous cannot select a draft from the base event table'
 );
 
-select results_eq(
+select throws_ok(
   $$
     select id
     from public.events
     where id = '30000000-0000-0000-0000-000000000002'
   $$,
-  $$ values ('30000000-0000-0000-0000-000000000002'::uuid) $$,
-  'Anonymous can see a published clear event'
+  '42501', 'permission denied for table events',
+  'Anonymous cannot bypass projections for a published clear event'
 );
 
-select results_eq(
+select throws_ok(
   $$
     select id
     from public.events
     where id = '30000000-0000-0000-0000-000000000003'
   $$,
-  $$ values ('30000000-0000-0000-0000-000000000003'::uuid) $$,
-  'Anonymous can see a published flagged event'
+  '42501', 'permission denied for table events',
+  'Anonymous cannot select an under-review event from the base table'
 );
 
-select is_empty(
+select throws_ok(
   $$
     select id
     from public.events
     where id = '30000000-0000-0000-0000-000000000004'
   $$,
-  'Anonymous cannot see a published blocked event'
+  '42501', 'permission denied for table events',
+  'Anonymous cannot select a blocked event from the base table'
 );
 
-select is_empty(
+select throws_ok(
   $$
     select id
     from public.events
     where id = '30000000-0000-0000-0000-000000000005'
   $$,
-  'Anonymous cannot see a published removed event'
+  '42501', 'permission denied for table events',
+  'Anonymous cannot select a removed event from the base table'
 );
 
 reset role;

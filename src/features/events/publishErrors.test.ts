@@ -11,6 +11,12 @@ describe('publish error copy', () => {
     EVENT_OUTSIDE_SERVICE_AREA: 'Choose a location inside the current Bay Area service area.',
     PAID_PUBLISHING_NOT_AVAILABLE: 'Paid event publishing is not available in this milestone. Choose Free to publish.',
     EVENT_MODERATION_BLOCKED: 'This event cannot be published in its current moderation state.',
+    EVENT_DISCLOSURES_REQUIRED: 'Complete the event requirements before publishing.',
+    EVENT_POLICY_ACCEPTANCE_REQUIRED:
+      'Review and accept the current Organizer Terms and Event Policy before publishing.',
+    EVENT_PUBLIC_HISTORY_UNKNOWN: 'This event needs moderation review before it can be published.',
+    POLICY_ENVIRONMENT_UNCONFIGURED: 'Publishing is temporarily unavailable. Try again later.',
+    POLICY_REQUIREMENTS_INVALID: 'Publishing is temporarily unavailable. Try again later.',
   }))('maps exact server code %s', (message, copy) => {
     expect(publishErrorCopy).toHaveProperty(message, copy)
     expect(getPublishErrorMessage({ message, details: 'private database detail' })).toBe(copy)

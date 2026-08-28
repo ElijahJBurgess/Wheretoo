@@ -65,9 +65,11 @@ describe('ticketTiersInputSchema', () => {
       >
     >(true)
     assertGeneratedDatabaseSurface<
-      IsExact<PublicTicketingEvent['tiers'], PublicTicketTierTuple>
+      IsExact<PublicTicketingEvent['tiers'], PublicTicketTierTuple | []>
     >(true)
-    assertGeneratedDatabaseSurface<IsExact<PublicTicketingEvent['event']['admission_type'], 'paid'>>(true)
+    assertGeneratedDatabaseSurface<
+      IsExact<PublicTicketingEvent['event']['admission_type'], 'free' | 'paid'>
+    >(true)
     assertGeneratedDatabaseSurface<IsExact<PublicTicketTier['currency'], 'usd'>>(true)
     assertGeneratedDatabaseSurface<
       IsExact<keyof OrderConfirmation, 'event' | 'orderNumber' | 'status' | 'tier'>
@@ -192,6 +194,8 @@ describe('publicTicketingEventSchema', () => {
           artwork_path: null,
           animation_preset: 'generic',
           admission_type: 'paid',
+          minimum_age: 'all_ages',
+          advisories: [],
           organizer: { id: '6b849fa0-4d5e-4faa-bf31-b169cb1bd7fe', display_name: 'Bay City Arts' },
         },
         tiers: [
@@ -231,6 +235,8 @@ describe('publicTicketingEventSchema', () => {
           artwork_path: null,
           animation_preset: 'generic',
           admission_type: 'paid',
+          minimum_age: 'all_ages',
+          advisories: ['alcohol'],
           organizer: { id: '6b849fa0-4d5e-4faa-bf31-b169cb1bd7fe', display_name: 'Bay City Arts' },
         },
         tiers: [
@@ -275,6 +281,8 @@ describe('publicTicketingEventSchema', () => {
         artwork_path: null,
         animation_preset: 'generic',
         admission_type: 'paid',
+        minimum_age: 'all_ages',
+        advisories: [],
         organizer: { id: '6b849fa0-4d5e-4faa-bf31-b169cb1bd7fe', display_name: 'Bay City Arts' },
       },
       tiers: [

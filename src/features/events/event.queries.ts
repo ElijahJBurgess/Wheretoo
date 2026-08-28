@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { getOwnedEvent, listOwnedEvents, publishEvent, saveEventDraft } from './event.api'
+import { getOwnedEvent, listOwnedEvents, publishEvent, saveEventDraft, saveEventRevision } from './event.api'
 
 export const eventKeys = {
   all: ['events'] as const,
@@ -32,6 +32,23 @@ export function useSaveEventDraft() {
     onSuccess: async (event, input) => {
       if (event.organizer_id === input.organizerId) {
         queryClient.setQueryData(eventKeys.detail(input.organizerId, event.id), event)
+      }
+      await queryClient.invalidateQueries({
+        queryKey: eventKeys.ownedList(input.organizerId),
+        exact: true,
+      })
+    },
+  })
+}
+
+export function useSaveEventRevision() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: saveEventRevision,
+    onSuccess: async (event, input) => {
+      if (event.id === input.eventId && event.organizer_id === input.organizerId) {
+        queryClient.setQueryData(eventKeys.detail(input.organizerId, input.eventId), event)
       }
       await queryClient.invalidateQueries({
         queryKey: eventKeys.ownedList(input.organizerId),

@@ -2,7 +2,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(31);
+select plan(35);
 
 insert into auth.users (id, email)
 values
@@ -84,7 +84,7 @@ values
   (
     '22000000-0000-0000-0000-000000000008',
     '12000000-0000-0000-0000-000000000001',
-    'published', 'flagged', 'Flagged Public Paid Event',
+    'published', 'clear', 'Flagged Public Paid Event',
     'A flagged paid event that remains publicly discoverable.', 'music',
     now() + interval '4 days', now() + interval '4 days 3 hours', 'Flagged Venue',
     '8 Market Street', 'San Francisco', 'CA', '94105', 'US',
@@ -143,6 +143,61 @@ values
   ('32000000-0000-0000-0000-000000000011', '22000000-0000-0000-0000-000000000009', 'Blocked Public Tier', null, 2000, 10, 'active', 1),
   ('32000000-0000-0000-0000-000000000012', '22000000-0000-0000-0000-000000000010', 'Removed Public Tier', null, 2000, 10, 'active', 1),
   ('32000000-0000-0000-0000-000000000013', '22000000-0000-0000-0000-000000000011', 'Draft Public Tier', null, 2000, 10, 'active', 1);
+
+insert into private.event_risk_disclosures (
+  event_id, minimum_age, alcohol_present, cannabis_present,
+  explicit_adult_content, gambling_present, weapons_present, high_risk_activity
+)
+values (
+  '22000000-0000-0000-0000-000000000008',
+  'all_ages', false, false, false, false, false, false
+);
+
+select set_config('request.jwt.claim.sub', '12000000-0000-0000-0000-000000000001', true);
+set local role authenticated;
+select public.accept_current_event_policies('22000000-0000-0000-0000-000000000008');
+reset role;
+
+insert into private.event_moderation_actions (
+  id, event_id, content_revision, input_sha256, actor_type, actor_user_id,
+  source, action, previous_status, new_status,
+  previous_public_history_status, new_public_history_status,
+  reason_code, policy_acceptance_id, moderation_version
+)
+select
+  '72000000-0000-4000-8000-000000000008',
+  events.id,
+  events.content_revision,
+  private.compute_event_input_sha256(events.id),
+  'organizer',
+  events.organizer_id,
+  'publish',
+  'authorize_publication',
+  'clear',
+  'clear',
+  events.public_history_status,
+  events.public_history_status,
+  'no_violation',
+  acceptances.id,
+  events.moderation_version
+from public.events as events
+join private.event_policy_acceptances as acceptances
+  on acceptances.event_id = events.id
+  and acceptances.content_revision = events.content_revision
+  and acceptances.input_sha256 = private.compute_event_input_sha256(events.id)
+where events.id = '22000000-0000-0000-0000-000000000008';
+
+update public.events
+set moderated_revision = content_revision,
+    publicly_authorized_revision = content_revision,
+    publicly_authorized_action_id = '72000000-0000-4000-8000-000000000008'
+where id = '22000000-0000-0000-0000-000000000008';
+
+select private.transition_event_public_eligibility(
+  '22000000-0000-0000-0000-000000000008',
+  true,
+  '72000000-0000-4000-8000-000000000008'
+);
 
 insert into public.orders (
   id, order_number, event_id, organizer_id, status, buyer_name, buyer_email,
@@ -394,7 +449,7 @@ select results_eq(
     from public.get_public_event_ticketing('22000000-0000-0000-0000-000000000008')
   $$,
   $$ values (1::bigint) $$,
-  'a published flagged paid event remains visible through the public projection'
+  'a published clear paid event remains visible through the public projection'
 );
 
 select results_eq(
@@ -415,9 +470,9 @@ select results_eq(
   $$,
   $$
     values ((array[
-      'address_line1', 'address_line2', 'admission_type', 'animation_preset', 'artwork_path',
+      'address_line1', 'address_line2', 'admission_type', 'advisories', 'animation_preset', 'artwork_path',
       'category', 'city', 'country_code', 'description', 'ends_at', 'id', 'latitude',
-      'longitude', 'organizer', 'postal_code', 'region', 'starts_at', 'timezone', 'title',
+      'longitude', 'minimum_age', 'organizer', 'postal_code', 'region', 'starts_at', 'timezone', 'title',
       'venue_name'
     ]::text[]) collate "C")
   $$,
@@ -481,5 +536,58 @@ select is_empty(
 );
 
 reset role;
+
+select set_config('request.jwt.claim.sub', '12000000-0000-0000-0000-000000000001', true);
+set local role authenticated;
+
+select lives_ok(
+  $$
+    select * from public.save_ticket_tiers(
+      '22000000-0000-0000-0000-000000000008',
+      '[
+        {"name":"Available","description":"Safe public description","unit_amount_minor":2100,"currency":"usd","quantity_total":12,"sort_order":1},
+        {"name":"Sold Out","description":null,"unit_amount_minor":2000,"currency":"usd","quantity_total":1,"sort_order":2}
+      ]'::jsonb
+    )
+  $$,
+  'paid tier price and capacity can change without public-text invalidation'
+);
+
+reset role;
+
+select results_eq(
+  $$ select content_revision from public.events where id = '22000000-0000-0000-0000-000000000008' $$,
+  $$ values (1::bigint) $$,
+  'paid tier price and capacity-only changes do not bump moderation revision'
+);
+
+select set_config('request.jwt.claim.sub', '12000000-0000-0000-0000-000000000001', true);
+set local role authenticated;
+
+select lives_ok(
+  $$
+    select * from public.save_ticket_tiers(
+      '22000000-0000-0000-0000-000000000008',
+      '[
+        {"name":"Available Early","description":"Updated public description","unit_amount_minor":2100,"currency":"usd","quantity_total":12,"sort_order":1},
+        {"name":"Sold Out","description":null,"unit_amount_minor":2000,"currency":"usd","quantity_total":1,"sort_order":2}
+      ]'::jsonb
+    )
+  $$,
+  'paid tier public text can change through the retained validated save path'
+);
+
+reset role;
+
+select results_eq(
+  $$
+    select content_revision, moderation_status
+    from public.events
+    where id = '22000000-0000-0000-0000-000000000008'
+  $$,
+  $$ values (2::bigint, 'under_review'::text) $$,
+  'paid tier public text invalidates the parent event while preserving sale records'
+);
+
 select * from finish();
 rollback;

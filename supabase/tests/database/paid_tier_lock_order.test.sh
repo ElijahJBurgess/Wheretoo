@@ -12,8 +12,74 @@ if [[ ! -x "$supabase_cli" ]]; then
 fi
 
 cleanup_sql="begin;
+set local session_replication_role = replica;
 delete from public.organizer_stripe_accounts where organizer_id = '14000000-0000-0000-0000-000000000001'::uuid;
 delete from public.ticket_tiers where event_id in (
+  '24000000-0000-0000-0000-000000000001'::uuid,
+  '24000000-0000-0000-0000-000000000002'::uuid,
+  '24000000-0000-0000-0000-000000000003'::uuid,
+  '24000000-0000-0000-0000-000000000004'::uuid
+);
+update public.events
+set publicly_authorized_revision = null,
+    publicly_authorized_action_id = null
+where id in (
+  '24000000-0000-0000-0000-000000000001'::uuid,
+  '24000000-0000-0000-0000-000000000002'::uuid,
+  '24000000-0000-0000-0000-000000000003'::uuid,
+  '24000000-0000-0000-0000-000000000004'::uuid
+);
+delete from private.event_public_eligibility_intervals where event_id in (
+  '24000000-0000-0000-0000-000000000001'::uuid,
+  '24000000-0000-0000-0000-000000000002'::uuid,
+  '24000000-0000-0000-0000-000000000003'::uuid,
+  '24000000-0000-0000-0000-000000000004'::uuid
+);
+update private.event_moderation_actions
+set review_request_id = null
+where event_id in (
+  '24000000-0000-0000-0000-000000000001'::uuid,
+  '24000000-0000-0000-0000-000000000002'::uuid,
+  '24000000-0000-0000-0000-000000000003'::uuid,
+  '24000000-0000-0000-0000-000000000004'::uuid
+);
+delete from private.moderation_review_requests where event_id in (
+  '24000000-0000-0000-0000-000000000001'::uuid,
+  '24000000-0000-0000-0000-000000000002'::uuid,
+  '24000000-0000-0000-0000-000000000003'::uuid,
+  '24000000-0000-0000-0000-000000000004'::uuid
+);
+delete from private.event_reports where event_id in (
+  '24000000-0000-0000-0000-000000000001'::uuid,
+  '24000000-0000-0000-0000-000000000002'::uuid,
+  '24000000-0000-0000-0000-000000000003'::uuid,
+  '24000000-0000-0000-0000-000000000004'::uuid
+);
+delete from private.event_moderation_actions where event_id in (
+  '24000000-0000-0000-0000-000000000001'::uuid,
+  '24000000-0000-0000-0000-000000000002'::uuid,
+  '24000000-0000-0000-0000-000000000003'::uuid,
+  '24000000-0000-0000-0000-000000000004'::uuid
+);
+delete from private.event_moderation_evaluations where event_id in (
+  '24000000-0000-0000-0000-000000000001'::uuid,
+  '24000000-0000-0000-0000-000000000002'::uuid,
+  '24000000-0000-0000-0000-000000000003'::uuid,
+  '24000000-0000-0000-0000-000000000004'::uuid
+);
+delete from private.event_policy_acceptances where event_id in (
+  '24000000-0000-0000-0000-000000000001'::uuid,
+  '24000000-0000-0000-0000-000000000002'::uuid,
+  '24000000-0000-0000-0000-000000000003'::uuid,
+  '24000000-0000-0000-0000-000000000004'::uuid
+);
+delete from private.event_policy_legacy_exemptions where event_id in (
+  '24000000-0000-0000-0000-000000000001'::uuid,
+  '24000000-0000-0000-0000-000000000002'::uuid,
+  '24000000-0000-0000-0000-000000000003'::uuid,
+  '24000000-0000-0000-0000-000000000004'::uuid
+);
+delete from private.event_risk_disclosures where event_id in (
   '24000000-0000-0000-0000-000000000001'::uuid,
   '24000000-0000-0000-0000-000000000002'::uuid,
   '24000000-0000-0000-0000-000000000003'::uuid,
@@ -136,6 +202,32 @@ insert into public.organizer_stripe_accounts (
   'acct_paidtierlockorder',
   'active', 'active', 'clear', 0, 0, now()
 );
+insert into private.event_risk_disclosures (
+  event_id, minimum_age, alcohol_present, cannabis_present,
+  explicit_adult_content, gambling_present, weapons_present, high_risk_activity
+)
+select id, 'all_ages', false, false, false, false, false, false
+from public.events
+where id in (
+  '24000000-0000-0000-0000-000000000001'::uuid,
+  '24000000-0000-0000-0000-000000000002'::uuid,
+  '24000000-0000-0000-0000-000000000003'::uuid,
+  '24000000-0000-0000-0000-000000000004'::uuid
+);
+insert into private.event_policy_acceptances (
+  event_id, organizer_id, accepted_by_user_id, content_revision, input_sha256,
+  organizer_terms_version_id, event_policy_version_id
+)
+select
+  events.id,
+  events.organizer_id,
+  events.organizer_id,
+  events.content_revision,
+  private.compute_event_input_sha256(events.id),
+  'dev-organizer-terms-v1',
+  'dev-event-policy-v1'
+from public.events as events
+where events.id = '24000000-0000-0000-0000-000000000004'::uuid;
 commit;" >"$temporary_directory/setup.log" 2>&1
 
 wait_for_advisory_marker() {
@@ -292,6 +384,7 @@ run_paid_free_publish_case() {
   select pg_sleep(12);
   update public.events set admission_type = 'free' where id = '$event_id'::uuid;
   select set_config('request.jwt.claim.sub', '14000000-0000-0000-0000-000000000001', true);
+  select public.accept_current_event_policies('$event_id');
   select (public.publish_event('$event_id')).id;
   commit;" >"$temporary_directory/${case_name}-free.log" 2>&1 &
   free_publish_pid=$!

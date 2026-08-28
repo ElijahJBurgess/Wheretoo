@@ -1,4 +1,5 @@
 import { act, render, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -122,5 +123,78 @@ describe('SessionProvider', () => {
 
     await act(async () => rejectSession(new Error('Unmounted session failure')))
     expect(unsubscribe).toHaveBeenCalledOnce()
+  })
+
+  it('evicts every owner-private cache family when A signs out while retaining public data', async () => {
+    getSession.mockResolvedValue({ data: { session }, error: null })
+    let authListener: ((event: AuthChangeEvent, nextSession: Session | null) => void) | undefined
+    onAuthStateChange.mockImplementation((listener) => {
+      authListener = listener
+      return { data: { subscription: { unsubscribe } } }
+    })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SessionProvider queryClient={queryClient}><SessionProbe /></SessionProvider>
+      </QueryClientProvider>,
+    )
+    expect(await screen.findByText('authenticated:user-1')).toBeInTheDocument()
+
+    queryClient.setQueryData(['events', 'detail', 'user-1', 'event-1'], 'private event')
+    queryClient.setQueryData(['moderation', 'requirements', 'user-1', 'event-1'], 'private requirements')
+    queryClient.setQueryData(['organizer', 'user-1'], 'private organizer profile')
+    queryClient.setQueryData(['tickets', 'owned', 'user-1', 'event-1'], 'private ticket tiers')
+    queryClient.setQueryData(['payments', 'connect', 'user-1'], 'private payment readiness')
+    queryClient.setQueryData(['public-event', 'event-1'], 'public event')
+    queryClient.setQueryData(['tickets', 'public', 'event-1'], 'public ticketing')
+    queryClient.setQueryData(['moderation', 'policies'], 'public policies')
+
+    act(() => authListener?.('SIGNED_OUT', null))
+    expect(screen.getByText('anonymous')).toBeInTheDocument()
+    expect(queryClient.getQueryData(['events', 'detail', 'user-1', 'event-1'])).toBeUndefined()
+    expect(queryClient.getQueryData(['moderation', 'requirements', 'user-1', 'event-1'])).toBeUndefined()
+    expect(queryClient.getQueryData(['organizer', 'user-1'])).toBeUndefined()
+    expect(queryClient.getQueryData(['tickets', 'owned', 'user-1', 'event-1'])).toBeUndefined()
+    expect(queryClient.getQueryData(['payments', 'connect', 'user-1'])).toBeUndefined()
+    expect(queryClient.getQueryData(['public-event', 'event-1'])).toBe('public event')
+    expect(queryClient.getQueryData(['tickets', 'public', 'event-1'])).toBe('public ticketing')
+    expect(queryClient.getQueryData(['moderation', 'policies'])).toBe('public policies')
+
+    act(() => authListener?.('SIGNED_IN', session))
+    expect(screen.getByText('authenticated:user-1')).toBeInTheDocument()
+    expect(queryClient.getQueryData(['events', 'detail', 'user-1', 'event-1'])).toBeUndefined()
+    expect(queryClient.getQueryData(['moderation', 'requirements', 'user-1', 'event-1'])).toBeUndefined()
+  })
+
+  it('evicts A owner-private rows before an A-to-B identity switch while public caches remain', async () => {
+    getSession.mockResolvedValue({ data: { session }, error: null })
+    let authListener: ((event: AuthChangeEvent, nextSession: Session | null) => void) | undefined
+    onAuthStateChange.mockImplementation((listener) => {
+      authListener = listener
+      return { data: { subscription: { unsubscribe } } }
+    })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SessionProvider queryClient={queryClient}><SessionProbe /></SessionProvider>
+      </QueryClientProvider>,
+    )
+    expect(await screen.findByText('authenticated:user-1')).toBeInTheDocument()
+
+    queryClient.setQueryData(['organizer', 'user-1'], { display_name: 'Organizer A' })
+    queryClient.setQueryData(['events', 'owned', 'user-1'], ['A event'])
+    queryClient.setQueryData(['tickets', 'owned', 'user-1', 'event-1'], ['A tier'])
+    queryClient.setQueryData(['payments', 'connect', 'user-1'], { status: 'ready' })
+    queryClient.setQueryData(['public-event', 'event-1'], { title: 'Public event' })
+
+    const sessionB = { ...session, user: { ...session.user, id: 'user-2' } } as Session
+    act(() => authListener?.('SIGNED_IN', sessionB))
+
+    expect(screen.getByText('authenticated:user-2')).toBeInTheDocument()
+    expect(queryClient.getQueryData(['organizer', 'user-1'])).toBeUndefined()
+    expect(queryClient.getQueryData(['events', 'owned', 'user-1'])).toBeUndefined()
+    expect(queryClient.getQueryData(['tickets', 'owned', 'user-1', 'event-1'])).toBeUndefined()
+    expect(queryClient.getQueryData(['payments', 'connect', 'user-1'])).toBeUndefined()
+    expect(queryClient.getQueryData(['public-event', 'event-1'])).toEqual({ title: 'Public event' })
   })
 })

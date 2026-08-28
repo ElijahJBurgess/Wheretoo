@@ -1,6 +1,14 @@
 import type { PublishEventErrorCode } from './event.types'
 
-export const publishErrorCopy: Record<PublishEventErrorCode, string> = {
+type ModerationPublishErrorCode =
+  | PublishEventErrorCode
+  | 'EVENT_DISCLOSURES_REQUIRED'
+  | 'EVENT_POLICY_ACCEPTANCE_REQUIRED'
+  | 'EVENT_PUBLIC_HISTORY_UNKNOWN'
+  | 'POLICY_ENVIRONMENT_UNCONFIGURED'
+  | 'POLICY_REQUIREMENTS_INVALID'
+
+export const publishErrorCopy: Record<ModerationPublishErrorCode, string> = {
   EVENT_NOT_FOUND: 'This event could not be found.',
   EVENT_NOT_OWNED: 'This event is not available to this organizer.',
   EVENT_INCOMPLETE: 'Complete every required event detail before publishing.',
@@ -10,9 +18,15 @@ export const publishErrorCopy: Record<PublishEventErrorCode, string> = {
   PAID_PUBLISHING_NOT_AVAILABLE:
     'Paid event publishing is not available in this milestone. Choose Free to publish.',
   EVENT_MODERATION_BLOCKED: 'This event cannot be published in its current moderation state.',
+  EVENT_DISCLOSURES_REQUIRED: 'Complete the event requirements before publishing.',
+  EVENT_POLICY_ACCEPTANCE_REQUIRED:
+    'Review and accept the current Organizer Terms and Event Policy before publishing.',
+  EVENT_PUBLIC_HISTORY_UNKNOWN: 'This event needs moderation review before it can be published.',
+  POLICY_ENVIRONMENT_UNCONFIGURED: 'Publishing is temporarily unavailable. Try again later.',
+  POLICY_REQUIREMENTS_INVALID: 'Publishing is temporarily unavailable. Try again later.',
 }
 
-function isPublishEventErrorCode(message: unknown): message is PublishEventErrorCode {
+function isPublishEventErrorCode(message: unknown): message is ModerationPublishErrorCode {
   return typeof message === 'string' && Object.hasOwn(publishErrorCopy, message)
 }
 

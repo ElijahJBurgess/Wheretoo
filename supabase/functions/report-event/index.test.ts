@@ -1,0 +1,180 @@
+import { assertEquals, assertMatch, assertThrows } from "@std/assert";
+import { createReportEventHandler, deriveReportFingerprints } from "./index.ts";
+import { canonicalizeClientAddress } from "./ip.ts";
+import { reportRequestSchema } from "./contracts.ts";
+
+const appOrigin = "https://app.example";
+const reportSecret = "report-fingerprint-test-secret-at-least-thirty-two";
+const eventId = "29000000-0000-4000-8000-000000000001";
+
+function request(body: unknown, origin = appOrigin): Request {
+  return new Request("https://functions.example/report-event", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      origin,
+      "x-forwarded-for": "203.0.113.24",
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+Deno.test("report contract accepts only an event id and one bounded reason", () => {
+  assertEquals(reportRequestSchema.parse({ eventId, reason: "unsafe" }), {
+    eventId,
+    reason: "unsafe",
+  });
+  assertThrows(() => reportRequestSchema.parse({ eventId, reason: "unknown" }));
+  assertThrows(() =>
+    reportRequestSchema.parse({
+      eventId,
+      reason: "unsafe",
+      note: "please remove",
+    })
+  );
+});
+
+Deno.test("report fingerprints are independent HMAC digests and never return client address", async () => {
+  const fingerprints = await deriveReportFingerprints(
+    "203.0.113.24",
+    reportSecret,
+  );
+  assertMatch(fingerprints.actorFingerprint, /^[a-f0-9]{64}$/);
+  assertMatch(fingerprints.networkFingerprint, /^[a-f0-9]{64}$/);
+  assertEquals(
+    fingerprints.actorFingerprint === fingerprints.networkFingerprint,
+    false,
+  );
+  assertEquals(JSON.stringify(fingerprints).includes("203.0.113.24"), false);
+});
+
+Deno.test("equivalent IPv6 spellings hash as one canonical actor and /64 network", async () => {
+  const compressed = canonicalizeClientAddress("2001:db8:42:5::1");
+  const expanded = canonicalizeClientAddress(
+    "2001:0db8:0042:0005:0000:0000:0000:0001",
+  );
+  const sameNetwork = canonicalizeClientAddress("2001:db8:42:5::2");
+  const otherNetwork = canonicalizeClientAddress("2001:db8:42:6::1");
+  assertEquals(compressed?.actorInput, expanded?.actorInput);
+  assertEquals(compressed?.networkInput, sameNetwork?.networkInput);
+  assertEquals(compressed?.networkInput === otherNetwork?.networkInput, false);
+  const compressedFingerprints = await deriveReportFingerprints(
+    compressed!.actorInput,
+    reportSecret,
+    compressed!.networkInput,
+  );
+  const expandedFingerprints = await deriveReportFingerprints(
+    expanded!.actorInput,
+    reportSecret,
+    expanded!.networkInput,
+  );
+  assertEquals(
+    compressedFingerprints.actorFingerprint,
+    expandedFingerprints.actorFingerprint,
+  );
+  assertEquals(
+    compressedFingerprints.networkFingerprint,
+    expandedFingerprints.networkFingerprint,
+  );
+});
+
+Deno.test("IPv4 canonicalization masks the approved /24 and rejects malformed addresses", () => {
+  const first = canonicalizeClientAddress("203.0.113.24");
+  const sameNetwork = canonicalizeClientAddress("203.0.113.99");
+  const otherNetwork = canonicalizeClientAddress("203.0.114.1");
+  assertEquals(first?.actorInput, "ipv4:203.0.113.24");
+  assertEquals(first?.networkInput, "ipv4:203.0.113.0/24");
+  assertEquals(first?.networkInput, sameNetwork?.networkInput);
+  assertEquals(first?.networkInput === otherNetwork?.networkInput, false);
+  for (
+    const malformed of [
+      "203.0.113.999",
+      "2001:db8::1%zone",
+      "2001:::1",
+      "not-an-ip",
+    ]
+  ) {
+    assertEquals(canonicalizeClientAddress(malformed), null);
+  }
+});
+
+Deno.test("IPv4-mapped IPv6 canonicalizes to the same IPv4 actor and /24", () => {
+  const ipv4 = canonicalizeClientAddress("203.0.113.24");
+  const mappedCompressed = canonicalizeClientAddress("::ffff:203.0.113.24");
+  const mappedExpanded = canonicalizeClientAddress(
+    "0:0:0:0:0:ffff:cb00:7118",
+  );
+  const otherPrefix = canonicalizeClientAddress("::ffff:203.0.114.1");
+  assertEquals(mappedCompressed, ipv4);
+  assertEquals(mappedExpanded, ipv4);
+  assertEquals(
+    mappedCompressed?.networkInput === otherPrefix?.networkInput,
+    false,
+  );
+  for (
+    const malformed of ["::ffff:203.0.113.999", "::ffff:203.0.113.24%zone"]
+  ) {
+    assertEquals(canonicalizeClientAddress(malformed), null);
+  }
+});
+
+Deno.test("report endpoint returns bounded success for dedupe and safe not-found", async () => {
+  const calls: unknown[] = [];
+  const handler = createReportEventHandler({
+    appOrigin,
+    reportFingerprintSecret: reportSecret,
+    submit: (payload) => {
+      calls.push(payload);
+      return Promise.resolve("duplicate");
+    },
+    clientAddress: () => "203.0.113.24",
+  });
+  const duplicate = await handler(request({ eventId, reason: "unsafe" }));
+  assertEquals(duplicate.status, 202);
+  assertEquals(await duplicate.json(), { status: "received" });
+  assertEquals(JSON.stringify(calls).includes("203.0.113.24"), false);
+
+  const notFound = createReportEventHandler({
+    appOrigin,
+    reportFingerprintSecret: reportSecret,
+    submit: () => Promise.resolve("not_found"),
+    clientAddress: () => "203.0.113.24",
+  });
+  const response = await notFound(request({ eventId, reason: "unsafe" }));
+  assertEquals(response.status, 404);
+  assertEquals(await response.json(), { error: { code: "EVENT_NOT_FOUND" } });
+});
+
+Deno.test("report endpoint rejects non-exact origin and malformed payload without calling the database", async () => {
+  let calls = 0;
+  const handler = createReportEventHandler({
+    appOrigin,
+    reportFingerprintSecret: reportSecret,
+    submit: () => {
+      calls += 1;
+      return Promise.resolve("submitted");
+    },
+    clientAddress: () => "203.0.113.24",
+  });
+  const denied = await handler(
+    request({ eventId, reason: "unsafe" }, "https://attacker.example"),
+  );
+  assertEquals(denied.status, 403);
+  assertEquals(await denied.json(), { error: { code: "CORS_ORIGIN_DENIED" } });
+  const malformed = await handler(request({ eventId, reason: "bad" }));
+  assertEquals(malformed.status, 400);
+  assertEquals(await malformed.json(), { error: { code: "INVALID_REQUEST" } });
+  assertEquals(calls, 0);
+});
+
+Deno.test("report endpoint does not expose database failures", async () => {
+  const handler = createReportEventHandler({
+    appOrigin,
+    reportFingerprintSecret: reportSecret,
+    submit: () => Promise.reject(new Error("private database detail")),
+    clientAddress: () => "203.0.113.24",
+  });
+  const response = await handler(request({ eventId, reason: "unsafe" }));
+  assertEquals(response.status, 500);
+  assertEquals(await response.json(), { error: { code: "INTERNAL_ERROR" } });
+});
