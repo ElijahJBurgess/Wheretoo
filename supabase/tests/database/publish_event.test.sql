@@ -539,7 +539,7 @@ select results_eq(
 
 select lives_ok(
   $$ select public.publish_event('20000000-0000-0000-0000-000000000013') $$,
-  'under-review event publishes without changing moderation'
+  'provenance-free under-review event publishes without changing moderation'
 );
 
 select results_eq(
@@ -549,7 +549,7 @@ select results_eq(
     where id = '20000000-0000-0000-0000-000000000013'
   $$,
   $$ values ('under_review'::text) $$,
-  'under-review moderation status persists through publish RPC'
+  'provenance-free under-review moderation status persists through publish RPC'
 );
 
 reset role;
@@ -574,7 +574,7 @@ select is_empty(
       '20000000-0000-0000-0000-000000000013'
     ) as public_event(event_payload)
   $$,
-  'published under-review event remains hidden anonymously'
+  'published provenance-free under-review event remains hidden anonymously'
 );
 
 reset role;

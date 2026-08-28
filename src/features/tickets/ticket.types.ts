@@ -14,8 +14,11 @@ export type TicketTiersInput = z.output<typeof ticketTiersInputSchema>
 export type { PublicTicketTier, PublicTicketTierTuple }
 export type CanonicalPublicTicketingEvent = z.output<typeof publicTicketingEventSchema>
 
-type CanonicalPublicEvent = CanonicalPublicTicketingEvent['event']
-export type PublicTicketingEvent = Omit<CanonicalPublicTicketingEvent, 'event'> & {
-  event: Omit<CanonicalPublicEvent, 'minimum_age' | 'advisories'>
-    & Partial<Pick<CanonicalPublicEvent, 'minimum_age' | 'advisories'>>
-}
+type RelaxedPublicTicketingEvent<T> = T extends CanonicalPublicTicketingEvent
+  ? Omit<T, 'event'> & {
+      event: Omit<T['event'], 'minimum_age' | 'advisories'>
+        & Partial<Pick<T['event'], 'minimum_age' | 'advisories'>>
+    }
+  : never
+
+export type PublicTicketingEvent = RelaxedPublicTicketingEvent<CanonicalPublicTicketingEvent>

@@ -29,11 +29,20 @@ import type {
   StaffRole,
 } from './moderation.types'
 
+const nullableDisclosureFields = [
+  'minimum_age', 'alcohol_present', 'cannabis_present', 'explicit_adult_content',
+  'gambling_present', 'weapons_present', 'high_risk_activity',
+] as const
 const requirementsRpcRowSchema = z.strictObject({
-  minimum_age: z.string(), alcohol_present: z.boolean(), cannabis_present: z.boolean(), explicit_adult_content: z.boolean(),
-  gambling_present: z.boolean(), weapons_present: z.boolean(), high_risk_activity: z.boolean(), needs_acceptance: z.boolean(),
+  minimum_age: z.string().nullable(), alcohol_present: z.boolean().nullable(), cannabis_present: z.boolean().nullable(), explicit_adult_content: z.boolean().nullable(),
+  gambling_present: z.boolean().nullable(), weapons_present: z.boolean().nullable(), high_risk_activity: z.boolean().nullable(), needs_acceptance: z.boolean(),
   organizer_terms_label: z.string(), organizer_terms_version_id: z.string(), organizer_terms_stage: z.string(), organizer_terms_url: z.string(),
   event_policy_label: z.string(), event_policy_version_id: z.string(), event_policy_stage: z.string(), event_policy_url: z.string(),
+}).superRefine((row, context) => {
+  const nullCount = nullableDisclosureFields.filter((field) => row[field] === null).length
+  if (nullCount !== 0 && nullCount !== nullableDisclosureFields.length) {
+    context.addIssue({ code: 'custom', message: 'Disclosure projection must be wholly absent or complete.' })
+  }
 })
 const savedRequirementsRpcRowSchema = z.strictObject({
   minimum_age: z.string(), alcohol_present: z.boolean(), cannabis_present: z.boolean(), explicit_adult_content: z.boolean(),
@@ -92,13 +101,13 @@ function parseContract<T>(schema: z.ZodType<T>, value: unknown): T {
 
 function requirementsFromRpc(row: z.infer<typeof requirementsRpcRowSchema>): EventRequirements {
   return parseContract(eventRequirementsSchema, {
-    minimumAge: row.minimum_age,
-    alcoholPresent: row.alcohol_present,
-    cannabisPresent: row.cannabis_present,
-    explicitAdultContent: row.explicit_adult_content,
-    gamblingPresent: row.gambling_present,
-    weaponsPresent: row.weapons_present,
-    highRiskActivity: row.high_risk_activity,
+    minimumAge: row.minimum_age ?? 'all_ages',
+    alcoholPresent: row.alcohol_present ?? false,
+    cannabisPresent: row.cannabis_present ?? false,
+    explicitAdultContent: row.explicit_adult_content ?? false,
+    gamblingPresent: row.gambling_present ?? false,
+    weaponsPresent: row.weapons_present ?? false,
+    highRiskActivity: row.high_risk_activity ?? false,
     needsAcceptance: row.needs_acceptance,
     organizerTerms: {
       policyKind: 'organizer_terms', label: row.organizer_terms_label, versionId: row.organizer_terms_version_id,

@@ -90,39 +90,56 @@ const publicTicketTiersSchema = z
     return [first, second, third]
   })
 
-export const publicTicketingEventSchema = z
+const publicEventProjectionSchema = z
   .object({
-    event: z
+    id: lowercaseRfcUuidSchema,
+    title: z.string().trim().min(3).max(120),
+    description: z.string().trim().min(20).max(5_000),
+    category: z.enum(eventCategories),
+    starts_at: z.string().datetime({ offset: true }),
+    ends_at: z.string().datetime({ offset: true }),
+    timezone: z.string(),
+    venue_name: z.string().trim().max(160).nullable(),
+    address_line1: z.string().trim().min(1),
+    address_line2: z.string().nullable(),
+    city: z.string().trim().min(1),
+    region: z.literal('CA'),
+    postal_code: z.string().trim().min(1),
+    country_code: z.literal('US'),
+    latitude: z.number().finite().min(36.8).max(38.9),
+    longitude: z.number().finite().min(-123.6).max(-121),
+    artwork_path: z.string().trim().min(1).nullable(),
+    animation_preset: z.string().trim().min(1),
+    minimum_age: z.enum(['all_ages', '18_plus', '21_plus']),
+    advisories: z.array(z.enum(['alcohol', 'cannabis', 'mature_content'])),
+    organizer: z
       .object({
         id: lowercaseRfcUuidSchema,
-        title: z.string().trim().min(3).max(120),
-        description: z.string().trim().min(20).max(5_000),
-        category: z.enum(eventCategories),
-        starts_at: z.string().datetime({ offset: true }),
-        ends_at: z.string().datetime({ offset: true }),
-        timezone: z.string(),
-        venue_name: z.string().trim().max(160).nullable(),
-        address_line1: z.string().trim().min(1),
-        address_line2: z.string().nullable(),
-        city: z.string().trim().min(1),
-        region: z.literal('CA'),
-        postal_code: z.string().trim().min(1),
-        country_code: z.literal('US'),
-        latitude: z.number().finite().min(36.8).max(38.9),
-        longitude: z.number().finite().min(-123.6).max(-121),
-        artwork_path: z.string().trim().min(1).nullable(),
-        animation_preset: z.string().trim().min(1),
-        admission_type: z.literal('paid'),
-        minimum_age: z.enum(['all_ages', '18_plus', '21_plus']),
-        advisories: z.array(z.enum(['alcohol', 'cannabis', 'mature_content'])),
-        organizer: z
-          .object({
-            id: lowercaseRfcUuidSchema,
-            display_name: z.string().trim().min(2).max(100),
-          })
-          .strict(),
+        display_name: z.string().trim().min(2).max(100),
       })
       .strict(),
+  })
+  .strict()
+
+export const publicPaidTicketingEventSchema = z
+  .object({
+    event: publicEventProjectionSchema.extend({ admission_type: z.literal('paid') }),
     tiers: publicTicketTiersSchema,
   })
   .strict()
+
+export const publicFreeEventSchema = publicEventProjectionSchema.extend({
+  admission_type: z.literal('free'),
+})
+
+const publicFreeEventShellSchema = z
+  .object({
+    event: publicFreeEventSchema,
+    tiers: z.tuple([]),
+  })
+  .strict()
+
+export const publicTicketingEventSchema = z.union([
+  publicPaidTicketingEventSchema,
+  publicFreeEventShellSchema,
+])

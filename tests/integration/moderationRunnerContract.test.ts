@@ -14,7 +14,39 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 const repositoryRoot = path.resolve(fileURLToPath(new URL('../..', import.meta.url)))
 const runnerPath = path.join(repositoryRoot, 'tests/integration/run-moderation-proof.sh')
+const browserRunnerPath = path.join(repositoryRoot, 'tests/e2e/run-moderation-browser-proof.sh')
+const journeyPath = path.join(repositoryRoot, 'tests/e2e/support/moderationJourney.ts')
+const browserSpecPaths = [
+  path.join(repositoryRoot, 'tests/e2e/moderation-public-eligibility.spec.ts'),
+  path.join(repositoryRoot, 'tests/e2e/moderation-public-eligibility.visual.spec.ts'),
+] as const
 const packagePath = path.join(repositoryRoot, 'package.json')
+
+const build25UnitPaths = [
+  'src/features/moderation/EventPolicyPage.test.tsx',
+  'src/features/moderation/EventRequirementsStep.test.tsx',
+  'src/features/moderation/ModerationCasePage.test.tsx',
+  'src/features/moderation/ModerationQueuePage.test.tsx',
+  'src/features/moderation/OrganizerAgreementStep.test.tsx',
+  'src/features/moderation/OrganizerTermsPage.test.tsx',
+  'src/features/moderation/ReportEventDialog.test.tsx',
+  'src/features/moderation/RequireStaff.test.tsx',
+  'src/features/moderation/moderation.api.test.ts',
+  'src/features/moderation/moderation.queries.test.tsx',
+  'src/features/moderation/moderation.schemas.test.ts',
+  'src/features/events/EventEditorPage.test.tsx',
+  'src/features/events/EventPreviewPage.test.tsx',
+  'src/features/events/EventReviewStep.test.tsx',
+  'src/features/events/LocationSearchField.test.tsx',
+  'src/features/events/OrganizerEventsPage.test.tsx',
+  'src/features/events/PublishedEventPage.test.tsx',
+  'src/features/tickets/PublicTicketEventPage.test.tsx',
+  'src/features/tickets/publicTicketing.api.test.ts',
+  'src/features/tickets/publicTicketing.queries.test.tsx',
+  'src/features/tickets/ticket.schemas.test.ts',
+  'src/app/router/router.test.tsx',
+  'src/components/layout/OrganizerLayout.test.tsx',
+] as const
 
 const moderationSqlChildren = [
   'moderation_schema',
@@ -122,7 +154,7 @@ case "$*" in
     printf '%s\\n' '[{"id":"abcdefghijklmnopqrst","linked":true,"status":"ACTIVE_HEALTHY"}]'
     ;;
   "migration list --linked")
-    printf '%s\\n' '{"migrations":[{"local":"20260826011000","remote":"20260826011000"}]}'
+    printf '%s\\n' '{"migrations":[{"local":"20260826011200","remote":"20260826011200"}]}'
     ;;
   *"test db --linked"*)
     printf '%s\\n' 'LegacyDockerRunError: Docker Desktop is a prerequisite for local development.' >&2
@@ -182,6 +214,57 @@ esac
   }
 }
 
+async function executePartialBrowserCleanup(
+  source: string,
+  identities: readonly [string, string, string],
+) {
+  const root = await mkdtemp(path.join(tmpdir(), 'moderation-browser-cleanup-contract-'))
+  temporaryDirectories.push(root)
+  const cleanupLog = path.join(root, 'cleanup.log')
+  const scriptPath = path.join(root, 'cleanup-contract.sh')
+  const cleanupMatch = source.match(/cleanup\(\) \{[\s\S]*?\n\}\n\ntrap cleanup/)
+  if (!cleanupMatch) throw new Error('Browser runner cleanup function is missing.')
+  const cleanupSource = cleanupMatch[0].replace(/\n\ntrap cleanup$/, '')
+
+  await writeFile(
+    scriptPath,
+    `#!/usr/bin/env bash
+set -u
+${cleanupSource}
+delete_auth_user() { printf 'delete:%s\\n' "$1" >> "$CLEANUP_LOG"; }
+verify_auth_user_absent() { printf 'verify:%s\\n' "$1" >> "$CLEANUP_LOG"; }
+temporary_directory="$(mktemp -d "${root}/artifacts.XXXXXX")"
+organizer_a_id='${identities[0]}'
+organizer_b_id='${identities[1]}'
+staff_id='${identities[2]}'
+report_server_pid=''
+admin_key='contract-admin'
+supabase_url='https://contract.invalid'
+supabase_cli='false'
+known_bucket_sql="'contract'"
+cleanup_failed=0
+cleanup
+`,
+  )
+  await chmod(scriptPath, 0o700)
+
+  const child = spawn('bash', [scriptPath], {
+    cwd: root,
+    env: { ...process.env, CLEANUP_LOG: cleanupLog },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  let stderr = ''
+  child.stderr.on('data', (chunk: Buffer) => {
+    stderr += chunk.toString()
+  })
+  const exitCode = await new Promise<number | null>((resolve) => child.on('close', resolve))
+  return {
+    exitCode,
+    stderr,
+    log: await readFile(cleanupLog, 'utf8'),
+  }
+}
+
 describe('Build 2.5 moderation proof runner', () => {
   it('exposes one canonical package command', async () => {
     const packageJson = JSON.parse(await readFile(packagePath, 'utf8')) as {
@@ -190,6 +273,74 @@ describe('Build 2.5 moderation proof runner', () => {
 
     expect(packageJson.scripts?.['test:integration:moderation']).toBe(
       'tests/integration/run-moderation-proof.sh',
+    )
+  })
+
+  it('exposes closed Build 2.5 unit and Edge Function allowlists', async () => {
+    const packageJson = JSON.parse(await readFile(packagePath, 'utf8')) as {
+      scripts?: Record<string, string>
+    }
+    const build25Command = [
+      'VITE_SUPABASE_URL=https://task16-disabled.supabase.co',
+      'VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_task16_disabled',
+      'VITE_MAPBOX_ACCESS_TOKEN=task16-disabled',
+      'VITE_STRIPE_PUBLISHABLE_KEY=pk_test_task16_disabled',
+      'vitest run',
+      ...build25UnitPaths,
+    ].join(' ')
+    const moderationFunctionCommand = [
+      'deno test --allow-env',
+      'supabase/functions/report-event/index.test.ts',
+      'supabase/functions/moderate-event-queue/index.test.ts',
+    ].join(' ')
+
+    expect(packageJson.scripts?.['test:build25']).toBe(build25Command)
+    expect(packageJson.scripts?.['test:functions:moderation']).toBe(moderationFunctionCommand)
+    expect(`${build25UnitPaths.join(' ')} supabase/functions/report-event/index.test.ts supabase/functions/moderate-event-queue/index.test.ts`).not.toMatch(
+      /checkout|connect|webhook|refund|dispute|stripe/i,
+    )
+  })
+
+  it('requires independent Auth cleanup and observed secondary browser pages', async () => {
+    const [browserRunner, journey, ...specs] = await Promise.all([
+      readFile(browserRunnerPath, 'utf8'),
+      readFile(journeyPath, 'utf8'),
+      ...browserSpecPaths.map((specPath) => readFile(specPath, 'utf8')),
+    ])
+
+    expect(browserRunner).toContain(
+      'for user_id in "$organizer_a_id" "$organizer_b_id" "$staff_id"; do',
+    )
+    expect(browserRunner).toContain('verify_auth_user_absent "$user_id"')
+    expect(journey).toContain('export async function newObservedPage(')
+    for (const spec of specs) {
+      expect(spec).not.toMatch(/\.newPage\(\)/)
+    }
+
+    const afterFirstUser = await executePartialBrowserCleanup(
+      browserRunner,
+      ['10000000-0000-4000-8000-000000000001', '', ''],
+    )
+    expect(afterFirstUser.exitCode, afterFirstUser.stderr).toBe(0)
+    expect(afterFirstUser.log).toBe(
+      'delete:10000000-0000-4000-8000-000000000001\n' +
+      'verify:10000000-0000-4000-8000-000000000001\n',
+    )
+
+    const afterSecondUser = await executePartialBrowserCleanup(
+      browserRunner,
+      [
+        '10000000-0000-4000-8000-000000000001',
+        '10000000-0000-4000-8000-000000000002',
+        '',
+      ],
+    )
+    expect(afterSecondUser.exitCode, afterSecondUser.stderr).toBe(0)
+    expect(afterSecondUser.log).toBe(
+      'delete:10000000-0000-4000-8000-000000000001\n' +
+      'verify:10000000-0000-4000-8000-000000000001\n' +
+      'delete:10000000-0000-4000-8000-000000000002\n' +
+      'verify:10000000-0000-4000-8000-000000000002\n',
     )
   })
 

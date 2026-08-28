@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { SearchBox, type SearchBoxRefType } from '@mapbox/search-js-react'
 import { Button } from '../../components/ui/Button'
 import { publicEnv } from '../../lib/env'
@@ -78,6 +78,7 @@ export function LocationSearchField({ error, onChange, value }: LocationSearchFi
   const [retrievalError, setRetrievalError] = useState<string | null>(null)
   const searchBoxRef = useRef<SearchBoxRefType>(null)
   const suppressNextVendorClearRef = useRef(false)
+  const focusSearchOnMountRef = useRef(false)
 
   const searchText =
     searchState.ownerKey === valueKey
@@ -87,6 +88,15 @@ export function LocationSearchField({ error, onChange, value }: LocationSearchFi
         : formatLocation(value)
   const displayedError = retrievalError ?? error
   const errorId = displayedError ? 'event-location-error' : undefined
+
+  useEffect(() => {
+    if (value !== null || !focusSearchOnMountRef.current) return
+    const frame = requestAnimationFrame(() => {
+      focusSearchOnMountRef.current = false
+      searchBoxRef.current?.focus()
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [value])
 
   function handleSearchChange(nextText: string) {
     setRetrievalError(null)
@@ -140,6 +150,7 @@ export function LocationSearchField({ error, onChange, value }: LocationSearchFi
 
   function handleExternalClear() {
     suppressNextVendorClearRef.current = false
+    focusSearchOnMountRef.current = true
     clearField()
     onChange(null)
   }
@@ -159,25 +170,33 @@ export function LocationSearchField({ error, onChange, value }: LocationSearchFi
       <span className="ui-field__label" id="event-location-label">
         Event address
       </span>
-      <SearchBox
-        accessToken={publicEnv.mapboxAccessToken}
-        componentOptions={{ allowReverse: false }}
-        onChange={handleSearchChange}
-        onClear={handleVendorClear}
-        onRetrieve={handleRetrieve}
-        onSuggestError={handleSuggestError}
-        options={{
-          country: 'US',
-          language: 'en',
-          limit: 5,
-          proximity: { lat: 37.7749, lng: -122.4194 },
-          types: 'address,poi',
-        }}
-        placeholder="Search for a California address"
-        ref={searchBoxRef}
-        theme={searchBoxTheme}
-        value={searchText}
-      />
+      {value === null ? (
+        <SearchBox
+          accessToken={publicEnv.mapboxAccessToken}
+          componentOptions={{ allowReverse: false }}
+          onChange={handleSearchChange}
+          onClear={handleVendorClear}
+          onRetrieve={handleRetrieve}
+          onSuggestError={handleSuggestError}
+          options={{
+            country: 'US',
+            language: 'en',
+            limit: 5,
+            proximity: { lat: 37.7749, lng: -122.4194 },
+            types: 'address,poi',
+          }}
+          placeholder="Search for a California address"
+          ref={searchBoxRef}
+          theme={searchBoxTheme}
+          value={searchText}
+        />
+      ) : (
+        <input
+          aria-label="Search for a California address"
+          readOnly
+          value={searchText}
+        />
+      )}
 
       {value !== null ? (
         <div className="location-search-field__verified" role="status">

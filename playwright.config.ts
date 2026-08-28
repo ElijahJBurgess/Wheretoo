@@ -1,7 +1,19 @@
 import { defineConfig, devices } from '@playwright/test'
-import { loadE2EEnv } from './tests/e2e/support/e2eEnv'
+import { loadE2EEnv, loadModerationE2EEnv } from './tests/e2e/support/e2eEnv'
 
-const env = loadE2EEnv()
+const moderationProfile = process.env.WHERETO_E2E_PROFILE === 'moderation'
+const browserEnv = moderationProfile
+  ? (() => {
+      const env = loadModerationE2EEnv()
+      return {
+        supabaseUrl: env.supabaseUrl,
+        supabasePublishableKey: env.supabasePublishableKey,
+        // The moderation inventory never visits or invokes either integration.
+        mapboxAccessToken: 'task16-mapbox-disabled',
+        stripePublishableKey: 'pk_test_task16_disabled',
+      }
+    })()
+  : loadE2EEnv()
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -24,10 +36,10 @@ export default defineConfig({
     reuseExistingServer: false,
     timeout: 120_000,
     env: {
-      VITE_SUPABASE_URL: env.supabaseUrl,
-      VITE_SUPABASE_PUBLISHABLE_KEY: env.supabasePublishableKey,
-      VITE_MAPBOX_ACCESS_TOKEN: env.mapboxAccessToken,
-      VITE_STRIPE_PUBLISHABLE_KEY: env.stripePublishableKey,
+      VITE_SUPABASE_URL: browserEnv.supabaseUrl,
+      VITE_SUPABASE_PUBLISHABLE_KEY: browserEnv.supabasePublishableKey,
+      VITE_MAPBOX_ACCESS_TOKEN: browserEnv.mapboxAccessToken,
+      VITE_STRIPE_PUBLISHABLE_KEY: browserEnv.stripePublishableKey,
     },
   },
   projects: [

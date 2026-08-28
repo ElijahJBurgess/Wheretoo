@@ -89,15 +89,28 @@ select function_privs_are(
 );
 
 insert into auth.users (id, email)
-values (
-  '74000000-0000-4000-8000-000000000001',
-  'moderation-publish-owner@example.invalid'
-);
+values
+  (
+    '74000000-0000-4000-8000-000000000001',
+    'moderation-publish-owner@example.invalid'
+  ),
+  (
+    '74000000-0000-4000-8000-000000000002',
+    'moderation-publish-staff@example.invalid'
+  );
 
 insert into public.organizers (id, display_name)
 values (
   '74000000-0000-4000-8000-000000000001',
   'Digest Organizer'
+);
+
+insert into private.staff_roles (user_id, role, active, granted_by)
+values (
+  '74000000-0000-4000-8000-000000000002',
+  'moderator',
+  true,
+  '74000000-0000-4000-8000-000000000002'
 );
 
 insert into public.events (
@@ -523,6 +536,242 @@ set local role service_role;
 select lives_ok(
   $$ select private.configure_policy_environment('development') $$,
   'the rollback fixture configures only the exact founder development pair'
+);
+reset role;
+
+insert into public.events (
+  id,
+  organizer_id,
+  status,
+  moderation_status,
+  moderated_revision,
+  title,
+  description,
+  category,
+  venue_name,
+  starts_at,
+  ends_at,
+  timezone,
+  address_line1,
+  city,
+  region,
+  postal_code,
+  country_code,
+  mapbox_feature_id,
+  latitude,
+  longitude,
+  admission_type,
+  artwork_path,
+  public_history_status,
+  first_publicly_eligible_at,
+  published_at
+)
+values (
+  '74100000-0000-4000-8000-000000000032',
+  '74000000-0000-4000-8000-000000000001',
+  'draft', 'not_evaluated', null,
+  'UI-first low-risk publication fixture',
+  'An ordinary low-risk event that saves disclosures through the owner RPC before publication.',
+  'community', 'Requirements Hall',
+  now() + interval '42 days', now() + interval '42 days 2 hours',
+  'America/Los_Angeles', '1 Market Street', 'San Francisco', 'CA', '94105', 'US',
+  'mapbox.moderation-ui-first', 37.7936, -122.3958, 'free', null,
+  'never_public', null, null
+);
+
+select set_config(
+  'request.jwt.claim.sub',
+  '74000000-0000-4000-8000-000000000001',
+  true
+);
+set local role authenticated;
+select lives_ok(
+  $$
+    select public.save_owned_event_requirements(
+      '74100000-0000-4000-8000-000000000032',
+      '{"minimum_age":"all_ages","alcohol_present":false,"cannabis_present":false,"explicit_adult_content":false,"gambling_present":false,"weapons_present":false,"high_risk_activity":false}'::jsonb
+    )
+  $$,
+  'the UI-first fixture saves its initial complete low-risk disclosure snapshot'
+);
+select results_eq(
+  $$
+    select status, moderation_status
+    from public.events
+    where id = '74100000-0000-4000-8000-000000000032'
+  $$,
+  $$ values ('draft'::text, 'under_review'::text) $$,
+  'initial requirements intentionally invalidate the draft into under review'
+);
+select lives_ok(
+  $$
+    select *
+    from public.accept_current_event_policies(
+      '74100000-0000-4000-8000-000000000032'
+    )
+  $$,
+  'the UI-first fixture accepts the exact current policy pair after requirements are saved'
+);
+select lives_ok(
+  $$ select public.publish_event('74100000-0000-4000-8000-000000000032') $$,
+  'a complete UI-first low-risk draft publishes from under review'
+);
+reset role;
+
+select results_eq(
+  $$
+    select
+      status,
+      moderation_status,
+      moderated_revision = content_revision,
+      public_history_status,
+      first_publicly_eligible_at is not null,
+      public_eligibility_version
+    from public.events
+    where id = '74100000-0000-4000-8000-000000000032'
+  $$,
+  $$
+    values (
+      'published'::text,
+      'clear'::text,
+      true,
+      'previously_public'::text,
+      true,
+      1::bigint
+    )
+  $$,
+  'UI-first low-risk publication clears the current revision and opens its first public epoch'
+);
+
+insert into public.events (
+  id,
+  organizer_id,
+  status,
+  moderation_status,
+  moderated_revision,
+  title,
+  description,
+  category,
+  venue_name,
+  starts_at,
+  ends_at,
+  timezone,
+  address_line1,
+  city,
+  region,
+  postal_code,
+  country_code,
+  mapbox_feature_id,
+  latitude,
+  longitude,
+  admission_type,
+  artwork_path,
+  public_history_status,
+  first_publicly_eligible_at,
+  published_at
+)
+values (
+  '74100000-0000-4000-8000-000000000033',
+  '74000000-0000-4000-8000-000000000001',
+  'draft', 'not_evaluated', null,
+  'Human-held low-risk publication fixture',
+  'An ordinary low-risk event that a human moderator keeps held for a current user report.',
+  'community', 'Human Review Hall',
+  now() + interval '43 days', now() + interval '43 days 2 hours',
+  'America/Los_Angeles', '1 Market Street', 'San Francisco', 'CA', '94105', 'US',
+  'mapbox.moderation-human-held', 37.7936, -122.3958, 'free', null,
+  'never_public', null, null
+);
+
+select set_config(
+  'request.jwt.claim.sub',
+  '74000000-0000-4000-8000-000000000001',
+  true
+);
+set local role authenticated;
+select lives_ok(
+  $$
+    select public.save_owned_event_requirements(
+      '74100000-0000-4000-8000-000000000033',
+      '{"minimum_age":"all_ages","alcohol_present":false,"cannabis_present":false,"explicit_adult_content":false,"gambling_present":false,"weapons_present":false,"high_risk_activity":false}'::jsonb
+    )
+  $$,
+  'the human-held fixture first enters the organizer-edit under-review state'
+);
+select lives_ok(
+  $$
+    select *
+    from public.accept_current_event_policies(
+      '74100000-0000-4000-8000-000000000033'
+    )
+  $$,
+  'the human-held fixture records the exact current organizer acceptance'
+);
+reset role;
+
+create temporary table human_hold_snapshot on commit drop as
+select
+  content_revision,
+  private.compute_event_input_sha256(id) as input_sha256,
+  moderation_version
+from public.events
+where id = '74100000-0000-4000-8000-000000000033';
+grant select on human_hold_snapshot to authenticated;
+
+select set_config(
+  'request.jwt.claim.sub',
+  '74000000-0000-4000-8000-000000000002',
+  true
+);
+set local role authenticated;
+select lives_ok(
+  $$
+    select public.moderate_event(
+      '74100000-0000-4000-8000-000000000033',
+      content_revision,
+      input_sha256,
+      moderation_version,
+      'hold',
+      'user_report',
+      null
+    )
+    from human_hold_snapshot
+  $$,
+  'a human moderator applies a current same-state hold after organizer invalidation'
+);
+reset role;
+
+select set_config(
+  'request.jwt.claim.sub',
+  '74000000-0000-4000-8000-000000000001',
+  true
+);
+set local role authenticated;
+select lives_ok(
+  $$ select public.publish_event('74100000-0000-4000-8000-000000000033') $$,
+  'owner republish persists the human-held state without weakening enforcement'
+);
+reset role;
+
+select results_eq(
+  $$
+    select status, moderation_status
+    from public.events
+    where id = '74100000-0000-4000-8000-000000000033'
+  $$,
+  $$ values ('published'::text, 'under_review'::text) $$,
+  'current human hold remains under review after low-risk owner publish'
+);
+
+set local role anon;
+select is_empty(
+  $$
+    select public_event.event_payload
+    from public.get_public_event(
+      '74100000-0000-4000-8000-000000000033'
+    ) as public_event(event_payload)
+  $$,
+  'current human-held event remains absent from the anonymous public projection'
 );
 reset role;
 

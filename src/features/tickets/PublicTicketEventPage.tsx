@@ -6,7 +6,7 @@ import { ReportEventDialog } from '../moderation/ReportEventDialog'
 import { TicketTierList } from './TicketTierList'
 import { isRetryablePublicTicketingError } from './publicTicketing.errors'
 import { usePublicTicketingEvent } from './publicTicketing.queries'
-import type { PublicTicketTierTuple } from './ticket.types'
+import type { CanonicalPublicTicketingEvent, PublicTicketTierTuple } from './ticket.types'
 
 const dateFormatter = new Intl.DateTimeFormat('en-US', {
   timeZone: 'America/Los_Angeles',
@@ -177,7 +177,10 @@ export function PublicTicketEventPage() {
   }
 
   const publicEvent = eventQuery.data
-  const { event, tiers } = publicEvent
+  const { event } = publicEvent
+  const paidPublicEvent = publicEvent.event.admission_type === 'paid'
+    ? publicEvent as Extract<CanonicalPublicTicketingEvent, { event: { admission_type: 'paid' } }>
+    : null
   const dateAndTime = formatDateAndTime(event.starts_at, event.ends_at)
 
   return (
@@ -210,10 +213,18 @@ export function PublicTicketEventPage() {
             <h2 id="public-event-about">About this event</h2>
             <p>{event.description}</p>
           </section>
-          <PublicTicketPurchase
-            eventId={event.id}
-            tiers={tiers}
-          />
+          {paidPublicEvent !== null ? (
+            <PublicTicketPurchase
+              eventId={event.id}
+              tiers={paidPublicEvent.tiers}
+            />
+          ) : (
+            <section aria-labelledby="public-event-admission" className="public-event__tickets">
+              <p className="public-event__eyebrow">Admission</p>
+              <h2 id="public-event-admission">Free event</h2>
+              <p>No ticket purchase is required.</p>
+            </section>
+          )}
           {!hasRetryableStaleEvent ? <ReportEventDialog eventId={event.id} /> : null}
         </div>
       </article>

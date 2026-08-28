@@ -17,9 +17,35 @@ const requiredTask18Variables = [
   'TEST_TASK18_FIXTURE_PREFIX',
 ] as const
 
+const requiredModerationVariables = [
+  'TEST_SUPABASE_URL',
+  'TEST_SUPABASE_PUBLISHABLE_KEY',
+  'TEST_ORGANIZER_A_EMAIL',
+  'TEST_ORGANIZER_A_PASSWORD',
+  'TEST_ORGANIZER_B_EMAIL',
+  'TEST_ORGANIZER_B_PASSWORD',
+  'TEST_STAFF_EMAIL',
+  'TEST_STAFF_PASSWORD',
+  'TEST_MODERATION_FIXTURE_PREFIX',
+  'TEST_MODERATION_REPORT_FUNCTION_URL',
+  'TEST_MODERATION_REPORT_CLIENT_MOBILE',
+  'TEST_MODERATION_REPORT_CLIENT_DESKTOP',
+  'TEST_MODERATION_REPORT_EVENT_MOBILE_ID',
+  'TEST_MODERATION_REPORT_EVENT_DESKTOP_ID',
+  'TEST_MODERATION_STAFF_EVENT_MOBILE_ID',
+  'TEST_MODERATION_STAFF_EVENT_DESKTOP_ID',
+  'TEST_MODERATION_VISUAL_EVENT_MOBILE_ID',
+  'TEST_MODERATION_VISUAL_EVENT_DESKTOP_ID',
+  'TEST_MODERATION_MAP_ELIGIBLE_MOBILE_ID',
+  'TEST_MODERATION_MAP_ELIGIBLE_DESKTOP_ID',
+  'TEST_MODERATION_MAP_EXCLUDED_MOBILE_IDS',
+  'TEST_MODERATION_MAP_EXCLUDED_DESKTOP_IDS',
+] as const
+
 type E2EVariable =
   | (typeof requiredE2EVariables)[number]
   | (typeof requiredTask18Variables)[number]
+  | (typeof requiredModerationVariables)[number]
 
 export type E2EEnv = {
   supabaseUrl: string
@@ -36,6 +62,142 @@ export type Task18E2EEnv = E2EEnv & {
   task18FunctionUrl: string
   task18DriverToken: string
   task18FixturePrefix: string
+}
+
+export type ModerationProjectFixture = {
+  organizer: { email: string; password: string; displayName: string }
+  reportEventId: string
+  staffEventId: string
+  visualEventId: string
+  mapEligibleEventId: string
+  mapExcludedEventIds: readonly string[]
+  reportClientAddress: string
+}
+
+export type ModerationE2EEnv = {
+  supabaseUrl: string
+  supabasePublishableKey: string
+  staffEmail: string
+  staffPassword: string
+  fixturePrefix: string
+  reportFunctionUrl: string
+  fixtureForProject(projectName: string): ModerationProjectFixture
+}
+
+const lowercaseUuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+
+function parseUuid(name: (typeof requiredModerationVariables)[number], value: string): string {
+  if (!lowercaseUuidPattern.test(value)) {
+    throw new Error(`${name} must be one lowercase RFC UUID.`)
+  }
+  return value
+}
+
+function parseExcludedIds(name: (typeof requiredModerationVariables)[number], value: string): readonly string[] {
+  const ids = value.split(',')
+  if (ids.length !== 8 || new Set(ids).size !== ids.length || ids.some((id) => !lowercaseUuidPattern.test(id))) {
+    throw new Error(`${name} must contain eight unique lowercase RFC UUIDs separated by commas.`)
+  }
+  return ids
+}
+
+function validateSupabaseBrowserBoundary(urlValue: string, publishableKey: string) {
+  let url: URL
+  try {
+    url = new URL(urlValue)
+  } catch {
+    throw new Error('TEST_SUPABASE_URL must be one canonical HTTPS Supabase project URL.')
+  }
+  if (
+    url.protocol !== 'https:' ||
+    !/^[a-z0-9]{20}\.supabase\.co$/.test(url.hostname) ||
+    url.pathname !== '/' ||
+    url.search !== '' ||
+    url.hash !== ''
+  ) {
+    throw new Error('TEST_SUPABASE_URL must be one canonical HTTPS Supabase project URL.')
+  }
+  if (!publishableKey.startsWith('sb_publishable_')) {
+    throw new Error(
+      'TEST_SUPABASE_PUBLISHABLE_KEY must be an sb_publishable_ key. ' +
+        'Never use an admin, secret, or service-role key in Playwright or Vite.',
+    )
+  }
+}
+
+export function loadModerationE2EEnv(
+  source: Partial<Record<E2EVariable, string | undefined>> = process.env,
+): ModerationE2EEnv {
+  const missing = requiredModerationVariables.filter((name) => !source[name]?.trim())
+  if (missing.length > 0) {
+    throw new Error(`Missing required Task 16 E2E environment variables: ${missing.join(', ')}`)
+  }
+
+  validateSupabaseBrowserBoundary(source.TEST_SUPABASE_URL!, source.TEST_SUPABASE_PUBLISHABLE_KEY!)
+  if (!/^task16_[a-z0-9]{12}$/.test(source.TEST_MODERATION_FIXTURE_PREFIX!)) {
+    throw new Error('TEST_MODERATION_FIXTURE_PREFIX must identify one exact disposable fixture.')
+  }
+  let reportFunctionUrl: URL
+  try {
+    reportFunctionUrl = new URL(source.TEST_MODERATION_REPORT_FUNCTION_URL!)
+  } catch {
+    throw new Error('TEST_MODERATION_REPORT_FUNCTION_URL must be the local Task 16 report harness URL.')
+  }
+  if (
+    reportFunctionUrl.protocol !== 'http:' || reportFunctionUrl.hostname !== '127.0.0.1' ||
+    reportFunctionUrl.port !== '8000' || reportFunctionUrl.pathname !== '/' ||
+    reportFunctionUrl.search !== '' || reportFunctionUrl.hash !== ''
+  ) {
+    throw new Error('TEST_MODERATION_REPORT_FUNCTION_URL must be the local Task 16 report harness URL.')
+  }
+  for (const name of ['TEST_MODERATION_REPORT_CLIENT_MOBILE', 'TEST_MODERATION_REPORT_CLIENT_DESKTOP'] as const) {
+    if (!/^198\.51\.100\.(?:[1-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-4])$/.test(source[name]!)) {
+      throw new Error(`${name} must use one non-identifying TEST-NET-2 IPv4 address.`)
+    }
+  }
+
+  const projectFixtures = {
+    'mobile-chromium': {
+      organizer: {
+        email: source.TEST_ORGANIZER_A_EMAIL!,
+        password: source.TEST_ORGANIZER_A_PASSWORD!,
+        displayName: 'Whereto Task 16 Mobile Organizer',
+      },
+      reportEventId: parseUuid('TEST_MODERATION_REPORT_EVENT_MOBILE_ID', source.TEST_MODERATION_REPORT_EVENT_MOBILE_ID!),
+      staffEventId: parseUuid('TEST_MODERATION_STAFF_EVENT_MOBILE_ID', source.TEST_MODERATION_STAFF_EVENT_MOBILE_ID!),
+      visualEventId: parseUuid('TEST_MODERATION_VISUAL_EVENT_MOBILE_ID', source.TEST_MODERATION_VISUAL_EVENT_MOBILE_ID!),
+      mapEligibleEventId: parseUuid('TEST_MODERATION_MAP_ELIGIBLE_MOBILE_ID', source.TEST_MODERATION_MAP_ELIGIBLE_MOBILE_ID!),
+      mapExcludedEventIds: parseExcludedIds('TEST_MODERATION_MAP_EXCLUDED_MOBILE_IDS', source.TEST_MODERATION_MAP_EXCLUDED_MOBILE_IDS!),
+      reportClientAddress: source.TEST_MODERATION_REPORT_CLIENT_MOBILE!,
+    },
+    'desktop-chromium': {
+      organizer: {
+        email: source.TEST_ORGANIZER_B_EMAIL!,
+        password: source.TEST_ORGANIZER_B_PASSWORD!,
+        displayName: 'Whereto Task 16 Desktop Organizer',
+      },
+      reportEventId: parseUuid('TEST_MODERATION_REPORT_EVENT_DESKTOP_ID', source.TEST_MODERATION_REPORT_EVENT_DESKTOP_ID!),
+      staffEventId: parseUuid('TEST_MODERATION_STAFF_EVENT_DESKTOP_ID', source.TEST_MODERATION_STAFF_EVENT_DESKTOP_ID!),
+      visualEventId: parseUuid('TEST_MODERATION_VISUAL_EVENT_DESKTOP_ID', source.TEST_MODERATION_VISUAL_EVENT_DESKTOP_ID!),
+      mapEligibleEventId: parseUuid('TEST_MODERATION_MAP_ELIGIBLE_DESKTOP_ID', source.TEST_MODERATION_MAP_ELIGIBLE_DESKTOP_ID!),
+      mapExcludedEventIds: parseExcludedIds('TEST_MODERATION_MAP_EXCLUDED_DESKTOP_IDS', source.TEST_MODERATION_MAP_EXCLUDED_DESKTOP_IDS!),
+      reportClientAddress: source.TEST_MODERATION_REPORT_CLIENT_DESKTOP!,
+    },
+  } satisfies Record<string, ModerationProjectFixture>
+
+  return {
+    supabaseUrl: source.TEST_SUPABASE_URL!,
+    supabasePublishableKey: source.TEST_SUPABASE_PUBLISHABLE_KEY!,
+    staffEmail: source.TEST_STAFF_EMAIL!,
+    staffPassword: source.TEST_STAFF_PASSWORD!,
+    fixturePrefix: source.TEST_MODERATION_FIXTURE_PREFIX!,
+    reportFunctionUrl: reportFunctionUrl.toString(),
+    fixtureForProject(projectName) {
+      const fixture = projectFixtures[projectName as keyof typeof projectFixtures]
+      if (!fixture) throw new Error(`No disposable moderation fixture exists for Playwright project: ${projectName}`)
+      return fixture
+    },
+  }
 }
 
 export function loadE2EEnv(

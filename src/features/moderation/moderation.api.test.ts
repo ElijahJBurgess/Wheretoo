@@ -63,6 +63,38 @@ describe('moderation browser API', () => {
     await expect(getOwnedEventRequirements(eventId)).resolves.toBeNull()
   })
 
+  it('defaults the all-null disclosure projection for a first draft but rejects partial nulls', async () => {
+    const firstDraftRow = {
+      ...requirementsRow,
+      minimum_age: null,
+      alcohol_present: null,
+      cannabis_present: null,
+      explicit_adult_content: null,
+      gambling_present: null,
+      weapons_present: null,
+      high_risk_activity: null,
+    }
+    rpc.mockResolvedValueOnce({ data: [firstDraftRow], error: null })
+    await expect(getOwnedEventRequirements(eventId)).resolves.toMatchObject({
+      minimumAge: 'all_ages',
+      alcoholPresent: false,
+      cannabisPresent: false,
+      explicitAdultContent: false,
+      gamblingPresent: false,
+      weaponsPresent: false,
+      highRiskActivity: false,
+      needsAcceptance: true,
+    })
+
+    rpc.mockResolvedValueOnce({
+      data: [{ ...firstDraftRow, minimum_age: 'all_ages' }],
+      error: null,
+    })
+    await expect(getOwnedEventRequirements(eventId)).rejects.toEqual(
+      new ModerationApiError('UNAVAILABLE'),
+    )
+  })
+
   it('loads only the current owner review request safe projection', async () => {
     const reviewRow = {
       id: '37beaa67-b2a2-4b56-9c6c-e91208925c45', status: 'open',

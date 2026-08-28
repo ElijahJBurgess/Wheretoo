@@ -65,9 +65,11 @@ describe('ticketTiersInputSchema', () => {
       >
     >(true)
     assertGeneratedDatabaseSurface<
-      IsExact<PublicTicketingEvent['tiers'], PublicTicketTierTuple>
+      IsExact<PublicTicketingEvent['tiers'], PublicTicketTierTuple | []>
     >(true)
-    assertGeneratedDatabaseSurface<IsExact<PublicTicketingEvent['event']['admission_type'], 'paid'>>(true)
+    assertGeneratedDatabaseSurface<
+      IsExact<PublicTicketingEvent['event']['admission_type'], 'free' | 'paid'>
+    >(true)
     assertGeneratedDatabaseSurface<IsExact<PublicTicketTier['currency'], 'usd'>>(true)
     assertGeneratedDatabaseSurface<
       IsExact<keyof OrderConfirmation, 'event' | 'orderNumber' | 'status' | 'tier'>

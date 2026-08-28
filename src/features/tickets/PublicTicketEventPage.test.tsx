@@ -66,6 +66,10 @@ const publicEvent: PublicTicketingEvent = {
     availability_status: 'sold_out',
   }],
 }
+const freePublicEvent = {
+  event: { ...publicEvent.event, admission_type: 'free' as const },
+  tiers: [] as const,
+}
 
 function renderPage() {
   const router = createMemoryRouter([
@@ -93,6 +97,23 @@ describe('PublicTicketEventPage', () => {
     expect(screen.getByText('$25.00')).toBeInTheDocument()
     expect(screen.getByText('Civic Center Plaza')).toBeInTheDocument()
     expect(screen.queryByText(/6b849|platform fee|destination|stripe|reserved_quantity/i)).not.toBeInTheDocument()
+  })
+
+  it('renders the free public shell and reporting without ticket or checkout controls', () => {
+    usePublicTicketingEvent.mockReturnValue({
+      data: freePublicEvent,
+      isPending: false,
+      isError: false,
+      refetch: vi.fn(),
+    })
+
+    renderPage()
+
+    expect(screen.getByRole('heading', { name: 'Night Market' })).toBeInTheDocument()
+    expect(screen.getByText('Free event')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Report this event' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Choose your ticket' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Continue to checkout' })).not.toBeInTheDocument()
   })
 
   it('requires exactly one available tier and navigates with its exact ID', async () => {
