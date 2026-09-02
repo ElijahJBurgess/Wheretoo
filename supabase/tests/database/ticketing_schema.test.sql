@@ -377,7 +377,7 @@ select results_eq(
   $$,
   $$
     values ((array[
-      'order_items_order_id_key',
+      'order_items_order_id_ticket_tier_id_key',
       'orders_client_request_key',
       'orders_confirmation_token_hash_key',
       'orders_order_number_key',
@@ -413,11 +413,13 @@ select results_eq(
     join pg_catalog.pg_namespace as namespaces on namespaces.oid = relations.relnamespace
     where namespaces.nspname = 'public'
       and constraints.conname in (
+        'order_items_quantity_check',
         'order_items_subtotal_check',
         'orders_application_fee_check',
         'orders_currency_check',
         'orders_fee_snapshot_check',
         'orders_platform_product_fee_check',
+        'orders_quantity_check',
         'orders_status_check',
         'orders_stripe_fee_estimate_check',
         'orders_test_mode_check',
@@ -444,11 +446,13 @@ select results_eq(
   $$,
   $$
     values ($json$[
+      ["order_items", "order_items_quantity_check", "CHECK (quantity >= 1 AND quantity <= 10)"],
       ["order_items", "order_items_subtotal_check", "CHECK (subtotal_minor::numeric = (unit_amount_minor::numeric * quantity::numeric) AND subtotal_minor > 0)"],
       ["orders", "orders_application_fee_check", "CHECK (application_fee_amount_minor::numeric = (platform_product_fee_minor::numeric + stripe_fee_estimate_minor::numeric) AND application_fee_amount_minor < subtotal_minor)"],
       ["orders", "orders_currency_check", "CHECK (currency = 'usd'::text)"],
       ["orders", "orders_fee_snapshot_check", "CHECK (platform_percent_bps >= 0 AND platform_percent_bps <= 10000 AND platform_fixed_minor >= 0 AND (processing_fee_treatment = ANY (ARRAY['stripe_fee_estimate'::text, 'platform_fee_only'::text])) AND (processing_fee_treatment = 'platform_fee_only'::text AND processing_estimate_percent_bps IS NULL AND processing_estimate_fixed_minor IS NULL OR processing_fee_treatment = 'stripe_fee_estimate'::text AND processing_estimate_percent_bps IS NOT NULL AND processing_estimate_percent_bps >= 0 AND processing_estimate_percent_bps <= 10000 AND processing_estimate_fixed_minor IS NOT NULL AND processing_estimate_fixed_minor >= 0))"],
       ["orders", "orders_platform_product_fee_check", "CHECK (platform_product_fee_minor::numeric = (floor(subtotal_minor::numeric * platform_percent_bps::numeric / 10000::numeric) + platform_fixed_minor::numeric * quantity::numeric))"],
+      ["orders", "orders_quantity_check", "CHECK (quantity >= 1 AND quantity <= 10)"],
       ["orders", "orders_status_check", "CHECK (status = ANY (ARRAY['creating_checkout'::text, 'checkout_open'::text, 'payment_processing'::text, 'paid'::text, 'expired'::text, 'payment_failed'::text, 'cancelled'::text, 'partially_refunded'::text, 'refunded'::text, 'requires_review'::text]))"],
       ["orders", "orders_stripe_fee_estimate_check", "CHECK (processing_fee_treatment = 'platform_fee_only'::text AND stripe_fee_estimate_minor = 0 OR processing_fee_treatment = 'stripe_fee_estimate'::text AND stripe_fee_estimate_minor::numeric = (floor(subtotal_minor::numeric * processing_estimate_percent_bps::numeric / 10000::numeric) + processing_estimate_fixed_minor::numeric * quantity::numeric))"],
       ["orders", "orders_test_mode_check", "CHECK (NOT livemode)"],
