@@ -51,6 +51,7 @@ export interface StripeCancelCheckoutDependencies {
 
 interface ValidatedCancellationSession {
   status: "open" | "complete" | "expired";
+  paymentStatus: "paid" | "unpaid";
 }
 
 async function readConfirmationToken(request: Request): Promise<string> {
@@ -102,12 +103,13 @@ function validateSession(
     value.object !== "checkout.session" || value.livemode !== false ||
     (value.status !== "open" && value.status !== "complete" &&
       value.status !== "expired") ||
+    (value.payment_status !== "paid" && value.payment_status !== "unpaid") ||
     !isRecord(value.metadata) ||
     value.metadata.order_id !== expectedOrderId
   ) {
     throw new CheckoutHttpError(502, "INVALID_STRIPE_SESSION");
   }
-  return { status: value.status };
+  return { status: value.status, paymentStatus: value.payment_status };
 }
 
 export async function defaultFindOrder(
@@ -178,14 +180,14 @@ export function createStripeCancelCheckoutHandler(
       }
 
       if (!CANCELLABLE_DATABASE_STATUSES.has(order.status)) {
-        return jsonResponse({ cancelled: true }, 200, headers);
+        if (
+          order.status === "cancelled" || order.status === "expired" ||
+          order.status === "payment_failed"
+        ) return jsonResponse({ cancelled: true }, 200, headers);
+        throw new CheckoutHttpError(409, "CHECKOUT_UNAVAILABLE");
       }
       if (order.stripeCheckoutSessionId === null) {
-        await dependencies.releaseReservation(
-          order.orderId,
-          "CHECKOUT_CANCELLED",
-        );
-        return jsonResponse({ cancelled: true }, 200, headers);
+        throw new CheckoutHttpError(409, "CHECKOUT_UNAVAILABLE");
       }
 
       let retrieved: unknown;
@@ -203,7 +205,10 @@ export function createStripeCancelCheckoutHandler(
       );
       if (session.status === "complete") {
         // Webhook persistence may lag Checkout completion; never downgrade it here.
-        return jsonResponse({ cancelled: true }, 200, headers);
+        throw new CheckoutHttpError(409, "CHECKOUT_UNAVAILABLE");
+      }
+      if (session.paymentStatus !== "unpaid") {
+        throw new CheckoutHttpError(502, "INVALID_STRIPE_SESSION");
       }
       if (session.status === "open") {
         let expired: unknown;
@@ -219,7 +224,7 @@ export function createStripeCancelCheckoutHandler(
           order.stripeCheckoutSessionId,
           order.orderId,
         );
-        if (result.status !== "expired") {
+        if (result.status !== "expired" || result.paymentStatus !== "unpaid") {
           throw new CheckoutHttpError(502, "INVALID_STRIPE_SESSION");
         }
       }

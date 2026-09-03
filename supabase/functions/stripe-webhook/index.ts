@@ -151,7 +151,7 @@ export interface RefundSnapshot {
   stripeRefundId: string;
   paymentIntentId: string;
   chargeId: string;
-  transferReversalId: string;
+  transferReversalId: string | null;
   applicationFeeRefundId: string | null;
   amountMinor: number;
   currency: "usd";
@@ -159,6 +159,10 @@ export interface RefundSnapshot {
   reason: string | null;
   reverseTransfer: boolean;
   refundApplicationFee: boolean;
+  transferReversalAmountMinor: number;
+  applicationFeeRefundAmountMinor: number;
+  policyVerified: boolean;
+  policyFailureCode: "REFUND_POLICY_MISMATCH" | null;
 }
 
 export interface DisputeSnapshot {
@@ -704,6 +708,11 @@ export function createDefaultStripeWebhookDependencies(): StripeWebhookDependenc
         p_reason: value.reason,
         p_reverse_transfer: value.reverseTransfer,
         p_refund_application_fee: value.refundApplicationFee,
+        p_transfer_reversal_amount_minor: value.transferReversalAmountMinor,
+        p_application_fee_refund_amount_minor:
+          value.applicationFeeRefundAmountMinor,
+        p_policy_verified: value.policyVerified,
+        p_policy_failure_code: value.policyFailureCode,
       }),
     applyDispute: (value) =>
       domainRpc("server_apply_verified_dispute", {
@@ -1199,15 +1208,28 @@ async function validatePaymentBinding(
   };
 }
 
-function policyAmount(value: unknown): number {
+function policyAmount(value: unknown): number | null {
   if (typeof value !== "string" || !/^(0|[1-9][0-9]*)$/.test(value)) {
-    permanent("REFUND_POLICY_MISMATCH");
+    return null;
   }
   const amount = Number(value);
   if (!Number.isSafeInteger(amount) || amount < 0) {
-    permanent("REFUND_POLICY_MISMATCH");
+    return null;
   }
-  return amount;
+  return amount as number;
+}
+
+function evidenceId(
+  value: unknown,
+  pattern: RegExp,
+  object: string,
+): string | null {
+  if (typeof value === "string") return pattern.test(value) ? value : null;
+  if (
+    !isRecord(value) || value.object !== object ||
+    typeof value.id !== "string" || !pattern.test(value.id)
+  ) return null;
+  return value.id;
 }
 
 async function validateRefundPolicy(
@@ -1216,13 +1238,16 @@ async function validateRefundPolicy(
   refundId: string,
   dependencies: StripeWebhookDependencies,
 ): Promise<{
-  transferReversalId: string;
+  transferReversalId: string | null;
   applicationFeeRefundId: string | null;
+  transferReversalAmountMinor: number;
+  applicationFeeRefundAmountMinor: number;
+  reverseTransfer: boolean;
   refundApplicationFee: boolean;
+  policyVerified: boolean;
+  policyFailureCode: "REFUND_POLICY_MISMATCH" | null;
 }> {
-  const metadata = isRecord(refund.metadata)
-    ? refund.metadata
-    : permanent("REFUND_POLICY_MISMATCH");
+  const metadata = isRecord(refund.metadata) ? refund.metadata : {};
   const keys = [
     "order_id",
     "whereto_refund_policy",
@@ -1232,114 +1257,112 @@ async function validateRefundPolicy(
     "whereto_application_fee_refund_id",
     "whereto_application_fee_refund_amount",
   ];
-  if (
-    !exactKeys(metadata, keys) ||
-    metadata.order_id !== binding.order.orderId ||
-    metadata.whereto_refund_policy !== "destination_v1" ||
-    metadata.whereto_reverse_transfer !== "true" ||
-    (metadata.whereto_refund_application_fee !== "true" &&
-      metadata.whereto_refund_application_fee !== "false")
-  ) permanent("REFUND_POLICY_MISMATCH");
+  const reverseTransfer = metadata.whereto_reverse_transfer === "true";
+  const refundApplicationFee =
+    metadata.whereto_refund_application_fee === "true";
+  let verified = exactKeys(metadata, keys) &&
+    metadata.order_id === binding.order.orderId &&
+    metadata.whereto_refund_policy === "destination_v1" && reverseTransfer &&
+    refundApplicationFee;
 
-  const transferReversalId = expandedId(
-    refund.transfer_reversal ?? refund.source_transfer_reversal,
+  const reversalValue = refund.transfer_reversal ??
+    refund.source_transfer_reversal;
+  const transferReversalId = evidenceId(
+    reversalValue,
     TRANSFER_REVERSAL_PATTERN,
     "transfer_reversal",
   );
-  const reversalAmount = policyAmount(
-    metadata.whereto_transfer_reversal_amount,
-  );
-  if (reversalAmount <= 0) permanent("REFUND_POLICY_MISMATCH");
-  const transfer = await dependencies.retrieveTransfer(
-    binding.payment.transferId,
-  );
-  if (
-    !isRecord(transfer) || transfer.object !== "transfer" ||
-    transfer.id !== binding.payment.transferId || transfer.livemode !== false ||
-    transfer.currency !== binding.order.currency ||
-    expandedId(transfer.destination, ACCOUNT_PATTERN, "account") !==
-      binding.order.destinationAccountId ||
-    expandedId(transfer.source_transaction, CHARGE_PATTERN, "charge") !==
-      binding.payment.chargeId ||
-    !Number.isSafeInteger(transfer.amount) ||
-    !Number.isSafeInteger(transfer.amount_reversed) ||
-    (transfer.amount as number) <= 0 ||
-    (transfer.amount_reversed as number) < reversalAmount ||
-    reversalAmount > (transfer.amount as number)
-  ) permanent("REFUND_POLICY_MISMATCH");
-  const reversal = await dependencies.retrieveTransferReversal(
-    binding.payment.transferId,
-    transferReversalId,
-  );
-  if (
-    !isRecord(reversal) || reversal.object !== "transfer_reversal" ||
-    reversal.id !== transferReversalId || reversal.amount !== reversalAmount ||
-    reversal.currency !== binding.order.currency ||
-    expandedId(reversal.transfer, TRANSFER_PATTERN, "transfer") !==
-      binding.payment.transferId ||
-    expandedId(reversal.source_refund, REFUND_PATTERN, "refund") !== refundId
-  ) permanent("REFUND_POLICY_MISMATCH");
+  let reversalAmount = 0;
+  if (transferReversalId === null) {
+    verified = false;
+  } else {
+    const transfer = await dependencies.retrieveTransfer(
+      binding.payment.transferId,
+    );
+    const reversal = await dependencies.retrieveTransferReversal(
+      binding.payment.transferId,
+      transferReversalId,
+    );
+    if (
+      isRecord(transfer) && transfer.object === "transfer" &&
+      transfer.id === binding.payment.transferId &&
+      transfer.livemode === false &&
+      transfer.currency === binding.order.currency &&
+      transfer.destination === binding.order.destinationAccountId &&
+      transfer.source_transaction === binding.payment.chargeId &&
+      Number.isSafeInteger(transfer.amount) &&
+      Number.isSafeInteger(transfer.amount_reversed) &&
+      isRecord(reversal) && reversal.object === "transfer_reversal" &&
+      reversal.id === transferReversalId &&
+      Number.isSafeInteger(reversal.amount) && (reversal.amount as number) > 0 &&
+      reversal.currency === binding.order.currency &&
+      reversal.transfer === binding.payment.transferId &&
+      reversal.source_refund === refundId &&
+      (transfer.amount_reversed as number) >= (reversal.amount as number) &&
+      (transfer.amount as number) >= (reversal.amount as number)
+    ) {
+      reversalAmount = reversal.amount as number;
+    } else verified = false;
+  }
 
   const applicationFee = await dependencies.retrieveApplicationFee(
     binding.payment.applicationFeeId,
   );
-  if (
+  const applicationFeeInvalid =
     !isRecord(applicationFee) || applicationFee.object !== "application_fee" ||
     applicationFee.id !== binding.payment.applicationFeeId ||
     applicationFee.livemode !== false ||
     applicationFee.amount !== binding.order.applicationFeeAmountMinor ||
     applicationFee.currency !== binding.order.currency ||
-    expandedId(
+    evidenceId(
         applicationFee.originating_transaction ?? applicationFee.charge,
         CHARGE_PATTERN,
-        "originating_transaction",
+        "charge",
       ) !==
       binding.payment.chargeId ||
-    !Number.isSafeInteger(applicationFee.amount_refunded)
-  ) permanent("REFUND_POLICY_MISMATCH");
+    !Number.isSafeInteger(applicationFee.amount_refunded);
+  if (applicationFeeInvalid) verified = false;
 
-  const refundApplicationFee =
-    metadata.whereto_refund_application_fee === "true";
-  const feeRefundAmount = policyAmount(
-    metadata.whereto_application_fee_refund_amount,
-  );
-  if (!refundApplicationFee) {
+  const feeRefundId = typeof metadata.whereto_application_fee_refund_id ===
+        "string" && FEE_REFUND_PATTERN.test(
+          metadata.whereto_application_fee_refund_id,
+        )
+    ? metadata.whereto_application_fee_refund_id
+    : null;
+  let feeRefundAmount = 0;
+  if (feeRefundId === null || applicationFeeInvalid) {
+    verified = false;
+  } else {
+    const feeRefund = await dependencies.retrieveApplicationFeeRefund(
+      binding.payment.applicationFeeId,
+      feeRefundId,
+    );
     if (
-      metadata.whereto_application_fee_refund_id !== "none" ||
-      feeRefundAmount !== 0
-    ) permanent("REFUND_POLICY_MISMATCH");
-    return {
-      transferReversalId,
-      applicationFeeRefundId: null,
-      refundApplicationFee,
-    };
+      isRecord(feeRefund) && feeRefund.object === "fee_refund" &&
+      feeRefund.id === feeRefundId && Number.isSafeInteger(feeRefund.amount) &&
+      (feeRefund.amount as number) > 0 &&
+      feeRefund.currency === binding.order.currency &&
+      feeRefund.fee === binding.payment.applicationFeeId &&
+      (applicationFee.amount_refunded as number) >=
+        (feeRefund.amount as number)
+    ) feeRefundAmount = feeRefund.amount as number;
+    else verified = false;
   }
-
-  const feeRefundId = requireId(
-    metadata.whereto_application_fee_refund_id,
-    FEE_REFUND_PATTERN,
-    "REFUND_POLICY_MISMATCH",
-  );
   if (
-    feeRefundAmount <= 0 ||
-    feeRefundAmount > binding.order.applicationFeeAmountMinor ||
-    (applicationFee.amount_refunded as number) < feeRefundAmount
-  ) permanent("REFUND_POLICY_MISMATCH");
-  const feeRefund = await dependencies.retrieveApplicationFeeRefund(
-    binding.payment.applicationFeeId,
-    feeRefundId,
-  );
-  if (
-    !isRecord(feeRefund) || feeRefund.object !== "fee_refund" ||
-    feeRefund.id !== feeRefundId || feeRefund.amount !== feeRefundAmount ||
-    feeRefund.currency !== binding.order.currency ||
-    expandedId(feeRefund.fee, APPLICATION_FEE_PATTERN, "application_fee") !==
-      binding.payment.applicationFeeId
-  ) permanent("REFUND_POLICY_MISMATCH");
+    policyAmount(metadata.whereto_transfer_reversal_amount) !==
+      reversalAmount ||
+    policyAmount(metadata.whereto_application_fee_refund_amount) !==
+      feeRefundAmount || reversalAmount !== refund.amount
+  ) verified = false;
   return {
     transferReversalId,
     applicationFeeRefundId: feeRefundId,
+    transferReversalAmountMinor: reversalAmount,
+    applicationFeeRefundAmountMinor: feeRefundAmount,
+    reverseTransfer,
     refundApplicationFee,
+    policyVerified: verified,
+    policyFailureCode: verified ? null : "REFUND_POLICY_MISMATCH",
   };
 }
 
@@ -1391,27 +1414,12 @@ async function dispatchRefund(
     !Number.isSafeInteger(binding.charge.amount) ||
     (binding.charge.amount as number) < amount
   ) permanent("REFUND_SNAPSHOT_MISMATCH");
-  let policy: {
-    transferReversalId: string;
-    applicationFeeRefundId: string | null;
-    refundApplicationFee: boolean;
-  };
-  try {
-    policy = await validateRefundPolicy(
-      refund,
-      binding,
-      refundId,
-      dependencies,
-    );
-  } catch (error) {
-    if (!(error instanceof PermanentWebhookError)) throw error;
-    await dependencies.markPaymentRequiresReview({
-      ...binding.payment,
-      stripeEventId: event.id,
-      failureCode: "REFUND_POLICY_MISMATCH",
-    });
-    return;
-  }
+  const policy = await validateRefundPolicy(
+    refund,
+    binding,
+    refundId,
+    dependencies,
+  );
   await dependencies.applyRefund({
     stripeEventId: event.id,
     orderId: binding.order.orderId,
@@ -1424,8 +1432,13 @@ async function dispatchRefund(
     currency,
     status,
     reason: typeof refund.reason === "string" ? refund.reason : null,
-    reverseTransfer: true,
+    reverseTransfer: policy.reverseTransfer,
     refundApplicationFee: policy.refundApplicationFee,
+    transferReversalAmountMinor: policy.transferReversalAmountMinor,
+    applicationFeeRefundAmountMinor:
+      policy.applicationFeeRefundAmountMinor,
+    policyVerified: policy.policyVerified,
+    policyFailureCode: policy.policyFailureCode,
   });
 }
 

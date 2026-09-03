@@ -220,7 +220,7 @@ export function refundFixture(
       whereto_refund_policy: "destination_v1",
       whereto_reverse_transfer: "true",
       whereto_refund_application_fee: "true",
-      whereto_transfer_reversal_amount: "5050",
+      whereto_transfer_reversal_amount: "5500",
       whereto_application_fee_refund_id: FEE_REFUND_ID,
       whereto_application_fee_refund_amount: "450",
     },

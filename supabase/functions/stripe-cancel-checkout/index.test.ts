@@ -29,12 +29,17 @@ function order(
   return { orderId: ORDER_ID, status, stripeCheckoutSessionId: sessionId };
 }
 
-function session(status: string, livemode = false): Record<string, unknown> {
+function session(
+  status: string,
+  livemode = false,
+  paymentStatus: string = "unpaid",
+): Record<string, unknown> {
   return {
     id: SESSION_ID,
     object: "checkout.session",
     livemode,
     status,
+    payment_status: paymentStatus,
     metadata: { order_id: ORDER_ID },
   };
 }
@@ -146,8 +151,10 @@ Deno.test("cancellation never downgrades a complete Session while its webhook ma
     },
   }))(request());
 
-  assertEquals(response.status, 200);
-  assertEquals(await response.json(), { cancelled: true });
+  assertEquals(response.status, 409);
+  assertEquals(await response.json(), {
+    error: { code: "CHECKOUT_UNAVAILABLE" },
+  });
   assertEquals(expired, false);
   assertEquals(released, false);
 });
@@ -171,17 +178,12 @@ Deno.test("cancellation idempotently releases an already-expired Session without
   assertEquals(released, true);
 });
 
-Deno.test("cancellation treats a terminal database retry as safe without contacting Stripe", async () => {
+Deno.test("cancellation treats an already released database retry as safe without contacting Stripe", async () => {
   for (
     const status of [
       "cancelled",
       "expired",
       "payment_failed",
-      "payment_processing",
-      "paid",
-      "partially_refunded",
-      "refunded",
-      "requires_review",
     ]
   ) {
     let stripeTouched = false;
@@ -198,7 +200,79 @@ Deno.test("cancellation treats a terminal database retry as safe without contact
   }
 });
 
-Deno.test("cancellation releases a token-bound creating order that has no Stripe Session", async () => {
+Deno.test("cancellation refuses paid, processing, refund, and review orders without contacting Stripe or releasing inventory", async () => {
+  for (
+    const status of [
+      "payment_processing",
+      "paid",
+      "partially_refunded",
+      "refunded",
+      "requires_review",
+    ]
+  ) {
+    let touched = false;
+    const response = await createStripeCancelCheckoutHandler(dependencies({
+      findOrder: async () => order(status),
+      retrieveSession: async () => {
+        touched = true;
+        return session("open");
+      },
+      releaseReservation: async () => {
+        touched = true;
+      },
+    }))(request());
+    assertEquals(response.status, 409, status);
+    assertEquals(await response.json(), {
+      error: { code: "CHECKOUT_UNAVAILABLE" },
+    }, status);
+    assertEquals(touched, false, status);
+  }
+});
+
+Deno.test("cancellation requires authoritative unpaid state before expiring and releasing the whole order", async () => {
+  for (
+    const unsafe of [
+      session("open", false, "paid"),
+      session("expired", false, "paid"),
+      { ...session("open"), payment_status: "no_payment_required" },
+      (() => {
+        const value = session("open");
+        delete value.payment_status;
+        return value;
+      })(),
+    ]
+  ) {
+    let mutated = false;
+    const response = await createStripeCancelCheckoutHandler(dependencies({
+      retrieveSession: async () => unsafe,
+      expireSession: async () => {
+        mutated = true;
+        return session("expired");
+      },
+      releaseReservation: async () => {
+        mutated = true;
+      },
+    }))(request());
+    assertEquals(response.status, 502);
+    assertEquals(mutated, false);
+  }
+});
+
+Deno.test("cancellation releases one multi-item order boundary only after open unpaid becomes expired unpaid", async () => {
+  const released: Array<[string, string]> = [];
+  const response = await createStripeCancelCheckoutHandler(dependencies({
+    retrieveSession: async () => session("open", false, "unpaid"),
+    expireSession: async () => session("expired", false, "unpaid"),
+    releaseReservation: async (orderId, reason) => {
+      released.push([orderId, reason]);
+    },
+  }))(request());
+
+  assertEquals(response.status, 200);
+  assertEquals(released, [[ORDER_ID, "CHECKOUT_CANCELLED"]]);
+});
+
+Deno.test("cancellation retains a token-bound creating order when no exact Stripe Session is attached", async () => {
   let released = false;
   const response = await createStripeCancelCheckoutHandler(dependencies({
     findOrder: async () => order("creating_checkout", null),
@@ -209,8 +283,11 @@ Deno.test("cancellation releases a token-bound creating order that has no Stripe
       released = true;
     },
   }))(request());
-  assertEquals(response.status, 200);
-  assertEquals(released, true);
+  assertEquals(response.status, 409);
+  assertEquals(await response.json(), {
+    error: { code: "CHECKOUT_UNAVAILABLE" },
+  });
+  assertEquals(released, false);
 });
 
 Deno.test("cancellation enforces strict input, rate limiting, and exact-origin CORS", async () => {

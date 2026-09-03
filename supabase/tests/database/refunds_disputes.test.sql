@@ -112,6 +112,28 @@ values (
   'active', 'active', 'clear', 0, 0, now()
 );
 
+insert into private.event_risk_disclosures (
+  event_id, minimum_age, alcohol_present, cannabis_present,
+  explicit_adult_content, gambling_present, weapons_present,
+  high_risk_activity
+) values (
+  '27000000-0000-4000-8000-000000000001', 'all_ages',
+  false, false, false, false, false, false
+);
+select set_config(
+  'request.jwt.claim.sub',
+  '17000000-0000-4000-8000-000000000001', true
+);
+set local role authenticated;
+select public.accept_current_event_policies(
+  '27000000-0000-4000-8000-000000000001'
+);
+select public.publish_event('27000000-0000-4000-8000-000000000001');
+reset role;
+update private.checkout_runtime_control
+set checkout_creation_enabled = true
+where singleton;
+
 create or replace function pg_temp.create_paid_order(
   p_request_id uuid,
   p_hash text,
@@ -176,8 +198,8 @@ select results_eq(
       true, false
     )
   $$,
-  $$ values ('partially_refunded'::text, 'refunded'::text) $$,
-  'a successful partial refund invalidates the single-admission ticket conservatively'
+  $$ values ('requires_review'::text, 'cancelled'::text) $$,
+  'a legacy partial refund fails closed and invalidates the single-admission ticket conservatively'
 );
 
 select results_eq(
@@ -206,7 +228,7 @@ select results_eq(
       true, false
     )
   $$,
-  $$ values ('partially_refunded'::text, 'refunded'::text) $$,
+  $$ values ('requires_review'::text, 'cancelled'::text) $$,
   'duplicate delivery of the same refund event is idempotent'
 );
 
@@ -244,8 +266,8 @@ select results_eq(
       true, true
     )
   $$,
-  $$ values ('refunded'::text, 'refunded'::text) $$,
-  'cumulative successful refunds reaching the order total invalidate the ticket'
+  $$ values ('requires_review'::text, 'cancelled'::text) $$,
+  'legacy cumulative refund amounts cannot claim complete economic reconciliation'
 );
 
 select results_eq(
@@ -254,18 +276,18 @@ select results_eq(
     from public.orders where id = (select id from refunded_order)
   $$,
   $$ values (
-    'refunded'::text, true, 'reconciled'::text, 'evt_finalrefund'::text
+    'requires_review'::text, false, 'requires_review'::text, 'evt_finalrefund'::text
   ) $$,
-  'a fully refunded order stores terminal webhook-derived truth'
+  'a legacy full customer refund remains review-held without exact unwind evidence'
 );
 
 select results_eq(
   $$
-    select status, refunded_at is not null, cancelled_at
+    select status, refunded_at is not null, cancelled_at is not null
     from public.tickets where order_id = (select id from refunded_order)
   $$,
-  $$ values ('refunded'::text, true, null::timestamptz) $$,
-  'full refund makes the ticket non-valid without deleting admission history'
+  $$ values ('cancelled'::text, false, true) $$,
+  'unverified refund economics make the ticket non-valid without claiming refunded truth'
 );
 
 select * from public.server_record_webhook_receipt(
@@ -306,8 +328,8 @@ select results_eq(
       true, false
     )
   $$,
-  $$ values ('refunded'::text, 'refunded'::text) $$,
-  'a failed refund attempt cannot move a fully refunded order backward'
+  $$ values ('requires_review'::text, 'cancelled'::text) $$,
+  'a failed refund attempt cannot move a review-held order backward'
 );
 
 create temporary table pending_refund_order (id uuid primary key) on commit drop;
@@ -350,17 +372,16 @@ select * from public.server_record_webhook_receipt(
   '2025-08-27.basil', '2026-08-25 13:04:31+00', repeat('6', 64)
 );
 
-select results_eq(
+select throws_ok(
   $$
-    select order_status, ticket_status
-    from public.server_apply_refund(
+    select * from public.server_apply_refund(
       'evt_pendingrefundsucceeded', (select id from pending_refund_order),
       're_pendingrefund', 'pi_pendingrefundorder', 'ch_pendingrefundorder',
       500, 'usd', 'succeeded', null, true, false
     )
   $$,
-  $$ values ('partially_refunded'::text, 'refunded'::text) $$,
-  'a later authoritative event advances a pending refund to succeeded once'
+  'P0001', 'REFUND_SNAPSHOT_MISMATCH',
+  'a legacy pending refund cannot claim success without exact unwind evidence'
 );
 
 select results_eq(
@@ -369,9 +390,9 @@ select results_eq(
     from public.refunds where stripe_refund_id = 're_pendingrefund'
   $$,
   $$ values (
-    'succeeded'::text, 'evt_pendingrefundsucceeded'::text, true
+    'pending'::text, 'evt_pendingrefund'::text, false
   ) $$,
-  'pending-to-succeeded refund transition stores the terminal event and completion time'
+  'rejected legacy progression preserves the pending evidence'
 );
 
 select is(
@@ -394,8 +415,8 @@ select results_eq(
       500, 'usd', 'pending', null, true, false
     )
   $$,
-  $$ values ('partially_refunded'::text, 'refunded'::text) $$,
-  'an out-of-order pending event cannot move a succeeded refund backward'
+  $$ values ('paid'::text, 'valid'::text) $$,
+  'a duplicate pending legacy event preserves paid admission'
 );
 
 select results_eq(
@@ -407,10 +428,10 @@ select results_eq(
     where refunds.stripe_refund_id = 're_pendingrefund'
   $$,
   $$ values (
-    'succeeded'::text, 'evt_pendingrefundsucceeded'::text, true,
-    'evt_pendingrefundsucceeded'::text
+    'pending'::text, 'evt_pendingrefund'::text, false,
+    'evt_pendingrefundorderpaid'::text
   ) $$,
-  'stale refund delivery preserves the accepted terminal event and order reconciliation truth'
+  'duplicate pending delivery preserves the accepted evidence and order truth'
 );
 
 create temporary table disputed_order (id uuid primary key) on commit drop;
@@ -446,7 +467,7 @@ select results_eq(
         where stripe_refund_id = 're_1Nispe2eZvKYlo2Cd31jOCgZ'),
       (select status from public.orders where id = (select id from pending_refund_order))
   $$,
-  $$ values (0::bigint, 'partially_refunded'::text) $$,
+  $$ values (0::bigint, 'paid'::text) $$,
   'rejected cross-order refund leaves refund and accepted order truth unchanged'
 );
 

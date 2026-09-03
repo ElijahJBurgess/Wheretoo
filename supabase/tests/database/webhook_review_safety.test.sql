@@ -8,7 +8,7 @@ select plan(43);
 select has_function(
   'public', 'server_apply_verified_refund',
   array['text', 'uuid', 'text', 'text', 'text', 'text', 'text', 'bigint', 'text',
-    'text', 'text', 'boolean', 'boolean'],
+    'text', 'text', 'boolean', 'boolean', 'bigint', 'bigint', 'boolean', 'text'],
   'verified refund reconciliation has a narrow service wrapper'
 );
 select has_function(
@@ -127,21 +127,21 @@ select function_privs_are(
 select function_privs_are(
   'public', 'server_apply_verified_refund',
   array['text', 'uuid', 'text', 'text', 'text', 'text', 'text', 'bigint', 'text',
-    'text', 'text', 'boolean', 'boolean'],
+    'text', 'text', 'boolean', 'boolean', 'bigint', 'bigint', 'boolean', 'text'],
   'anon', array[]::text[],
   'anonymous callers cannot apply verified refunds'
 );
 select function_privs_are(
   'public', 'server_apply_verified_refund',
   array['text', 'uuid', 'text', 'text', 'text', 'text', 'text', 'bigint', 'text',
-    'text', 'text', 'boolean', 'boolean'],
+    'text', 'text', 'boolean', 'boolean', 'bigint', 'bigint', 'boolean', 'text'],
   'authenticated', array[]::text[],
   'authenticated callers cannot apply verified refunds'
 );
 select function_privs_are(
   'public', 'server_apply_verified_refund',
   array['text', 'uuid', 'text', 'text', 'text', 'text', 'text', 'bigint', 'text',
-    'text', 'text', 'boolean', 'boolean'],
+    'text', 'text', 'boolean', 'boolean', 'bigint', 'bigint', 'boolean', 'text'],
   'service_role', array['EXECUTE'],
   'service role can apply a verified refund'
 );
@@ -285,7 +285,7 @@ select results_eq(
       're_ReviewRefundBeforePaid', 'pi_ReviewRefundBeforePaid',
       'ch_ReviewRefundBeforePaid', 'trr_ReviewRefundBeforePaid',
       'fr_ReviewRefundBeforePaid', 2000, 'usd', 'succeeded',
-      'requested_by_customer', true, true
+      'requested_by_customer', true, true, 2000, 150, true, null
     )
   $$,
   $$ values ('refunded'::text, null::text) $$,
@@ -437,7 +437,7 @@ select results_eq(
       're_ReviewPolicyMismatch', 'pi_ReviewPolicyMismatch',
       'ch_ReviewPolicyMismatch', 'trr_ReviewPolicyMismatch',
       'fr_ReviewPolicyMismatch', 2000, 'usd', 'succeeded',
-      'requested_by_customer', true, true
+      'requested_by_customer', true, true, 2000, 150, true, null
     )
   $$,
   $$ values ('refunded'::text, 'refunded'::text) $$,
@@ -475,7 +475,7 @@ select results_eq(
       're_ReviewPolicyMismatch', 'pi_ReviewPolicyMismatch',
       'ch_ReviewPolicyMismatch', 'trr_ReviewPolicyMismatch',
       'fr_ReviewPolicyMismatch', 2000, 'usd', 'succeeded',
-      'requested_by_customer', true, true
+      'requested_by_customer', true, true, 2000, 150, true, null
     )
   $$,
   $$ values ('refunded'::text, 'refunded'::text) $$,

@@ -1386,11 +1386,15 @@ Deno.test("refund reconciliation retrieves authoritative refund, charge, and Pay
     },
     retrieveTransfer: async (id) => {
       assertEquals(id, TRANSFER_ID);
-      return transferFixture({ amount_reversed: 5_050, reversed: true });
+      return transferFixture({
+        amount: 5_500,
+        amount_reversed: 5_500,
+        reversed: true,
+      });
     },
     retrieveTransferReversal: async (transferId, reversalId) => {
       assertEquals([transferId, reversalId], [TRANSFER_ID, REFUND_REVERSAL_ID]);
-      return transferReversalFixture();
+      return transferReversalFixture({ amount: 5_500 });
     },
     retrieveApplicationFee: async (id) => {
       assertEquals(id, APPLICATION_FEE_ID);
@@ -1420,24 +1424,40 @@ Deno.test("refund reconciliation retrieves authoritative refund, charge, and Pay
     reason: "requested_by_customer",
     reverseTransfer: true,
     refundApplicationFee: true,
+    transferReversalAmountMinor: 5_500,
+    applicationFeeRefundAmountMinor: 450,
+    policyVerified: true,
+    policyFailureCode: null,
   });
 });
 
-Deno.test("missing or mismatched automatic-refund policy marks the bound payment review and does not pretend refund reconciliation", async () => {
-  let applied = 0;
-  const reviews: PaymentReviewSnapshot[] = [];
+Deno.test("missing automatic-refund policy persists authoritative mismatch evidence for review", async () => {
+  let applied: unknown;
   const response = await createStripeWebhookHandler(dependencies({
     retrieveRefund: async () => refundFixture({ metadata: {} }),
-    markPaymentRequiresReview: async (snapshot) => {
-      reviews.push(snapshot);
-    },
-    applyRefund: async () => {
-      applied += 1;
+    retrieveTransfer: async () =>
+      transferFixture({
+        amount: 5_500,
+        amount_reversed: 5_500,
+        reversed: true,
+      }),
+    retrieveTransferReversal: async () =>
+      transferReversalFixture({ amount: 5_500 }),
+    applyRefund: async (snapshot) => {
+      applied = snapshot;
     },
   }))(request(snapshotEvent("refund.updated", { id: REFUND_ID })));
 
-  assertEquals([response.status, applied], [200, 0]);
-  assertEquals(reviews[0]?.failureCode, "REFUND_POLICY_MISMATCH");
+  assertEquals(response.status, 200);
+  assertEquals((applied as Record<string, unknown>)?.policyVerified, false);
+  assertEquals(
+    (applied as Record<string, unknown>)?.policyFailureCode,
+    "REFUND_POLICY_MISMATCH",
+  );
+  assertEquals(
+    (applied as Record<string, unknown>)?.transferReversalAmountMinor,
+    5_500,
+  );
 });
 
 Deno.test("a failed refund event reconciles the current authoritative failed refund state", async () => {
