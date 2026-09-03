@@ -218,6 +218,17 @@ begin
   end if;
 end
 \$assert\$;"
+run_query release_gate_reservation "begin;
+  set local role service_role;
+  select public.server_cancel_checkout_reservation(
+    (
+      select id from public.orders
+      where event_id = '$fixture_event'::uuid
+        and client_request_id = '97300000-0000-4000-8000-000000000010'::uuid
+    ),
+    'TEST_GATE_RESERVATION_RELEASE'
+  );
+  commit;"
 run_query reopen_gate "update private.checkout_runtime_control
   set checkout_creation_enabled = true
   where singleton;"
@@ -312,12 +323,52 @@ if [[ $loss_exit -ne 0 || $ineligible_exit -eq 0 ]] \
 fi
 
 # A sold-out line must roll the entire cart back, including an otherwise available line.
+run_query atomic_precondition "with tier_availability as (
+  select tiers.id,
+    tiers.quantity_total - coalesce(sum(items.quantity) filter (
+      where orders.status in ('paid', 'payment_processing', 'requires_review', 'partially_refunded')
+        or (orders.status in ('creating_checkout', 'checkout_open')
+          and orders.reservation_expires_at > statement_timestamp())
+    ), 0)::integer as available_quantity
+  from public.ticket_tiers as tiers
+  left join public.order_items as items on items.ticket_tier_id = tiers.id
+  left join public.orders as orders on orders.id = items.order_id
+  where tiers.id in (
+    '97200000-0000-4000-8000-000000000001'::uuid,
+    '97200000-0000-4000-8000-000000000002'::uuid
+  )
+  group by tiers.id, tiers.quantity_total
+)
+select
+  (select available_quantity from tier_availability
+    where id = '97200000-0000-4000-8000-000000000002'::uuid) as general_available,
+  (select available_quantity from tier_availability
+    where id = '97200000-0000-4000-8000-000000000001'::uuid) as final_available,
+  (select available_quantity >= 1 from tier_availability
+    where id = '97200000-0000-4000-8000-000000000002'::uuid) as general_has_requested,
+  (select available_quantity = 0 from tier_availability
+    where id = '97200000-0000-4000-8000-000000000001'::uuid) as final_sold_out;"
+if ! grep -q '"general_has_requested": true' "$temporary_directory/atomic_precondition.log" \
+  || ! grep -q '"final_sold_out": true' "$temporary_directory/atomic_precondition.log"; then
+  echo "Atomic-failure precondition did not have one available and one sold-out line." >&2
+  sed -n '1,120p' "$temporary_directory/atomic_precondition.log" >&2
+  exit 1
+fi
 set +e
 run_query atomic_fail "$(reserve_sql "$fixture_event" '[{\"tier_id\":\"97200000-0000-4000-8000-000000000002\",\"quantity\":1},{\"tier_id\":\"97200000-0000-4000-8000-000000000001\",\"quantity\":1}]' '97300000-0000-4000-8000-000000000009' 9)"
 atomic_exit=$?
 set -e
-run_query atomic_check "select count(*)::integer as inserted_orders from public.orders where client_request_id = '97300000-0000-4000-8000-000000000009';"
-if [[ $atomic_exit -eq 0 ]] || ! grep -q '"inserted_orders": 0' "$temporary_directory/atomic_check.log"; then
+run_query atomic_check "select
+  (select count(*)::integer from public.orders
+    where client_request_id = '97300000-0000-4000-8000-000000000009'::uuid) as inserted_orders,
+  (select count(*)::integer from public.order_items
+    where order_id in (
+      select id from public.orders
+      where client_request_id = '97300000-0000-4000-8000-000000000009'::uuid
+    )) as inserted_items;"
+if [[ $atomic_exit -eq 0 ]] \
+  || ! grep -q '"inserted_orders": 0' "$temporary_directory/atomic_check.log" \
+  || ! grep -q '"inserted_items": 0' "$temporary_directory/atomic_check.log"; then
   echo "Insufficient cart line left partial rows." >&2; exit 1
 fi
 
