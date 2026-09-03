@@ -204,6 +204,45 @@ select throws_ok(
   'P0001', 'CHECKOUT_INPUT_INVALID',
   'complete-cart preflight rejects duplicate tier identifiers'
 );
+select throws_ok(
+  $$ select * from public.server_get_checkout_preflight(
+    '96100000-0000-4000-8000-000000000001',
+    array[
+      '96200000-0000-4000-8000-000000000090'::uuid,
+      '96200000-0000-4000-8000-000000000091'::uuid,
+      '96200000-0000-4000-8000-000000000092'::uuid,
+      '96200000-0000-4000-8000-000000000093'::uuid,
+      '96200000-0000-4000-8000-000000000094'::uuid,
+      '96200000-0000-4000-8000-000000000095'::uuid,
+      '96200000-0000-4000-8000-000000000096'::uuid,
+      '96200000-0000-4000-8000-000000000097'::uuid,
+      '96200000-0000-4000-8000-000000000098'::uuid,
+      '96200000-0000-4000-8000-000000000099'::uuid
+    ]
+  ) $$,
+  'P0001', 'TIER_NOT_ACTIVE',
+  'preflight accepts ten distinct tier identifiers before authoritative lookup'
+);
+select throws_ok(
+  $$ select * from public.server_get_checkout_preflight(
+    '96100000-0000-4000-8000-000000000001',
+    array[
+      '96200000-0000-4000-8000-000000000089'::uuid,
+      '96200000-0000-4000-8000-000000000090'::uuid,
+      '96200000-0000-4000-8000-000000000091'::uuid,
+      '96200000-0000-4000-8000-000000000092'::uuid,
+      '96200000-0000-4000-8000-000000000093'::uuid,
+      '96200000-0000-4000-8000-000000000094'::uuid,
+      '96200000-0000-4000-8000-000000000095'::uuid,
+      '96200000-0000-4000-8000-000000000096'::uuid,
+      '96200000-0000-4000-8000-000000000097'::uuid,
+      '96200000-0000-4000-8000-000000000098'::uuid,
+      '96200000-0000-4000-8000-000000000099'::uuid
+    ]
+  ) $$,
+  'P0001', 'CHECKOUT_INPUT_INVALID',
+  'preflight rejects eleven distinct tier identifiers at the input boundary'
+);
 create temporary table cart_reservation on commit drop as
 select * from public.server_reserve_checkout(
   '96100000-0000-4000-8000-000000000001',
@@ -333,6 +372,35 @@ select throws_ok(
     '96300000-0000-4000-8000-000000000006', repeat('f', 64)
   ) $$,
   'P0001', 'CHECKOUT_INPUT_INVALID', 'negative quantities are rejected'
+);
+select throws_ok(
+  $$ select * from public.server_reserve_checkout(
+    '96100000-0000-4000-8000-000000000001',
+    '[{"tier_id":"96200000-0000-4000-8000-000000000001","quantity":11}]'::jsonb,
+    'Cart Buyer', 'cart-buyer@example.invalid',
+    '96300000-0000-4000-8000-000000000006', repeat('f', 64)
+  ) $$,
+  'P0001', 'CHECKOUT_INPUT_INVALID', 'per-item quantity above ten is rejected'
+);
+select throws_ok(
+  $$ select * from public.server_reserve_checkout(
+    '96100000-0000-4000-8000-000000000001',
+    '[{"tier_id":"96200000-0000-4000-8000-000000000090","quantity":1},{"tier_id":"96200000-0000-4000-8000-000000000091","quantity":1},{"tier_id":"96200000-0000-4000-8000-000000000092","quantity":1},{"tier_id":"96200000-0000-4000-8000-000000000093","quantity":1},{"tier_id":"96200000-0000-4000-8000-000000000094","quantity":1},{"tier_id":"96200000-0000-4000-8000-000000000095","quantity":1},{"tier_id":"96200000-0000-4000-8000-000000000096","quantity":1},{"tier_id":"96200000-0000-4000-8000-000000000097","quantity":1},{"tier_id":"96200000-0000-4000-8000-000000000098","quantity":1},{"tier_id":"96200000-0000-4000-8000-000000000099","quantity":1}]'::jsonb,
+    'Cart Buyer', 'cart-buyer@example.invalid',
+    '96300000-0000-4000-8000-000000000016', repeat('9', 64)
+  ) $$,
+  'P0001', 'TIER_NOT_FOUND',
+  'reservation accepts ten distinct one-admission lines before authoritative lookup'
+);
+select throws_ok(
+  $$ select * from public.server_reserve_checkout(
+    '96100000-0000-4000-8000-000000000001',
+    '[{"tier_id":"96200000-0000-4000-8000-000000000089","quantity":1},{"tier_id":"96200000-0000-4000-8000-000000000090","quantity":1},{"tier_id":"96200000-0000-4000-8000-000000000091","quantity":1},{"tier_id":"96200000-0000-4000-8000-000000000092","quantity":1},{"tier_id":"96200000-0000-4000-8000-000000000093","quantity":1},{"tier_id":"96200000-0000-4000-8000-000000000094","quantity":1},{"tier_id":"96200000-0000-4000-8000-000000000095","quantity":1},{"tier_id":"96200000-0000-4000-8000-000000000096","quantity":1},{"tier_id":"96200000-0000-4000-8000-000000000097","quantity":1},{"tier_id":"96200000-0000-4000-8000-000000000098","quantity":1},{"tier_id":"96200000-0000-4000-8000-000000000099","quantity":1}]'::jsonb,
+    'Cart Buyer', 'cart-buyer@example.invalid',
+    '96300000-0000-4000-8000-000000000017', repeat('0', 64)
+  ) $$,
+  'P0001', 'CHECKOUT_INPUT_INVALID',
+  'reservation rejects eleven distinct one-admission lines at the input boundary'
 );
 select throws_ok(
   $$ select * from public.server_reserve_checkout(

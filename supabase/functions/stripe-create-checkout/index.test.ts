@@ -76,6 +76,44 @@ const persistedItems = [
   },
 ];
 
+const TEN_TIER_IDS = [
+  "00000000-0000-4000-8000-000000000001",
+  "00000000-0000-4000-8000-000000000002",
+  "00000000-0000-4000-8000-000000000003",
+  "00000000-0000-4000-8000-000000000004",
+  "00000000-0000-4000-8000-000000000005",
+  "00000000-0000-4000-8000-000000000006",
+  "00000000-0000-4000-8000-000000000007",
+  "00000000-0000-4000-8000-000000000008",
+  "00000000-0000-4000-8000-000000000009",
+  "00000000-0000-4000-8000-000000000010",
+];
+const ELEVEN_TIER_IDS = [
+  ...TEN_TIER_IDS,
+  "00000000-0000-4000-8000-000000000011",
+];
+const TEN_ORDER_ITEM_IDS = [
+  "10000000-0000-4000-8000-000000000001",
+  "10000000-0000-4000-8000-000000000002",
+  "10000000-0000-4000-8000-000000000003",
+  "10000000-0000-4000-8000-000000000004",
+  "10000000-0000-4000-8000-000000000005",
+  "10000000-0000-4000-8000-000000000006",
+  "10000000-0000-4000-8000-000000000007",
+  "10000000-0000-4000-8000-000000000008",
+  "10000000-0000-4000-8000-000000000009",
+  "10000000-0000-4000-8000-000000000010",
+];
+const tenPersistedItems = TEN_TIER_IDS.map((ticketTierId, index) => ({
+  orderItemId: TEN_ORDER_ITEM_IDS[index],
+  ticketTierId,
+  tierName: `Tier ${String(index + 1).padStart(2, "0")}`,
+  unitAmountMinor: 101 + index,
+  quantity: 1,
+  subtotalMinor: 101 + index,
+  currency: "usd" as const,
+}));
+
 const persistedItemsJsonb =
   `[{"currency": "usd", "quantity": 2, "tier_name": "General Admission", "order_item_id": "${GA_ORDER_ITEM_ID}", "subtotal_minor": 3000, "ticket_tier_id": "${GA_TIER_ID}", "unit_amount_minor": 1500}, {"currency": "usd", "quantity": 1, "tier_name": "VIP Entry", "order_item_id": "${VIP_ORDER_ITEM_ID}", "subtotal_minor": 2500, "ticket_tier_id": "${VIP_TIER_ID}", "unit_amount_minor": 2500}]`;
 
@@ -107,6 +145,34 @@ const CREATE_REQUEST_DIGEST = await sha256Hex([
   String(EXPIRES_AT_EPOCH),
   "whereto_checkout_cccccccc",
   persistedItemsJsonb,
+].join(String.fromCharCode(31)));
+
+function postgresItemsJsonb(
+  items: typeof persistedItems,
+): string {
+  return `[${
+    items.map((item) =>
+      `{"currency": "usd", "quantity": ${item.quantity}, "tier_name": ${
+        JSON.stringify(item.tierName)
+      }, "order_item_id": "${item.orderItemId}", "subtotal_minor": ${item.subtotalMinor}, "ticket_tier_id": "${item.ticketTierId}", "unit_amount_minor": ${item.unitAmountMinor}}`
+    ).join(", ")
+  }]`;
+}
+
+const TEN_CREATE_REQUEST_DIGEST = await sha256Hex([
+  "whereto-checkout-cart-v1",
+  ORDER_ID,
+  EVENT_ID,
+  REQUEST_ID,
+  CONFIRMATION_HASH,
+  "avery@example.com",
+  "usd",
+  "1055",
+  "100",
+  ACCOUNT_ID,
+  String(EXPIRES_AT_EPOCH),
+  "whereto_checkout_cccccccc",
+  postgresItemsJsonb(tenPersistedItems),
 ].join(String.fromCharCode(31)));
 
 function request(body: unknown = validBody, options: {
@@ -161,6 +227,17 @@ function reservation(
   } as ReservationSnapshot;
 }
 
+function tenLineReservation(): ReservationSnapshot {
+  return reservation({
+    quantity: 10,
+    subtotalMinor: 1_055,
+    applicationFeeAmountMinor: 100,
+    totalMinor: 1_055,
+    createRequestDigest: TEN_CREATE_REQUEST_DIGEST,
+    items: structuredClone(tenPersistedItems),
+  });
+}
+
 function rpcReservation(
   overrides: Record<string, unknown> = {},
 ): Record<string, unknown> {
@@ -193,6 +270,28 @@ function rpcReservation(
   };
 }
 
+function tenLineRpcReservation(): Record<string, unknown> {
+  return rpcReservation({
+    quantity: 10,
+    subtotal_minor: 1_055,
+    platform_product_fee_minor: 80,
+    stripe_fee_estimate_minor: 20,
+    application_fee_amount_minor: 100,
+    expected_organizer_proceeds_minor: 955,
+    total_minor: 1_055,
+    create_request_digest: TEN_CREATE_REQUEST_DIGEST,
+    order_items: tenPersistedItems.map((item) => ({
+      order_item_id: item.orderItemId,
+      ticket_tier_id: item.ticketTierId,
+      tier_name: item.tierName,
+      unit_amount_minor: item.unitAmountMinor,
+      quantity: item.quantity,
+      subtotal_minor: item.subtotalMinor,
+      currency: item.currency,
+    })),
+  });
+}
+
 function metadata(): Record<string, string> {
   return {
     contract_version: "checkout_integrity_v1",
@@ -205,9 +304,7 @@ function productFixture(
   item: (typeof persistedItems)[number],
 ): Record<string, unknown> {
   return {
-    id: item.orderItemId === GA_ORDER_ITEM_ID
-      ? "prod_Task4General"
-      : "prod_Task4Vip",
+    id: `prod_Task4${item.orderItemId.replaceAll("-", "")}`,
     object: "product",
     active: true,
     created: 1_787_773_930,
@@ -232,9 +329,7 @@ function lineFixture(
   item: (typeof persistedItems)[number],
 ): Record<string, unknown> {
   return {
-    id: item.orderItemId === GA_ORDER_ITEM_ID
-      ? "li_Task4General"
-      : "li_Task4Vip",
+    id: `li_Task4${item.orderItemId.replaceAll("-", "")}`,
     object: "item",
     amount_discount: 0,
     amount_subtotal: item.subtotalMinor,
@@ -244,9 +339,7 @@ function lineFixture(
     description: item.tierName,
     discounts: [],
     price: {
-      id: item.orderItemId === GA_ORDER_ITEM_ID
-        ? "price_Task4General"
-        : "price_Task4Vip",
+      id: `price_Task4${item.orderItemId.replaceAll("-", "")}`,
       object: "price",
       active: true,
       billing_scheme: "per_unit",
@@ -401,8 +494,8 @@ Deno.test("checkout requires an independent canonical 32-byte confirmation beare
   );
 });
 
-// Mutation caught: accepting legacy/unknown keys, malformed carts, duplicate
-// tiers, or an aggregate above ten.
+// Mutation caught: accepting legacy/unknown keys, malformed carts, or duplicate
+// tiers.
 Deno.test("checkout rejects non-exact cart request shapes before side effects", async () => {
   const invalidBodies: unknown[] = [
     { ...validBody, extra: true },
@@ -414,26 +507,10 @@ Deno.test("checkout rejects non-exact cart request shapes before side effects", 
       tierId: GA_TIER_ID,
     },
     { ...validBody, items: [] },
-    {
-      ...validBody,
-      items: [
-        { tierId: GA_TIER_ID, quantity: 1 },
-        { tierId: VIP_TIER_ID, quantity: 1 },
-        { tierId: "33333333-3333-4333-8333-333333333333", quantity: 1 },
-        { tierId: "44444444-4444-4444-8444-444444444444", quantity: 1 },
-      ],
-    },
     { ...validBody, items: [{ tierId: GA_TIER_ID, quantity: 0 }] },
     { ...validBody, items: [{ tierId: GA_TIER_ID, quantity: 11 }] },
     { ...validBody, items: [{ tierId: GA_TIER_ID, quantity: 1.5 }] },
     { ...validBody, items: [{ tierId: GA_TIER_ID, quantity: "2" }] },
-    {
-      ...validBody,
-      items: [{ tierId: GA_TIER_ID, quantity: 10 }, {
-        tierId: VIP_TIER_ID,
-        quantity: 1,
-      }],
-    },
     {
       ...validBody,
       items: [{ tierId: GA_TIER_ID, quantity: 1 }, {
@@ -462,6 +539,57 @@ Deno.test("checkout rejects non-exact cart request shapes before side effects", 
         touched = true;
       },
     }))(request(body));
+    assertEquals(response.status, 400);
+    assertEquals(touched, false);
+  }
+});
+
+// Mutation caught: retaining a separate three-line product cap even though ten
+// distinct unit-quantity lines satisfy the approved aggregate limit.
+Deno.test("checkout accepts and sorts ten distinct request lines", async () => {
+  let refreshedTierIds: string[] | undefined;
+  let reservedItems: CreateCheckoutInput["items"] | undefined;
+  const response = await createStripeCreateCheckoutHandler(dependencies({
+    refreshConnect: async (_eventId, tierIds) => {
+      refreshedTierIds = tierIds;
+    },
+    reserveCheckout: async (input) => {
+      reservedItems = input.items;
+      throw new Error("CHECKOUT_DISABLED");
+    },
+  }))(request({
+    ...validBody,
+    items: [...TEN_TIER_IDS].reverse().map((tierId) => ({
+      tierId,
+      quantity: 1,
+    })),
+  }));
+
+  assertEquals(response.status, 503);
+  assertEquals(refreshedTierIds, TEN_TIER_IDS);
+  assertEquals(
+    reservedItems,
+    TEN_TIER_IDS.map((tierId) => ({ tierId, quantity: 1 })),
+  );
+});
+
+// Mutation caught: allowing an eleventh distinct line or an aggregate of
+// eleven admissions after removing the obsolete three-line cap.
+Deno.test("checkout rejects eleven lines and aggregate quantity above ten", async () => {
+  const invalidBoundaryCarts = [
+    ELEVEN_TIER_IDS.map((tierId) => ({ tierId, quantity: 1 })),
+    [
+      { tierId: GA_TIER_ID, quantity: 10 },
+      { tierId: VIP_TIER_ID, quantity: 1 },
+    ],
+  ];
+  for (const items of invalidBoundaryCarts) {
+    let touched = false;
+    const response = await createStripeCreateCheckoutHandler(dependencies({
+      refreshConnect: async () => {
+        touched = true;
+      },
+    }))(request({ ...validBody, items }));
     assertEquals(response.status, 400);
     assertEquals(touched, false);
   }
@@ -629,6 +757,39 @@ Deno.test("default reservation adapter validates every returned bigint", async (
   }
 });
 
+// Mutation caught: rejecting persisted reservation snapshots solely because
+// they contain more than three valid, sorted, aggregate-bounded order items.
+Deno.test("default reservation adapter accepts ten persisted order items", async () => {
+  type ReserveAdapter = (
+    input: CreateCheckoutInput,
+    tokenHash: string,
+    client: unknown,
+  ) => Promise<ReservationSnapshot | null>;
+  const reserveAdapter =
+    (checkoutModule as unknown as { defaultReserveCheckout: ReserveAdapter })
+      .defaultReserveCheckout;
+  const input = {
+    ...canonicalInput,
+    items: TEN_TIER_IDS.map((tierId) => ({ tierId, quantity: 1 })),
+  };
+  const client = {
+    rpc: async () => ({ data: [tenLineRpcReservation()], error: null }),
+  };
+
+  const result = await reserveAdapter(input, CONFIRMATION_HASH, client);
+
+  assertEquals(result?.quantity, 10);
+  assertEquals(result?.subtotalMinor, 1_055);
+  assertEquals(
+    result?.items.map((item) => item.orderItemId),
+    TEN_ORDER_ITEM_IDS,
+  );
+  assertEquals(
+    result?.items.map((item) => item.ticketTierId),
+    TEN_TIER_IDS,
+  );
+});
+
 // Mutation caught: client-derived/generic lines or wrong metadata, totals, expansion, destination, or key.
 Deno.test("checkout creates deterministic Product-bound persisted Stripe lines", async () => {
   let capturedParams: Stripe.Checkout.SessionCreateParams | undefined;
@@ -707,6 +868,119 @@ Deno.test("checkout creates deterministic Product-bound persisted Stripe lines",
   ) {
     assertEquals(Object.hasOwn(capturedParams ?? {}, omitted), false);
   }
+});
+
+// Mutation caught: truncating a valid ten-line cart during construction or
+// validating its returned Stripe lines by position instead of the exact bound set.
+Deno.test("checkout constructs and validates ten deterministic bound Stripe lines", async () => {
+  let capturedParams: Stripe.Checkout.SessionCreateParams | undefined;
+  const response = await createStripeCreateCheckoutHandler(dependencies({
+    reserveCheckout: async () => tenLineReservation(),
+    createSession: async (params) => {
+      capturedParams = params;
+      return sessionFixture({
+        amount_subtotal: 1_055,
+        amount_total: 1_055,
+        line_items: {
+          ...lineItemsFixture(),
+          data: [...tenPersistedItems].reverse().map(lineFixture),
+        },
+        payment_intent: paymentIntentFixture({
+          amount: 1_055,
+          application_fee_amount: 100,
+        }),
+      });
+    },
+  }))(request({
+    ...validBody,
+    items: [...TEN_TIER_IDS].reverse().map((tierId) => ({
+      tierId,
+      quantity: 1,
+    })),
+  }));
+
+  const createdLines = capturedParams?.line_items ?? [];
+  const observed = createdLines.map((line) => {
+    const priceData = "price_data" in line ? line.price_data : undefined;
+    const productData = priceData && "product_data" in priceData
+      ? priceData.product_data
+      : undefined;
+    return {
+      quantity: line.quantity,
+      unitAmountMinor: priceData && "unit_amount" in priceData
+        ? priceData.unit_amount
+        : undefined,
+      name: productData && "name" in productData ? productData.name : undefined,
+      orderItemId: productData && "metadata" in productData
+        ? productData.metadata?.whereto_order_item_id
+        : undefined,
+    };
+  });
+  const expected = [
+    {
+      quantity: 1,
+      unitAmountMinor: 101,
+      name: "Tier 01",
+      orderItemId: TEN_ORDER_ITEM_IDS[0],
+    },
+    {
+      quantity: 1,
+      unitAmountMinor: 102,
+      name: "Tier 02",
+      orderItemId: TEN_ORDER_ITEM_IDS[1],
+    },
+    {
+      quantity: 1,
+      unitAmountMinor: 103,
+      name: "Tier 03",
+      orderItemId: TEN_ORDER_ITEM_IDS[2],
+    },
+    {
+      quantity: 1,
+      unitAmountMinor: 104,
+      name: "Tier 04",
+      orderItemId: TEN_ORDER_ITEM_IDS[3],
+    },
+    {
+      quantity: 1,
+      unitAmountMinor: 105,
+      name: "Tier 05",
+      orderItemId: TEN_ORDER_ITEM_IDS[4],
+    },
+    {
+      quantity: 1,
+      unitAmountMinor: 106,
+      name: "Tier 06",
+      orderItemId: TEN_ORDER_ITEM_IDS[5],
+    },
+    {
+      quantity: 1,
+      unitAmountMinor: 107,
+      name: "Tier 07",
+      orderItemId: TEN_ORDER_ITEM_IDS[6],
+    },
+    {
+      quantity: 1,
+      unitAmountMinor: 108,
+      name: "Tier 08",
+      orderItemId: TEN_ORDER_ITEM_IDS[7],
+    },
+    {
+      quantity: 1,
+      unitAmountMinor: 109,
+      name: "Tier 09",
+      orderItemId: TEN_ORDER_ITEM_IDS[8],
+    },
+    {
+      quantity: 1,
+      unitAmountMinor: 110,
+      name: "Tier 10",
+      orderItemId: TEN_ORDER_ITEM_IDS[9],
+    },
+  ];
+  assertEquals(response.status, 200);
+  assertEquals(await responseHasCheckoutUrl(response), true);
+  assertEquals(observed, expected);
 });
 
 // Mutation caught: incomplete retrieval expansion or a second create/attach on retry.

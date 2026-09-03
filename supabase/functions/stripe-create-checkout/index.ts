@@ -268,7 +268,7 @@ function parseCreateInput(value: Record<string, unknown>): CreateCheckoutInput {
     typeof value.buyerEmail !== "string" ||
     typeof value.clientRequestId !== "string" ||
     !Array.isArray(value.items) || value.items.length < 1 ||
-    value.items.length > 3
+    value.items.length > 10
   ) {
     throw new CheckoutHttpError(400, "INVALID_REQUEST");
   }
@@ -396,7 +396,7 @@ function reservationFromRpc(value: unknown): ReservationSnapshot {
   const createRequestDigest = value.create_request_digest;
   if (
     !Array.isArray(value.order_items) || value.order_items.length < 1 ||
-    value.order_items.length > 3
+    value.order_items.length > 10
   ) {
     throw new CheckoutHttpError(500, "INTERNAL_ERROR");
   }
