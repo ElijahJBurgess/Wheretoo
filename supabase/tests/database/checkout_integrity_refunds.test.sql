@@ -144,6 +144,8 @@ select pg_temp.create_paid_order('incomplete', 'b8400000-0000-4000-8000-00000000
 select pg_temp.create_paid_order('exact', 'b8400000-0000-4000-8000-000000000003', repeat('3',64));
 select pg_temp.create_paid_order('pending', 'b8400000-0000-4000-8000-000000000004', repeat('4',64));
 select pg_temp.create_paid_order('failed', 'b8400000-0000-4000-8000-000000000005', repeat('5',64));
+select pg_temp.create_paid_order('requiresaction', 'b8400000-0000-4000-8000-000000000007', repeat('7',64));
+select pg_temp.create_paid_order('race', 'b8400000-0000-4000-8000-000000000008', repeat('8',64));
 
 create temporary table cancel_order (id uuid primary key) on commit drop;
 grant all on cancel_order to service_role;
@@ -309,6 +311,36 @@ select results_eq(
   $$ values ('paid'::text, 'valid'::text, null::timestamptz) $$,
   'pending refund evidence holds without claiming success or invalidating paid admission'
 );
+select throws_ok(
+  $$ select * from public.server_prepare_whole_order_refund(
+    (select id from refund_orders where kind = 'pending'),
+    'requested_by_customer'
+  ) $$,
+  'P0001', 'REFUND_NOT_AVAILABLE',
+  'an unresolved pending refund blocks another automatic whole-order refund'
+);
+
+set local role service_role;
+select * from public.server_record_webhook_receipt(
+  'evt_task8requiresaction', 'refund.updated', false,
+  're_task8requiresaction', '2026-07-29.dahlia',
+  '2026-09-02 01:05:15+00', repeat('7',64)
+);
+select * from public.server_apply_verified_refund(
+  'evt_task8requiresaction',
+  (select id from refund_orders where kind = 'requiresaction'),
+  're_task8requiresaction', 'pi_task8requiresaction',
+  'ch_task8requiresaction', null, null, 3001, 'usd', 'requires_action',
+  null, true, true, 0, 0, false, 'REFUND_PENDING'
+);
+select throws_ok(
+  $$ select * from public.server_prepare_whole_order_refund(
+    (select id from refund_orders where kind = 'requiresaction'),
+    'requested_by_customer'
+  ) $$,
+  'P0001', 'REFUND_NOT_AVAILABLE',
+  'an unresolved requires-action refund blocks another automatic whole-order refund'
+);
 
 set local role service_role;
 select * from public.server_record_webhook_receipt(
@@ -376,6 +408,65 @@ select results_eq(
     3001::bigint, 300::bigint, true, 3::bigint
   ) $$,
   'pending refund advances only after exact whole-order economics are verified'
+);
+
+set local role service_role;
+select * from public.server_record_webhook_receipt(
+  'evt_task8racemismatch', 'refund.updated', false, 're_task8race',
+  '2026-07-29.dahlia', '2026-09-02 01:05:40+00', repeat('1',64)
+);
+select * from public.server_apply_verified_refund(
+  'evt_task8racemismatch', (select id from refund_orders where kind = 'race'),
+  're_task8race', 'pi_task8race', 'ch_task8race',
+  'trr_task8race', null, 3001, 'usd', 'succeeded', null,
+  true, true, 3001, 0, false, 'REFUND_POLICY_MISMATCH'
+);
+select results_eq(
+  $$ select status, reconciliation_status, failure_code
+     from orders where id = (select id from refund_orders where kind = 'race') $$,
+  $$ values ('requires_review'::text, 'requires_review'::text,
+    'REFUND_POLICY_MISMATCH'::text) $$,
+  'succeeded money with incomplete metadata immediately invalidates admission for review'
+);
+
+select * from public.server_record_webhook_receipt(
+  'evt_task8racerecovered', 'refund.updated', false, 're_task8race',
+  '2026-07-29.dahlia', '2026-09-02 01:05:50+00', repeat('2',64)
+);
+select throws_ok(
+  $$ select * from public.server_apply_verified_refund(
+    'evt_task8racerecovered', (select id from refund_orders where kind = 'race'),
+    're_task8race', 'pi_task8race', 'ch_task8race',
+    'trr_task8racereplacement', 'fr_task8race', 3001, 'usd', 'succeeded',
+    null, true, true, 3001, 300, true, null
+  ) $$,
+  'P0001', 'REFUND_SNAPSHOT_MISMATCH',
+  'succeeded mismatch recovery cannot replace a known provider evidence ID'
+);
+select lives_ok(
+  $$ select * from public.server_apply_verified_refund(
+    'evt_task8racerecovered', (select id from refund_orders where kind = 'race'),
+    're_task8race', 'pi_task8race', 'ch_task8race',
+    'trr_task8race', 'fr_task8race', 3001, 'usd', 'succeeded', null,
+    true, true, 3001, 300, true, null
+  ) $$,
+  'succeeded mismatch accepts only monotonic exact evidence recovery'
+);
+reset role;
+select results_eq(
+  $$
+    select orders.status, orders.reconciliation_status,
+      refunds.policy_verified,
+      refunds.application_fee_refund_amount_minor,
+      count(*) filter (where tickets.status = 'refunded')::bigint
+    from orders
+    join refunds on refunds.order_id = orders.id
+    join tickets on tickets.order_id = orders.id
+    where orders.id = (select id from refund_orders where kind = 'race')
+    group by orders.id, refunds.id
+  $$,
+  $$ values ('refunded'::text, 'reconciled'::text, true, 300::bigint, 3::bigint) $$,
+  'recovered exact succeeded evidence reconciles the whole order and ticket set'
 );
 
 set local role service_role;

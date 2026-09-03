@@ -1232,6 +1232,10 @@ function evidenceId(
   return value.id;
 }
 
+function isPermanentStripeEvidenceMismatch(error: unknown): boolean {
+  return isRecord(error) && error.type === "StripeInvalidRequestError";
+}
+
 async function validateRefundPolicy(
   refund: Record<string, unknown>,
   binding: Awaited<ReturnType<typeof validatePaymentBinding>>,
@@ -1276,13 +1280,20 @@ async function validateRefundPolicy(
   if (transferReversalId === null) {
     verified = false;
   } else {
-    const transfer = await dependencies.retrieveTransfer(
-      binding.payment.transferId,
-    );
-    const reversal = await dependencies.retrieveTransferReversal(
-      binding.payment.transferId,
-      transferReversalId,
-    );
+    let transfer: unknown;
+    let reversal: unknown;
+    try {
+      transfer = await dependencies.retrieveTransfer(
+        binding.payment.transferId,
+      );
+      reversal = await dependencies.retrieveTransferReversal(
+        binding.payment.transferId,
+        transferReversalId,
+      );
+    } catch (error) {
+      if (!isPermanentStripeEvidenceMismatch(error)) throw error;
+      verified = false;
+    }
     if (
       isRecord(transfer) && transfer.object === "transfer" &&
       transfer.id === binding.payment.transferId &&
@@ -1305,9 +1316,15 @@ async function validateRefundPolicy(
     } else verified = false;
   }
 
-  const applicationFee = await dependencies.retrieveApplicationFee(
-    binding.payment.applicationFeeId,
-  );
+  let applicationFee: unknown;
+  try {
+    applicationFee = await dependencies.retrieveApplicationFee(
+      binding.payment.applicationFeeId,
+    );
+  } catch (error) {
+    if (!isPermanentStripeEvidenceMismatch(error)) throw error;
+    verified = false;
+  }
   const applicationFeeInvalid =
     !isRecord(applicationFee) || applicationFee.object !== "application_fee" ||
     applicationFee.id !== binding.payment.applicationFeeId ||
@@ -1322,6 +1339,10 @@ async function validateRefundPolicy(
       binding.payment.chargeId ||
     !Number.isSafeInteger(applicationFee.amount_refunded);
   if (applicationFeeInvalid) verified = false;
+  const applicationFeeAmountRefunded = !applicationFeeInvalid &&
+      isRecord(applicationFee)
+    ? applicationFee.amount_refunded as number
+    : 0;
 
   const feeRefundId = typeof metadata.whereto_application_fee_refund_id ===
         "string" && FEE_REFUND_PATTERN.test(
@@ -1333,18 +1354,23 @@ async function validateRefundPolicy(
   if (feeRefundId === null || applicationFeeInvalid) {
     verified = false;
   } else {
-    const feeRefund = await dependencies.retrieveApplicationFeeRefund(
-      binding.payment.applicationFeeId,
-      feeRefundId,
-    );
+    let feeRefund: unknown;
+    try {
+      feeRefund = await dependencies.retrieveApplicationFeeRefund(
+        binding.payment.applicationFeeId,
+        feeRefundId,
+      );
+    } catch (error) {
+      if (!isPermanentStripeEvidenceMismatch(error)) throw error;
+      verified = false;
+    }
     if (
       isRecord(feeRefund) && feeRefund.object === "fee_refund" &&
       feeRefund.id === feeRefundId && Number.isSafeInteger(feeRefund.amount) &&
       (feeRefund.amount as number) > 0 &&
       feeRefund.currency === binding.order.currency &&
       feeRefund.fee === binding.payment.applicationFeeId &&
-      (applicationFee.amount_refunded as number) >=
-        (feeRefund.amount as number)
+      applicationFeeAmountRefunded >= (feeRefund.amount as number)
     ) feeRefundAmount = feeRefund.amount as number;
     else verified = false;
   }

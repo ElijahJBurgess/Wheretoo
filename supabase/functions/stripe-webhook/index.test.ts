@@ -1460,6 +1460,174 @@ Deno.test("missing automatic-refund policy persists authoritative mismatch evide
   );
 });
 
+Deno.test("permanent refund evidence lookup mismatches persist succeeded money for bounded review", async () => {
+  for (const failedLookup of ["reversal", "fee_refund"] as const) {
+    let applied: Record<string, unknown> | undefined;
+    const response = await createStripeWebhookHandler(dependencies({
+      retrieveTransfer: async () =>
+        transferFixture({
+          amount: 5_500,
+          amount_reversed: 5_500,
+          reversed: true,
+        }),
+      retrieveTransferReversal: async () => {
+        if (failedLookup === "reversal") {
+          throw { type: "StripeInvalidRequestError" };
+        }
+        return transferReversalFixture({ amount: 5_500 });
+      },
+      retrieveApplicationFeeRefund: async () => {
+        if (failedLookup === "fee_refund") {
+          throw { type: "StripeInvalidRequestError" };
+        }
+        return feeRefundFixture();
+      },
+      applyRefund: async (snapshot) => {
+        applied = snapshot as unknown as Record<string, unknown>;
+      },
+    }))(request(snapshotEvent(
+      "refund.updated",
+      { id: REFUND_ID },
+      {
+        id: `evt_Task8PermanentEvidence${
+          failedLookup === "reversal" ? "Reversal" : "FeeRefund"
+        }`,
+      },
+    )));
+
+    assertEquals(response.status, 200);
+    assertEquals(applied?.policyVerified, false);
+    assertEquals(applied?.policyFailureCode, "REFUND_POLICY_MISMATCH");
+    assertEquals(applied?.transferReversalId, REFUND_REVERSAL_ID);
+    assertEquals(applied?.applicationFeeRefundId, FEE_REFUND_ID);
+    assertEquals(
+      applied?.transferReversalAmountMinor,
+      failedLookup === "reversal" ? 0 : 5_500,
+    );
+    assertEquals(
+      applied?.applicationFeeRefundAmountMinor,
+      failedLookup === "fee_refund" ? 0 : 450,
+    );
+  }
+});
+
+Deno.test("refund evidence network, authentication, and permission failures remain retryable", async () => {
+  const errors = [
+    { type: "StripeConnectionError" },
+    new Stripe.errors.StripeAuthenticationError({
+      message: "test authentication failure",
+      type: "invalid_request_error",
+      statusCode: 401,
+    }),
+    new Stripe.errors.StripePermissionError({
+      message: "test permission failure",
+      type: "invalid_request_error",
+      statusCode: 403,
+    }),
+  ];
+
+  for (const [index, stripeError] of errors.entries()) {
+    let applied = false;
+    const finalizations: unknown[] = [];
+    const response = await createStripeWebhookHandler(dependencies({
+      retrieveTransfer: async () =>
+        transferFixture({
+          amount: 5_500,
+          amount_reversed: 5_500,
+          reversed: true,
+        }),
+      retrieveTransferReversal: async () => {
+        throw stripeError;
+      },
+      applyRefund: async () => {
+        applied = true;
+      },
+      finalizeReceipt: async (...args) => {
+        finalizations.push(args);
+      },
+    }))(request(snapshotEvent(
+      "refund.updated",
+      { id: REFUND_ID },
+      { id: `evt_Task8RetryableEvidence${index}` },
+    )));
+
+    assertEquals([response.status, applied], [503, false]);
+    assertEquals(finalizations, [[
+      `evt_Task8RetryableEvidence${index}`,
+      "failed",
+      "TRANSIENT_PROCESSING_FAILURE",
+    ]]);
+  }
+});
+
+Deno.test("refund metadata enrichment advances the same succeeded refund from bounded mismatch to exact evidence", async () => {
+  const applied: Array<Record<string, unknown>> = [];
+  let retrieval = 0;
+  const testDependencies = dependencies({
+    retrieveRefund: async () => {
+      retrieval += 1;
+      if (retrieval === 1) {
+        return refundFixture({
+          metadata: {
+            order_id: ORDER_ID,
+            whereto_refund_policy: "destination_v1",
+            whereto_reverse_transfer: "true",
+            whereto_refund_application_fee: "true",
+          },
+        });
+      }
+      return refundFixture();
+    },
+    retrieveTransfer: async () =>
+      transferFixture({
+        amount: 5_500,
+        amount_reversed: 5_500,
+        reversed: true,
+      }),
+    retrieveTransferReversal: async () =>
+      transferReversalFixture({ amount: 5_500 }),
+    applyRefund: async (snapshot) => {
+      applied.push(snapshot as unknown as Record<string, unknown>);
+    },
+  });
+
+  const raced = await createStripeWebhookHandler(testDependencies)(request(
+    snapshotEvent(
+      "refund.updated",
+      { id: REFUND_ID },
+      { id: "evt_Task8RefundMetadataRace" },
+    ),
+  ));
+  const enriched = await createStripeWebhookHandler(testDependencies)(request(
+    snapshotEvent(
+      "refund.updated",
+      { id: REFUND_ID },
+      { id: "evt_Task8RefundMetadataEnriched" },
+    ),
+  ));
+
+  assertEquals([raced.status, enriched.status], [200, 200]);
+  assertEquals(applied.map((snapshot) => ({
+    policyVerified: snapshot.policyVerified,
+    policyFailureCode: snapshot.policyFailureCode,
+    reversalAmount: snapshot.transferReversalAmountMinor,
+    feeRefundAmount: snapshot.applicationFeeRefundAmountMinor,
+  })), [
+    {
+      policyVerified: false,
+      policyFailureCode: "REFUND_POLICY_MISMATCH",
+      reversalAmount: 5_500,
+      feeRefundAmount: 0,
+    },
+    {
+      policyVerified: true,
+      policyFailureCode: null,
+      reversalAmount: 5_500,
+      feeRefundAmount: 450,
+    },
+  ]);
+});
+
 Deno.test("a failed refund event reconciles the current authoritative failed refund state", async () => {
   let status: string | undefined;
   const response = await createStripeWebhookHandler(dependencies({
