@@ -1,8 +1,9 @@
-import { useLayoutEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { AsyncState } from '../../components/ui/AsyncState'
 import { Button } from '../../components/ui/Button'
 import { ReportEventDialog } from '../moderation/ReportEventDialog'
+import { encodeCheckoutCart, MAX_CHECKOUT_QUANTITY } from '../checkout/checkout.cart'
 import { TicketTierList } from './TicketTierList'
 import { isRetryablePublicTicketingError } from './publicTicketing.errors'
 import { usePublicTicketingEvent } from './publicTicketing.queries'
@@ -81,67 +82,45 @@ type PublicTicketPurchaseProps = {
   tiers: PublicTicketTierTuple
 }
 
-type TicketSelectionStore = {
-  getSnapshot: () => string | null
-  invalidate: (tierId: string) => void
-  select: (tierId: string) => void
-  subscribe: (listener: () => void) => () => void
-}
-
-function createTicketSelectionStore(): TicketSelectionStore {
-  let selectedTierId: string | null = null
-  const listeners = new Set<() => void>()
-
-  function notify() {
-    listeners.forEach((listener) => listener())
-  }
-
-  function replaceSelection(nextTierId: string | null) {
-    if (selectedTierId === nextTierId) return
-    selectedTierId = nextTierId
-    notify()
-  }
-
-  return {
-    getSnapshot: () => selectedTierId,
-    invalidate: (tierId) => {
-      if (selectedTierId === tierId) replaceSelection(null)
-    },
-    select: (tierId) => replaceSelection(tierId),
-    subscribe: (listener) => {
-      listeners.add(listener)
-      return () => listeners.delete(listener)
-    },
-  }
-}
-
 function PublicTicketPurchase({ eventId, tiers }: PublicTicketPurchaseProps) {
   const navigate = useNavigate()
-  const [selectionStore] = useState(createTicketSelectionStore)
-  const selectedTierId = useSyncExternalStore(selectionStore.subscribe, selectionStore.getSnapshot)
+  const [quantities, setQuantities] = useState<Record<string, number>>({})
+  const availabilityKey = tiers.map((tier) => `${tier.id}:${tier.availability_status}`).join('|')
+  const [previousAvailabilityKey, setPreviousAvailabilityKey] = useState(availabilityKey)
+  if (previousAvailabilityKey !== availabilityKey) {
+    setPreviousAvailabilityKey(availabilityKey)
+    setQuantities((current) => {
+      const availableIds = new Set(tiers.filter((tier) => tier.availability_status === 'available').map((tier) => tier.id))
+      const next = Object.fromEntries(Object.entries(current).filter(([tierId]) => availableIds.has(tierId)))
+      return Object.keys(current).length === Object.keys(next).length ? current : next
+    })
+  }
 
-  useLayoutEffect(() => {
-    if (selectedTierId === null) return
-    const selectedTier = tiers.find((tier) => tier.id === selectedTierId)
-    if (selectedTier?.availability_status !== 'available') {
-      selectionStore.invalidate(selectedTierId)
-    }
-  }, [selectedTierId, selectionStore, tiers])
-
-  const selectedTier = tiers.find(
-    (tier) => tier.id === selectedTierId && tier.availability_status === 'available',
-  ) ?? null
+  const items = tiers
+    .filter((tier) => tier.availability_status === 'available')
+    .flatMap((tier) => {
+      const quantity = quantities[tier.id] ?? 0
+      return Number.isSafeInteger(quantity) && quantity > 0 ? [{ tierId: tier.id, quantity }] : []
+    })
+  const hasInvalidQuantity = tiers.some((tier) => {
+    const quantity = quantities[tier.id] ?? 0
+    return tier.availability_status === 'available' &&
+      (!Number.isSafeInteger(quantity) || quantity < 0 || quantity > MAX_CHECKOUT_QUANTITY)
+  })
+  const total = items.reduce((sum, item) => sum + item.quantity, 0)
+  const validCart = !hasInvalidQuantity && items.length > 0 && total <= MAX_CHECKOUT_QUANTITY &&
+    items.every((item) => item.quantity <= MAX_CHECKOUT_QUANTITY)
   const hasAvailableTier = tiers.some((tier) => tier.availability_status === 'available')
 
-  function selectTier(tierId: string) {
-    selectionStore.select(tierId)
+  function changeQuantity(tierId: string, quantity: number) {
+    setQuantities((current) => ({ ...current, [tierId]: quantity }))
   }
 
   function continueToCheckout() {
-    if (selectedTier === null) return
+    if (!validCart) return
     navigate({
       pathname: `/events/${eventId}/checkout`,
-      search: `?tier=${encodeURIComponent(selectedTier.id)}`,
+      search: `?${encodeCheckoutCart(items)}`,
     })
   }
 
@@ -149,11 +128,16 @@ function PublicTicketPurchase({ eventId, tiers }: PublicTicketPurchaseProps) {
     <section aria-labelledby="public-event-tickets" className="public-event__tickets">
       <div>
         <p className="public-event__eyebrow">Tickets</p>
-        <h2 id="public-event-tickets">Choose your ticket</h2>
+        <h2 id="public-event-tickets">Choose your tickets</h2>
       </div>
-      <TicketTierList onSelect={selectTier} selectedTierId={selectedTier?.id ?? null} tiers={tiers} />
+      <TicketTierList
+        maxTotal={MAX_CHECKOUT_QUANTITY}
+        onQuantityChange={changeQuantity}
+        quantities={quantities}
+        tiers={tiers}
+      />
       {hasAvailableTier ? null : <p className="public-event__unavailable">Tickets are currently unavailable</p>}
-      <Button disabled={selectedTier === null} onClick={continueToCheckout}>Continue to checkout</Button>
+      <Button disabled={!validCart} onClick={continueToCheckout}>Continue to checkout</Button>
     </section>
   )
 }

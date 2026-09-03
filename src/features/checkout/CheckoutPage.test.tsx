@@ -12,6 +12,10 @@ const { cancelCheckout, createCheckout, refetch, useCheckoutPublicEvent } = vi.h
   refetch: vi.fn(),
   useCheckoutPublicEvent: vi.fn(),
 }))
+const { clearCheckoutAttempt, getOrCreateCheckoutAttempt } = vi.hoisted(() => ({
+  clearCheckoutAttempt: vi.fn(),
+  getOrCreateCheckoutAttempt: vi.fn(),
+}))
 
 vi.mock('./checkout.api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./checkout.api')>()),
@@ -19,6 +23,7 @@ vi.mock('./checkout.api', async (importOriginal) => ({
   createCheckout,
 }))
 vi.mock('./checkout.queries', () => ({ useCheckoutPublicEvent }))
+vi.mock('./checkout.attempt', () => ({ clearCheckoutAttempt, getOrCreateCheckoutAttempt }))
 
 import { CheckoutPage } from './CheckoutPage'
 
@@ -27,6 +32,8 @@ const tierId = '900a9142-9111-4f87-84d5-b8545a94c7fb'
 const otherTierId = '6b849fa0-4d5e-4faa-bf31-b169cb1bd7fe'
 const nextEventId = '10823f25-2860-4b63-968c-749e8047561d'
 const nextTierId = '18a23f25-2860-4b63-968c-749e8047561d'
+const confirmationBearer = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8'
+const clientRequestId = '10823f25-2860-4b63-968c-749e8047561d'
 
 const publicEvent: PublicTicketingEvent = {
   event: {
@@ -58,11 +65,18 @@ const publicEvent: PublicTicketingEvent = {
     unit_amount_minor: 2_500,
     currency: 'usd',
     availability_status: 'available',
+  }, {
+    id: otherTierId,
+    name: 'VIP',
+    description: 'Early entry and lounge access.',
+    unit_amount_minor: 7_500,
+    currency: 'usd',
+    availability_status: 'available',
   }],
 }
 
 function renderCheckout(
-  initialEntry = `/events/${eventId}/checkout?tier=${tierId}`,
+  initialEntry = `/events/${eventId}/checkout?item=${tierId}%3A2&item=${otherTierId}%3A1`,
   assignCheckout?: (url: string) => void,
   strict = false,
 ) {
@@ -83,19 +97,26 @@ describe('CheckoutPage', () => {
     vi.clearAllMocks()
     useCheckoutPublicEvent.mockReturnValue({ data: publicEvent, isPending: false, isError: false, refetch })
     cancelCheckout.mockResolvedValue(undefined)
+    getOrCreateCheckoutAttempt.mockResolvedValue({
+      contractVersion: 'checkout_integrity_v1',
+      submissionFingerprint: confirmationBearer,
+      clientRequestId,
+      confirmationBearer,
+    })
   })
 
-  it('reviews exactly the persisted selected available tier with fixed quantity one', () => {
+  it('reviews multiple canonical cart lines and derives one public-data total', () => {
     renderCheckout()
 
-    expect(screen.getByRole('heading', { name: 'Review your ticket' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Review your tickets' })).toBeInTheDocument()
     expect(screen.getByText('Night Market')).toBeInTheDocument()
     expect(screen.getByText('General admission')).toBeInTheDocument()
-    expect(screen.getByText('$25.00')).toBeInTheDocument()
-    expect(screen.getByText('Quantity')).toBeInTheDocument()
-    expect(screen.getByText('1')).toBeInTheDocument()
+    expect(screen.getByText('2 tickets')).toBeInTheDocument()
+    expect(screen.getByText('VIP')).toBeInTheDocument()
+    expect(screen.getByText('1 ticket')).toBeInTheDocument()
+    expect(screen.getByText('$125.00')).toBeInTheDocument()
     expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument()
-    expect(screen.queryByText(/platform fee|destination|stripe account|order id/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/platform fee|destination|stripe account|order id|request id|confirmation bearer/i)).not.toBeInTheDocument()
   })
 
   it('gives the standalone loading state one semantic heading and a live loading role', () => {
@@ -119,8 +140,9 @@ describe('CheckoutPage', () => {
 
   it.each([
     `/events/${eventId}/checkout`,
-    `/events/${eventId}/checkout?tier=not-a-uuid`,
-    `/events/${eventId}/checkout?tier=${otherTierId}`,
+    `/events/${eventId}/checkout?item=not-a-uuid%3A1`,
+    `/events/${eventId}/checkout?item=${tierId}%3A11`,
+    `/events/${eventId}/checkout?item=18a23f25-2860-4b63-968c-749e8047561d%3A1`,
   ])('safely returns invalid or missing tier selections to the public event: %s', async (path) => {
     const { router } = renderCheckout(path)
     await waitFor(() => expect(router.state.location.pathname).toBe(`/events/${eventId}`))
@@ -164,7 +186,7 @@ describe('CheckoutPage', () => {
     fireEvent.click(action)
     fireEvent.click(action)
 
-    expect(createCheckout).toHaveBeenCalledOnce()
+    await waitFor(() => expect(createCheckout).toHaveBeenCalledOnce())
     expect(action).toBeDisabled()
     expect(screen.getByLabelText('Your name')).toBeDisabled()
     resolveCheckout('https://checkout.stripe.com/c/pay/cs_test_123')
@@ -183,6 +205,24 @@ describe('CheckoutPage', () => {
     expect(screen.queryByText(/TIER_SOLD_OUT|raw/i)).not.toBeInTheDocument()
   })
 
+  it('reuses the durable attempt after an ambiguous rejection instead of minting submit-local values', async () => {
+    const user = userEvent.setup()
+    createCheckout
+      .mockRejectedValueOnce(new TypeError('network failed'))
+      .mockResolvedValueOnce('https://checkout.stripe.com/c/pay/cs_test_123')
+    renderCheckout(undefined, vi.fn())
+    await user.type(screen.getByLabelText('Your name'), 'Avery Stone')
+    await user.type(screen.getByLabelText('Email address'), 'avery@example.com')
+
+    await user.click(screen.getByRole('button', { name: 'Continue to secure payment' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Secure checkout is unavailable')
+    await user.click(screen.getByRole('button', { name: 'Continue to secure payment' }))
+
+    await waitFor(() => expect(createCheckout).toHaveBeenCalledTimes(2))
+    expect(createCheckout.mock.calls[1]).toEqual(createCheckout.mock.calls[0])
+    expect(getOrCreateCheckoutAttempt).toHaveBeenCalledTimes(2)
+  })
+
   it('redirects only after a valid hosted Checkout URL and never creates paid client state', async () => {
     const user = userEvent.setup()
     const assign = vi.fn()
@@ -192,13 +232,17 @@ describe('CheckoutPage', () => {
     await user.type(screen.getByLabelText('Email address'), 'avery@example.com')
     await user.click(screen.getByRole('button', { name: 'Continue to secure payment' }))
 
-    expect(createCheckout).toHaveBeenCalledWith(expect.objectContaining({
+    expect(createCheckout).toHaveBeenCalledWith({
       eventId,
-      tierId,
       buyerName: 'Avery Stone',
       buyerEmail: 'avery@example.com',
-      quantity: 1,
-    }))
+      clientRequestId,
+      items: [
+        { tierId: otherTierId, quantity: 1 },
+        { tierId, quantity: 2 },
+      ],
+    }, confirmationBearer)
+    expect(clearCheckoutAttempt).toHaveBeenCalledWith(eventId, expect.objectContaining({ clientRequestId }))
     await waitFor(() => expect(assign).toHaveBeenCalledWith('https://checkout.stripe.com/c/pay/cs_test_123'))
     expect(screen.queryByText(/payment complete|ticket issued|order confirmed/i)).not.toBeInTheDocument()
   })
@@ -255,7 +299,9 @@ describe('CheckoutPage', () => {
       data: {
         ...publicEvent,
         event: { ...publicEvent.event, id: queriedEventId, title: queriedEventId === nextEventId ? 'Later Market' : 'Night Market' },
-        tiers: [{ ...publicEvent.tiers[0], id: queriedEventId === nextEventId ? nextTierId : tierId }],
+        tiers: queriedEventId === nextEventId
+          ? [{ ...publicEvent.tiers[0], id: nextTierId }]
+          : publicEvent.tiers,
       },
       isPending: false,
       isError: false,
@@ -266,7 +312,7 @@ describe('CheckoutPage', () => {
     await user.type(screen.getByLabelText('Email address'), 'avery@example.com')
     await user.click(screen.getByRole('button', { name: 'Continue to secure payment' }))
 
-    await act(async () => { await router.navigate(`/events/${nextEventId}/checkout?tier=${nextTierId}`) })
+    await act(async () => { await router.navigate(`/events/${nextEventId}/checkout?item=${nextTierId}%3A1`) })
     expect(screen.getByText('Later Market')).toBeInTheDocument()
     resolveCheckout('https://checkout.stripe.com/c/pay/cs_test_123')
 
@@ -280,7 +326,9 @@ describe('CheckoutPage', () => {
       data: {
         ...publicEvent,
         event: { ...publicEvent.event, id: queriedEventId, title: queriedEventId === nextEventId ? 'Later Market' : 'Night Market' },
-        tiers: [{ ...publicEvent.tiers[0], id: queriedEventId === nextEventId ? nextTierId : tierId }],
+        tiers: queriedEventId === nextEventId
+          ? [{ ...publicEvent.tiers[0], id: nextTierId }]
+          : publicEvent.tiers,
       },
       isPending: false,
       isError: false,
@@ -292,7 +340,7 @@ describe('CheckoutPage', () => {
     await user.type(screen.getByLabelText('Your name'), 'Avery Stone')
     await user.type(screen.getByLabelText('Email address'), 'avery@example.com')
 
-    await act(async () => { await router.navigate(`/events/${nextEventId}/checkout?tier=${nextTierId}`) })
+    await act(async () => { await router.navigate(`/events/${nextEventId}/checkout?item=${nextTierId}%3A1`) })
 
     expect(screen.getByText('Later Market')).toBeInTheDocument()
     expect(screen.getByLabelText('Your name')).toHaveValue('')
@@ -314,7 +362,9 @@ describe('CheckoutPage', () => {
       data: {
         ...publicEvent,
         event: { ...publicEvent.event, id: queriedEventId, title: queriedEventId === nextEventId ? 'Later Market' : 'Night Market' },
-        tiers: [{ ...publicEvent.tiers[0], id: queriedEventId === nextEventId ? nextTierId : tierId }],
+        tiers: queriedEventId === nextEventId
+          ? [{ ...publicEvent.tiers[0], id: nextTierId }]
+          : publicEvent.tiers,
       },
       isPending: false,
       isError: false,
@@ -326,7 +376,7 @@ describe('CheckoutPage', () => {
     await user.click(screen.getByRole('button', { name: 'Continue to secure payment' }))
     expect(screen.getByRole('button', { name: 'Opening secure payment…' })).toBeDisabled()
 
-    await act(async () => { await router.navigate(`/events/${nextEventId}/checkout?tier=${nextTierId}`) })
+    await act(async () => { await router.navigate(`/events/${nextEventId}/checkout?item=${nextTierId}%3A1`) })
     expect(screen.getByLabelText('Your name')).toHaveValue('')
     expect(screen.getByLabelText('Email address')).toHaveValue('')
     expect(screen.getByRole('button', { name: 'Continue to secure payment' })).toBeEnabled()
