@@ -1366,5 +1366,15 @@ select results_eq(
   'expiry cannot release payment-processing inventory'
 );
 
+select results_eq(
+  $$
+    select status, expired_at, failure_code
+    from public.orders
+    where id = (select order_id from processing_reservation)
+  $$,
+  $$ values ('payment_processing'::text, null::timestamptz, null::text) $$,
+  'protected payment-processing expiry is a no-op rather than a partial lifecycle mutation'
+);
+
 select * from finish();
 rollback;
