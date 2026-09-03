@@ -156,6 +156,22 @@ select public.publish_event('96100000-0000-4000-8000-000000000001');
 reset role;
 
 update private.checkout_runtime_control
+set checkout_creation_enabled = false
+where singleton;
+set local role service_role;
+select throws_ok(
+  $$ select * from public.server_reserve_checkout(
+    '96100000-0000-4000-8000-000000000001',
+    '[{"tier_id":"96200000-0000-4000-8000-000000000001","quantity":1}]'::jsonb,
+    'Gate Buyer', 'gate-buyer@example.invalid',
+    '96300000-0000-4000-8000-000000000010', repeat('0', 64)
+  ) $$,
+  'P0001', 'CHECKOUT_DISABLED',
+  'the JSON overload blocks a new cart while checkout creation is off'
+);
+reset role;
+
+update private.checkout_runtime_control
 set checkout_creation_enabled = true
 where singleton;
 
@@ -221,6 +237,9 @@ select results_eq(
   'all requested tier snapshots are inserted atomically'
 );
 
+update private.checkout_runtime_control
+set checkout_creation_enabled = false
+where singleton;
 set local role service_role;
 select results_eq(
   $$
@@ -233,7 +252,7 @@ select results_eq(
     )
   $$,
   $$ select order_id, order_items from cart_reservation $$,
-  'an equivalent reordered cart retry returns the persisted order and snapshots'
+  'an exact persisted JSON cart retry remains resumable while creation is off'
 );
 reset role;
 
@@ -246,8 +265,13 @@ select throws_ok(
     '96300000-0000-4000-8000-000000000001', repeat('a', 64)
   ) $$,
   'P0001', 'IDEMPOTENCY_CONFLICT',
-  'a material cart retry cannot create or substitute an order'
+  'a material JSON cart retry conflicts while creation is off'
 );
+reset role;
+update private.checkout_runtime_control
+set checkout_creation_enabled = true
+where singleton;
+set local role service_role;
 select throws_ok(
   $$ select * from public.server_reserve_checkout(
     '96100000-0000-4000-8000-000000000001', '[]'::jsonb,

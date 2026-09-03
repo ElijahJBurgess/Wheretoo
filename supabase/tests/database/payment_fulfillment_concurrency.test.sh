@@ -31,9 +31,26 @@ delete from public.stripe_webhook_events where stripe_event_id in (
   'evt_ConcurrencyOneAb', 'evt_ConcurrencyTwoCd', 'evt_RaceFulfillmentEf'
 );
 delete from public.ticket_tiers where event_id = '28000000-0000-4000-8000-000000000001'::uuid;
+update public.events
+set publicly_authorized_revision = null,
+    publicly_authorized_action_id = null
+where id = '28000000-0000-4000-8000-000000000001'::uuid;
 delete from private.event_public_eligibility_intervals
 where event_id = '28000000-0000-4000-8000-000000000001'::uuid;
+update private.event_moderation_actions
+set review_request_id = null
+where event_id = '28000000-0000-4000-8000-000000000001'::uuid;
+delete from private.moderation_review_requests
+where event_id = '28000000-0000-4000-8000-000000000001'::uuid;
+delete from private.event_reports
+where event_id = '28000000-0000-4000-8000-000000000001'::uuid;
+delete from private.event_moderation_actions
+where event_id = '28000000-0000-4000-8000-000000000001'::uuid;
+delete from private.event_moderation_evaluations
+where event_id = '28000000-0000-4000-8000-000000000001'::uuid;
 delete from private.event_policy_acceptances
+where event_id = '28000000-0000-4000-8000-000000000001'::uuid;
+delete from private.event_policy_legacy_exemptions
 where event_id = '28000000-0000-4000-8000-000000000001'::uuid;
 delete from private.event_risk_disclosures
 where event_id = '28000000-0000-4000-8000-000000000001'::uuid;
@@ -47,6 +64,17 @@ set checkout_creation_enabled = false
 where singleton;
 commit;"
 
+cleanup_verification_sql="select (
+  (select count(*) from private.event_moderation_actions where event_id = '28000000-0000-4000-8000-000000000001'::uuid)
+  + (select count(*) from private.event_moderation_evaluations where event_id = '28000000-0000-4000-8000-000000000001'::uuid)
+  + (select count(*) from private.event_reports where event_id = '28000000-0000-4000-8000-000000000001'::uuid)
+  + (select count(*) from private.moderation_review_requests where event_id = '28000000-0000-4000-8000-000000000001'::uuid)
+  + (select count(*) from private.event_policy_legacy_exemptions where event_id = '28000000-0000-4000-8000-000000000001'::uuid)
+  + (select count(*) from private.event_public_eligibility_intervals where event_id = '28000000-0000-4000-8000-000000000001'::uuid)
+  + (select count(*) from private.event_policy_acceptances where event_id = '28000000-0000-4000-8000-000000000001'::uuid)
+  + (select count(*) from private.event_risk_disclosures where event_id = '28000000-0000-4000-8000-000000000001'::uuid)
+) as residue_count;"
+
 cleanup() {
   original_status=$?
   trap - EXIT
@@ -56,6 +84,16 @@ cleanup() {
   if [[ $cleanup_status -ne 0 ]]; then
     echo "Payment concurrency fixture cleanup failed." >&2
     sed -n '1,160p' "$temporary_directory/cleanup.log" >&2
+  else
+    "$supabase_cli" db query --linked "$cleanup_verification_sql" \
+      >"$temporary_directory/cleanup-verification.log" 2>&1
+    cleanup_status=$?
+    if [[ $cleanup_status -ne 0 ]] || ! grep -q '"residue_count": 0' \
+      "$temporary_directory/cleanup-verification.log"; then
+      cleanup_status=1
+      echo "Payment concurrency moderation residue remains." >&2
+      sed -n '1,160p' "$temporary_directory/cleanup-verification.log" >&2
+    fi
   fi
   find "$temporary_directory" -type f -delete
   rmdir "$temporary_directory"

@@ -21,8 +21,20 @@ delete from public.tickets where organizer_id = '$fixture_organizer'::uuid;
 delete from public.order_items where order_id in (select id from public.orders where organizer_id = '$fixture_organizer'::uuid);
 delete from public.orders where organizer_id = '$fixture_organizer'::uuid;
 delete from public.ticket_tiers where event_id in ('$fixture_event'::uuid, '$fixture_lost_event'::uuid);
+update public.events
+set publicly_authorized_revision = null,
+    publicly_authorized_action_id = null
+where id in ('$fixture_event'::uuid, '$fixture_lost_event'::uuid);
 delete from private.event_public_eligibility_intervals where event_id in ('$fixture_event'::uuid, '$fixture_lost_event'::uuid);
+update private.event_moderation_actions
+set review_request_id = null
+where event_id in ('$fixture_event'::uuid, '$fixture_lost_event'::uuid);
+delete from private.moderation_review_requests where event_id in ('$fixture_event'::uuid, '$fixture_lost_event'::uuid);
+delete from private.event_reports where event_id in ('$fixture_event'::uuid, '$fixture_lost_event'::uuid);
+delete from private.event_moderation_actions where event_id in ('$fixture_event'::uuid, '$fixture_lost_event'::uuid);
+delete from private.event_moderation_evaluations where event_id in ('$fixture_event'::uuid, '$fixture_lost_event'::uuid);
 delete from private.event_policy_acceptances where event_id in ('$fixture_event'::uuid, '$fixture_lost_event'::uuid);
+delete from private.event_policy_legacy_exemptions where event_id in ('$fixture_event'::uuid, '$fixture_lost_event'::uuid);
 delete from private.event_risk_disclosures where event_id in ('$fixture_event'::uuid, '$fixture_lost_event'::uuid);
 delete from public.organizer_stripe_accounts where organizer_id = '$fixture_organizer'::uuid;
 delete from public.events where id in ('$fixture_event'::uuid, '$fixture_lost_event'::uuid);
@@ -33,6 +45,20 @@ set checkout_creation_enabled = false
 where singleton;
 commit;"
 
+cleanup_verification_sql="with fixture_events(event_id) as (values
+  ('$fixture_event'::uuid), ('$fixture_lost_event'::uuid)
+)
+select (
+  (select count(*) from private.event_moderation_actions where event_id in (select event_id from fixture_events))
+  + (select count(*) from private.event_moderation_evaluations where event_id in (select event_id from fixture_events))
+  + (select count(*) from private.event_reports where event_id in (select event_id from fixture_events))
+  + (select count(*) from private.moderation_review_requests where event_id in (select event_id from fixture_events))
+  + (select count(*) from private.event_policy_legacy_exemptions where event_id in (select event_id from fixture_events))
+  + (select count(*) from private.event_public_eligibility_intervals where event_id in (select event_id from fixture_events))
+  + (select count(*) from private.event_policy_acceptances where event_id in (select event_id from fixture_events))
+  + (select count(*) from private.event_risk_disclosures where event_id in (select event_id from fixture_events))
+) as residue_count;"
+
 cleanup() {
   original_exit=$?
   trap - EXIT
@@ -42,6 +68,16 @@ cleanup() {
   if [[ $cleanup_exit -ne 0 ]]; then
     echo "Checkout integrity concurrency fixture cleanup failed." >&2
     sed -n '1,120p' "$temporary_directory/cleanup.log" >&2
+  else
+    "$supabase_cli" db query --linked "$cleanup_verification_sql" \
+      >"$temporary_directory/cleanup-verification.log" 2>&1
+    cleanup_exit=$?
+    if [[ $cleanup_exit -ne 0 ]] || ! grep -q '"residue_count": 0' \
+      "$temporary_directory/cleanup-verification.log"; then
+      cleanup_exit=1
+      echo "Checkout integrity concurrency moderation residue remains." >&2
+      sed -n '1,120p' "$temporary_directory/cleanup-verification.log" >&2
+    fi
   fi
   find "$temporary_directory" -type f -delete
   rmdir "$temporary_directory"
@@ -75,6 +111,28 @@ wait_for_advisory_marker() {
 
   echo "$case_name did not reach its deterministic concurrency marker." >&2
   sed -n '1,120p' "$temporary_directory/${case_name}_marker.log" >&2
+  return 1
+}
+
+wait_for_session_lock() {
+  local application_name="$1"
+  local case_name="$2"
+  local deadline=$((SECONDS + 8))
+
+  while (( SECONDS < deadline )); do
+    run_query "${case_name}_lock" "select exists (
+      select 1 from pg_catalog.pg_stat_activity
+      where application_name = '$application_name'
+        and wait_event_type = 'Lock'
+    ) as lock_waiting;"
+    if grep -q '"lock_waiting": true' "$temporary_directory/${case_name}_lock.log"; then
+      return 0
+    fi
+    sleep 0.2
+  done
+
+  echo "$case_name did not wait on the checkout runtime gate lock." >&2
+  sed -n '1,120p' "$temporary_directory/${case_name}_lock.log" >&2
   return 1
 }
 
@@ -120,6 +178,50 @@ reserve_hold_sql() {
   printf "begin; set local statement_timeout = '20s'; set local role service_role; select * from public.server_reserve_checkout('%s', '%s'::jsonb, 'Concurrent Buyer', 'concurrent-buyer@example.invalid', '%s', repeat('%s', 64)); select pg_sleep(4); commit;" "$event_id" "$items" "$request_id" "$token"
 }
 
+# A JSON cart admitted while the switch is on holds the control-row share lock
+# through commit, so an owner disable cannot overtake the admitted transaction.
+gate_disable_application="whereto_task2_json_gate_disable"
+run_query gate_admission "begin;
+  set local statement_timeout = '20s';
+  set local role service_role;
+  select * from public.server_reserve_checkout(
+    '$fixture_event',
+    '[{\"tier_id\":\"97200000-0000-4000-8000-000000000002\",\"quantity\":1}]'::jsonb,
+    'Gate Buyer', 'gate-buyer@example.invalid',
+    '97300000-0000-4000-8000-000000000010', repeat('0', 64)
+  );
+  select pg_advisory_xact_lock(919203);
+  select pg_sleep(12);
+  commit;" &
+gate_admission_pid=$!
+wait_for_advisory_marker 919203 json_gate_admission
+run_query gate_disable "begin;
+  set local application_name = '$gate_disable_application';
+  set local statement_timeout = '20s';
+  update private.checkout_runtime_control
+  set checkout_creation_enabled = false
+  where singleton;
+  commit;" &
+gate_disable_pid=$!
+wait_for_session_lock "$gate_disable_application" json_gate_disable
+wait "$gate_admission_pid"
+wait "$gate_disable_pid"
+run_query verify_gate_serialization "do \$assert\$
+begin
+  if (select checkout_creation_enabled from private.checkout_runtime_control where singleton) then
+    raise exception using errcode = 'P0001', message = 'ASSERT_SWITCH_NOT_DISABLED';
+  end if;
+  if (select count(*) from public.orders
+      where event_id = '$fixture_event'::uuid
+        and client_request_id = '97300000-0000-4000-8000-000000000010'::uuid) <> 1 then
+    raise exception using errcode = 'P0001', message = 'ASSERT_JSON_ADMISSION_NOT_PERSISTED';
+  end if;
+end
+\$assert\$;"
+run_query reopen_gate "update private.checkout_runtime_control
+  set checkout_creation_enabled = true
+  where singleton;"
+
 # Same-tier final inventory: session two must wait, then fail sold-out rather than oversell.
 run_query final_first "$(reserve_hold_sql "$fixture_event" '[{\"tier_id\":\"97200000-0000-4000-8000-000000000001\",\"quantity\":1}]' '97300000-0000-4000-8000-000000000001' a)" &
 first_pid=$!
@@ -162,8 +264,10 @@ if [[ $general_exit -ne 0 || $vip_exit -ne 0 ]]; then
   echo "Different-tier carts failed bounded completion." >&2; exit 1
 fi
 
-# A concurrent tier edit serializes with the cart lock; then eligibility loss prevents a later cart.
-run_query tier_edit "begin; set local statement_timeout = '20s'; select public.lock_event_ticketing_operation('$fixture_event'); select id from public.ticket_tiers where id = '97200000-0000-4000-8000-000000000002' for update; update public.ticket_tiers set name = 'General Edited' where id = '97200000-0000-4000-8000-000000000002'; select pg_advisory_xact_lock(919202); select pg_sleep(3); commit;" &
+# Direct locked SQL isolates the production tier-row serialization boundary.
+# The public save path also changes publication/moderation state, which would
+# turn this into an eligibility test instead of a purchase-time snapshot test.
+run_query tier_edit "begin; set local statement_timeout = '20s'; select public.lock_event_ticketing_operation('$fixture_event'); select id from public.ticket_tiers where id = '97200000-0000-4000-8000-000000000002' for update; update public.ticket_tiers set name = 'General Edited', unit_amount_minor = 1200, version = version + 1 where id = '97200000-0000-4000-8000-000000000002'; select pg_advisory_xact_lock(919202); select pg_sleep(3); commit;" &
 edit_pid=$!
 wait_for_advisory_marker 919202 tier_edit
 set +e
@@ -177,6 +281,23 @@ if [[ $edit_exit -ne 0 || $edit_reserve_exit -ne 0 ]]; then
   sed -n '1,120p' "$temporary_directory/edit_reserve.log" >&2
   exit 1
 fi
+run_query verify_edit_snapshot "do \$assert\$
+begin
+  if not exists (
+    select 1
+    from public.orders as orders
+    join public.order_items as items on items.order_id = orders.id
+    where orders.client_request_id = '97300000-0000-4000-8000-000000000007'::uuid
+      and items.ticket_tier_id = '97200000-0000-4000-8000-000000000002'::uuid
+      and items.tier_name = 'General Edited'
+      and items.unit_amount_minor = 1200
+      and items.tier_version = 2
+  ) then
+    raise exception using errcode = 'P0001', message = 'ASSERT_STALE_TIER_SNAPSHOT';
+  end if;
+end
+\$assert\$;"
+# Eligibility loss is a separate serialized mutation and must prevent a later cart.
 run_query lose_eligibility "begin; set local statement_timeout = '20s'; select public.lock_event_ticketing_operation('$fixture_lost_event'); select id from public.ticket_tiers where event_id = '$fixture_lost_event' order by id for update; select id from public.events where id = '$fixture_lost_event' for update; update public.events set status = 'cancelled' where id = '$fixture_lost_event'; select pg_advisory_xact_lock(919201); select pg_sleep(3); commit;" &
 loss_pid=$!
 wait_for_advisory_marker 919201 eligibility_loss
