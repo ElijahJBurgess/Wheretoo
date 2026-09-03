@@ -5,6 +5,19 @@ set local search_path = public, extensions;
 
 select no_plan();
 
+select ok(
+  pg_catalog.pg_get_functiondef(
+    'public.get_public_event_ticketing(uuid)'::regprocedure
+  ) like '%''paid'', ''payment_processing'', ''requires_review'', ''partially_refunded''%'
+  and pg_catalog.pg_get_functiondef(
+    'public.get_public_event_ticketing(uuid)'::regprocedure
+  ) like '%reservation_expires_at > pg_catalog.statement_timestamp()%'
+  and pg_catalog.pg_get_functiondef(
+    'public.get_public_event_ticketing(uuid)'::regprocedure
+  ) not like '%orders.status in (''paid'', ''payment_processing'')%',
+  'public tier availability permanently commits paid, processing, review, and partial-refund orders'
+);
+
 select has_function(
   'private', 'event_is_publicly_eligible', array['uuid', 'timestamp with time zone'],
   'one private helper owns the final public eligibility answer'
@@ -137,6 +150,7 @@ select results_eq(
   $$ values
     ('checkout_reservation_v1'::name, true, true),
     ('fulfill_paid_order'::name, true, true),
+    ('get_checkout_preflight'::name, true, true),
     ('get_checkout_preflight'::name, true, true)
   $$,
   'reservation, preflight, and fulfillment route through one canonical eligibility helper'
@@ -277,6 +291,24 @@ where events.organizer_id = '78000000-0000-4000-8000-000000000001'
 order by events.id;
 reset role;
 
+update private.checkout_runtime_control
+set checkout_creation_enabled = true
+where singleton;
+set local role service_role;
+create temporary table review_inventory_cart on commit drop as
+select * from public.server_reserve_checkout(
+  '78100000-0000-4000-8000-000000000002',
+  '[{"tier_id":"78200000-0000-4000-8000-000000000001","quantity":10}]'::jsonb,
+  'Projection Buyer', 'projection-buyer@example.invalid',
+  '78300000-0000-4000-8000-000000000001', repeat('9', 64)
+);
+reset role;
+update public.ticket_tiers set quantity_total = 10
+where id = '78200000-0000-4000-8000-000000000001';
+update public.orders
+set status = 'requires_review', reconciliation_status = 'requires_review'
+where id = (select order_id from review_inventory_cart);
+
 update public.events set status = 'draft'
 where id = '78100000-0000-4000-8000-000000000003';
 update public.events set status = 'cancelled'
@@ -370,6 +402,50 @@ select results_eq(
     ('unit_amount_minor')
   $$,
   'ticketing exposes only the existing safe tier fields'
+);
+
+select is(
+  (
+    select ticketing -> 'tiers' -> 0 ->> 'availability_status'
+    from public.get_public_event_ticketing(
+      '78100000-0000-4000-8000-000000000002'
+    ) as ticketing
+  ),
+  'sold_out',
+  'requires-review orders remain committed in public tier availability'
+);
+
+reset role;
+update public.orders
+set status = 'partially_refunded', reconciliation_status = 'reconciled'
+where id = (select order_id from review_inventory_cart);
+set local role anon;
+select is(
+  (
+    select ticketing -> 'tiers' -> 0 ->> 'availability_status'
+    from public.get_public_event_ticketing(
+      '78100000-0000-4000-8000-000000000002'
+    ) as ticketing
+  ),
+  'sold_out',
+  'partially-refunded orders remain committed in public tier availability'
+);
+
+reset role;
+update public.orders
+set status = 'checkout_open', created_at = now() - interval '2 hours',
+    reservation_expires_at = now() - interval '30 minutes'
+where id = (select order_id from review_inventory_cart);
+set local role anon;
+select is(
+  (
+    select ticketing -> 'tiers' -> 0 ->> 'availability_status'
+    from public.get_public_event_ticketing(
+      '78100000-0000-4000-8000-000000000002'
+    ) as ticketing
+  ),
+  'available',
+  'expired open reservations do not remain committed in public tier availability'
 );
 
 select results_eq(

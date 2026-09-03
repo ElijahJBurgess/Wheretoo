@@ -12,6 +12,7 @@ if [[ ! -x "$supabase_cli" ]]; then
 fi
 
 cleanup_sql="begin;
+set local session_replication_role = replica;
 delete from public.disputes where order_id in (
   select id from public.orders
   where organizer_id = '18000000-0000-4000-8000-000000000001'::uuid
@@ -30,11 +31,20 @@ delete from public.stripe_webhook_events where stripe_event_id in (
   'evt_ConcurrencyOneAb', 'evt_ConcurrencyTwoCd', 'evt_RaceFulfillmentEf'
 );
 delete from public.ticket_tiers where event_id = '28000000-0000-4000-8000-000000000001'::uuid;
+delete from private.event_public_eligibility_intervals
+where event_id = '28000000-0000-4000-8000-000000000001'::uuid;
+delete from private.event_policy_acceptances
+where event_id = '28000000-0000-4000-8000-000000000001'::uuid;
+delete from private.event_risk_disclosures
+where event_id = '28000000-0000-4000-8000-000000000001'::uuid;
 delete from public.organizer_stripe_accounts
 where organizer_id = '18000000-0000-4000-8000-000000000001'::uuid;
 delete from public.events where id = '28000000-0000-4000-8000-000000000001'::uuid;
 delete from public.organizers where id = '18000000-0000-4000-8000-000000000001'::uuid;
 delete from auth.users where id = '18000000-0000-4000-8000-000000000001'::uuid;
+update private.checkout_runtime_control
+set checkout_creation_enabled = false
+where singleton;
 commit;"
 
 cleanup() {
@@ -85,7 +95,7 @@ wait_for_advisory_marker() {
 
 "$supabase_cli" db query --linked "$cleanup_sql" >"$temporary_directory/pre-cleanup.log" 2>&1
 
-"$supabase_cli" db query --linked "begin;
+if ! "$supabase_cli" db query --linked "begin;
 insert into auth.users (id, email) values (
   '18000000-0000-4000-8000-000000000001',
   'payment-fulfillment-concurrency@example.invalid'
@@ -129,10 +139,27 @@ insert into public.organizer_stripe_accounts (
   'acct_1ConcurrencyAbCdEf',
   'active', 'active', 'clear', 0, 0, now()
 );
+insert into private.event_risk_disclosures (
+  event_id, minimum_age, alcohol_present, cannabis_present,
+  explicit_adult_content, gambling_present, weapons_present, high_risk_activity
+) values (
+  '28000000-0000-4000-8000-000000000001',
+  'all_ages', false, false, false, false, false, false
+);
+select set_config(
+  'request.jwt.claim.sub', '18000000-0000-4000-8000-000000000001', true
+);
+set local role authenticated;
+select public.accept_current_event_policies('28000000-0000-4000-8000-000000000001'::uuid);
+select public.publish_event('28000000-0000-4000-8000-000000000001'::uuid);
+reset role;
+update private.checkout_runtime_control
+set checkout_creation_enabled = true
+where singleton;
 set local role service_role;
 select * from public.server_reserve_checkout(
   '28000000-0000-4000-8000-000000000001',
-  '38000000-0000-4000-8000-000000000001',
+  '38000000-0000-4000-8000-000000000001'::uuid,
   'Concurrent Buyer One', 'concurrent-one@example.invalid',
   '48000000-0000-4000-8000-000000000001', repeat('1', 64)
 );
@@ -145,7 +172,7 @@ select public.server_attach_checkout_session(
 );
 select * from public.server_reserve_checkout(
   '28000000-0000-4000-8000-000000000001',
-  '38000000-0000-4000-8000-000000000002',
+  '38000000-0000-4000-8000-000000000002'::uuid,
   'Concurrent Buyer Two', 'concurrent-two@example.invalid',
   '48000000-0000-4000-8000-000000000002', repeat('2', 64)
 );
@@ -171,7 +198,11 @@ select * from public.server_record_webhook_receipt(
   'cs_test_MutationRaceAbCd02', '2025-08-27.basil',
   '2026-08-25 18:00:02+00', repeat('c', 64)
 );
-commit;" >"$temporary_directory/setup.log" 2>&1
+commit;" >"$temporary_directory/setup.log" 2>&1; then
+  echo "Payment fulfillment concurrency setup failed." >&2
+  sed -n '1,160p' "$temporary_directory/setup.log" >&2
+  exit 1
+fi
 
 "$supabase_cli" db query --linked "begin;
 set local statement_timeout = '20s';

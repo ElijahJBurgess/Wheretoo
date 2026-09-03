@@ -13,12 +13,19 @@ fi
 
 cleanup_sql="begin;
 set local session_replication_role = replica;
+delete from public.tickets where organizer_id = '14000000-0000-0000-0000-000000000001'::uuid;
+delete from public.order_items where order_id in (
+  select id from public.orders
+  where organizer_id = '14000000-0000-0000-0000-000000000001'::uuid
+);
+delete from public.orders where organizer_id = '14000000-0000-0000-0000-000000000001'::uuid;
 delete from public.organizer_stripe_accounts where organizer_id = '14000000-0000-0000-0000-000000000001'::uuid;
 delete from public.ticket_tiers where event_id in (
   '24000000-0000-0000-0000-000000000001'::uuid,
   '24000000-0000-0000-0000-000000000002'::uuid,
   '24000000-0000-0000-0000-000000000003'::uuid,
-  '24000000-0000-0000-0000-000000000004'::uuid
+  '24000000-0000-0000-0000-000000000004'::uuid,
+  '24000000-0000-0000-0000-000000000005'::uuid
 );
 update public.events
 set publicly_authorized_revision = null,
@@ -27,13 +34,15 @@ where id in (
   '24000000-0000-0000-0000-000000000001'::uuid,
   '24000000-0000-0000-0000-000000000002'::uuid,
   '24000000-0000-0000-0000-000000000003'::uuid,
-  '24000000-0000-0000-0000-000000000004'::uuid
+  '24000000-0000-0000-0000-000000000004'::uuid,
+  '24000000-0000-0000-0000-000000000005'::uuid
 );
 delete from private.event_public_eligibility_intervals where event_id in (
   '24000000-0000-0000-0000-000000000001'::uuid,
   '24000000-0000-0000-0000-000000000002'::uuid,
   '24000000-0000-0000-0000-000000000003'::uuid,
-  '24000000-0000-0000-0000-000000000004'::uuid
+  '24000000-0000-0000-0000-000000000004'::uuid,
+  '24000000-0000-0000-0000-000000000005'::uuid
 );
 update private.event_moderation_actions
 set review_request_id = null
@@ -41,58 +50,70 @@ where event_id in (
   '24000000-0000-0000-0000-000000000001'::uuid,
   '24000000-0000-0000-0000-000000000002'::uuid,
   '24000000-0000-0000-0000-000000000003'::uuid,
-  '24000000-0000-0000-0000-000000000004'::uuid
+  '24000000-0000-0000-0000-000000000004'::uuid,
+  '24000000-0000-0000-0000-000000000005'::uuid
 );
 delete from private.moderation_review_requests where event_id in (
   '24000000-0000-0000-0000-000000000001'::uuid,
   '24000000-0000-0000-0000-000000000002'::uuid,
   '24000000-0000-0000-0000-000000000003'::uuid,
-  '24000000-0000-0000-0000-000000000004'::uuid
+  '24000000-0000-0000-0000-000000000004'::uuid,
+  '24000000-0000-0000-0000-000000000005'::uuid
 );
 delete from private.event_reports where event_id in (
   '24000000-0000-0000-0000-000000000001'::uuid,
   '24000000-0000-0000-0000-000000000002'::uuid,
   '24000000-0000-0000-0000-000000000003'::uuid,
-  '24000000-0000-0000-0000-000000000004'::uuid
+  '24000000-0000-0000-0000-000000000004'::uuid,
+  '24000000-0000-0000-0000-000000000005'::uuid
 );
 delete from private.event_moderation_actions where event_id in (
   '24000000-0000-0000-0000-000000000001'::uuid,
   '24000000-0000-0000-0000-000000000002'::uuid,
   '24000000-0000-0000-0000-000000000003'::uuid,
-  '24000000-0000-0000-0000-000000000004'::uuid
+  '24000000-0000-0000-0000-000000000004'::uuid,
+  '24000000-0000-0000-0000-000000000005'::uuid
 );
 delete from private.event_moderation_evaluations where event_id in (
   '24000000-0000-0000-0000-000000000001'::uuid,
   '24000000-0000-0000-0000-000000000002'::uuid,
   '24000000-0000-0000-0000-000000000003'::uuid,
-  '24000000-0000-0000-0000-000000000004'::uuid
+  '24000000-0000-0000-0000-000000000004'::uuid,
+  '24000000-0000-0000-0000-000000000005'::uuid
 );
 delete from private.event_policy_acceptances where event_id in (
   '24000000-0000-0000-0000-000000000001'::uuid,
   '24000000-0000-0000-0000-000000000002'::uuid,
   '24000000-0000-0000-0000-000000000003'::uuid,
-  '24000000-0000-0000-0000-000000000004'::uuid
+  '24000000-0000-0000-0000-000000000004'::uuid,
+  '24000000-0000-0000-0000-000000000005'::uuid
 );
 delete from private.event_policy_legacy_exemptions where event_id in (
   '24000000-0000-0000-0000-000000000001'::uuid,
   '24000000-0000-0000-0000-000000000002'::uuid,
   '24000000-0000-0000-0000-000000000003'::uuid,
-  '24000000-0000-0000-0000-000000000004'::uuid
+  '24000000-0000-0000-0000-000000000004'::uuid,
+  '24000000-0000-0000-0000-000000000005'::uuid
 );
 delete from private.event_risk_disclosures where event_id in (
   '24000000-0000-0000-0000-000000000001'::uuid,
   '24000000-0000-0000-0000-000000000002'::uuid,
   '24000000-0000-0000-0000-000000000003'::uuid,
-  '24000000-0000-0000-0000-000000000004'::uuid
+  '24000000-0000-0000-0000-000000000004'::uuid,
+  '24000000-0000-0000-0000-000000000005'::uuid
 );
 delete from public.events where id in (
   '24000000-0000-0000-0000-000000000001'::uuid,
   '24000000-0000-0000-0000-000000000002'::uuid,
   '24000000-0000-0000-0000-000000000003'::uuid,
-  '24000000-0000-0000-0000-000000000004'::uuid
+  '24000000-0000-0000-0000-000000000004'::uuid,
+  '24000000-0000-0000-0000-000000000005'::uuid
 );
 delete from public.organizers where id = '14000000-0000-0000-0000-000000000001'::uuid;
 delete from auth.users where id = '14000000-0000-0000-0000-000000000001'::uuid;
+update private.checkout_runtime_control
+set checkout_creation_enabled = false
+where singleton;
 commit;"
 
 cleanup() {
@@ -174,6 +195,24 @@ insert into public.events (
   37.7936,
   -122.3958,
   'paid'
+), (
+  '24000000-0000-0000-0000-000000000005',
+  '14000000-0000-0000-0000-000000000001',
+  'Concurrent Cart Reservation Event',
+  'A complete event used to verify cart tier-then-event lock ordering.',
+  'community',
+  now() + interval '4 days',
+  now() + interval '4 days 2 hours',
+  'Cart Lock Venue',
+  '3 Market Street',
+  'San Francisco',
+  'CA',
+  '94105',
+  'US',
+  'mapbox.concurrent-cart-lock-order',
+  37.7937,
+  -122.3959,
+  'paid'
 );
 insert into public.ticket_tiers (
   id, event_id, name, unit_amount_minor, quantity_total, status, sort_order
@@ -192,6 +231,11 @@ insert into public.ticket_tiers (
     '34000000-0000-4000-8000-000000000004',
     '24000000-0000-0000-0000-000000000004',
     'Publish Race Tier', 3000, 10, 'draft', 1
+  ),
+  (
+    '34000000-0000-4000-8000-000000000005',
+    '24000000-0000-0000-0000-000000000005',
+    'Cart Lock Tier', 2200, 10, 'draft', 1
   );
 insert into public.organizer_stripe_accounts (
   organizer_id, stripe_account_id, transfers_status, payouts_status,
@@ -212,7 +256,8 @@ where id in (
   '24000000-0000-0000-0000-000000000001'::uuid,
   '24000000-0000-0000-0000-000000000002'::uuid,
   '24000000-0000-0000-0000-000000000003'::uuid,
-  '24000000-0000-0000-0000-000000000004'::uuid
+  '24000000-0000-0000-0000-000000000004'::uuid,
+  '24000000-0000-0000-0000-000000000005'::uuid
 );
 insert into private.event_policy_acceptances (
   event_id, organizer_id, accepted_by_user_id, content_revision, input_sha256,
@@ -228,6 +273,18 @@ select
   'dev-event-policy-v1'
 from public.events as events
 where events.id = '24000000-0000-0000-0000-000000000004'::uuid;
+select set_config(
+  'request.jwt.claim.sub', '14000000-0000-0000-0000-000000000001', true
+);
+set local role authenticated;
+select public.accept_current_event_policies(
+  '24000000-0000-0000-0000-000000000005'::uuid
+);
+select public.publish_event('24000000-0000-0000-0000-000000000005'::uuid);
+reset role;
+update private.checkout_runtime_control
+set checkout_creation_enabled = true
+where singleton;
 commit;" >"$temporary_directory/setup.log" 2>&1
 
 wait_for_advisory_marker() {
@@ -430,6 +487,23 @@ run_paid_free_publish_case() {
 }
 
 failure_count=0
+
+run_lock_order_case \
+  "reserve-checkout-cart" \
+  "34000000-0000-4000-8000-000000000005" \
+  "24000000-0000-0000-0000-000000000005" \
+  "begin;
+   set local statement_timeout = '20s';
+   set local role service_role;
+   select count(*) from public.server_reserve_checkout(
+     '24000000-0000-0000-0000-000000000005',
+     jsonb_build_array(jsonb_build_object(
+       'tier_id', '34000000-0000-4000-8000-000000000005', 'quantity', 1
+     )),
+     'Cart Lock Buyer', 'cart-lock@example.invalid',
+     '44000000-0000-4000-8000-000000000005', repeat('a', 64)
+   );
+   commit;" || failure_count=$((failure_count + 1))
 
 run_lock_order_case \
   "save-ticket-tiers" \

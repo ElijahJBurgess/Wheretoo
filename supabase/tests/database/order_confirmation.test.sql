@@ -131,7 +131,7 @@ set local role service_role;
 create temporary table confirmation_reservation on commit drop as
 select * from public.server_reserve_checkout(
   '26000000-0000-4000-8000-000000000001',
-  '36000000-0000-4000-8000-000000000001',
+  '36000000-0000-4000-8000-000000000001'::uuid,
   'Private Buyer', 'private-buyer@example.invalid',
   '46000000-0000-4000-8000-000000000001',
   repeat('a', 64)

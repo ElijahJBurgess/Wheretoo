@@ -260,7 +260,7 @@ wait_for_activity_lock "$blocker_application" true blocker-ready
   set local statement_timeout = '30s';
   set local role service_role;
   select * from public.server_reserve_checkout(
-    '$event_id', '$tier_id', 'Task 1 Buyer',
+    '$event_id', '$tier_id'::uuid, 'Task 1 Buyer',
     'whereto-task1-buyer-${run_id}@example.invalid', '$request_id',
     repeat('a', 64)
   );

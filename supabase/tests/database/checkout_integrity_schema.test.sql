@@ -399,7 +399,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '20000000-0000-4000-8000-000000000101',
-      '30000000-0000-4000-8000-000000000101',
+      '30000000-0000-4000-8000-000000000101'::uuid,
       'Disabled Buyer', 'disabled-buyer@example.invalid',
       '50000000-0000-4000-8000-000000000103', repeat('c', 64)
     )
@@ -417,7 +417,7 @@ create temporary table enabled_reservation on commit drop as
 select *
 from public.server_reserve_checkout(
   '20000000-0000-4000-8000-000000000101',
-  '30000000-0000-4000-8000-000000000101',
+  '30000000-0000-4000-8000-000000000101'::uuid,
   'Retry Buyer', 'retry-buyer@example.invalid',
   '50000000-0000-4000-8000-000000000104', repeat('d', 64)
 );
@@ -437,7 +437,7 @@ select results_eq(
     select order_id
     from public.server_reserve_checkout(
       '20000000-0000-4000-8000-000000000101',
-      '30000000-0000-4000-8000-000000000101',
+      '30000000-0000-4000-8000-000000000101'::uuid,
       'Retry Buyer', 'retry-buyer@example.invalid',
       '50000000-0000-4000-8000-000000000104', repeat('d', 64)
     )
@@ -450,7 +450,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '20000000-0000-4000-8000-000000000101',
-      '30000000-0000-4000-8000-000000000102',
+      '30000000-0000-4000-8000-000000000102'::uuid,
       'Retry Buyer', 'retry-buyer@example.invalid',
       '50000000-0000-4000-8000-000000000104', repeat('d', 64)
     )
@@ -464,7 +464,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '20000000-0000-4000-8000-000000000101',
-      '30000000-0000-4000-8000-000000000101',
+      '30000000-0000-4000-8000-000000000101'::uuid,
       'Changed Buyer', 'retry-buyer@example.invalid',
       '50000000-0000-4000-8000-000000000104', repeat('d', 64)
     )
@@ -478,7 +478,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '20000000-0000-4000-8000-000000000101',
-      '30000000-0000-4000-8000-000000000101',
+      '30000000-0000-4000-8000-000000000101'::uuid,
       'Retry Buyer', 'changed-buyer@example.invalid',
       '50000000-0000-4000-8000-000000000104', repeat('d', 64)
     )
@@ -492,7 +492,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '20000000-0000-4000-8000-000000000101',
-      '30000000-0000-4000-8000-000000000101',
+      '30000000-0000-4000-8000-000000000101'::uuid,
       'Retry Buyer', 'retry-buyer@example.invalid',
       '50000000-0000-4000-8000-000000000104', repeat('9', 64)
     )
@@ -506,7 +506,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '20000000-0000-4000-8000-000000000101',
-      '30000000-0000-4000-8000-000000000101',
+      '30000000-0000-4000-8000-000000000101'::uuid,
       'Another Buyer', 'another-buyer@example.invalid',
       '50000000-0000-4000-8000-000000000105', repeat('e', 64)
     )

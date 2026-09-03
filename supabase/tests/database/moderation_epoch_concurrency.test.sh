@@ -201,7 +201,7 @@ NODE
   set local statement_timeout = '30s';
   set local role service_role;
   select * from public.server_reserve_checkout(
-    '$event_id', '$tier_id', 'Task 15 Buyer',
+    '$event_id', '$tier_id'::uuid, 'Task 15 Buyer',
     'whereto-task15-buyer-${run_id}@example.invalid', '$request_id', repeat('a', 64)
   );
   select pg_catalog.pg_advisory_xact_lock($marker);
@@ -263,7 +263,7 @@ run_query option-a "
   begin
     begin
       perform * from public.server_reserve_checkout(
-        '$event_id', '$tier_id', 'Blocked Buyer',
+        '$event_id', '$tier_id'::uuid, 'Blocked Buyer',
         'whereto-task15-blocked-${run_id}@example.invalid',
         '$(new_uuid)', repeat('b', 64)
       );

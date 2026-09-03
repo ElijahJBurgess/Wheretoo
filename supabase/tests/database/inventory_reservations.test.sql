@@ -2,9 +2,15 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(69);
+select no_plan();
 
 select has_schema('private', 'private service function schema exists');
+
+-- Task 1 intentionally defaults new checkout creation off. This legacy
+-- reservation suite exercises admitted creation paths, so opt in explicitly.
+update private.checkout_runtime_control
+set checkout_creation_enabled = true
+where singleton;
 
 select results_eq(
   $$
@@ -67,7 +73,7 @@ select results_eq(
   $$
     values ((array[
       'attach_checkout_session', 'cancel_checkout_reservation',
-      'expire_checkout_reservations', 'reserve_checkout'
+      'expire_checkout_reservations', 'reserve_checkout', 'reserve_checkout'
     ]::text[]) collate "C")
   $$,
   'all reservation functions are security definers with an empty search path'
@@ -90,7 +96,8 @@ select results_eq(
   $$
     values ((array[
       'server_attach_checkout_session', 'server_cancel_checkout_reservation',
-      'server_expire_checkout_reservations', 'server_reserve_checkout'
+      'server_expire_checkout_reservations', 'server_reserve_checkout',
+      'server_reserve_checkout'
     ]::text[]) collate "C")
   $$,
   'all public server wrappers are security definers with an empty search path'
@@ -112,7 +119,7 @@ select results_eq(
       and helper_namespace.nspname = 'public'
       and helper_function.proname = 'lock_event_ticketing_operation'
   $$,
-  $$ values (true) $$,
+  $$ values (true), (true) $$,
   'reserve checkout runs as the owner that alone can call the shared lock helper'
 );
 
@@ -259,6 +266,7 @@ select results_eq(
       'server_attach_checkout_session:service_role:EXECUTE',
       'server_cancel_checkout_reservation:service_role:EXECUTE',
       'server_expire_checkout_reservations:service_role:EXECUTE',
+      'server_reserve_checkout:service_role:EXECUTE',
       'server_reserve_checkout:service_role:EXECUTE'
     ]::text[]) collate "C")
   $$,
@@ -271,7 +279,9 @@ select results_eq(
       collate "C"
     from information_schema.parameters
     where specific_schema = 'private'
-      and specific_name like 'reserve_checkout_%'
+      and specific_name = 'reserve_checkout_' || (
+        'private.reserve_checkout(uuid,uuid,text,text,uuid,text)'::regprocedure::oid
+      )::text
       and parameter_mode = 'OUT'
   $$,
   $$
@@ -291,7 +301,9 @@ select results_eq(
       collate "C"
     from information_schema.parameters
     where specific_schema = 'public'
-      and specific_name like 'server_reserve_checkout_%'
+      and specific_name = 'server_reserve_checkout_' || (
+        'public.server_reserve_checkout(uuid,uuid,text,text,uuid,text)'::regprocedure::oid
+      )::text
       and parameter_mode = 'OUT'
   $$,
   $$
@@ -449,7 +461,7 @@ create temporary table first_reservation on commit drop as
 select *
 from public.server_reserve_checkout(
   '25000000-0000-0000-0000-000000000001',
-  '35000000-0000-4000-8000-000000000001',
+  '35000000-0000-4000-8000-000000000001'::uuid,
   '  Ada Lovelace  ',
   '  ADA@Example.COM  ',
   '45000000-0000-4000-8000-000000000001',
@@ -590,7 +602,7 @@ create temporary table retried_reservation on commit drop as
 select *
 from public.server_reserve_checkout(
   '25000000-0000-0000-0000-000000000001',
-  '35000000-0000-4000-8000-000000000001',
+  '35000000-0000-4000-8000-000000000001'::uuid,
   'Ada Lovelace',
   'ada@example.com',
   '45000000-0000-4000-8000-000000000001',
@@ -627,7 +639,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
-      '35000000-0000-4000-8000-000000000001',
+      '35000000-0000-4000-8000-000000000001'::uuid,
       'Ada Lovelace', 'ada@example.com',
       '45000000-0000-4000-8000-000000000001',
       'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
@@ -673,7 +685,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
-      '35000000-0000-4000-8000-000000000001',
+      '35000000-0000-4000-8000-000000000001'::uuid,
       'Blocked Buyer', 'blocked@example.com',
       '45000000-0000-4000-8000-000000000002',
       'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
@@ -691,7 +703,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
-      '35000000-0000-4000-8000-000000000003',
+      '35000000-0000-4000-8000-000000000003'::uuid,
       'Wrong Tier', 'wrong-tier@example.com',
       '45000000-0000-4000-8000-000000000003',
       'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
@@ -709,7 +721,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
-      '35000000-0000-4000-8000-000000000001',
+      '35000000-0000-4000-8000-000000000001'::uuid,
       'Archived Tier', 'archived@example.com',
       '45000000-0000-4000-8000-000000000004',
       'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
@@ -731,7 +743,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
-      '35000000-0000-4000-8000-000000000001',
+      '35000000-0000-4000-8000-000000000001'::uuid,
       'Stale Connect', 'stale-connect@example.com',
       '45000000-0000-4000-8000-000000000005',
       'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
@@ -750,7 +762,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
-      '35000000-0000-4000-8000-000000000001',
+      '35000000-0000-4000-8000-000000000001'::uuid,
       'Connect Due', 'connect-due@example.com',
       '45000000-0000-4000-8000-000000000006',
       'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'
@@ -772,7 +784,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
-      '35000000-0000-4000-8000-000000000001',
+      '35000000-0000-4000-8000-000000000001'::uuid,
       'No Fee', 'no-fee@example.com',
       '45000000-0000-4000-8000-000000000007',
       '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -790,7 +802,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
-      '35000000-0000-4000-8000-000000000001',
+      '35000000-0000-4000-8000-000000000001'::uuid,
       ' ', 'valid@example.com',
       '45000000-0000-4000-8000-000000000008',
       '1123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -804,7 +816,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
-      '35000000-0000-4000-8000-000000000001',
+      '35000000-0000-4000-8000-000000000001'::uuid,
       'Valid Buyer', 'not-an-email',
       '45000000-0000-4000-8000-000000000009',
       '2123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -818,7 +830,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
-      '35000000-0000-4000-8000-000000000001',
+      '35000000-0000-4000-8000-000000000001'::uuid,
       'Valid Buyer', 'valid@example.com',
       '45000000-0000-4000-8000-000000000010', 'clear-confirmation-token'
     )
@@ -831,7 +843,7 @@ create temporary table stale_final_reservation on commit drop as
 select *
 from public.server_reserve_checkout(
   '25000000-0000-0000-0000-000000000001',
-  '35000000-0000-4000-8000-000000000002',
+  '35000000-0000-4000-8000-000000000002'::uuid,
   'Stale Final Buyer', 'stale-final@example.com',
   '45000000-0000-4000-8000-000000000011',
   '3123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -841,7 +853,7 @@ create temporary table stale_tier_reservation on commit drop as
 select *
 from public.server_reserve_checkout(
   '25000000-0000-0000-0000-000000000001',
-  '35000000-0000-4000-8000-000000000001',
+  '35000000-0000-4000-8000-000000000001'::uuid,
   'Stale Tier Buyer', 'stale-tier@example.com',
   '45000000-0000-4000-8000-000000000018',
   'a123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -851,7 +863,7 @@ create temporary table stale_connect_reservation on commit drop as
 select *
 from public.server_reserve_checkout(
   '25000000-0000-0000-0000-000000000001',
-  '35000000-0000-4000-8000-000000000001',
+  '35000000-0000-4000-8000-000000000001'::uuid,
   'Stale Connect Retry', 'stale-connect-retry@example.com',
   '45000000-0000-4000-8000-000000000019',
   'b123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -861,7 +873,7 @@ create temporary table restricted_connect_reservation on commit drop as
 select *
 from public.server_reserve_checkout(
   '25000000-0000-0000-0000-000000000001',
-  '35000000-0000-4000-8000-000000000001',
+  '35000000-0000-4000-8000-000000000001'::uuid,
   'Restricted Connect Retry', 'restricted-connect-retry@example.com',
   '45000000-0000-4000-8000-000000000020',
   'c123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -871,7 +883,7 @@ create temporary table stale_fee_reservation on commit drop as
 select *
 from public.server_reserve_checkout(
   '25000000-0000-0000-0000-000000000001',
-  '35000000-0000-4000-8000-000000000001',
+  '35000000-0000-4000-8000-000000000001'::uuid,
   'Stale Fee Retry', 'stale-fee-retry@example.com',
   '45000000-0000-4000-8000-000000000021',
   'd123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -1099,7 +1111,7 @@ create temporary table replacement_final_reservation on commit drop as
 select *
 from public.server_reserve_checkout(
   '25000000-0000-0000-0000-000000000001',
-  '35000000-0000-4000-8000-000000000002',
+  '35000000-0000-4000-8000-000000000002'::uuid,
   'Replacement Final Buyer', 'replacement-final@example.com',
   '45000000-0000-4000-8000-000000000012',
   '4123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -1119,7 +1131,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
-      '35000000-0000-4000-8000-000000000002',
+      '35000000-0000-4000-8000-000000000002'::uuid,
       'Sold Out Buyer', 'sold-out@example.com',
       '45000000-0000-4000-8000-000000000013',
       '5123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -1137,7 +1149,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
-      '35000000-0000-4000-8000-000000000002',
+      '35000000-0000-4000-8000-000000000002'::uuid,
       'Paid Sold Out Buyer', 'paid-sold-out@example.com',
       '45000000-0000-4000-8000-000000000022',
       'e123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -1169,7 +1181,7 @@ create temporary table attached_reservation on commit drop as
 select *
 from public.server_reserve_checkout(
   '25000000-0000-0000-0000-000000000001',
-  '35000000-0000-4000-8000-000000000001',
+  '35000000-0000-4000-8000-000000000001'::uuid,
   'Attached Buyer', 'attached@example.com',
   '45000000-0000-4000-8000-000000000014',
   '6123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -1240,7 +1252,7 @@ create temporary table cancelled_reservation on commit drop as
 select *
 from public.server_reserve_checkout(
   '25000000-0000-0000-0000-000000000001',
-  '35000000-0000-4000-8000-000000000001',
+  '35000000-0000-4000-8000-000000000001'::uuid,
   'Cancelled Buyer', 'cancelled@example.com',
   '45000000-0000-4000-8000-000000000015',
   '7123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -1298,7 +1310,7 @@ create temporary table expiring_reservation on commit drop as
 select *
 from public.server_reserve_checkout(
   '25000000-0000-0000-0000-000000000001',
-  '35000000-0000-4000-8000-000000000001',
+  '35000000-0000-4000-8000-000000000001'::uuid,
   'Expiring Buyer', 'expiring@example.com',
   '45000000-0000-4000-8000-000000000016',
   '8123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -1334,7 +1346,7 @@ create temporary table processing_reservation on commit drop as
 select *
 from public.server_reserve_checkout(
   '25000000-0000-0000-0000-000000000001',
-  '35000000-0000-4000-8000-000000000001',
+  '35000000-0000-4000-8000-000000000001'::uuid,
   'Processing Buyer', 'processing@example.com',
   '45000000-0000-4000-8000-000000000017',
   '9123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'

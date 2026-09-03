@@ -130,7 +130,7 @@ begin
   select reservation.order_id into v_order_id
   from public.server_reserve_checkout(
     '27000000-0000-4000-8000-000000000001',
-    '37000000-0000-4000-8000-000000000001',
+    '37000000-0000-4000-8000-000000000001'::uuid,
     'Refund Buyer', 'refund-buyer@example.invalid', p_request_id, p_hash
   ) as reservation;
   perform public.server_attach_checkout_session(
