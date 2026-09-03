@@ -95,8 +95,8 @@ insert into public.events (
 insert into public.ticket_tiers (
   id, event_id, name, unit_amount_minor, currency, quantity_total, status, sort_order
 ) values
-  ('97200000-0000-4000-8000-000000000001', '97100000-0000-4000-8000-000000000001', 'Expiry First', 1000, 'usd', 10, 'active', 1),
-  ('97200000-0000-4000-8000-000000000002', '97100000-0000-4000-8000-000000000001', 'Expiry Second', 1000, 'usd', 10, 'active', 2);
+  ('97200000-0000-4000-8000-000000000001', '97100000-0000-4000-8000-000000000001', 'Expiry First', 1000, 'usd', 5, 'active', 1),
+  ('97200000-0000-4000-8000-000000000002', '97100000-0000-4000-8000-000000000001', 'Expiry Second', 1000, 'usd', 5, 'active', 2);
 insert into public.organizer_stripe_accounts (
   organizer_id, stripe_account_id, transfers_status, payouts_status, requirements_status,
   requirements_currently_due_count, requirements_past_due_count, last_synced_at
