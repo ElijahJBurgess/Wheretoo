@@ -130,12 +130,17 @@ insert into public.ticket_tiers (
   (
     'a6300000-0000-4000-8000-000000000001',
     'a6200000-0000-4000-8000-000000000001',
-    'General Admission', 1001, 'usd', 12, 'active', 1
+    'General Admission', 1001, 'usd', 14, 'active', 1
   ),
   (
     'a6300000-0000-4000-8000-000000000002',
     'a6200000-0000-4000-8000-000000000001',
-    'VIP', 999, 'usd', 7, 'active', 2
+    'VIP', 999, 'usd', 8, 'active', 2
+  ),
+  (
+    'a6300000-0000-4000-8000-000000000004',
+    'a6200000-0000-4000-8000-000000000001',
+    'Alternate General Admission', 1001, 'usd', 2, 'active', 3
   ),
   (
     'a6300000-0000-4000-8000-000000000003',
@@ -260,6 +265,14 @@ insert into fulfillment_orders (kind, id, session_id) values
       'cs_test_integrityatomic'
     ),
     'cs_test_integrityatomic'
+  ),
+  (
+    'snapshot',
+    pg_temp.create_multi_item_order(
+      'a6400000-0000-4000-8000-000000000007', repeat('7', 64),
+      'cs_test_integritysnapshot'
+    ),
+    'cs_test_integritysnapshot'
   );
 
 create or replace function pg_temp.order_snapshot(p_order_id uuid, p_session_id text)
@@ -562,6 +575,258 @@ select results_eq(
     order by identity.id
   $$,
   'a complete-set retry preserves every ticket identity and issuance timestamp'
+);
+
+reset role;
+
+update public.order_items
+set ticket_tier_id = 'a6300000-0000-4000-8000-000000000004',
+    tier_name = 'Alternate General Admission',
+    tier_description = null,
+    tier_version = 1
+where order_id = (select id from fulfillment_orders where kind = 'snapshot')
+  and ticket_tier_id = 'a6300000-0000-4000-8000-000000000001';
+
+update public.ticket_tiers
+set quantity_total = 12
+where id = 'a6300000-0000-4000-8000-000000000001';
+
+set local role service_role;
+
+select results_eq(
+  $$
+    select value ->> 'order_status', (value ->> 'ticket_count')::bigint
+    from (
+      select pg_temp.record_and_fulfill(
+        'integritysnapshot', 'integritysnapshot', id, session_id
+      ) as value
+      from fulfillment_orders where kind = 'snapshot'
+    ) as mismatch
+  $$,
+  $$ values ('requires_review'::text, 0::bigint) $$,
+  'a stable same-event same-priced tier substitution cannot fulfill the frozen cart'
+);
+
+select results_eq(
+  $$
+    select orders.status, orders.reconciliation_status, orders.failure_code,
+      count(tickets.*)::bigint,
+      receipts.processing_status, receipts.error_code
+    from fulfillment_orders as fixture
+    join public.orders as orders on orders.id = fixture.id
+    join public.stripe_webhook_events as receipts
+      on receipts.stripe_event_id = 'evt_integritysnapshot'
+    left join public.tickets as tickets on tickets.order_id = orders.id
+    where fixture.kind = 'snapshot'
+    group by orders.id, receipts.stripe_event_id
+  $$,
+  $$ values (
+    'requires_review'::text, 'requires_review'::text,
+    'TICKET_SET_MISMATCH'::text, 0::bigint,
+    'processed'::text, 'TICKET_SET_MISMATCH'::text
+  ) $$,
+  'digest-bound item corruption records safe review state without admissions'
+);
+
+reset role;
+
+create or replace function pg_temp.exercise_valid_ticket_lifecycle(
+  p_input_status text,
+  p_event_suffix text
+)
+returns table (
+  input_status text,
+  final_status text,
+  reconciliation_status text,
+  failure_code text,
+  valid_ticket_count bigint,
+  cancelled_ticket_count bigint,
+  refunded_ticket_count bigint,
+  receipt_error_code text,
+  returned_status text,
+  returned_ticket_count bigint
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_order_id uuid;
+  v_session_id text;
+  v_result jsonb;
+begin
+  select fixture.id, fixture.session_id
+  into v_order_id, v_session_id
+  from pg_temp.fulfillment_orders as fixture
+  where fixture.kind = 'clean';
+
+  update public.orders as orders
+  set status = p_input_status,
+      reconciliation_status = case
+        when p_input_status = 'paid' then 'reconciled'
+        when p_input_status = 'requires_review' then 'requires_review'
+        else 'pending'
+      end,
+      failure_code = case
+        when p_input_status = 'requires_review' then 'SYNTHETIC_REVIEW_STATE'
+        else null
+      end
+  where orders.id = v_order_id;
+
+  update public.tickets as tickets
+  set status = 'valid',
+      refunded_at = null,
+      cancelled_at = null
+  where tickets.order_id = v_order_id;
+
+  v_result := pg_temp.record_and_fulfill(
+    p_event_suffix,
+    'integrityclean',
+    v_order_id,
+    v_session_id
+  );
+
+  return query
+  select
+    p_input_status,
+    orders.status,
+    orders.reconciliation_status,
+    orders.failure_code,
+    count(tickets.*) filter (where tickets.status = 'valid')::bigint,
+    count(tickets.*) filter (where tickets.status = 'cancelled')::bigint,
+    count(tickets.*) filter (where tickets.status = 'refunded')::bigint,
+    receipts.error_code,
+    v_result ->> 'order_status',
+    (v_result ->> 'ticket_count')::bigint
+  from public.orders as orders
+  join public.stripe_webhook_events as receipts
+    on receipts.stripe_event_id = 'evt_' || p_event_suffix
+  left join public.tickets as tickets on tickets.order_id = orders.id
+  where orders.id = v_order_id
+  group by orders.id, receipts.stripe_event_id;
+end;
+$$;
+
+create temporary table lifecycle_results (
+  input_status text,
+  final_status text,
+  reconciliation_status text,
+  failure_code text,
+  valid_ticket_count bigint,
+  cancelled_ticket_count bigint,
+  refunded_ticket_count bigint,
+  receipt_error_code text,
+  returned_status text,
+  returned_ticket_count bigint
+) on commit drop;
+
+insert into lifecycle_results
+select * from pg_temp.exercise_valid_ticket_lifecycle(
+  'requires_review', 'lifecyclereview'
+);
+insert into lifecycle_results
+select * from pg_temp.exercise_valid_ticket_lifecycle(
+  'partially_refunded', 'lifecyclepartial'
+);
+insert into lifecycle_results
+select * from pg_temp.exercise_valid_ticket_lifecycle(
+  'refunded', 'lifecyclerefunded'
+);
+insert into lifecycle_results
+select * from pg_temp.exercise_valid_ticket_lifecycle(
+  'expired', 'lifecycleexpired'
+);
+insert into lifecycle_results
+select * from pg_temp.exercise_valid_ticket_lifecycle(
+  'cancelled', 'lifecyclecancelled'
+);
+insert into lifecycle_results
+select * from pg_temp.exercise_valid_ticket_lifecycle(
+  'payment_failed', 'lifecyclefailed'
+);
+
+select results_eq(
+  $$
+    select input_status, final_status, reconciliation_status, failure_code,
+      valid_ticket_count, cancelled_ticket_count, refunded_ticket_count,
+      receipt_error_code,
+      returned_status, returned_ticket_count
+    from lifecycle_results
+    order by input_status
+  $$,
+  $$ values
+    (
+      'cancelled'::text, 'requires_review'::text, 'requires_review'::text,
+      'TICKET_SET_MISMATCH'::text, 0::bigint, 3::bigint, 0::bigint,
+      'TICKET_SET_MISMATCH'::text, 'requires_review'::text, 3::bigint
+    ),
+    (
+      'expired'::text, 'requires_review'::text, 'requires_review'::text,
+      'TICKET_SET_MISMATCH'::text, 0::bigint, 3::bigint, 0::bigint,
+      'TICKET_SET_MISMATCH'::text, 'requires_review'::text, 3::bigint
+    ),
+    (
+      'partially_refunded'::text, 'requires_review'::text, 'requires_review'::text,
+      'TICKET_SET_MISMATCH'::text, 0::bigint, 3::bigint, 0::bigint,
+      'TICKET_SET_MISMATCH'::text, 'requires_review'::text, 3::bigint
+    ),
+    (
+      'payment_failed'::text, 'requires_review'::text, 'requires_review'::text,
+      'TICKET_SET_MISMATCH'::text, 0::bigint, 3::bigint, 0::bigint,
+      'TICKET_SET_MISMATCH'::text, 'requires_review'::text, 3::bigint
+    ),
+    (
+      'refunded'::text, 'refunded'::text, 'requires_review'::text,
+      'TICKET_SET_MISMATCH'::text, 0::bigint, 0::bigint, 3::bigint,
+      'TICKET_SET_MISMATCH'::text, 'refunded'::text, 3::bigint
+    ),
+    (
+      'requires_review'::text, 'requires_review'::text, 'requires_review'::text,
+      'TICKET_SET_MISMATCH'::text, 0::bigint, 3::bigint, 0::bigint,
+      'TICKET_SET_MISMATCH'::text, 'requires_review'::text, 3::bigint
+    )
+  $$,
+  'valid admissions are invalidated for every non-admitting order lifecycle state'
+);
+
+create temporary table lifecycle_cancelled_identity on commit drop as
+select id, issued_at, cancelled_at
+from public.tickets
+where order_id = (select id from fulfillment_orders where kind = 'clean');
+grant select on lifecycle_cancelled_identity to service_role;
+
+set local role service_role;
+
+select results_eq(
+  $$
+    select value ->> 'order_status', (value ->> 'ticket_count')::bigint
+    from (
+      select pg_temp.record_and_fulfill(
+        'lifecycleidempotent', 'integrityclean', id, session_id
+      ) as value
+      from fulfillment_orders where kind = 'clean'
+    ) as retry
+  $$,
+  $$ values ('requires_review'::text, 3::bigint) $$,
+  'a lifecycle mismatch retry is a no-op over the invalidated exact ticket set'
+);
+
+select results_eq(
+  $$
+    select tickets.id, tickets.issued_at, tickets.cancelled_at,
+      tickets.status, orders.failure_code
+    from public.tickets as tickets
+    join public.orders as orders on orders.id = tickets.order_id
+    where tickets.order_id = (select id from fulfillment_orders where kind = 'clean')
+    order by tickets.id
+  $$,
+  $$
+    select identity.id, identity.issued_at, identity.cancelled_at,
+      'cancelled'::text, 'TICKET_SET_MISMATCH'::text
+    from lifecycle_cancelled_identity as identity
+    order by identity.id
+  $$,
+  'lifecycle mismatch retry preserves ticket identity, issuance, and cancellation time'
 );
 
 insert into public.tickets (
@@ -894,11 +1159,17 @@ select results_eq(
       'a6200000-0000-4000-8000-000000000001'
     ) as projection
     cross join lateral jsonb_array_elements(projection -> 'tiers') as tier_item(value)
+    where tier_item.value ->> 'id' in (
+      'a6300000-0000-4000-8000-000000000001',
+      'a6300000-0000-4000-8000-000000000002',
+      'a6300000-0000-4000-8000-000000000004'
+    )
     order by tier_item.value ->> 'id'
   $$,
   $$ values
     ('a6300000-0000-4000-8000-000000000001'::text, 'sold_out'::text),
-    ('a6300000-0000-4000-8000-000000000002'::text, 'sold_out'::text)
+    ('a6300000-0000-4000-8000-000000000002'::text, 'sold_out'::text),
+    ('a6300000-0000-4000-8000-000000000004'::text, 'sold_out'::text)
   $$,
   'paid, reviewed, and unresolved atomic orders keep every purchased unit committed'
 );

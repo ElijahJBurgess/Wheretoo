@@ -131,6 +131,32 @@ wait_for_advisory_marker() {
   return 1
 }
 
+wait_for_session_lock() {
+  application_name="$1"
+  case_name="$2"
+  deadline=$((SECONDS + 15))
+
+  while (( SECONDS < deadline )); do
+    "$supabase_cli" db query --linked "
+      select exists (
+        select 1
+        from pg_catalog.pg_stat_activity
+        where application_name = '$application_name'
+          and wait_event_type = 'Lock'
+      ) as lock_waiting;
+    " >"$temporary_directory/${case_name}-lock.log" 2>&1
+
+    if grep -q '\"lock_waiting\": true' "$temporary_directory/${case_name}-lock.log"; then
+      return 0
+    fi
+    sleep 0.2
+  done
+
+  echo "$case_name did not reach its expected lock wait." >&2
+  sed -n '1,160p' "$temporary_directory/${case_name}-lock.log" >&2
+  return 1
+}
+
 "$supabase_cli" db query --linked "$cleanup_sql" >"$temporary_directory/pre-cleanup.log" 2>&1
 
 if ! "$supabase_cli" db query --linked "begin;
@@ -171,7 +197,7 @@ insert into public.ticket_tiers (
   (
     '38000000-0000-4000-8000-000000000003',
     '28000000-0000-4000-8000-000000000001',
-    'Mutation Race', 3000, 'usd', 10, 'active', 3
+    'Alternate General Admission', 2000, 'usd', 10, 'active', 3
   );
 insert into public.organizer_stripe_accounts (
   organizer_id, stripe_account_id, transfers_status, payouts_status,
@@ -259,8 +285,23 @@ select * from public.server_fulfill_paid_order(
   'cus_1ConcurrencyAbCdEf', 'payment', 'paid', 'usd',
   6500, 6500, 475, 'acct_1ConcurrencyAbCdEf'
 );
-select pg_advisory_xact_lock(918501);
-select pg_sleep(6);
+select
+  (
+    select array_to_string(
+      array_agg(
+        tickets.id::text || '@' || extract(epoch from tickets.issued_at)::text
+        order by tickets.id
+      ),
+      '|'
+    )
+    from public.tickets as tickets
+    where tickets.order_id = (
+      select id from public.orders
+      where client_request_id = '48000000-0000-4000-8000-000000000001'
+    )
+  ) as first_ticket_identity_snapshot,
+  pg_advisory_xact_lock(918501),
+  pg_sleep(6);
 commit;" >"$temporary_directory/duplicate-first.log" 2>&1 &
 duplicate_first_pid=$!
 
@@ -301,6 +342,14 @@ select orders.status,
       array_agg(unit_sequence order by ticket_tier_id, unit_sequence), ','
     )
     from public.tickets where order_id = orders.id) as ticket_sequences,
+  (select array_to_string(
+      array_agg(
+        id::text || '@' || extract(epoch from issued_at)::text
+        order by id
+      ),
+      '|'
+    )
+    from public.tickets where order_id = orders.id) as final_ticket_identity_snapshot,
   (select count(*) from public.stripe_webhook_events
     where stripe_event_id in ('evt_ConcurrencyOneAb', 'evt_ConcurrencyTwoCd')
       and processing_status = 'processed') as processed_receipt_count
@@ -318,30 +367,37 @@ if ! grep -q '\"status\": \"paid\"' "$temporary_directory/duplicate-result.log" 
   exit 1
 fi
 
-echo "concurrent duplicate fulfillment preserved three item-local tickets and two processed receipts"
+first_ticket_identity_snapshot=$(sed -n \
+  's/.*"first_ticket_identity_snapshot": "\([^"]*\)".*/\1/p' \
+  "$temporary_directory/duplicate-first.log" | tail -n 1)
+final_ticket_identity_snapshot=$(sed -n \
+  's/.*"final_ticket_identity_snapshot": "\([^"]*\)".*/\1/p' \
+  "$temporary_directory/duplicate-result.log" | tail -n 1)
+
+if [[ -z "$first_ticket_identity_snapshot" \
+  || "$first_ticket_identity_snapshot" != "$final_ticket_identity_snapshot" ]]; then
+  echo "Concurrent retry rewrote first-writer ticket identity or issuance time." >&2
+  sed -n '1,160p' "$temporary_directory/duplicate-first.log" >&2
+  sed -n '1,160p' "$temporary_directory/duplicate-result.log" >&2
+  exit 1
+fi
+
+echo "concurrent duplicate fulfillment preserved first-writer ticket identities, issuance times, and two processed receipts"
 
 "$supabase_cli" db query --linked "begin;
-set local statement_timeout = '20s';
+set local statement_timeout = '30s';
 select public.lock_event_ticketing_operation(
   '28000000-0000-4000-8000-000000000001'
 );
-select id from public.ticket_tiers
-where id = '38000000-0000-4000-8000-000000000003' for update;
-select id from public.events
-where id = '28000000-0000-4000-8000-000000000001' for update;
-update public.ticket_tiers set status = 'archived'
-where id = '38000000-0000-4000-8000-000000000003';
-update public.events set status = 'cancelled'
-where id = '28000000-0000-4000-8000-000000000001';
 select pg_advisory_xact_lock(918502);
-select pg_sleep(6);
+select pg_sleep(20);
 commit;" >"$temporary_directory/mutation-first.log" 2>&1 &
 mutation_first_pid=$!
 
 wait_for_advisory_marker 918502 "fulfillment-mutation-race"
 
-set +e
 "$supabase_cli" db query --linked "begin;
+set local application_name = 'task6_order_item_fulfillment_waiter';
 set local statement_timeout = '20s';
 set local role service_role;
 select * from public.server_fulfill_paid_order(
@@ -351,40 +407,91 @@ select * from public.server_fulfill_paid_order(
   'cs_test_MutationRaceAbCd02', 'pi_1MutationRaceAbCd', 'ch_1MutationRaceAbCd',
   'tr_1MutationRaceAbCd', 'fee_1MutationRaceAbCd', 'txn_1MutationRaceAbCd',
   'cus_1MutationRaceAbCd', 'payment', 'paid', 'usd',
-  3000, 3000, 200, 'acct_1ConcurrencyAbCdEf'
+  2000, 2000, 150, 'acct_1ConcurrencyAbCdEf'
 );
-commit;" >"$temporary_directory/mutation-fulfillment.log" 2>&1
+commit;" >"$temporary_directory/mutation-fulfillment.log" 2>&1 &
+mutation_fulfillment_pid=$!
+
+wait_for_session_lock \
+  'task6_order_item_fulfillment_waiter' \
+  'order-item-fulfillment'
+
+"$supabase_cli" db query --linked "begin;
+set local statement_timeout = '20s';
+update public.order_items as items
+set ticket_tier_id = '38000000-0000-4000-8000-000000000001'::uuid,
+    tier_name = 'Duplicate Fulfillment GA',
+    tier_description = null,
+    tier_version = 1
+from public.orders as orders
+where orders.id = items.order_id
+  and orders.client_request_id = '48000000-0000-4000-8000-000000000002';
+commit;" >"$temporary_directory/mutation-writer.log" 2>&1
+mutation_writer_status=$?
+
+set +e
+wait "$mutation_fulfillment_pid"
 mutation_fulfillment_status=$?
 wait "$mutation_first_pid"
 mutation_first_status=$?
 set -e
 
-if [[ $mutation_first_status -ne 0 || $mutation_fulfillment_status -ne 0 ]]; then
-  echo "Fulfillment versus tier/event mutation failed or timed out." >&2
+if [[ $mutation_first_status -ne 0 \
+  || $mutation_writer_status -ne 0 \
+  || $mutation_fulfillment_status -eq 0 \
+  || ! -s "$temporary_directory/mutation-fulfillment.log" ]] \
+  || ! grep -q 'ORDER_CHANGED_RETRY' \
+    "$temporary_directory/mutation-fulfillment.log"; then
+  echo "Fulfillment did not reject the order-item set changed behind its event lock." >&2
   sed -n '1,160p' "$temporary_directory/mutation-first.log" >&2
+  sed -n '1,160p' "$temporary_directory/mutation-writer.log" >&2
   sed -n '1,160p' "$temporary_directory/mutation-fulfillment.log" >&2
   exit 1
 fi
 
 "$supabase_cli" db query --linked "
 select orders.status,
+  orders.failure_code,
   (select count(*) from public.tickets where order_id = orders.id) as ticket_count,
+  receipts.processing_status as receipt_status,
+  items.ticket_tier_id,
   events.status as event_status,
-  tiers.status as tier_status
+  tiers.status as tier_status,
+  orders.stripe_checkout_request_digest is distinct from
+    private.checkout_request_digest(
+      orders.id,
+      orders.event_id,
+      items.ticket_tier_id,
+      orders.client_request_id,
+      orders.confirmation_token_hash,
+      orders.buyer_email,
+      orders.currency,
+      orders.subtotal_minor,
+      orders.application_fee_amount_minor,
+      orders.stripe_destination_account_id,
+      orders.checkout_expires_at,
+      orders.stripe_checkout_integration_identifier
+    ) as digest_mismatch
 from public.orders as orders
 join public.events as events on events.id = orders.event_id
 join public.order_items as items on items.order_id = orders.id
 join public.ticket_tiers as tiers on tiers.id = items.ticket_tier_id
+join public.stripe_webhook_events as receipts
+  on receipts.stripe_event_id = 'evt_RaceFulfillmentEf'
 where orders.client_request_id = '48000000-0000-4000-8000-000000000002';
 " >"$temporary_directory/mutation-result.log" 2>&1
 
-if ! grep -q '\"status\": \"requires_review\"' "$temporary_directory/mutation-result.log" \
+if ! grep -q '\"status\": \"checkout_open\"' "$temporary_directory/mutation-result.log" \
+  || ! grep -q '\"failure_code\": null' "$temporary_directory/mutation-result.log" \
   || ! grep -q '\"ticket_count\": 0' "$temporary_directory/mutation-result.log" \
-  || ! grep -q '\"event_status\": \"cancelled\"' "$temporary_directory/mutation-result.log" \
-  || ! grep -q '\"tier_status\": \"archived\"' "$temporary_directory/mutation-result.log"; then
-  echo "Fulfillment did not revalidate the committed tier/event mutation." >&2
+  || ! grep -q '\"receipt_status\": \"processing\"' "$temporary_directory/mutation-result.log" \
+  || ! grep -q '\"ticket_tier_id\": \"38000000-0000-4000-8000-000000000001\"' "$temporary_directory/mutation-result.log" \
+  || ! grep -q '\"event_status\": \"published\"' "$temporary_directory/mutation-result.log" \
+  || ! grep -q '\"tier_status\": \"active\"' "$temporary_directory/mutation-result.log" \
+  || ! grep -q '\"digest_mismatch\": true' "$temporary_directory/mutation-result.log"; then
+  echo "Rejected order-item mutation left an unsafe fulfillment state." >&2
   sed -n '1,160p' "$temporary_directory/mutation-result.log" >&2
   exit 1
 fi
 
-echo "fulfillment revalidated tier/event mutation after serialized lock acquisition"
+echo "fulfillment rejected a real order-item mutation committed while it waited on the event lock"
