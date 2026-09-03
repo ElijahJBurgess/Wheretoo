@@ -114,6 +114,47 @@ function lineFixture(
   };
 }
 
+function withoutField(
+  value: Record<string, unknown>,
+  field: string,
+): Record<string, unknown> {
+  const copy = { ...value };
+  delete copy[field];
+  return copy;
+}
+
+function sessionWithPaymentIntent(
+  overrides: Record<string, unknown>,
+): Record<string, unknown> {
+  return checkoutSessionFixture({
+    payment_intent: paymentIntentFixture(overrides),
+  });
+}
+
+function sessionWithCharge(
+  overrides: Record<string, unknown>,
+): Record<string, unknown> {
+  return checkoutSessionFixture({
+    payment_intent: paymentIntentFixture({
+      latest_charge: chargeFixture(overrides),
+    }),
+  });
+}
+
+function sessionWithoutPaymentIntentField(field: string) {
+  return checkoutSessionFixture({
+    payment_intent: withoutField(paymentIntentFixture(), field),
+  });
+}
+
+function sessionWithoutChargeField(field: string) {
+  return checkoutSessionFixture({
+    payment_intent: paymentIntentFixture({
+      latest_charge: withoutField(chargeFixture(), field),
+    }),
+  });
+}
+
 function dependencies(
   overrides: Partial<Task7Dependencies> = {},
 ): Task7Dependencies {
@@ -1035,6 +1076,114 @@ Deno.test("non-line Stripe snapshot mismatches fail closed without fulfillment",
     ]], name);
   }
 });
+
+// Mutations caught: trusting intended payment amounts or `paid` alone would
+// fulfill without proving Stripe actually collected and captured the full total.
+const collectedFundsCases: Array<[string, Record<string, unknown>]> = [
+  [
+    "missing PaymentIntent amount_received",
+    sessionWithoutPaymentIntentField("amount_received"),
+  ],
+  [
+    "null PaymentIntent amount_received",
+    sessionWithPaymentIntent({ amount_received: null }),
+  ],
+  [
+    "partial PaymentIntent amount_received",
+    sessionWithPaymentIntent({ amount_received: 5_499 }),
+  ],
+  [
+    "non-integer PaymentIntent amount_received",
+    sessionWithPaymentIntent({ amount_received: 5_499.5 }),
+  ],
+  [
+    "unsafe PaymentIntent amount_received",
+    sessionWithPaymentIntent({
+      amount_received: Number.MAX_SAFE_INTEGER + 1,
+    }),
+  ],
+  [
+    "missing PaymentIntent amount_capturable",
+    sessionWithoutPaymentIntentField("amount_capturable"),
+  ],
+  [
+    "null PaymentIntent amount_capturable",
+    sessionWithPaymentIntent({ amount_capturable: null }),
+  ],
+  [
+    "nonzero PaymentIntent amount_capturable",
+    sessionWithPaymentIntent({ amount_capturable: 1 }),
+  ],
+  [
+    "non-integer PaymentIntent amount_capturable",
+    sessionWithPaymentIntent({ amount_capturable: 0.5 }),
+  ],
+  [
+    "unsafe PaymentIntent amount_capturable",
+    sessionWithPaymentIntent({
+      amount_capturable: Number.MAX_SAFE_INTEGER + 1,
+    }),
+  ],
+  [
+    "missing Charge amount_captured",
+    sessionWithoutChargeField("amount_captured"),
+  ],
+  [
+    "null Charge amount_captured",
+    sessionWithCharge({ amount_captured: null }),
+  ],
+  [
+    "partial Charge amount_captured",
+    sessionWithCharge({ amount_captured: 5_499 }),
+  ],
+  [
+    "non-integer Charge amount_captured",
+    sessionWithCharge({ amount_captured: 5_499.5 }),
+  ],
+  [
+    "unsafe Charge amount_captured",
+    sessionWithCharge({ amount_captured: Number.MAX_SAFE_INTEGER + 1 }),
+  ],
+  ["missing Charge captured", sessionWithoutChargeField("captured")],
+  ["null Charge captured", sessionWithCharge({ captured: null })],
+  ["false Charge captured", sessionWithCharge({ captured: false })],
+  ["missing Charge status", sessionWithoutChargeField("status")],
+  ["null Charge status", sessionWithCharge({ status: null })],
+  ["pending Charge status", sessionWithCharge({ status: "pending" })],
+  ["failed Charge status", sessionWithCharge({ status: "failed" })],
+];
+
+for (const [name, session] of collectedFundsCases) {
+  Deno.test(`${name} is a safe permanent mismatch without fulfillment`, async () => {
+    const finalizations: unknown[] = [];
+    let fulfilled = 0;
+    let reviewed = 0;
+    const eventId = `evt_Task7${name.replaceAll(/[^A-Za-z0-9]/g, "")}`;
+    const response = await createStripeWebhookHandler(dependencies({
+      retrieveSession: async () => session,
+      fulfillPaidOrder: async () => {
+        fulfilled += 1;
+      },
+      markCheckoutReconciliationReview: async () => {
+        reviewed += 1;
+      },
+      finalizeReceipt: async (...args) => {
+        finalizations.push(args);
+      },
+    }))(request(snapshotEvent(
+      "checkout.session.completed",
+      { id: SESSION_ID },
+      { id: eventId },
+    )));
+
+    assertEquals([response.status, fulfilled, reviewed], [200, 0, 0]);
+    assertEquals(finalizations, [[
+      eventId,
+      "processed",
+      "PAYMENT_SNAPSHOT_MISMATCH",
+    ]]);
+  });
+}
 
 // Mutation caught: attempting review from untrusted event payload identity can
 // mutate an unrelated order before the Session/order RPC proves the binding.

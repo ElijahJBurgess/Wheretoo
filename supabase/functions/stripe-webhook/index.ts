@@ -770,6 +770,15 @@ function validatePaymentIntent(
       "succeeded",
     ].includes(value.status)
   ) permanent("PAYMENT_SNAPSHOT_MISMATCH");
+  if (
+    value.status === "succeeded" &&
+    (
+      !Number.isSafeInteger(value.amount_received) ||
+      value.amount_received !== order.totalMinor ||
+      !Number.isSafeInteger(value.amount_capturable) ||
+      value.amount_capturable !== 0
+    )
+  ) permanent("PAYMENT_SNAPSHOT_MISMATCH");
   validateMetadata(value.metadata, order);
   if (value.latest_charge === null || value.latest_charge === undefined) {
     return { id, status: value.status, charge: null };
@@ -795,6 +804,9 @@ function validateCharge(
   if (
     !isRecord(value) || value.object !== "charge" || value.livemode !== false ||
     value.paid !== true || value.amount !== order.totalMinor ||
+    !Number.isSafeInteger(value.amount_captured) ||
+    value.amount_captured !== order.totalMinor || value.captured !== true ||
+    value.status !== "succeeded" ||
     value.currency !== order.currency ||
     expandedId(
         value.payment_intent,
