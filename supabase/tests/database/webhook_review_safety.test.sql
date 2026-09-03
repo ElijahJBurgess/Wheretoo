@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(35);
+select plan(43);
 
 select has_function(
   'public', 'server_apply_verified_refund',
@@ -26,6 +26,15 @@ select has_function(
   'public', 'server_persist_connect_status_if_current',
   array['text', 'bigint', 'text', 'text', 'text', 'integer', 'integer', 'text'],
   'Connect webhook synchronization has a CAS service wrapper'
+);
+select has_function(
+  'public', 'server_get_checkout_integrity_payment_snapshot', array['uuid'],
+  'checkout-integrity payment snapshot has a multi-item service wrapper'
+);
+select has_function(
+  'public', 'server_mark_checkout_reconciliation_review',
+  array['uuid', 'text', 'text', 'text'],
+  'known checkout mismatches have a narrow review wrapper'
 );
 
 select function_privs_are(
@@ -81,6 +90,39 @@ select function_privs_are(
   'public', 'server_get_webhook_payment_order_snapshot', array['uuid'],
   'service_role', array['EXECUTE'],
   'service role can inspect the narrow payment snapshot'
+);
+select function_privs_are(
+  'public', 'server_get_checkout_integrity_payment_snapshot', array['uuid'],
+  'anon', array[]::text[],
+  'anonymous callers cannot inspect checkout-integrity payment snapshots'
+);
+select function_privs_are(
+  'public', 'server_get_checkout_integrity_payment_snapshot', array['uuid'],
+  'authenticated', array[]::text[],
+  'authenticated callers cannot inspect checkout-integrity payment snapshots'
+);
+select function_privs_are(
+  'public', 'server_get_checkout_integrity_payment_snapshot', array['uuid'],
+  'service_role', array['EXECUTE'],
+  'service role can inspect checkout-integrity payment snapshots'
+);
+select function_privs_are(
+  'public', 'server_mark_checkout_reconciliation_review',
+  array['uuid', 'text', 'text', 'text'],
+  'anon', array[]::text[],
+  'anonymous callers cannot route checkout mismatches to review'
+);
+select function_privs_are(
+  'public', 'server_mark_checkout_reconciliation_review',
+  array['uuid', 'text', 'text', 'text'],
+  'authenticated', array[]::text[],
+  'authenticated callers cannot route checkout mismatches to review'
+);
+select function_privs_are(
+  'public', 'server_mark_checkout_reconciliation_review',
+  array['uuid', 'text', 'text', 'text'],
+  'service_role', array['EXECUTE'],
+  'service role can route a known checkout mismatch to review'
 );
 select function_privs_are(
   'public', 'server_apply_verified_refund',
@@ -155,6 +197,22 @@ insert into public.organizer_stripe_accounts (
   'active', 'active', 'clear', 0, 0, now()
 );
 
+insert into private.event_risk_disclosures (
+  event_id, minimum_age, alcohol_present, cannabis_present,
+  explicit_adult_content, gambling_present, weapons_present, high_risk_activity
+) values (
+  '29000000-0000-4000-8000-000000000001', 'all_ages',
+  false, false, false, false, false, false
+);
+
+select set_config(
+  'request.jwt.claim.sub', '19000000-0000-4000-8000-000000000001', true
+);
+set local role authenticated;
+select public.accept_current_event_policies('29000000-0000-4000-8000-000000000001');
+select public.publish_event('29000000-0000-4000-8000-000000000001');
+reset role;
+
 create or replace function pg_temp.create_open_order(
   p_request_id uuid,
   p_token_hash text,
@@ -180,6 +238,10 @@ begin
   return v_order_id;
 end;
 $$;
+
+update private.checkout_runtime_control
+set checkout_creation_enabled = true
+where singleton;
 
 create temporary table review_orders (kind text primary key, id uuid not null) on commit drop;
 insert into review_orders values
@@ -451,6 +513,9 @@ select results_eq(
   'an older ready response is deterministically rejected by CAS'
 );
 reset role;
+update private.checkout_runtime_control
+set checkout_creation_enabled = false
+where singleton;
 select results_eq(
   $$
     select transfers_status, payouts_status, requirements_status,

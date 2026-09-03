@@ -161,12 +161,17 @@ insert into public.ticket_tiers (
   (
     '38000000-0000-4000-8000-000000000001',
     '28000000-0000-4000-8000-000000000001',
-    'Duplicate Fulfillment', 2000, 'usd', 10, 'active', 1
+    'Duplicate Fulfillment GA', 2000, 'usd', 10, 'active', 1
   ),
   (
     '38000000-0000-4000-8000-000000000002',
     '28000000-0000-4000-8000-000000000001',
-    'Mutation Race', 2500, 'usd', 10, 'active', 2
+    'Duplicate Fulfillment VIP', 2500, 'usd', 10, 'active', 2
+  ),
+  (
+    '38000000-0000-4000-8000-000000000003',
+    '28000000-0000-4000-8000-000000000001',
+    'Mutation Race', 3000, 'usd', 10, 'active', 3
   );
 insert into public.organizer_stripe_accounts (
   organizer_id, stripe_account_id, transfers_status, payouts_status,
@@ -197,7 +202,7 @@ where singleton;
 set local role service_role;
 select * from public.server_reserve_checkout(
   '28000000-0000-4000-8000-000000000001',
-  '38000000-0000-4000-8000-000000000001'::uuid,
+  '[{\"tier_id\":\"38000000-0000-4000-8000-000000000002\",\"quantity\":1},{\"tier_id\":\"38000000-0000-4000-8000-000000000001\",\"quantity\":2}]'::jsonb,
   'Concurrent Buyer One', 'concurrent-one@example.invalid',
   '48000000-0000-4000-8000-000000000001', repeat('1', 64)
 );
@@ -210,7 +215,7 @@ select public.server_attach_checkout_session(
 );
 select * from public.server_reserve_checkout(
   '28000000-0000-4000-8000-000000000001',
-  '38000000-0000-4000-8000-000000000002'::uuid,
+  '38000000-0000-4000-8000-000000000003'::uuid,
   'Concurrent Buyer Two', 'concurrent-two@example.invalid',
   '48000000-0000-4000-8000-000000000002', repeat('2', 64)
 );
@@ -252,7 +257,7 @@ select * from public.server_fulfill_paid_order(
   'cs_test_ConcurrencyAbCdEf01', 'pi_1ConcurrencyAbCdEf', 'ch_1ConcurrencyAbCdEf',
   'tr_1ConcurrencyAbCdEf', 'fee_1ConcurrencyAbCdEf', 'txn_1ConcurrencyAbCdEf',
   'cus_1ConcurrencyAbCdEf', 'payment', 'paid', 'usd',
-  2000, 2000, 150, 'acct_1ConcurrencyAbCdEf'
+  6500, 6500, 475, 'acct_1ConcurrencyAbCdEf'
 );
 select pg_advisory_xact_lock(918501);
 select pg_sleep(6);
@@ -272,7 +277,7 @@ select * from public.server_fulfill_paid_order(
   'cs_test_ConcurrencyAbCdEf01', 'pi_1ConcurrencyAbCdEf', 'ch_1ConcurrencyAbCdEf',
   'tr_1ConcurrencyAbCdEf', 'fee_1ConcurrencyAbCdEf', 'txn_1ConcurrencyAbCdEf',
   'cus_1ConcurrencyAbCdEf', 'payment', 'paid', 'usd',
-  2000, 2000, 150, 'acct_1ConcurrencyAbCdEf'
+  6500, 6500, 475, 'acct_1ConcurrencyAbCdEf'
 );
 commit;" >"$temporary_directory/duplicate-second.log" 2>&1
 duplicate_second_status=$?
@@ -290,6 +295,12 @@ fi
 "$supabase_cli" db query --linked "
 select orders.status,
   (select count(*) from public.tickets where order_id = orders.id) as ticket_count,
+  (select count(distinct order_item_id) from public.tickets
+    where order_id = orders.id) as ticket_item_count,
+  (select array_to_string(
+      array_agg(unit_sequence order by ticket_tier_id, unit_sequence), ','
+    )
+    from public.tickets where order_id = orders.id) as ticket_sequences,
   (select count(*) from public.stripe_webhook_events
     where stripe_event_id in ('evt_ConcurrencyOneAb', 'evt_ConcurrencyTwoCd')
       and processing_status = 'processed') as processed_receipt_count
@@ -298,14 +309,16 @@ where orders.client_request_id = '48000000-0000-4000-8000-000000000001';
 " >"$temporary_directory/duplicate-result.log" 2>&1
 
 if ! grep -q '\"status\": \"paid\"' "$temporary_directory/duplicate-result.log" \
-  || ! grep -q '\"ticket_count\": 1' "$temporary_directory/duplicate-result.log" \
+  || ! grep -q '\"ticket_count\": 3' "$temporary_directory/duplicate-result.log" \
+  || ! grep -q '\"ticket_item_count\": 2' "$temporary_directory/duplicate-result.log" \
+  || ! grep -q '\"ticket_sequences\": \"1,2,1\"' "$temporary_directory/duplicate-result.log" \
   || ! grep -q '\"processed_receipt_count\": 2' "$temporary_directory/duplicate-result.log"; then
   echo "Concurrent duplicate fulfillment violated exactly-once state." >&2
   sed -n '1,160p' "$temporary_directory/duplicate-result.log" >&2
   exit 1
 fi
 
-echo "concurrent duplicate fulfillment preserved one ticket and two processed receipts"
+echo "concurrent duplicate fulfillment preserved three item-local tickets and two processed receipts"
 
 "$supabase_cli" db query --linked "begin;
 set local statement_timeout = '20s';
@@ -313,11 +326,11 @@ select public.lock_event_ticketing_operation(
   '28000000-0000-4000-8000-000000000001'
 );
 select id from public.ticket_tiers
-where id = '38000000-0000-4000-8000-000000000002' for update;
+where id = '38000000-0000-4000-8000-000000000003' for update;
 select id from public.events
 where id = '28000000-0000-4000-8000-000000000001' for update;
 update public.ticket_tiers set status = 'archived'
-where id = '38000000-0000-4000-8000-000000000002';
+where id = '38000000-0000-4000-8000-000000000003';
 update public.events set status = 'cancelled'
 where id = '28000000-0000-4000-8000-000000000001';
 select pg_advisory_xact_lock(918502);
@@ -338,7 +351,7 @@ select * from public.server_fulfill_paid_order(
   'cs_test_MutationRaceAbCd02', 'pi_1MutationRaceAbCd', 'ch_1MutationRaceAbCd',
   'tr_1MutationRaceAbCd', 'fee_1MutationRaceAbCd', 'txn_1MutationRaceAbCd',
   'cus_1MutationRaceAbCd', 'payment', 'paid', 'usd',
-  2500, 2500, 175, 'acct_1ConcurrencyAbCdEf'
+  3000, 3000, 200, 'acct_1ConcurrencyAbCdEf'
 );
 commit;" >"$temporary_directory/mutation-fulfillment.log" 2>&1
 mutation_fulfillment_status=$?

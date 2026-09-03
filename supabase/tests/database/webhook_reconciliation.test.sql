@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path = public, extensions;
 
-select plan(15);
+select plan(20);
 
 select has_function(
   'public', 'server_finalize_webhook_receipt', array['text', 'text', 'text'],
@@ -12,6 +12,10 @@ select has_function(
 select has_function(
   'public', 'server_get_webhook_order_snapshot', array['uuid', 'text'],
   'webhook order snapshot has a narrow service wrapper'
+);
+select has_function(
+  'public', 'server_get_checkout_integrity_order_snapshot', array['uuid', 'text'],
+  'checkout-integrity order snapshot has a multi-item service wrapper'
 );
 
 select function_privs_are(
@@ -23,6 +27,11 @@ select function_privs_are(
   'public', 'server_get_webhook_order_snapshot', array['uuid', 'text'],
   'service_role', array['EXECUTE'],
   'service role can read only the webhook order snapshot'
+);
+select function_privs_are(
+  'public', 'server_get_checkout_integrity_order_snapshot', array['uuid', 'text'],
+  'service_role', array['EXECUTE'],
+  'service role can read the checkout-integrity order snapshot'
 );
 
 select function_privs_are(
@@ -44,6 +53,16 @@ select function_privs_are(
   'public', 'server_get_webhook_order_snapshot', array['uuid', 'text'],
   'authenticated', array[]::text[],
   'authenticated callers cannot inspect webhook order snapshots'
+);
+select function_privs_are(
+  'public', 'server_get_checkout_integrity_order_snapshot', array['uuid', 'text'],
+  'anon', array[]::text[],
+  'anonymous callers cannot inspect checkout-integrity order snapshots'
+);
+select function_privs_are(
+  'public', 'server_get_checkout_integrity_order_snapshot', array['uuid', 'text'],
+  'authenticated', array[]::text[],
+  'authenticated callers cannot inspect checkout-integrity order snapshots'
 );
 
 set local role service_role;
@@ -122,6 +141,16 @@ select is_empty(
     )
   $$,
   'an unknown order/session pair exposes no snapshot'
+);
+
+select is_empty(
+  $$
+    select * from public.server_get_checkout_integrity_order_snapshot(
+      '11111111-2222-4333-8444-555555555555',
+      'cs_test_Task14Missing'
+    )
+  $$,
+  'an unknown order/session pair exposes no multi-item snapshot'
 );
 
 select * from finish();

@@ -154,6 +154,10 @@ select public.accept_current_event_policies('26000000-0000-4000-8000-00000000000
 select public.publish_event('26000000-0000-4000-8000-000000000001');
 reset role;
 
+update private.checkout_runtime_control
+set checkout_creation_enabled = true
+where singleton;
+
 create or replace function pg_temp.create_checkout_order(
   p_tier_id uuid,
   p_request_id uuid,
@@ -383,7 +387,7 @@ select throws_ok(
 
 select results_eq(
   $$
-    select order_status, ticket_id is not null
+    select order_status, ticket_count
     from public.server_fulfill_paid_order(
       'evt_primaryfulfillment', (select id from primary_order),
       'cs_test_primaryfulfillment', 'pi_primaryfulfillment', 'ch_primaryfulfillment',
@@ -392,7 +396,7 @@ select results_eq(
       2000, 2000, 150, 'acct_fulfillmentowner'
     )
   $$,
-  $$ values ('paid'::text, true) $$,
+  $$ values ('paid'::text, 1::bigint) $$,
   'an exact paid Stripe snapshot fulfills the persisted order'
 );
 
@@ -465,7 +469,7 @@ select * from public.server_record_webhook_receipt(
 
 select results_eq(
   $$
-    select order_id, order_status, ticket_id
+    select order_id, order_status, ticket_count
     from public.server_fulfill_paid_order(
       'evt_duplicatefulfillment', (select id from primary_order),
       'cs_test_primaryfulfillment', 'pi_primaryfulfillment', 'ch_primaryfulfillment',
@@ -475,9 +479,8 @@ select results_eq(
     )
   $$,
   $$
-    select orders.id, 'paid'::text, tickets.id
+    select orders.id, 'paid'::text, 1::bigint
     from public.orders as orders
-    join public.tickets as tickets on tickets.order_id = orders.id
     where orders.id = (select id from primary_order)
   $$,
   'a distinct retried Stripe event returns the already persisted fulfillment result'
@@ -501,7 +504,7 @@ select * from public.server_record_webhook_receipt(
 
 select results_eq(
   $$
-    select order_id, order_status, ticket_id
+    select order_id, order_status, ticket_count
     from public.server_fulfill_paid_order(
       'evt_paidafterarchive', (select id from primary_order),
       'cs_test_primaryfulfillment', 'pi_primaryfulfillment', 'ch_primaryfulfillment',
@@ -511,9 +514,8 @@ select results_eq(
     )
   $$,
   $$
-    select orders.id, 'paid'::text, tickets.id
+    select orders.id, 'paid'::text, 1::bigint
     from public.orders as orders
-    join public.tickets as tickets on tickets.order_id = orders.id
     where orders.id = (select id from primary_order)
   $$,
   'a later tier change cannot reinterpret an already fulfilled payment'
@@ -612,7 +614,7 @@ select * from public.server_record_webhook_receipt(
 
 select results_eq(
   $$
-    select order_status, ticket_id is not null
+    select order_status, ticket_count
     from public.server_fulfill_paid_order(
       'evt_processingpaid', (select id from processing_order),
       'cs_test_processingfulfillment', 'pi_processingfulfillment',
@@ -622,7 +624,7 @@ select results_eq(
       2000, 2000, 150, 'acct_fulfillmentowner'
     )
   $$,
-  $$ values ('paid'::text, true) $$,
+  $$ values ('paid'::text, 1::bigint) $$,
   'an authoritative async success advances processing to paid exactly once'
 );
 
@@ -700,7 +702,7 @@ select * from public.server_record_webhook_receipt(
 
 select results_eq(
   $$
-    select order_status, ticket_id
+    select order_status, ticket_count
     from public.server_fulfill_paid_order(
       'evt_invalidatedfulfillment', (select id from invalidated_order),
       'cs_test_invalidatedfulfillment', 'pi_invalidatedfulfillment',
@@ -710,7 +712,7 @@ select results_eq(
       3000, 3000, 200, 'acct_fulfillmentowner'
     )
   $$,
-  $$ values ('requires_review'::text, null::uuid) $$,
+  $$ values ('requires_review'::text, 0::bigint) $$,
   'paid-after-tier-invalidation enters review without issuing a ticket'
 );
 
@@ -757,7 +759,7 @@ select * from public.server_record_webhook_receipt(
 
 select results_eq(
   $$
-    select order_status, ticket_id
+    select order_status, ticket_count
     from public.server_fulfill_paid_order(
       'evt_latefulfillment', (select id from late_order),
       'cs_test_latefulfillment', 'pi_latefulfillment',
@@ -766,7 +768,7 @@ select results_eq(
       3000, 3000, 200, 'acct_fulfillmentowner'
     )
   $$,
-  $$ values ('requires_review'::text, null::uuid) $$,
+  $$ values ('requires_review'::text, 0::bigint) $$,
   'a paid Session after reservation expiry enters review even when capacity appears free'
 );
 
@@ -824,7 +826,7 @@ select * from public.server_record_webhook_receipt(
 
 select results_eq(
   $$
-    select order_status, ticket_id is not null
+    select order_status, ticket_count
     from public.server_fulfill_paid_order(
       'evt_afterendfulfillment', (select id from after_end_order),
       'cs_test_afterendfulfillment', 'pi_afterendfulfillment',
@@ -834,7 +836,7 @@ select results_eq(
       2000, 2000, 150, 'acct_fulfillmentowner'
     )
   $$,
-  $$ values ('paid'::text, true) $$,
+  $$ values ('paid'::text, 1::bigint) $$,
   'an accepted in-flight Session can fulfill after event end without schedule reclassification'
 );
 
@@ -843,5 +845,8 @@ set starts_at = now() + interval '2 days', ends_at = now() + interval '2 days 2 
 where id = '26000000-0000-4000-8000-000000000001';
 
 reset role;
+update private.checkout_runtime_control
+set checkout_creation_enabled = false
+where singleton;
 select * from finish();
 rollback;
