@@ -82,6 +82,28 @@ describe('checkout attempt identity', () => {
     expect(attempt.confirmationBearer).not.toContain(firstUuid.replaceAll('-', ''))
   })
 
+  it('rotates a stored bearer whose unused base64url pad bits are non-canonical', async () => {
+    vi.spyOn(crypto, 'randomUUID')
+      .mockReturnValueOnce(firstUuid)
+      .mockReturnValueOnce(secondUuid)
+    vi.spyOn(crypto, 'getRandomValues').mockImplementation((values) => {
+      const bytes = values as Uint8Array
+      bytes.forEach((_value, index) => { bytes[index] = index })
+      return values
+    })
+    await getOrCreateCheckoutAttempt(submission)
+    const stored = JSON.parse(sessionStorage.getItem(storageKey) ?? '{}') as Record<string, unknown>
+    sessionStorage.setItem(storageKey, JSON.stringify({
+      ...stored,
+      confirmationBearer: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh9',
+    }))
+
+    const rotated = await getOrCreateCheckoutAttempt(submission)
+
+    expect(rotated.clientRequestId).toBe(secondUuid)
+    expect(rotated.confirmationBearer).toBe('AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8')
+  })
+
   it('fails closed and rotates a corrupt stored record', async () => {
     sessionStorage.setItem(storageKey, JSON.stringify({
       contractVersion: 'checkout_integrity_v1',
@@ -112,12 +134,16 @@ describe('checkout attempt identity', () => {
     expect(sessionStorage.getItem(storageKey)).toBeNull()
   })
 
-  it('wraps unavailable session storage and still returns a usable attempt', async () => {
-    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('denied') })
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('denied') })
+  it.each(['read', 'write'] as const)('fails closed when session storage %s is unavailable', async (operation) => {
+    vi.spyOn(Storage.prototype, operation === 'read' ? 'getItem' : 'setItem')
+      .mockImplementation(() => { throw new Error('denied') })
 
-    await expect(getOrCreateCheckoutAttempt(submission)).resolves.toMatchObject({
-      contractVersion: 'checkout_integrity_v1',
-    })
+    await expect(getOrCreateCheckoutAttempt(submission)).rejects.toThrow('Checkout retry state is unavailable.')
+  })
+
+  it('fails closed when a storage write cannot be read back', async () => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => undefined)
+
+    await expect(getOrCreateCheckoutAttempt(submission)).rejects.toThrow('Checkout retry state is unavailable.')
   })
 })

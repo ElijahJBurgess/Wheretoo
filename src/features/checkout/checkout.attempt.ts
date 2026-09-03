@@ -11,9 +11,9 @@ const uuidV4Pattern = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[
 const checkoutAttemptRecordSchema = z
   .object({
     contractVersion: z.literal(contractVersion),
-    submissionFingerprint: z.string().regex(base64Url32BytePattern),
+    submissionFingerprint: z.string().refine(isCanonicalCheckoutBearer),
     clientRequestId: z.string().regex(uuidV4Pattern),
-    confirmationBearer: z.string().regex(base64Url32BytePattern),
+    confirmationBearer: z.string().refine(isCanonicalCheckoutBearer),
   })
   .strict()
 
@@ -29,6 +29,17 @@ function bytesToBase64Url(bytes: Uint8Array): string {
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
 }
 
+export function isCanonicalCheckoutBearer(value: unknown): value is string {
+  if (typeof value !== 'string' || !base64Url32BytePattern.test(value)) return false
+  try {
+    const padded = value.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - value.length % 4) % 4)
+    const decoded = Uint8Array.from(atob(padded), (character) => character.charCodeAt(0))
+    return decoded.length === 32 && bytesToBase64Url(decoded) === value
+  } catch {
+    return false
+  }
+}
+
 async function submissionFingerprint(submission: CheckoutCanonicalSubmission): Promise<string> {
   const bytes = new TextEncoder().encode(JSON.stringify(submission))
   const digest = await crypto.subtle.digest('SHA-256', bytes)
@@ -36,9 +47,14 @@ async function submissionFingerprint(submission: CheckoutCanonicalSubmission): P
 }
 
 function readAttempt(key: string): CheckoutAttemptRecord | null {
+  let value: string | null
   try {
-    const value = sessionStorage.getItem(key)
-    if (value === null) return null
+    value = sessionStorage.getItem(key)
+  } catch {
+    throw new Error('Checkout retry state is unavailable.')
+  }
+  if (value === null) return null
+  try {
     return checkoutAttemptRecordSchema.parse(JSON.parse(value))
   } catch {
     return null
@@ -49,7 +65,11 @@ function writeAttempt(key: string, attempt: CheckoutAttemptRecord): void {
   try {
     sessionStorage.setItem(key, JSON.stringify(attempt))
   } catch {
-    // Storage can be unavailable in private or constrained browser contexts.
+    throw new Error('Checkout retry state is unavailable.')
+  }
+  const persisted = readAttempt(key)
+  if (persisted === null || !attemptsMatch(persisted, attempt)) {
+    throw new Error('Checkout retry state is unavailable.')
   }
 }
 
@@ -83,9 +103,9 @@ export async function getOrCreateCheckoutAttempt(
 
 export function clearCheckoutAttempt(eventId: string, expected: CheckoutAttemptRecord): void {
   const key = storageKey(eventId)
-  const stored = readAttempt(key)
-  if (stored === null || !attemptsMatch(stored, expected)) return
   try {
+    const stored = readAttempt(key)
+    if (stored === null || !attemptsMatch(stored, expected)) return
     sessionStorage.removeItem(key)
   } catch {
     // Cleanup is best effort when browser storage is unavailable.

@@ -1,4 +1,5 @@
 import { supabase } from '../../lib/supabase/client'
+import { isCanonicalCheckoutBearer } from './checkout.attempt'
 import { checkoutInputSchema, type CheckoutInput } from './checkout.schemas'
 
 const safeCheckoutCodes = new Set([
@@ -79,7 +80,7 @@ async function invokeCheckoutFunction(
 
 export async function createCheckout(input: CheckoutInput, confirmationBearer: string): Promise<string> {
   const parsed = checkoutInputSchema.safeParse(input)
-  if (!parsed.success || !/^[A-Za-z0-9_-]{43}$/.test(confirmationBearer)) {
+  if (!parsed.success || !isCanonicalCheckoutBearer(confirmationBearer)) {
     throw new CheckoutApiError('CHECKOUT_UNAVAILABLE')
   }
 
@@ -95,7 +96,7 @@ export async function createCheckout(input: CheckoutInput, confirmationBearer: s
 }
 
 export async function cancelCheckout(confirmationToken: string): Promise<void> {
-  if (!/^[A-Za-z0-9_-]{43}$/.test(confirmationToken)) throw new CheckoutApiError('CHECKOUT_UNAVAILABLE')
+  if (!isCanonicalCheckoutBearer(confirmationToken)) throw new CheckoutApiError('CHECKOUT_UNAVAILABLE')
   const data = await invokeCheckoutFunction('stripe-cancel-checkout', { confirmationToken })
   if (!isRecord(data) || Object.keys(data).length !== 1 || data.cancelled !== true) {
     throw new CheckoutApiError('CHECKOUT_UNAVAILABLE')

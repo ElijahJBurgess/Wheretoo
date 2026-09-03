@@ -10,6 +10,7 @@ const eventId = 'eb0fd9d5-d7d5-45dd-a99f-0c8a191bdc6f'
 const tierId = '900a9142-9111-4f87-84d5-b8545a94c7fb'
 const requestId = '6b849fa0-4d5e-4faa-bf31-b169cb1bd7fe'
 const confirmationBearer = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8'
+const nonCanonicalBearer = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh9'
 const confirmationToken = 'tzGJcJWwoS-3IzLlK9cZV3QHHbC6-vv2d3a-Kl3nHng'
 
 describe('checkout API', () => {
@@ -37,6 +38,19 @@ describe('checkout API', () => {
       headers: { 'X-Whereto-Confirmation-Bearer': confirmationBearer },
       method: 'POST',
     })
+  })
+
+  it('rejects a non-canonical creation bearer before invoking checkout', async () => {
+    invoke.mockResolvedValue({ data: { checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_123' }, error: null })
+
+    await expect(createCheckout({
+      eventId,
+      buyerName: 'Avery Stone',
+      buyerEmail: 'avery@example.com',
+      clientRequestId: requestId,
+      items: [{ tierId, quantity: 1 }],
+    }, nonCanonicalBearer)).rejects.toEqual(new CheckoutApiError('CHECKOUT_UNAVAILABLE'))
+    expect(invoke).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -100,5 +114,12 @@ describe('checkout API', () => {
       body: { confirmationToken },
       method: 'POST',
     })
+  })
+
+  it('rejects a non-canonical cancellation bearer before invoking checkout', async () => {
+    invoke.mockResolvedValue({ data: { cancelled: true }, error: null })
+
+    await expect(cancelCheckout(nonCanonicalBearer)).rejects.toEqual(new CheckoutApiError('CHECKOUT_UNAVAILABLE'))
+    expect(invoke).not.toHaveBeenCalled()
   })
 })

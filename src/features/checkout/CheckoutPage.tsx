@@ -240,7 +240,7 @@ export function CheckoutPage({ assignCheckout = assignHostedCheckout }: Checkout
     return tier === undefined ? [] : [{ ...item, tier }]
   }) ?? []
   if (items === null || selectedLines.length !== items.length) {
-    return <CheckoutState action={<Link className="ui-button ui-button--secondary" to={publicEventPath(eventId)}>Return to event</Link>} description="Choose available tickets to continue." status="empty" title="This ticket is unavailable" />
+    return <CheckoutState action={<Link className="ui-button ui-button--secondary" to={publicEventPath(eventId)}>Return to event</Link>} description="Choose available tickets to continue." status="empty" title="This cart is unavailable" />
   }
 
   const totalMinor = selectedLines.reduce((sum, line) => sum + line.quantity * line.tier.unit_amount_minor, 0)
