@@ -2,12 +2,16 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(13);
+select plan(15);
 
 select has_function('private', 'lookup_order_confirmation', array['text'],
   'a private bearer-safe order confirmation projection exists');
 select has_function('public', 'server_lookup_order_confirmation', array['text'],
   'a service-only order confirmation boundary exists');
+select has_function(
+  'public', 'server_lookup_checkout_integrity_confirmation', array['text'],
+  'the new multi-item confirmation boundary coexists with the deployed singular boundary'
+);
 
 select results_eq(
   $$
@@ -86,7 +90,7 @@ values (
   '26000000-0000-4000-8000-000000000001',
   '16000000-0000-4000-8000-000000000001',
   'published', 'clear', 'Confirmation Event', 'A confirmation projection fixture.',
-  'community', '2026-09-01 02:00:00+00', '2026-09-01 05:00:00+00',
+  'community', '2026-10-01 02:00:00+00', '2026-10-01 05:00:00+00',
   'Confirmation Venue', '1 Market Street', 'San Francisco', 'CA', '94105', 'US',
   'mapbox.confirmation', 37.7936, -122.3958, 'paid', now()
 );
@@ -126,6 +130,10 @@ select public.accept_current_event_policies('26000000-0000-4000-8000-00000000000
 select public.publish_event('26000000-0000-4000-8000-000000000001');
 reset role;
 
+update private.checkout_runtime_control
+set checkout_creation_enabled = true
+where singleton;
+
 set local role service_role;
 
 create temporary table confirmation_reservation on commit drop as
@@ -151,8 +159,8 @@ select results_eq(
   $$,
   $$ values (
     'Confirmation Event'::text,
-    '2026-09-01 02:00:00+00'::timestamptz,
-    '2026-09-01 05:00:00+00'::timestamptz,
+    '2026-10-01 02:00:00+00'::timestamptz,
+    '2026-10-01 05:00:00+00'::timestamptz,
     'America/Los_Angeles'::text,
     'Confirmation Venue'::text,
     'General admission'::text,
@@ -214,5 +222,16 @@ select throws_ok(
 );
 
 reset role;
+
+update private.checkout_runtime_control
+set checkout_creation_enabled = false
+where singleton;
+
+select is(
+  (select checkout_creation_enabled from private.checkout_runtime_control where singleton),
+  false,
+  'the rollback-only singular confirmation suite restores checkout creation to disabled'
+);
+
 select * from finish();
 rollback;

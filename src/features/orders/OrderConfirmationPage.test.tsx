@@ -4,15 +4,23 @@ import { useState } from 'react'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { retry, useOrderConfirmation } = vi.hoisted(() => ({ retry: vi.fn(), useOrderConfirmation: vi.fn() }))
+const { clearCheckoutAttemptForConfirmation, retry, useOrderConfirmation } = vi.hoisted(() => ({
+  clearCheckoutAttemptForConfirmation: vi.fn(), retry: vi.fn(), useOrderConfirmation: vi.fn(),
+}))
 vi.mock('./order.queries', () => ({ useOrderConfirmation }))
+vi.mock('../checkout/checkout.attempt', () => ({ clearCheckoutAttemptForConfirmation }))
 
 import { OrderConfirmationPage } from './OrderConfirmationPage'
 
 const token = 'tzGJcJWwoS-3IzLlK9cZV3QHHbC6-vv2d3a-Kl3nHng'
 const confirmation = {
   event: { title: 'Night Market', startsAt: '2026-09-01T02:00:00Z', endsAt: '2026-09-01T05:00:00Z', timezone: 'America/Los_Angeles', venueName: 'Civic Center Plaza' },
-  tier: { name: 'General admission' }, orderNumber: 'WT-260901-0042', status: 'processing' as const,
+  items: [
+    { tierName: 'General admission', quantity: 2, unitAmountMinor: 2500, subtotalMinor: 5000, currency: 'usd' as const },
+    { tierName: 'VIP', quantity: 1, unitAmountMinor: 5000, subtotalMinor: 5000, currency: 'usd' as const },
+  ],
+  orderNumber: 'WT-260901-0042', status: 'processing' as const, quantity: 3, currency: 'usd' as const,
+  subtotalMinor: 10000, taxAmountMinor: 0 as const, totalMinor: 10000,
 }
 
 function renderPage(bearer = token) {
@@ -39,9 +47,11 @@ describe('OrderConfirmationPage', () => {
 
   it.each([
     ['paid', "You're all set", 'Payment confirmed'],
-    ['failed', 'Payment could not be confirmed', 'No ticket was issued'],
+    ['payment_failed', 'Payment could not be confirmed', 'No ticket was issued'],
+    ['cancelled', 'Checkout cancelled', 'No payment was completed'],
     ['expired', 'Checkout expired', 'Choose a ticket again'],
     ['refunded', 'This order was refunded', 'This ticket is no longer valid'],
+    ['requires_review', 'Order needs review', 'reviewing this order'],
   ] as const)('renders persisted %s truth with one semantic heading', (status, heading, copy) => {
     useOrderConfirmation.mockReturnValue({ data: { ...confirmation, status }, isPending: false, isError: false, isTimedOut: false, retry })
     renderPage()
@@ -50,15 +60,34 @@ describe('OrderConfirmationPage', () => {
     expect(screen.getByText(new RegExp(copy, 'i'))).toBeInTheDocument()
   })
 
-  it('renders only approved event, tier, and order details after confirmation', () => {
+  it('renders approved item quantities and aggregate totals without internal identities', () => {
     useOrderConfirmation.mockReturnValue({ data: { ...confirmation, status: 'paid' }, isPending: false, isError: false, isTimedOut: false, retry })
     renderPage()
     expect(screen.getByText('Night Market')).toBeInTheDocument()
-    expect(screen.getByText('General admission')).toBeInTheDocument()
+    expect(screen.getByText('General admission × 2')).toBeInTheDocument()
+    expect(screen.getByText('VIP × 1')).toBeInTheDocument()
+    expect(screen.getByText('3 admissions')).toBeInTheDocument()
+    expect(screen.getByText('$100.00', { selector: '.confirmation-card__total' })).toBeInTheDocument()
     expect(screen.getByText('Civic Center Plaza')).toBeInTheDocument()
     expect(screen.getByText('WT-260901-0042')).toBeInTheDocument()
-    expect(screen.queryByText(/email|buyer|amount|fee|stripe|destination|ticket id/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/email|buyer|fee|stripe|destination|ticket id|order item|unit sequence/i)).not.toBeInTheDocument()
+    expect(document.body).not.toHaveTextContent('c9300000-0000-4000-8000-000000000001')
   })
+
+  it.each(['processing', 'requires_review'] as const)('retains the matching tab attempt while status is %s', (status) => {
+    useOrderConfirmation.mockReturnValue({ data: { ...confirmation, status }, isPending: false, isError: false, isTimedOut: false, retry })
+    renderPage()
+    expect(clearCheckoutAttemptForConfirmation).not.toHaveBeenCalled()
+  })
+
+  it.each(['paid', 'payment_failed', 'cancelled', 'expired', 'refunded'] as const)(
+    'clears the matching tab attempt after persisted %s truth',
+    (status) => {
+      useOrderConfirmation.mockReturnValue({ data: { ...confirmation, status }, isPending: false, isError: false, isTimedOut: false, retry })
+      renderPage()
+      expect(clearCheckoutAttemptForConfirmation).toHaveBeenCalledWith(token)
+    },
+  )
 
   it('formats a same-day schedule once in the event timezone', () => {
     renderPage()

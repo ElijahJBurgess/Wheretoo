@@ -7,6 +7,7 @@ import {
 const contractVersion = 'checkout_integrity_v1' as const
 const base64Url32BytePattern = /^[A-Za-z0-9_-]{43}$/
 const uuidV4Pattern = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/
+const storageKeyPrefix = 'whereto.checkout-attempt.v1:'
 
 const checkoutAttemptRecordSchema = z
   .object({
@@ -20,7 +21,7 @@ const checkoutAttemptRecordSchema = z
 export type CheckoutAttemptRecord = z.output<typeof checkoutAttemptRecordSchema>
 
 function storageKey(eventId: string): string {
-  return `whereto.checkout-attempt.v1:${eventId}`
+  return `${storageKeyPrefix}${eventId}`
 }
 
 function bytesToBase64Url(bytes: Uint8Array): string {
@@ -101,12 +102,15 @@ export async function getOrCreateCheckoutAttempt(
   return validatedAttempt
 }
 
-export function clearCheckoutAttempt(eventId: string, expected: CheckoutAttemptRecord): void {
-  const key = storageKey(eventId)
+export function clearCheckoutAttemptForConfirmation(confirmationBearer: string): void {
+  if (!isCanonicalCheckoutBearer(confirmationBearer)) return
   try {
-    const stored = readAttempt(key)
-    if (stored === null || !attemptsMatch(stored, expected)) return
-    sessionStorage.removeItem(key)
+    const keys = Array.from({ length: sessionStorage.length }, (_value, index) => sessionStorage.key(index))
+    for (const key of keys) {
+      if (key === null || !key.startsWith(storageKeyPrefix)) continue
+      const stored = readAttempt(key)
+      if (stored?.confirmationBearer === confirmationBearer) sessionStorage.removeItem(key)
+    }
   } catch {
     // Cleanup is best effort when browser storage is unavailable.
   }

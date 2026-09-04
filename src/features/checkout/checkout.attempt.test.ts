@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  clearCheckoutAttempt,
+  clearCheckoutAttemptForConfirmation,
   getOrCreateCheckoutAttempt,
 } from './checkout.attempt'
 
@@ -120,18 +120,28 @@ describe('checkout attempt identity', () => {
     expect(sessionStorage.getItem(storageKey)).not.toContain('leaked@example.com')
   })
 
-  it('terminal cleanup deletes only the still-matching attempt', async () => {
+  it('terminal confirmation cleanup deletes only the bearer-matching attempt', async () => {
+    vi.spyOn(crypto, 'randomUUID')
+      .mockReturnValueOnce(firstUuid)
+      .mockReturnValueOnce(secondUuid)
+    const first = await getOrCreateCheckoutAttempt(submission)
+    const otherEventId = 'fb0fd9d5-d7d5-45dd-a99f-0c8a191bdc6f'
+    const second = await getOrCreateCheckoutAttempt({ ...submission, eventId: otherEventId })
+
+    clearCheckoutAttemptForConfirmation(first.confirmationBearer)
+    expect(sessionStorage.getItem(storageKey)).toBeNull()
+    expect(JSON.parse(sessionStorage.getItem(`whereto.checkout-attempt.v1:${otherEventId}`) ?? '{}')).toEqual(second)
+  })
+
+  it('terminal confirmation cleanup preserves a newer attempt for the same event', async () => {
     vi.spyOn(crypto, 'randomUUID')
       .mockReturnValueOnce(firstUuid)
       .mockReturnValueOnce(secondUuid)
     const first = await getOrCreateCheckoutAttempt(submission)
     const second = await getOrCreateCheckoutAttempt({ ...submission, buyerName: 'Another Buyer' })
 
-    clearCheckoutAttempt(eventId, first)
+    clearCheckoutAttemptForConfirmation(first.confirmationBearer)
     expect(JSON.parse(sessionStorage.getItem(storageKey) ?? '{}')).toEqual(second)
-
-    clearCheckoutAttempt(eventId, second)
-    expect(sessionStorage.getItem(storageKey)).toBeNull()
   })
 
   it.each(['read', 'write'] as const)('fails closed when session storage %s is unavailable', async (operation) => {

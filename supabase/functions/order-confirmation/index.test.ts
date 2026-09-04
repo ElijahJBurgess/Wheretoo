@@ -19,9 +19,26 @@ const projection = {
     timezone: "America/Los_Angeles",
     venueName: "Civic Center Plaza",
   },
-  tier: { name: "General admission" },
+  items: [{
+    tierName: "General admission",
+    quantity: 2,
+    unitAmountMinor: 2500,
+    subtotalMinor: 5000,
+    currency: "usd" as const,
+  }, {
+    tierName: "VIP",
+    quantity: 1,
+    unitAmountMinor: 5000,
+    subtotalMinor: 5000,
+    currency: "usd" as const,
+  }],
   orderNumber: "WT-260901-0042",
   status: "processing" as const,
+  quantity: 3,
+  currency: "usd" as const,
+  subtotalMinor: 10000,
+  taxAmountMinor: 0 as const,
+  totalMinor: 10000,
 };
 
 function request(
@@ -59,10 +76,15 @@ Deno.test("confirmation hashes the canonical bearer and returns only the minimum
   assertEquals(response.headers.get("cache-control"), "no-store");
   assertEquals(await response.json(), projection);
   assertEquals(Object.keys(projection).sort(), [
+    "currency",
     "event",
+    "items",
     "orderNumber",
+    "quantity",
     "status",
-    "tier",
+    "subtotalMinor",
+    "taxAmountMinor",
+    "totalMinor",
   ]);
 });
 
@@ -91,7 +113,7 @@ Deno.test("confirmation rejects extra input and non-Whereto origins without echo
   assertEquals(await denied.json(), { error: { code: "CORS_ORIGIN_DENIED" } });
 });
 
-Deno.test("default confirmation uses only the service projection RPC and validates its exact row", async () => {
+Deno.test("default confirmation uses only the V2 service projection RPC and validates its exact safe row", async () => {
   let capturedName = "";
   let capturedArgs: Record<string, unknown> | undefined;
   const client = {
@@ -105,9 +127,20 @@ Deno.test("default confirmation uses only the service projection RPC and validat
           event_ends_at: projection.event.endsAt,
           event_timezone: projection.event.timezone,
           event_venue_name: projection.event.venueName,
-          tier_name: projection.tier.name,
+          items: projection.items.map((item) => ({
+            tier_name: item.tierName,
+            quantity: item.quantity,
+            unit_amount_minor: item.unitAmountMinor,
+            subtotal_minor: item.subtotalMinor,
+            currency: item.currency,
+          })),
           order_number: projection.orderNumber,
           confirmation_status: projection.status,
+          quantity: projection.quantity,
+          currency: projection.currency,
+          subtotal_minor: projection.subtotalMinor,
+          tax_amount_minor: projection.taxAmountMinor,
+          total_minor: projection.totalMinor,
         }],
         error: null,
       };
@@ -115,8 +148,54 @@ Deno.test("default confirmation uses only the service projection RPC and validat
   } as unknown as Parameters<typeof defaultFindConfirmation>[1];
 
   assertEquals(await defaultFindConfirmation(TOKEN_HASH, client), projection);
-  assertEquals(capturedName, "server_lookup_order_confirmation");
+  assertEquals(capturedName, "server_lookup_checkout_integrity_confirmation");
   assertEquals(capturedArgs, { p_token_hash: TOKEN_HASH });
+});
+
+Deno.test("default confirmation accepts every exact safe lifecycle status", async () => {
+  for (
+    const status of [
+      "processing",
+      "paid",
+      "payment_failed",
+      "cancelled",
+      "expired",
+      "refunded",
+      "requires_review",
+    ] as const
+  ) {
+    const client = {
+      rpc: async () => ({
+        data: [{
+          event_title: projection.event.title,
+          event_starts_at: projection.event.startsAt,
+          event_ends_at: projection.event.endsAt,
+          event_timezone: projection.event.timezone,
+          event_venue_name: projection.event.venueName,
+          items: projection.items.map((item) => ({
+            tier_name: item.tierName,
+            quantity: item.quantity,
+            unit_amount_minor: item.unitAmountMinor,
+            subtotal_minor: item.subtotalMinor,
+            currency: item.currency,
+          })),
+          order_number: projection.orderNumber,
+          confirmation_status: status,
+          quantity: projection.quantity,
+          currency: projection.currency,
+          subtotal_minor: projection.subtotalMinor,
+          tax_amount_minor: projection.taxAmountMinor,
+          total_minor: projection.totalMinor,
+        }],
+        error: null,
+      }),
+    } as unknown as Parameters<typeof defaultFindConfirmation>[1];
+
+    assertEquals(
+      (await defaultFindConfirmation(TOKEN_HASH, client))?.status,
+      status,
+    );
+  }
 });
 
 Deno.test("default confirmation fails closed on extra, malformed, or duplicate service rows", async () => {
@@ -129,9 +208,42 @@ Deno.test("default confirmation fails closed on extra, malformed, or duplicate s
         event_ends_at: "2026-09-01T05:00:00+00:00",
         event_timezone: "America/Los_Angeles",
         event_venue_name: "Venue",
-        tier_name: "Tier",
+        items: [{
+          tier_name: "Tier",
+          quantity: 1,
+          unit_amount_minor: 2500,
+          subtotal_minor: 2500,
+          currency: "usd",
+        }],
         order_number: "ORDER-1",
         confirmation_status: "paid",
+        quantity: 1,
+        currency: "usd",
+        subtotal_minor: 2500,
+        tax_amount_minor: 0,
+        total_minor: 2500,
+      }],
+      [{
+        event_title: projection.event.title,
+        event_starts_at: projection.event.startsAt,
+        event_ends_at: projection.event.endsAt,
+        event_timezone: projection.event.timezone,
+        event_venue_name: projection.event.venueName,
+        items: [{
+          tier_name: "General admission",
+          quantity: 2,
+          unit_amount_minor: 2500,
+          subtotal_minor: 1,
+          currency: "usd",
+          ticket_id: "not-approved",
+        }],
+        order_number: projection.orderNumber,
+        confirmation_status: "paid",
+        quantity: 2,
+        currency: "usd",
+        subtotal_minor: 1,
+        tax_amount_minor: 0,
+        total_minor: 1,
       }],
       [{}, {}],
     ]

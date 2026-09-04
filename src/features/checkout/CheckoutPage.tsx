@@ -5,7 +5,7 @@ import { Button } from '../../components/ui/Button'
 import { Field } from '../../components/ui/Field'
 import { FormErrorSummary } from '../../components/ui/FormErrorSummary'
 import { lowercaseRfcUuidSchema } from '../tickets/ticket.schemas'
-import { clearCheckoutAttempt, getOrCreateCheckoutAttempt } from './checkout.attempt'
+import { getOrCreateCheckoutAttempt } from './checkout.attempt'
 import { cancelCheckout, createCheckout, isStripeCheckoutUrl } from './checkout.api'
 import { parseCheckoutCart } from './checkout.cart'
 import type { CheckoutApiErrorCode } from './checkout.api'
@@ -207,7 +207,6 @@ export function CheckoutPage({ assignCheckout = assignHostedCheckout }: Checkout
         durableAttempt.confirmationBearer,
       )
       if (activeAttemptRef.current !== attempt || !mountedRef.current || routeKeyRef.current !== routeKey || !isStripeCheckoutUrl(checkoutUrl)) return
-      clearCheckoutAttempt(eventId, durableAttempt)
       assignCheckout(checkoutUrl)
     } catch (error) {
       if (activeAttemptRef.current === attempt && mountedRef.current && routeKeyRef.current === routeKey) {

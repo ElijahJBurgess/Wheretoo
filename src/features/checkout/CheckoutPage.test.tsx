@@ -242,7 +242,7 @@ describe('CheckoutPage', () => {
         { tierId, quantity: 2 },
       ],
     }, confirmationBearer)
-    expect(clearCheckoutAttempt).toHaveBeenCalledWith(eventId, expect.objectContaining({ clientRequestId }))
+    expect(clearCheckoutAttempt).not.toHaveBeenCalled()
     await waitFor(() => expect(assign).toHaveBeenCalledWith('https://checkout.stripe.com/c/pay/cs_test_123'))
     expect(screen.queryByText(/payment complete|ticket issued|order confirmed/i)).not.toBeInTheDocument()
   })
