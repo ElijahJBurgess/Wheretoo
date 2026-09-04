@@ -18,6 +18,12 @@ import {
   createDefaultStripeWebhookDependencies,
   createStripeWebhookHandler,
 } from "../../../../supabase/functions/stripe-webhook/index.ts";
+import {
+  assertSafeProofResponse,
+  deleteAndVerifyFixtureAuthUser,
+  destinationChargeRelationsMatch,
+  findExactFixtureAuthUser,
+} from "./contracts.ts";
 
 const actions = new Set([
   "server_proof",
@@ -59,15 +65,31 @@ const fixtureQuantity = 3;
 const fixtureSubtotalMinor = 5_500;
 const fixtureApplicationFeeMinor = 425;
 const fixtureOrganizerProceedsMinor = 5_075;
+type OrderHandle = "paid" | "declined";
 
 function json(body: Record<string, unknown>, status = 200): Response {
-  return new Response(JSON.stringify(body), {
+  return new Response(JSON.stringify(assertSafeProofResponse(body)), {
     status,
     headers: {
       "content-type": "application/json; charset=utf-8",
       "cache-control": "no-store",
     },
   });
+}
+
+function orderHandle(value: unknown): OrderHandle {
+  if (value !== "paid" && value !== "declined") throw new Error("INPUT");
+  return value;
+}
+
+function fixtureBuyerEmail(handle: OrderHandle): string {
+  return `${fixturePrefix()}-${handle}@example.invalid`;
+}
+
+function buyerOrderHandle(value: unknown): OrderHandle {
+  if (value === fixtureBuyerEmail("paid")) return "paid";
+  if (value === fixtureBuyerEmail("declined")) return "declined";
+  throw new Error("DATABASE");
 }
 
 function env(name: string): string {
@@ -139,37 +161,48 @@ type EventDescriptor = {
   created: number;
 };
 
-function eventDescriptor(value: unknown): EventDescriptor {
+async function eventDescriptor(value: unknown): Promise<EventDescriptor> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("INPUT");
   }
   const row = value as Record<string, unknown>;
   const keys = Object.keys(row).sort();
-  if (keys.join(",") !== "created,event_id,object,object_id,type") {
+  if (keys.join(",") !== "created,event_handle,object,order_handle,type") {
     throw new Error("INPUT");
   }
   if (
-    typeof row.event_id !== "string" ||
-    !/^evt_task17[a-z0-9]+$/.test(row.event_id) ||
+    typeof row.event_handle !== "string" ||
+    !uuidPattern.test(row.event_handle) ||
     !Number.isSafeInteger(row.created) ||
     Math.abs(Math.floor(Date.now() / 1_000) - (row.created as number)) > 300
   ) throw new Error("INPUT");
+  const handle = orderHandle(row.order_handle);
+  const order = await proofOrder(handle);
   const valid = (
     row.type === "checkout.session.completed" &&
-    row.object === "checkout.session" &&
-    typeof row.object_id === "string" &&
-    /^cs_test_[A-Za-z0-9]+$/.test(row.object_id)
+    row.object === "checkout.session"
   ) || (
     row.type === "checkout.session.expired" &&
-    row.object === "checkout.session" &&
-    typeof row.object_id === "string" &&
-    /^cs_test_[A-Za-z0-9]+$/.test(row.object_id)
+    row.object === "checkout.session"
   ) || (
-    row.type === "refund.updated" && row.object === "refund" &&
-    typeof row.object_id === "string" && /^re_[A-Za-z0-9]+$/.test(row.object_id)
+    row.type === "refund.updated" && row.object === "refund"
   );
   if (!valid) throw new Error("INPUT");
-  return row as EventDescriptor;
+  let objectId = order.stripe_checkout_session_id;
+  if (row.object === "refund") {
+    const { data, error } = await getServiceClient().from("refunds")
+      .select("stripe_refund_id").eq("order_id", order.id).single();
+    if (error !== null) throw new Error("DATABASE");
+    objectId = data.stripe_refund_id;
+  }
+  if (typeof objectId !== "string") throw new Error("DATABASE");
+  return {
+    event_id: `evt_task17${row.event_handle.replaceAll("-", "")}`,
+    type: row.type as EventDescriptor["type"],
+    object: row.object as EventDescriptor["object"],
+    object_id: objectId,
+    created: row.created as number,
+  };
 }
 
 function eventPayload(event: EventDescriptor): string {
@@ -205,7 +238,12 @@ async function receipt(eventId: string): Promise<Record<string, unknown>> {
       "stripe_event_id,event_type,stripe_object_id,processing_status,delivery_attempt_count,error_code",
     ).eq("stripe_event_id", eventId).single();
   if (error !== null) throw new Error("DATABASE");
-  return data;
+  return {
+    event_type: data.event_type,
+    processing_status: data.processing_status,
+    delivery_attempt_count: data.delivery_attempt_count,
+    error_code: data.error_code,
+  };
 }
 
 async function serverProof(): Promise<Record<string, unknown>> {
@@ -255,15 +293,55 @@ async function fixtureOrganizer(): Promise<{ id: string } | null> {
   return data;
 }
 
-async function fixtureAuthUser(): Promise<{ id: string } | null> {
+type FixtureAuthIdentity = { id: string; email: string };
+
+async function loadFixtureAuthUserById(
+  id: string,
+): Promise<FixtureAuthIdentity | null> {
+  const result = await getServiceClient().auth.admin.getUserById(id);
+  if (result.error !== null) {
+    if (result.error.status === 404) return null;
+    throw new Error("DATABASE");
+  }
+  if (result.data.user.email === undefined) throw new Error("DATABASE");
+  return { id: result.data.user.id, email: result.data.user.email };
+}
+
+async function loadFixtureAuthPage(page: number) {
   const result = await getServiceClient().auth.admin.listUsers({
-    page: 1,
+    page,
     perPage: 1_000,
   });
   if (result.error !== null) throw new Error("DATABASE");
-  const email = `${fixturePrefix()}@example.invalid`;
-  const user = result.data.users.find((candidate) => candidate.email === email);
-  return user === undefined ? null : { id: user.id };
+  return {
+    users: result.data.users.map((user) => ({
+      id: user.id,
+      email: user.email,
+    })),
+    nextPage: result.data.nextPage,
+  };
+}
+
+async function fixtureAuthUser(
+  preferredId?: string,
+): Promise<FixtureAuthIdentity | null> {
+  const expectedEmail = `${fixturePrefix()}@example.invalid`;
+  if (preferredId !== undefined) {
+    const exact = await loadFixtureAuthUserById(preferredId);
+    if (exact !== null) {
+      if (exact.email !== expectedEmail) throw new Error("DATABASE");
+      return exact;
+    }
+  }
+  const found = await findExactFixtureAuthUser(
+    expectedEmail,
+    loadFixtureAuthPage,
+  );
+  if (found === null) return null;
+  if (preferredId !== undefined && found.id !== preferredId) {
+    throw new Error("DATABASE");
+  }
+  return { id: found.id, email: expectedEmail };
 }
 
 async function setup(): Promise<Record<string, unknown>> {
@@ -307,6 +385,8 @@ async function setup(): Promise<Record<string, unknown>> {
       last_status_code: projection.lastStatusCode,
     });
     if (connectError !== null) throw new Error("DATABASE");
+  } else if (await fixtureAuthUser(organizer.id) === null) {
+    throw new Error("DATABASE");
   }
 
   const title = `${fixturePrefix()} transaction`;
@@ -434,9 +514,17 @@ async function inspect(eventId: unknown): Promise<Record<string, unknown>> {
   const client = getServiceClient();
   const { data: orders, error: orderError } = await client.from("orders")
     .select(
-      "id,status,failure_code,reconciliation_status,stripe_checkout_session_id,stripe_payment_intent_id,stripe_charge_id,stripe_transfer_id,stripe_application_fee_id,stripe_balance_transaction_id,subtotal_minor,total_minor,application_fee_amount_minor,expected_organizer_proceeds_minor",
+      "id,buyer_email,status,failure_code,reconciliation_status,stripe_checkout_session_id,stripe_payment_intent_id,stripe_charge_id,stripe_transfer_id,stripe_application_fee_id,stripe_balance_transaction_id,subtotal_minor,total_minor,application_fee_amount_minor,expected_organizer_proceeds_minor",
     ).eq("event_id", eventId).order("created_at", { ascending: true });
   if (orderError !== null) throw new Error("DATABASE");
+  const handlesByOrderId = new Map<string, OrderHandle>();
+  const seenHandles = new Set<OrderHandle>();
+  for (const order of orders) {
+    const handle = buyerOrderHandle(order.buyer_email);
+    if (seenHandles.has(handle)) throw new Error("DATABASE");
+    seenHandles.add(handle);
+    handlesByOrderId.set(order.id, handle);
+  }
   const orderIds = orders.map((order) => order.id);
   const itemResult = orderIds.length === 0
     ? { data: [], error: null }
@@ -467,6 +555,16 @@ async function inspect(eventId: unknown): Promise<Record<string, unknown>> {
     .select("id,quantity_total,sort_order").eq("event_id", eventId)
     .order("sort_order", { ascending: true });
   if (tierError !== null) throw new Error("DATABASE");
+  const tierLabels = new Map<string, "ga" | "vip">();
+  for (const tier of tiers) {
+    const label = tier.sort_order === 1
+      ? "ga"
+      : tier.sort_order === 2
+      ? "vip"
+      : null;
+    if (label === null || tierLabels.has(tier.id)) throw new Error("DATABASE");
+    tierLabels.set(tier.id, label);
+  }
   const inventory = tiers.map((tier) => {
     const reservedQuantity = items.reduce((sum, item) => {
       const order = orders.find((candidate) => candidate.id === item.order_id);
@@ -479,7 +577,7 @@ async function inspect(eventId: unknown): Promise<Record<string, unknown>> {
         (item.ticket_tier_id === tier.id && reserved ? item.quantity : 0);
     }, 0);
     return {
-      ticket_tier_id: tier.id,
+      tier_label: tierLabels.get(tier.id),
       quantity_total: tier.quantity_total,
       reserved_quantity: reservedQuantity,
       available_quantity: tier.quantity_total - reservedQuantity,
@@ -499,12 +597,88 @@ async function inspect(eventId: unknown): Promise<Record<string, unknown>> {
       "stripe_event_id,event_type,stripe_object_id,processing_status,delivery_attempt_count,error_code",
     ).in("stripe_object_id", objectIds);
   if (receiptError !== null) throw new Error("DATABASE");
+  const safeItems = items.map((item) => ({
+    order_handle: handlesByOrderId.get(item.order_id),
+    tier_label: tierLabels.get(item.ticket_tier_id),
+    tier_name: item.tier_name,
+    unit_amount_minor: item.unit_amount_minor,
+    quantity: item.quantity,
+    subtotal_minor: item.subtotal_minor,
+    currency: item.currency,
+  }));
+  if (
+    safeItems.some((item) =>
+      item.order_handle === undefined || item.tier_label === undefined
+    )
+  ) throw new Error("DATABASE");
+  const ticketSets = orders.map((order) => {
+    const orderItems = items.filter((item) => item.order_id === order.id);
+    const orderTickets = tickets.filter((ticket) =>
+      ticket.order_id === order.id
+    );
+    const bindingsValid = orderTickets.length === 0 ||
+      orderItems.every((item) => {
+        const bound = orderTickets.filter((ticket) =>
+          ticket.order_item_id === item.id &&
+          ticket.ticket_tier_id === item.ticket_tier_id
+        );
+        return bound.length === item.quantity;
+      });
+    const sequencesValid = orderTickets.length === 0 ||
+      orderItems.every((item) => {
+        const sequences = orderTickets.filter((ticket) =>
+          ticket.order_item_id === item.id
+        )
+          .map((ticket) => ticket.unit_sequence).sort((left, right) =>
+            left - right
+          );
+        return sequences.length === item.quantity &&
+          sequences.every((sequence, index) => sequence === index + 1);
+      });
+    return {
+      order_handle: handlesByOrderId.get(order.id),
+      ticket_count: orderTickets.length,
+      unique_ticket_count: new Set(orderTickets.map((ticket) =>
+        ticket.id
+      )).size,
+      valid_count:
+        orderTickets.filter((ticket) => ticket.status === "valid").length,
+      refunded_count:
+        orderTickets.filter((ticket) => ticket.status === "refunded").length,
+      bindings_valid: bindingsValid,
+      sequences_valid: sequencesValid,
+      refunded_timestamps_valid: orderTickets.every((ticket) =>
+        ticket.status !== "refunded" || ticket.refunded_at !== null
+      ),
+    };
+  });
   return {
     ok: true,
-    orders,
-    items,
-    tickets,
-    refunds: refunds.map(({ stripe_event_id: _eventId, ...refund }) => refund),
+    orders: orders.map((order) => ({
+      order_handle: handlesByOrderId.get(order.id),
+      status: order.status,
+      failure_code: order.failure_code,
+      reconciliation_status: order.reconciliation_status,
+      subtotal_minor: order.subtotal_minor,
+      total_minor: order.total_minor,
+      application_fee_amount_minor: order.application_fee_amount_minor,
+      expected_organizer_proceeds_minor:
+        order.expected_organizer_proceeds_minor,
+    })),
+    items: safeItems,
+    tickets: ticketSets,
+    refunds: refunds.map((refund) => ({
+      order_handle: handlesByOrderId.get(refund.order_id),
+      status: refund.status,
+      amount_minor: refund.amount_minor,
+      reverse_transfer: refund.reverse_transfer,
+      refund_application_fee: refund.refund_application_fee,
+      transfer_reversal_amount_minor: refund.transfer_reversal_amount_minor,
+      application_fee_refund_amount_minor:
+        refund.application_fee_refund_amount_minor,
+      policy_verified: refund.policy_verified,
+      policy_failure_code: refund.policy_failure_code,
+    })),
     receipts: receipts.map((value) => ({
       event_type: value.event_type,
       processing_status: value.processing_status,
@@ -535,10 +709,11 @@ function stripeId(value: unknown, prefix: string): string {
 }
 
 async function checkoutStatus(
-  sessionIdValue: unknown,
+  orderHandleValue: unknown,
 ): Promise<Record<string, unknown>> {
+  const order = await proofOrder(orderHandleValue);
   const session = await getStripe().checkout.sessions.retrieve(
-    stripeId(sessionIdValue, "cs_test_"),
+    stripeId(order.stripe_checkout_session_id, "cs_test_"),
     {
       expand: [
         "line_items.data.price.product",
@@ -633,7 +808,7 @@ async function checkoutStatus(
 }
 
 async function deliver(value: unknown): Promise<Record<string, unknown>> {
-  const event = eventDescriptor(value);
+  const event = await eventDescriptor(value);
   const response = await fetch(await signedRequest(event));
   return { status: response.status, receipt: await receipt(event.event_id) };
 }
@@ -641,7 +816,7 @@ async function deliver(value: unknown): Promise<Record<string, unknown>> {
 async function deliverTransientRetry(
   value: unknown,
 ): Promise<Record<string, unknown>> {
-  const event = eventDescriptor(value);
+  const event = await eventDescriptor(value);
   if (event.type !== "checkout.session.expired") throw new Error("INPUT");
   const dependencies = createDefaultStripeWebhookDependencies();
   const first = await createStripeWebhookHandler({
@@ -660,10 +835,11 @@ async function deliverTransientRetry(
 }
 
 async function expireCheckout(
-  sessionIdValue: unknown,
+  orderHandleValue: unknown,
 ): Promise<Record<string, unknown>> {
+  const order = await proofOrder(orderHandleValue);
   const session = await getStripe().checkout.sessions.expire(
-    stripeId(sessionIdValue, "cs_test_"),
+    stripeId(order.stripe_checkout_session_id, "cs_test_"),
   );
   assertTestMode(session);
   if (session.status !== "expired") {
@@ -709,21 +885,19 @@ async function invalidSignature(): Promise<Record<string, unknown>> {
   };
 }
 
-async function paidOrder(orderIdValue: unknown) {
-  if (typeof orderIdValue !== "string" || !uuidPattern.test(orderIdValue)) {
-    throw new Error("INPUT");
-  }
+async function proofOrder(orderHandleValue: unknown) {
+  const handle = orderHandle(orderHandleValue);
   const { data, error } = await getServiceClient().from("orders").select(
     "id,status,total_minor,application_fee_amount_minor,expected_organizer_proceeds_minor,stripe_checkout_session_id,stripe_payment_intent_id,stripe_charge_id,stripe_transfer_id,stripe_application_fee_id,stripe_balance_transaction_id",
-  ).eq("id", orderIdValue).single();
+  ).eq("buyer_email", fixtureBuyerEmail(handle)).single();
   if (error !== null) throw new Error("DATABASE");
   return data;
 }
 
 async function reconcilePayment(
-  orderIdValue: unknown,
+  orderHandleValue: unknown,
 ): Promise<Record<string, unknown>> {
-  const order = await paidOrder(orderIdValue);
+  const order = await proofOrder(orderHandleValue);
   const stripe = getStripe();
   const intent = await stripe.paymentIntents.retrieve(
     stripeId(order.stripe_payment_intent_id, "pi_"),
@@ -748,14 +922,24 @@ async function reconcilePayment(
     ? transfer.destination
     : transfer.destination?.id;
   if (destination === undefined) throw new Error("STRIPE");
-  const lineStatus = await checkoutStatus(order.stripe_checkout_session_id);
+  const lineStatus = await checkoutStatus(orderHandleValue);
   const connectedAccountMatches = destination === connectedAccountId() &&
-    intent.transfer_data?.destination === connectedAccountId();
+    intent.transfer_data?.destination === connectedAccountId() &&
+    charge.transfer_data?.destination === connectedAccountId();
   const persistedIdsMatch = intent.id === order.stripe_payment_intent_id &&
     charge.id === order.stripe_charge_id &&
     transfer.id === order.stripe_transfer_id &&
     fee.id === order.stripe_application_fee_id &&
     balance.id === order.stripe_balance_transaction_id;
+  const crossObjectRelationsMatch = destinationChargeRelationsMatch({
+    paymentIntentId: intent.id,
+    chargeId: charge.id,
+    transferId: transfer.id,
+    connectedAccountId: connectedAccountId(),
+    charge: charge as unknown as Record<string, unknown>,
+    transfer: transfer as unknown as Record<string, unknown>,
+    applicationFee: fee as unknown as Record<string, unknown>,
+  });
   return {
     ok: intent.amount === order.total_minor &&
       charge.amount === order.total_minor &&
@@ -764,10 +948,12 @@ async function reconcilePayment(
       transfer.amount - fee.amount ===
         order.expected_organizer_proceeds_minor &&
       connectedAccountMatches && persistedIdsMatch &&
+      crossObjectRelationsMatch &&
       lineStatus.line_bindings_valid === true,
     livemode: false,
     connected_account_matches: connectedAccountMatches,
     persisted_ids_match: persistedIdsMatch,
+    cross_object_relations_match: crossObjectRelationsMatch,
     destination_charge: connectedAccountMatches,
     line_bindings_valid: lineStatus.line_bindings_valid,
     line_count: lineStatus.line_count,
@@ -780,9 +966,9 @@ async function reconcilePayment(
 }
 
 async function reconcileEvents(
-  orderIdValue: unknown,
+  orderHandleValue: unknown,
 ): Promise<Record<string, unknown>> {
-  const order = await paidOrder(orderIdValue);
+  const order = await proofOrder(orderHandleValue);
   const events = await getStripe().events.list({ limit: 100 });
   const matching = new Set<string>();
   for (const event of events.data) {
@@ -810,11 +996,9 @@ async function reconcileEvents(
 }
 
 async function createRefund(
-  orderIdValue: unknown,
+  orderHandleValue: unknown,
 ): Promise<Record<string, unknown>> {
-  if (typeof orderIdValue !== "string" || !uuidPattern.test(orderIdValue)) {
-    throw new Error("INPUT");
-  }
+  const order = await proofOrder(orderHandleValue);
   const stripeClient = getStripe();
   let prepared: {
     totalMinor: number;
@@ -825,7 +1009,7 @@ async function createRefund(
     applicationFeeRefundAmountMinor: number;
   } | undefined;
   const result = await createWholeOrderRefund(
-    orderIdValue,
+    order.id,
     "requested_by_customer",
     {
       prepareWholeOrderRefund: async (orderId, reason) => {
@@ -917,7 +1101,6 @@ async function createRefund(
   return {
     ok: true,
     livemode: false,
-    refund_id: result.stripeRefundId,
     status: result.status,
     amount: prepared.totalMinor,
     reverse_transfer: true,
@@ -932,7 +1115,7 @@ async function cleanup(): Promise<Record<string, unknown>> {
   mustCloseConnectedAccount();
   const client = getServiceClient();
   const organizer = await fixtureOrganizer();
-  const authUser = await fixtureAuthUser();
+  const authUser = await fixtureAuthUser(organizer?.id);
   const eventIds: string[] = [];
   const orderIds: string[] = [];
   const objectIds: string[] = [];
@@ -1106,9 +1289,17 @@ async function cleanup(): Promise<Record<string, unknown>> {
     );
   }
   if (authUser !== null) {
-    const result = await client.auth.admin.deleteUser(authUser.id);
-    if (result.error !== null) throw new Error("DATABASE");
+    await deleteAndVerifyFixtureAuthUser(
+      authUser,
+      async (id) => {
+        const result = await client.auth.admin.deleteUser(id);
+        if (result.error !== null) throw new Error("DATABASE_DELETE_AUTH");
+      },
+      loadFixtureAuthUserById,
+      loadFixtureAuthPage,
+    );
   }
+  if (await fixtureAuthUser() !== null) throw new Error("DATABASE_DELETE_AUTH");
   const count = async (table: string, column: string, value: string) => {
     const result = await client.from(table).select(column, {
       count: "exact",
@@ -1214,6 +1405,7 @@ async function cleanup(): Promise<Record<string, unknown>> {
     deleted_item_count: deletedItemCount,
     archived_price_count: priceIds.size,
     archived_product_count: productIds.size,
+    auth_user_absent: true,
     connected_account_closed: connectedAccountClosed,
   };
 }
@@ -1235,24 +1427,24 @@ Deno.serve(async (request) => {
     if (action === "setup") return json(await setup());
     if (action === "inspect") return json(await inspect(input.event_id));
     if (action === "checkout_status") {
-      return json(await checkoutStatus(input.session_id));
+      return json(await checkoutStatus(input.order_handle));
     }
     if (action === "deliver") return json(await deliver(input.event));
     if (action === "deliver_transient_retry") {
       return json(await deliverTransientRetry(input.event));
     }
     if (action === "expire_checkout") {
-      return json(await expireCheckout(input.session_id));
+      return json(await expireCheckout(input.order_handle));
     }
     if (action === "invalid_signature") return json(await invalidSignature());
     if (action === "reconcile_payment") {
-      return json(await reconcilePayment(input.order_id));
+      return json(await reconcilePayment(input.order_handle));
     }
     if (action === "reconcile_events") {
-      return json(await reconcileEvents(input.order_id));
+      return json(await reconcileEvents(input.order_handle));
     }
     if (action === "create_refund") {
-      return json(await createRefund(input.order_id));
+      return json(await createRefund(input.order_handle));
     }
     if (action === "cleanup") return json(await cleanup());
     return json({ ok: false }, 400);

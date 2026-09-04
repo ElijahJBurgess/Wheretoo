@@ -22,10 +22,11 @@ export type ManagedStripeProofClient = {
 }
 
 const unsafeValuePattern = /(?:https:\/\/checkout\.stripe\.com\/|(?:pk|rk|sk)_(?:test|live)_[A-Za-z0-9]|whsec_[A-Za-z0-9]|sb_secret_[A-Za-z0-9])/i
-const unsafeKeyPattern = /^(?:checkout_?url|confirmation_?bearer|authorization|service_?token|auth_?token|secret|buyer_?(?:email|name)|guest_?(?:email|name)|email)$/i
+const providerIdPattern = /^(?:acct|ch|fee|fr|evt|pi|price|prod|re|tr|trr|txn)_[A-Za-z0-9]+$|^cs_(?:test|live)_[A-Za-z0-9]+$/
+const unsafeKeyPattern = /^(?:id|checkout_?url|confirmation_?bearer|authorization|service_?token|auth_?token|secret|buyer_?(?:email|name)|guest_?(?:email|name)|email|ticket_?id|order_?id|order_?item_?id|refund_?id|session_?id|payment_?intent_?id|charge_?id|transfer_?id|application_?fee_?id|balance_?transaction_?id|stripe_?(?:event|object)_?id|stripe_[a-z0-9_]*_id)$/i
 
 function hasUnsafeProofData(value: unknown): boolean {
-  if (typeof value === 'string') return unsafeValuePattern.test(value)
+  if (typeof value === 'string') return unsafeValuePattern.test(value) || providerIdPattern.test(value)
   if (Array.isArray(value)) return value.some(hasUnsafeProofData)
   if (typeof value !== 'object' || value === null) return false
   return Object.entries(value).some(([key, nested]) => unsafeKeyPattern.test(key) || hasUnsafeProofData(nested))

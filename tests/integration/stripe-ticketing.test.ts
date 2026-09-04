@@ -8,6 +8,7 @@ import {
   TASK17_CART,
   TASK17_ORGANIZER_PROCEEDS_MINOR,
   TASK17_SUBTOTAL_MINOR,
+  toSafeHostedCheckoutBrowserError,
 } from './stripeTestObjects'
 import { createManagedStripeProofClient } from './stripeWebhookHarness'
 import { loadStripeIntegrationTestEnv } from './testEnv'
@@ -16,16 +17,10 @@ const env = loadStripeIntegrationTestEnv()
 const proof = createManagedStripeProofClient(env)
 
 type OrderRow = {
-  id: string
+  order_handle: 'paid' | 'declined'
   status: string
   failure_code: string | null
   reconciliation_status: string
-  stripe_checkout_session_id: string | null
-  stripe_payment_intent_id: string | null
-  stripe_charge_id: string | null
-  stripe_transfer_id: string | null
-  stripe_application_fee_id: string | null
-  stripe_balance_transaction_id: string | null
   subtotal_minor: number
   total_minor: number
   application_fee_amount_minor: number
@@ -33,9 +28,8 @@ type OrderRow = {
 }
 
 type OrderItemRow = {
-  id: string
-  order_id: string
-  ticket_tier_id: string
+  order_handle: 'paid' | 'declined'
+  tier_label: 'ga' | 'vip'
   tier_name: string
   unit_amount_minor: number
   quantity: number
@@ -43,23 +37,24 @@ type OrderItemRow = {
   currency: string
 }
 
-type TicketRow = {
-  id: string
-  order_id: string
-  order_item_id: string
-  ticket_tier_id: string
-  unit_sequence: number
-  status: string
-  refunded_at: string | null
+type TicketSet = {
+  order_handle: 'paid' | 'declined'
+  ticket_count: number
+  unique_ticket_count: number
+  valid_count: number
+  refunded_count: number
+  bindings_valid: boolean
+  sequences_valid: boolean
+  refunded_timestamps_valid: boolean
 }
 
 type Inspection = {
   ok: boolean
   orders: OrderRow[]
   items: OrderItemRow[]
-  tickets: TicketRow[]
+  tickets: TicketSet[]
   refunds: Array<{
-    order_id: string
+    order_handle: 'paid' | 'declined'
     status: string
     amount_minor: number
     reverse_transfer: boolean
@@ -76,7 +71,7 @@ type Inspection = {
     error_code: string | null
   }>
   inventory: Array<{
-    ticket_tier_id: string
+    tier_label: 'ga' | 'vip'
     quantity_total: number
     reserved_quantity: number
     available_quantity: number
@@ -108,12 +103,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function eventDescriptor(type: string, object: string, objectId: string) {
+function eventDescriptor(
+  type: 'checkout.session.completed' | 'checkout.session.expired' | 'refund.updated',
+  object: 'checkout.session' | 'refund',
+  orderHandle: 'paid' | 'declined',
+) {
   return {
-    event_id: `evt_task17${randomUUID().replaceAll('-', '')}`,
+    event_handle: randomUUID(),
     type,
     object,
-    object_id: objectId,
+    order_handle: orderHandle,
     created: Math.floor(Date.now() / 1_000),
   }
 }
@@ -132,7 +131,7 @@ function isHostedTestCheckoutUrl(value: unknown): value is string {
 
 async function createCheckout(
   fixture: Setup,
-  email: string,
+  orderHandle: 'paid' | 'declined',
 ): Promise<{ checkoutUrl: string; confirmationBearer: string }> {
   const attempt = createStripeProofCheckoutAttempt()
   const response = await fetch(`${env.supabaseUrl}/functions/v1/stripe-create-checkout`, {
@@ -147,7 +146,7 @@ async function createCheckout(
     body: JSON.stringify({
       eventId: fixture.event_id,
       buyerName: 'Task 17 Buyer',
-      buyerEmail: email,
+      buyerEmail: `${env.fixturePrefix}-${orderHandle}@example.invalid`,
       clientRequestId: attempt.clientRequestId,
       items: [
         { tierId: fixture.ga_tier_id, quantity: 2 },
@@ -175,33 +174,37 @@ async function visibleTextbox(page: Page, name: string): Promise<Locator> {
 }
 
 async function exerciseHostedCheckout(url: string, cardNumber: string, outcome: 'paid' | 'declined') {
-  const browser = await chromium.launch({ headless: true })
   try {
-    const page = await browser.newPage()
-    await page.goto(url)
-    const card = page.getByRole('radio', { name: 'Card' })
-    if (!(await card.isChecked())) await card.check({ force: true })
-    const cardNumberInput = await visibleTextbox(page, 'Card number')
-    await cardNumberInput.fill(cardNumber)
-    await (await visibleTextbox(page, 'Expiration')).fill('1234')
-    await (await visibleTextbox(page, 'CVC')).fill('123')
-    await (await visibleTextbox(page, 'Cardholder name')).fill('Task Seventeen')
-    await (await visibleTextbox(page, 'ZIP')).fill('94103')
-    const save = page.getByRole('checkbox', { name: 'Save my information for faster checkout' }).filter({ visible: true }).first()
-    if (await save.isChecked()) await save.uncheck()
-    const disclosure = page.getByRole('checkbox', { name: 'I am an AI agent acting on behalf of someone else' }).filter({ visible: true }).first()
-    await disclosure.evaluate((element: HTMLInputElement) => element.click())
-    expect(await disclosure.isChecked()).toBe(true)
-    await page.getByRole('button', { name: 'Pay', exact: true }).filter({ visible: true }).first().click()
-    if (outcome === 'paid') {
-      await page.waitForURL((value) => value.origin === 'http://127.0.0.1:3000', { timeout: 30_000 })
-    } else {
-      const alert = page.getByRole('alert')
-      await alert.waitFor({ timeout: 30_000 })
-      expect((await alert.textContent())?.toLowerCase()).toContain('declined')
+    const browser = await chromium.launch({ headless: true })
+    try {
+      const page = await browser.newPage()
+      await page.goto(url)
+      const card = page.getByRole('radio', { name: 'Card' })
+      if (!(await card.isChecked())) await card.check({ force: true })
+      const cardNumberInput = await visibleTextbox(page, 'Card number')
+      await cardNumberInput.fill(cardNumber)
+      await (await visibleTextbox(page, 'Expiration')).fill('1234')
+      await (await visibleTextbox(page, 'CVC')).fill('123')
+      await (await visibleTextbox(page, 'Cardholder name')).fill('Task Seventeen')
+      await (await visibleTextbox(page, 'ZIP')).fill('94103')
+      const save = page.getByRole('checkbox', { name: 'Save my information for faster checkout' }).filter({ visible: true }).first()
+      if (await save.isChecked()) await save.uncheck()
+      const disclosure = page.getByRole('checkbox', { name: 'I am an AI agent acting on behalf of someone else' }).filter({ visible: true }).first()
+      await disclosure.evaluate((element: HTMLInputElement) => element.click())
+      expect(await disclosure.isChecked()).toBe(true)
+      await page.getByRole('button', { name: 'Pay', exact: true }).filter({ visible: true }).first().click()
+      if (outcome === 'paid') {
+        await page.waitForURL((value) => value.origin === 'http://127.0.0.1:3000', { timeout: 30_000 })
+      } else {
+        const alert = page.getByRole('alert')
+        await alert.waitFor({ timeout: 30_000 })
+        expect((await alert.textContent())?.toLowerCase()).toContain('declined')
+      }
+    } finally {
+      await browser.close()
     }
-  } finally {
-    await browser.close()
+  } catch (error) {
+    throw toSafeHostedCheckoutBrowserError(error)
   }
 }
 
@@ -209,13 +212,11 @@ async function inspect(eventId: string): Promise<Inspection> {
   return await proof.invoke<Inspection>('inspect', { event_id: eventId })
 }
 
-async function waitForNewOrder(eventId: string, knownOrderIds: Set<string>): Promise<OrderRow> {
+async function waitForOrder(eventId: string, orderHandle: 'paid' | 'declined'): Promise<OrderRow> {
   for (let attempt = 0; attempt < 20; attempt += 1) {
-    const orders = (await inspect(eventId)).orders.filter((order) =>
-      !knownOrderIds.has(order.id) && order.stripe_checkout_session_id !== null
-    )
+    const orders = (await inspect(eventId)).orders.filter((order) => order.order_handle === orderHandle)
     if (orders.length === 1) return orders[0]
-    if (orders.length > 1) throw new Error('Checkout created multiple orders')
+    if (orders.length > 1) throw new Error('Checkout created multiple orders for one proof handle')
     await new Promise((resolve) => setTimeout(resolve, 250))
   }
   throw new Error('Timed out waiting for Task 17 order')
@@ -236,20 +237,6 @@ async function confirmation(confirmationBearer: string): Promise<Record<string, 
   const value: unknown = await response.json()
   if (!isRecord(value)) throw new Error('Confirmation returned an unsafe response')
   return value
-}
-
-function verifyIssuedTickets(items: OrderItemRow[], tickets: TicketRow[]): boolean {
-  if (items.length !== 2 || tickets.length !== 3 || new Set(tickets.map((ticket) => ticket.id)).size !== 3) {
-    return false
-  }
-  return items.every((item) => {
-    const bound = tickets.filter((ticket) =>
-      ticket.order_item_id === item.id && ticket.ticket_tier_id === item.ticket_tier_id
-    )
-    return bound.length === item.quantity &&
-      bound.map((ticket) => ticket.unit_sequence).sort((left, right) => left - right)
-        .every((sequence, index) => sequence === index + 1)
-  })
 }
 
 describe('real Stripe test-mode ticket transaction', () => {
@@ -286,12 +273,14 @@ describe('real Stripe test-mode ticket transaction', () => {
     expect(Object.keys(fixture).some((key) => /secret|bearer|url/i.test(key))).toBe(false)
     expect(new Set([fixture.ga_tier_id, fixture.vip_tier_id]).size).toBe(2)
 
-    const beforePaid = new Set((await inspect(fixture.event_id)).orders.map((order) => order.id))
-    const paidCheckout = await createCheckout(fixture, `${env.fixturePrefix}-paid@example.invalid`)
-    const paidOrder = await waitForNewOrder(fixture.event_id, beforePaid)
+    expect((await inspect(fixture.event_id)).orders).not.toContainEqual(
+      expect.objectContaining({ order_handle: 'paid' }),
+    )
+    const paidCheckout = await createCheckout(fixture, 'paid')
+    await waitForOrder(fixture.event_id, 'paid')
     await exerciseHostedCheckout(paidCheckout.checkoutUrl, '4242424242424242', 'paid')
     await expect(proof.invoke('checkout_status', {
-      session_id: paidOrder.stripe_checkout_session_id,
+      order_handle: 'paid',
     })).resolves.toMatchObject({
       ok: true,
       livemode: false,
@@ -316,32 +305,43 @@ describe('real Stripe test-mode ticket transaction', () => {
     const paidEvent = eventDescriptor(
       'checkout.session.completed',
       'checkout.session',
-      paidOrder.stripe_checkout_session_id!,
+      'paid',
     )
     const paidFirst = await proof.invoke<{ status: number }>('deliver', { event: paidEvent })
     let state = await inspect(fixture.event_id)
-    const paidItems = state.items.filter((item) => item.order_id === paidOrder.id)
-    const paidTickets = state.tickets.filter((ticket) => ticket.order_id === paidOrder.id)
-    const firstTicketIds = new Set(paidTickets.map((ticket) => ticket.id))
+    const paidItems = state.items.filter((item) => item.order_handle === 'paid')
+    const paidTickets = state.tickets.find((tickets) => tickets.order_handle === 'paid')
     expect(paidFirst.status).toBe(200)
-    expect(state.orders.find((order) => order.id === paidOrder.id)?.status).toBe('paid')
+    expect(state.orders.find((order) => order.order_handle === 'paid')?.status).toBe('paid')
     expect(paidItems).toHaveLength(2)
     expect(paidItems.map((item) => item.quantity).sort()).toEqual([1, 2])
-    expect(paidTickets).toHaveLength(3)
-    expect(verifyIssuedTickets(paidItems, paidTickets)).toBe(true)
+    expect(paidTickets).toMatchObject({
+      ticket_count: 3,
+      unique_ticket_count: 3,
+      valid_count: 3,
+      refunded_count: 0,
+      bindings_valid: true,
+      sequences_valid: true,
+      refunded_timestamps_valid: true,
+    })
 
     const paidDuplicate = await proof.invoke<{
       status: number
       receipt: { delivery_attempt_count: number; processing_status: string }
     }>('deliver', { event: paidEvent })
     state = await inspect(fixture.event_id)
-    const duplicateTickets = state.tickets.filter((ticket) => ticket.order_id === paidOrder.id)
+    const duplicateTickets = state.tickets.find((tickets) => tickets.order_handle === 'paid')
     expect(paidDuplicate).toMatchObject({
       status: 200,
       receipt: { delivery_attempt_count: 2, processing_status: 'processed' },
     })
-    expect(duplicateTickets).toHaveLength(3)
-    expect(duplicateTickets.every((ticket) => firstTicketIds.has(ticket.id))).toBe(true)
+    expect(duplicateTickets).toMatchObject({
+      ticket_count: 3,
+      unique_ticket_count: 3,
+      valid_count: 3,
+      bindings_valid: true,
+      sequences_valid: true,
+    })
 
     const safeConfirmation = await confirmation(paidCheckout.confirmationBearer)
     expect(safeConfirmation).not.toHaveProperty('ticket_id')
@@ -365,12 +365,12 @@ describe('real Stripe test-mode ticket transaction', () => {
       isRecord(item) && !Object.keys(item).some((key) => /(^|_)(id|token|bearer)$/i.test(key))
     )).toBe(true)
 
-    const beforeDeclined = new Set(state.orders.map((order) => order.id))
-    const declinedCheckout = await createCheckout(fixture, `${env.fixturePrefix}-declined@example.invalid`)
-    const declinedOrder = await waitForNewOrder(fixture.event_id, beforeDeclined)
+    expect(state.orders).not.toContainEqual(expect.objectContaining({ order_handle: 'declined' }))
+    const declinedCheckout = await createCheckout(fixture, 'declined')
+    await waitForOrder(fixture.event_id, 'declined')
     await exerciseHostedCheckout(declinedCheckout.checkoutUrl, '4000000000000002', 'declined')
     await expect(proof.invoke('checkout_status', {
-      session_id: declinedOrder.stripe_checkout_session_id,
+      order_handle: 'declined',
     })).resolves.toMatchObject({
       ok: true,
       livemode: false,
@@ -382,17 +382,17 @@ describe('real Stripe test-mode ticket transaction', () => {
       admission_count: 3,
     })
     state = await inspect(fixture.event_id)
-    expect(state.orders.find((order) => order.id === declinedOrder.id)?.status).toBe('checkout_open')
-    expect(state.items.filter((item) => item.order_id === declinedOrder.id)).toHaveLength(2)
-    expect(state.tickets.filter((ticket) => ticket.order_id === declinedOrder.id)).toHaveLength(0)
+    expect(state.orders.find((order) => order.order_handle === 'declined')?.status).toBe('checkout_open')
+    expect(state.items.filter((item) => item.order_handle === 'declined')).toHaveLength(2)
+    expect(state.tickets.find((tickets) => tickets.order_handle === 'declined')?.ticket_count).toBe(0)
 
     await expect(proof.invoke('expire_checkout', {
-      session_id: declinedOrder.stripe_checkout_session_id,
+      order_handle: 'declined',
     })).resolves.toMatchObject({ ok: true, livemode: false, status: 'expired' })
     const expiredEvent = eventDescriptor(
       'checkout.session.expired',
       'checkout.session',
-      declinedOrder.stripe_checkout_session_id!,
+      'declined',
     )
     const retry = await proof.invoke<{
       statuses: number[]
@@ -404,17 +404,17 @@ describe('real Stripe test-mode ticket transaction', () => {
       processing_status: 'processed',
     })
     state = await inspect(fixture.event_id)
-    expect(state.orders.find((order) => order.id === declinedOrder.id)).toMatchObject({
+    expect(state.orders.find((order) => order.order_handle === 'declined')).toMatchObject({
       status: 'payment_failed',
       failure_code: 'CHECKOUT_EXPIRED',
     })
-    expect(state.tickets.filter((ticket) => ticket.order_id === declinedOrder.id)).toHaveLength(0)
-    expect(state.inventory.find((tier) => tier.ticket_tier_id === fixture.ga_tier_id)).toMatchObject({
+    expect(state.tickets.find((tickets) => tickets.order_handle === 'declined')?.ticket_count).toBe(0)
+    expect(state.inventory.find((tier) => tier.tier_label === 'ga')).toMatchObject({
       quantity_total: 10,
       reserved_quantity: 2,
       available_quantity: 8,
     })
-    expect(state.inventory.find((tier) => tier.ticket_tier_id === fixture.vip_tier_id)).toMatchObject({
+    expect(state.inventory.find((tier) => tier.tier_label === 'vip')).toMatchObject({
       quantity_total: 10,
       reserved_quantity: 1,
       available_quantity: 9,
@@ -429,7 +429,6 @@ describe('real Stripe test-mode ticket transaction', () => {
     const refund = await proof.invoke<{
       ok: boolean
       livemode: boolean
-      refund_id: string
       status: string
       amount: number
       reverse_transfer: boolean
@@ -437,7 +436,7 @@ describe('real Stripe test-mode ticket transaction', () => {
       reversal_amount: number
       application_fee_refund_amount: number
       expected_application_fee_amount: number
-    }>('create_refund', { order_id: paidOrder.id })
+    }>('create_refund', { order_handle: 'paid' })
     expect(refund).toMatchObject({
       ok: true,
       livemode: false,
@@ -449,7 +448,7 @@ describe('real Stripe test-mode ticket transaction', () => {
       application_fee_refund_amount: TASK17_APPLICATION_FEE_MINOR,
       expected_application_fee_amount: TASK17_APPLICATION_FEE_MINOR,
     })
-    const refundEvent = eventDescriptor('refund.updated', 'refund', refund.refund_id)
+    const refundEvent = eventDescriptor('refund.updated', 'refund', 'paid')
     const refundFirst = await proof.invoke<{ status: number }>('deliver', { event: refundEvent })
     const refundDuplicate = await proof.invoke<{
       status: number
@@ -461,11 +460,17 @@ describe('real Stripe test-mode ticket transaction', () => {
       processing_status: 'processed',
     })
     state = await inspect(fixture.event_id)
-    expect(state.orders.find((order) => order.id === paidOrder.id)?.status).toBe('refunded')
-    expect(state.tickets.filter((ticket) => ticket.order_id === paidOrder.id)).toHaveLength(3)
-    expect(state.tickets.filter((ticket) => ticket.order_id === paidOrder.id)
-      .every((ticket) => ticket.status === 'refunded' && ticket.refunded_at !== null)).toBe(true)
-    expect(state.refunds.filter((candidate) => candidate.order_id === paidOrder.id)).toEqual([
+    expect(state.orders.find((order) => order.order_handle === 'paid')?.status).toBe('refunded')
+    expect(state.tickets.find((tickets) => tickets.order_handle === 'paid')).toMatchObject({
+      ticket_count: 3,
+      unique_ticket_count: 3,
+      valid_count: 0,
+      refunded_count: 3,
+      bindings_valid: true,
+      sequences_valid: true,
+      refunded_timestamps_valid: true,
+    })
+    expect(state.refunds.filter((candidate) => candidate.order_handle === 'paid')).toEqual([
       expect.objectContaining({
         status: 'succeeded',
         amount_minor: TASK17_SUBTOTAL_MINOR,
@@ -478,11 +483,12 @@ describe('real Stripe test-mode ticket transaction', () => {
       }),
     ])
 
-    await expect(proof.invoke('reconcile_payment', { order_id: paidOrder.id })).resolves.toMatchObject({
+    await expect(proof.invoke('reconcile_payment', { order_handle: 'paid' })).resolves.toMatchObject({
       ok: true,
       livemode: false,
       connected_account_matches: true,
       persisted_ids_match: true,
+      cross_object_relations_match: true,
       destination_charge: true,
       line_bindings_valid: true,
       line_count: 2,
@@ -492,7 +498,7 @@ describe('real Stripe test-mode ticket transaction', () => {
       transfer_less_application_fee: TASK17_ORGANIZER_PROCEEDS_MINOR,
       balance_transaction_amount: TASK17_SUBTOTAL_MINOR,
     })
-    await expect(proof.invoke('reconcile_events', { order_id: paidOrder.id })).resolves.toMatchObject({
+    await expect(proof.invoke('reconcile_events', { order_handle: 'paid' })).resolves.toMatchObject({
       ok: true,
       livemode: false,
       has_more: false,
@@ -522,6 +528,7 @@ describe('real Stripe test-mode ticket transaction', () => {
       deleted_item_count: 4,
       archived_price_count: 4,
       archived_product_count: 4,
+      auth_user_absent: true,
       connected_account_closed: true,
     })
   }, 180_000)

@@ -5,8 +5,10 @@ umask 077
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
 DRIVER_SOURCE="$SCRIPT_DIR/edge/task17-transaction-driver/index.ts"
+DRIVER_CONTRACTS_SOURCE="$SCRIPT_DIR/edge/task17-transaction-driver/contracts.ts"
 MATERIALIZED_DIR="$REPO_ROOT/supabase/functions/task17-transaction-driver"
 MATERIALIZED_SOURCE="$MATERIALIZED_DIR/index.ts"
+MATERIALIZED_CONTRACTS_SOURCE="$MATERIALIZED_DIR/contracts.ts"
 MATERIALIZED_CREATED=0
 MATERIALIZED_DIR_CREATED=0
 PROJECT_REF_FILE="$REPO_ROOT/supabase/.temp/project-ref"
@@ -140,7 +142,7 @@ cleanup() {
       const fs = require("node:fs");
       const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
       const counts = ["event_count", "organizer_count", "connect_count", "order_count", "tier_count", "receipt_count", "ticket_count", "dispute_count", "refund_count", "item_count"];
-      if (value.ok !== true || value.connected_account_closed !== true || !counts.every((name) => value[name] === 0)) process.exit(1);
+      if (value.ok !== true || value.auth_user_absent !== true || value.connected_account_closed !== true || !counts.every((name) => value[name] === 0)) process.exit(1);
     ' "$CLEANUP_RESPONSE"; then
       TEARDOWN_FAILURE=1
     fi
@@ -160,7 +162,7 @@ cleanup() {
   fi
 
   if [ "$MATERIALIZED_CREATED" -eq 1 ]; then
-    rm -f "$MATERIALIZED_SOURCE"
+    rm -f "$MATERIALIZED_SOURCE" "$MATERIALIZED_CONTRACTS_SOURCE"
   fi
   if [ "$MATERIALIZED_DIR_CREATED" -eq 1 ]; then
     rmdir "$MATERIALIZED_DIR" 2>/dev/null || true
@@ -180,7 +182,9 @@ cleanup() {
     rm -rf "$TEMP_DIR"
   fi
 
-  if [ "$MATERIALIZED_CREATED" -eq 1 ] && [ -e "$MATERIALIZED_SOURCE" ]; then
+  if [ "$MATERIALIZED_CREATED" -eq 1 ] && {
+    [ -e "$MATERIALIZED_SOURCE" ] || [ -e "$MATERIALIZED_CONTRACTS_SOURCE" ]
+  }; then
     TEARDOWN_FAILURE=1
   fi
   if [ "$TEARDOWN_FAILURE" -ne 0 ]; then
@@ -195,8 +199,9 @@ trap cleanup EXIT HUP INT TERM
 
 cd "$REPO_ROOT"
 [ -f "$DRIVER_SOURCE" ] || { printf '%s\n' 'Missing committed Task 17 driver source.' >&2; exit 1; }
+[ -f "$DRIVER_CONTRACTS_SOURCE" ] || { printf '%s\n' 'Missing committed Task 17 driver contracts.' >&2; exit 1; }
 [ -f "$PROJECT_REF_FILE" ] || { printf '%s\n' 'Missing linked Supabase project reference.' >&2; exit 1; }
-[ ! -e "$MATERIALIZED_SOURCE" ] || {
+[ ! -e "$MATERIALIZED_SOURCE" ] && [ ! -e "$MATERIALIZED_CONTRACTS_SOURCE" ] || {
   printf '%s\n' 'Refusing to overwrite an existing Task 17 function source.' >&2
   exit 1
 }
@@ -223,6 +228,10 @@ TEST_CONNECTED_ACCOUNT_ID=${TEST_CONNECTED_ACCOUNT_ID-}
 TEST_CONNECTED_ACCOUNT_DISPOSABLE=${TEST_CONNECTED_ACCOUNT_DISPOSABLE-}
 
 case "$TEST_SUPABASE_URL" in https://*.supabase.co) ;; *) printf '%s\n' 'Invalid TEST_SUPABASE_URL.' >&2; exit 1 ;; esac
+[ "$TEST_SUPABASE_URL" = "https://${PROJECT_REF}.supabase.co" ] || {
+  printf '%s\n' 'TEST Supabase URL does not match the linked project.' >&2
+  exit 1
+}
 case "$TEST_SUPABASE_PUBLISHABLE_KEY" in sb_publishable_*) ;; *) printf '%s\n' 'Invalid TEST_SUPABASE_PUBLISHABLE_KEY.' >&2; exit 1 ;; esac
 case "$VITE_STRIPE_PUBLISHABLE_KEY" in pk_test_*) ;; *) printf '%s\n' 'Live or missing Stripe publishable key rejected.' >&2; exit 1 ;; esac
 case "$TEST_CONNECTED_ACCOUNT_ID" in acct_*) ;; *) printf '%s\n' 'Missing TEST connected account fixture.' >&2; exit 1 ;; esac
@@ -233,6 +242,33 @@ case "$TEST_CONNECTED_ACCOUNT_ID" in acct_*) ;; *) printf '%s\n' 'Missing TEST c
 
 TEMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/whereto-task17-run.XXXXXX")
 chmod 700 "$TEMP_DIR"
+projects_file="$TEMP_DIR/projects.json"
+environment_file="$TEMP_DIR/environment.json"
+pnpm exec supabase projects list --output json > "$projects_file"
+PROJECT_REF="$PROJECT_REF" PROJECTS_FILE="$projects_file" node --input-type=module <<'NODE'
+import fs from 'node:fs'
+const payload = JSON.parse(fs.readFileSync(process.env.PROJECTS_FILE, 'utf8'))
+if (!Array.isArray(payload)) process.exit(1)
+const linked = payload.filter((project) => project?.linked === true)
+if (
+  linked.length !== 1 || linked[0]?.id !== process.env.PROJECT_REF ||
+  linked[0]?.status !== 'ACTIVE_HEALTHY'
+) process.exit(1)
+NODE
+pnpm exec supabase db query --linked --output-format json \
+  "select environment as policy_environment from private.organizer_policy_release_settings where singleton_id;" \
+  > "$environment_file"
+ENVIRONMENT_FILE="$environment_file" node --input-type=module <<'NODE'
+import fs from 'node:fs'
+const payload = JSON.parse(fs.readFileSync(process.env.ENVIRONMENT_FILE, 'utf8'))
+const rows = Array.isArray(payload.rows)
+  ? payload.rows
+  : Array.isArray(payload.result)
+    ? payload.result
+    : null
+if (rows?.length !== 1 || rows[0]?.policy_environment !== 'development') process.exit(1)
+NODE
+chmod 600 "$projects_file" "$environment_file"
 TEMP_SECRET_FILE="$TEMP_DIR/driver-secrets.env"
 CURL_CONFIG="$TEMP_DIR/cleanup.curl"
 CLEANUP_RESPONSE="$TEMP_DIR/cleanup.json"
@@ -261,7 +297,8 @@ TEST_FUNCTION_URL="${TEST_SUPABASE_URL%/}/functions/v1/task17-transaction-driver
 mkdir -p "$MATERIALIZED_DIR"
 MATERIALIZED_CREATED=1
 sed 's#../../../../supabase/functions/#../#g' "$DRIVER_SOURCE" > "$MATERIALIZED_SOURCE"
-chmod 600 "$MATERIALIZED_SOURCE"
+cp "$DRIVER_CONTRACTS_SOURCE" "$MATERIALIZED_CONTRACTS_SOURCE"
+chmod 600 "$MATERIALIZED_SOURCE" "$MATERIALIZED_CONTRACTS_SOURCE"
 
 pre_functions="$TEMP_DIR/functions-before.json"
 pre_secrets="$TEMP_DIR/secrets-before.json"

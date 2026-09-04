@@ -143,6 +143,66 @@ describe('managed proof client boundary', () => {
     await expect(client.invoke('inspect')).rejects.toThrow('Managed Stripe proof returned unsafe data')
   })
 
+  it('rejects provider, ticket, receipt, refund, and order-item identifiers at the managed boundary', async () => {
+    const responses = [
+      { ok: true, provider: 'cs_test_forbidden' },
+      { ok: true, ticket_id: '11111111-1111-4111-8111-111111111111' },
+      { ok: true, order_item_id: '22222222-2222-4222-8222-222222222222' },
+      { ok: true, stripe_event_id: 'evt_forbidden' },
+      { ok: true, refund_id: 're_forbidden' },
+      { ok: true, order_id: '33333333-3333-4333-8333-333333333333' },
+      { ok: true, id: '44444444-4444-4444-8444-444444444444' },
+    ]
+    const client = createManagedStripeProofClient(
+      {
+        credentialMode: 'managed_edge',
+        supabaseUrl: base.TEST_SUPABASE_URL,
+        supabasePublishableKey: base.TEST_SUPABASE_PUBLISHABLE_KEY,
+        stripePublishableKey: base.VITE_STRIPE_PUBLISHABLE_KEY,
+        functionUrl: base.TEST_FUNCTION_URL,
+        driverToken: base.TEST_STRIPE_DRIVER_TOKEN,
+        fixturePrefix: base.TEST_STRIPE_FIXTURE_PREFIX,
+        connectedAccountId: base.TEST_CONNECTED_ACCOUNT_ID,
+        connectedAccountDisposable: true,
+        restrictedKeyProof: 'managed:test-mode-authenticated',
+        webhookSecretProof: 'managed:signature-verified',
+      },
+      async () => Response.json(responses.shift()),
+    )
+
+    for (
+      const action of [
+        'checkout_status',
+        'inspect',
+        'deliver',
+        'create_refund',
+        'server_proof',
+        'reconcile_payment',
+        'reconcile_events',
+      ] as const
+    ) {
+      let rejected = false
+      try {
+        await client.invoke(action)
+      } catch (error) {
+        rejected = error instanceof Error && error.message === 'Managed Stripe proof returned unsafe data'
+      }
+      expect(rejected).toBe(true)
+    }
+  })
+
+  it('sanitizes URL-bearing hosted Checkout browser errors', () => {
+    const sanitize = Reflect.get(stripeTestObjects, 'toSafeHostedCheckoutBrowserError')
+    expect(typeof sanitize).toBe('function')
+    if (typeof sanitize !== 'function') return
+
+    const sensitiveUrl = ['https://checkout.stripe.com', '/c/pay/', 'cs_test_forbidden'].join('')
+    const safe = sanitize(new Error(`page navigation timed out at ${sensitiveUrl}`)) as Error
+    expect(safe.message).toBe('Hosted Checkout browser failure: TIMEOUT')
+    expect(safe.message).not.toContain(sensitiveUrl)
+    expect(safe).not.toHaveProperty('cause')
+  })
+
   it('defines the exact two-line three-admission cart and per-admission fee', () => {
     expect(stripeTestObjects.applicationFeeMinor(5_500, 3)).toBe(425)
     expect(Reflect.get(stripeTestObjects, 'TASK17_CART')).toEqual([
@@ -187,10 +247,16 @@ describe('managed proof client boundary', () => {
     expect(proofTest).toContain("'X-Whereto-Confirmation-Bearer': attempt.confirmationBearer")
     expect(proofTest).toContain('line_count: 2')
     expect(proofTest).toContain('admission_count: 3')
-    expect(proofTest).toContain("tickets.filter((ticket) => ticket.order_id === paidOrder.id)).toHaveLength(3)")
+    expect(proofTest).toContain('ticket_count: 3')
+    expect(proofTest).toContain('unique_ticket_count: 3')
+    expect(proofTest).toContain('bindings_valid: true')
+    expect(proofTest).toContain("order_handle: 'paid'")
+    expect(proofTest).not.toContain('ticket.order_id')
+    expect(proofTest).not.toContain('ticket.id')
     expect(proofTest).toContain('expect(safeConfirmation).not.toHaveProperty(\'ticket_id\')')
     expect(proofTest).toContain('deleted_item_count: 4')
     expect(proofTest).toContain('deleted_ticket_count: 3')
+    expect(proofTest).toContain('auth_user_absent: true')
     expect(driver).toContain('line_bindings_valid: true')
   })
 })

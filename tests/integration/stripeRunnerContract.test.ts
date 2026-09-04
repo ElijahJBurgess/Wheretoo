@@ -34,6 +34,10 @@ async function runRunner(
     new URL('./edge/task17-transaction-driver/index.ts', import.meta.url),
     path.join(root, 'tests/integration/edge/task17-transaction-driver/index.ts'),
   )
+  await cp(
+    new URL('./edge/task17-transaction-driver/contracts.ts', import.meta.url),
+    path.join(root, 'tests/integration/edge/task17-transaction-driver/contracts.ts'),
+  )
   if (preexistingMaterialized) {
     await mkdir(path.join(root, 'supabase/functions/task17-transaction-driver'), { recursive: true })
     await writeFile(
@@ -47,8 +51,16 @@ async function runRunner(
 printf '%s\\n' "$*" >> "$FAKE_COMMAND_LOG"
 [ -z "\${STRIPE_SECRET_KEY-}" ] || printf '%s\\n' 'inherited-secret-visible' >> "$FAKE_COMMAND_LOG"
 case "$*" in
+  *"projects list"*)
+    [ "$FAKE_PROJECT_LIST_FAILURE" = 0 ] || exit 1
+    printf '%s\\n' "$FAKE_PROJECTS_RESPONSE"
+    ;;
   *"functions list"*) printf '%s\\n' '{"functions":[]}' ;;
   *"secrets list"*) printf '%s\\n' '{"secrets":[]}' ;;
+  *"db query"*"policy_environment"*)
+    [ "$FAKE_POLICY_QUERY_FAILURE" = 0 ] || exit 1
+    printf '%s\\n' "$FAKE_POLICY_RESPONSE"
+    ;;
   *"db query"*"with restored as"*) printf '%s\\n' '{"rows":[{"restored":true}]}' ;;
   *"db query"*"with enabled as"*) printf '%s\\n' '{"rows":[{"enabled":true}]}' ;;
   *"db query"*"select checkout_creation_enabled"*) printf '{"rows":[{"enabled":%s}]}\\n' "$FAKE_PRIOR_SWITCH" ;;
@@ -67,6 +79,7 @@ case "$*" in
     done
     [ "$FAKE_SECRET_SET_FAILURE" = 0 ]
     ;;
+  *"deno check"*) [ -f "$PWD/supabase/functions/task17-transaction-driver/contracts.ts" ] ;;
   *"vitest run"*) [ "$FAKE_TEST_FAILURE" = 0 ] ;;
 esac
 `
@@ -80,7 +93,7 @@ for argument in "$@"; do
   fi
   previous=$argument
 done
-printf '%s\\n' '{"ok":true,"event_count":0,"organizer_count":0,"connect_count":0,"order_count":0,"tier_count":0,"receipt_count":0,"ticket_count":0,"dispute_count":0,"refund_count":0,"item_count":0,"connected_account_closed":true}'
+printf '%s\\n' "$FAKE_CLEANUP_RESPONSE"
 `
   await writeFile(path.join(root, 'fake-bin/pnpm'), fakePnpm)
   await writeFile(path.join(root, 'fake-bin/curl'), fakeCurl)
@@ -96,6 +109,11 @@ printf '%s\\n' '{"ok":true,"event_count":0,"organizer_count":0,"connect_count":0
       FAKE_TEST_FAILURE: testFailure ? '1' : '0',
       FAKE_PRIOR_SWITCH: priorSwitch ? 'true' : 'false',
       FAKE_SECRET_SET_FAILURE: '0',
+      FAKE_PROJECT_LIST_FAILURE: '0',
+      FAKE_PROJECTS_RESPONSE: '[{"id":"abcdefghijklmnopqrst","linked":true,"status":"ACTIVE_HEALTHY"}]',
+      FAKE_POLICY_QUERY_FAILURE: '0',
+      FAKE_POLICY_RESPONSE: '{"rows":[{"policy_environment":"development"}]}',
+      FAKE_CLEANUP_RESPONSE: '{"ok":true,"event_count":0,"organizer_count":0,"connect_count":0,"order_count":0,"tier_count":0,"receipt_count":0,"ticket_count":0,"dispute_count":0,"refund_count":0,"item_count":0,"auth_user_absent":true,"connected_account_closed":true}',
       TEST_SUPABASE_URL: 'https://abcdefghijklmnopqrst.supabase.co',
       TEST_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_contract',
       VITE_STRIPE_PUBLISHABLE_KEY: 'pk_test_contract',
@@ -115,6 +133,8 @@ printf '%s\\n' '{"ok":true,"event_count":0,"organizer_count":0,"connect_count":0
     log: await readFile(log, 'utf8').catch(() => ''),
     materializedExists: await import('node:fs').then(({ existsSync }) =>
       existsSync(path.join(root, 'supabase/functions/task17-transaction-driver/index.ts'))),
+    materializedContractsExist: await import('node:fs').then(({ existsSync }) =>
+      existsSync(path.join(root, 'supabase/functions/task17-transaction-driver/contracts.ts'))),
     materializedContents: await readFile(
       path.join(root, 'supabase/functions/task17-transaction-driver/index.ts'),
       'utf8',
@@ -127,6 +147,14 @@ describe('Task 17 managed proof runner', () => {
     const result = await runRunner(false)
     expect(result.exitCode).toBe(0)
     expect(result.log).toContain('supabase secrets set --env-file')
+    expect(result.log).toContain('supabase projects list --output json')
+    expect(result.log).toContain('policy_environment')
+    expect(result.log.indexOf('supabase projects list --output json')).toBeLessThan(
+      result.log.indexOf('supabase secrets set --env-file'),
+    )
+    expect(result.log.indexOf('policy_environment')).toBeLessThan(
+      result.log.indexOf('supabase secrets set --env-file'),
+    )
     expect(result.log).toContain('db query --linked --output-format json select checkout_creation_enabled')
     expect(result.log).toContain('set checkout_creation_enabled = true')
     expect(result.log).toContain('set checkout_creation_enabled = false')
@@ -149,6 +177,7 @@ describe('Task 17 managed proof runner', () => {
     expect(result.log).toContain('curl-config-mode 600')
     expect(result.log).toContain('materialized-mode 600')
     expect(result.materializedExists).toBe(false)
+    expect(result.materializedContractsExist).toBe(false)
   })
 
   it('runs the same teardown when the canonical proof fails', async () => {
@@ -161,6 +190,7 @@ describe('Task 17 managed proof runner', () => {
       'supabase secrets unset TASK17_PROOF_TOKEN TASK17_FIXTURE_PREFIX TASK17_CONNECTED_ACCOUNT_ID TASK17_CLOSE_CONNECTED_ACCOUNT',
     )
     expect(result.materializedExists).toBe(false)
+    expect(result.materializedContractsExist).toBe(false)
   })
 
   it('restores an enabled prior switch after the proof succeeds', async () => {
@@ -202,10 +232,63 @@ describe('Task 17 managed proof runner', () => {
     expect(result.log).not.toContain('inherited-secret-visible')
   })
 
+  it('fails teardown when the fixture Auth identity is not proven absent', async () => {
+    const result = await runRunner(false, false, {
+      FAKE_CLEANUP_RESPONSE: '{"ok":true,"event_count":0,"organizer_count":0,"connect_count":0,"order_count":0,"tier_count":0,"receipt_count":0,"ticket_count":0,"dispute_count":0,"refund_count":0,"item_count":0,"auth_user_absent":false,"connected_account_closed":true}',
+    })
+    expect(result.exitCode).not.toBe(0)
+  })
+
   it('refuses to replace or remove a pre-existing local driver materialization', async () => {
     const result = await runRunner(false, false, {}, true)
     expect(result.exitCode).not.toBe(0)
     expect(result.materializedContents).toBe('preexisting source\n')
     expect(result.log).not.toContain('functions deploy task17-transaction-driver')
+  })
+
+  it.each([
+    ['project-list command failure', {
+      FAKE_PROJECT_LIST_FAILURE: '1',
+    }],
+    ['project-list parse failure', {
+      FAKE_PROJECTS_RESPONSE: 'not-json',
+    }],
+    ['zero linked matches', {
+      FAKE_PROJECTS_RESPONSE: '[]',
+    }],
+    ['multiple linked matches', {
+      FAKE_PROJECTS_RESPONSE: '[{"id":"abcdefghijklmnopqrst","linked":true,"status":"ACTIVE_HEALTHY"},{"id":"bbbbbbbbbbbbbbbbbbbb","linked":true,"status":"ACTIVE_HEALTHY"}]',
+    }],
+    ['linked reference mismatch', {
+      FAKE_PROJECTS_RESPONSE: '[{"id":"bbbbbbbbbbbbbbbbbbbb","linked":true,"status":"ACTIVE_HEALTHY"}]',
+    }],
+    ['linked project is not healthy', {
+      FAKE_PROJECTS_RESPONSE: '[{"id":"abcdefghijklmnopqrst","linked":true,"status":"INACTIVE"}]',
+    }],
+    ['Supabase URL mismatch', {
+      TEST_SUPABASE_URL: 'https://bbbbbbbbbbbbbbbbbbbb.supabase.co',
+    }],
+    ['non-development database', {
+      FAKE_POLICY_RESPONSE: '{"rows":[{"policy_environment":"production"}]}',
+    }],
+    ['environment-query command failure', {
+      FAKE_POLICY_QUERY_FAILURE: '1',
+    }],
+    ['environment-query parse failure', {
+      FAKE_POLICY_RESPONSE: 'not-json',
+    }],
+    ['zero environment rows', {
+      FAKE_POLICY_RESPONSE: '{"rows":[]}',
+    }],
+    ['multiple environment rows', {
+      FAKE_POLICY_RESPONSE: '{"rows":[{"policy_environment":"development"},{"policy_environment":"development"}]}',
+    }],
+  ])('fails closed before mutation on %s', async (_label, overrides) => {
+    const result = await runRunner(false, false, overrides)
+    expect(result.exitCode).not.toBe(0)
+    expect(result.log).not.toContain('supabase secrets set --env-file')
+    expect(result.log).not.toContain('functions deploy task17-transaction-driver')
+    expect(result.log).not.toContain('set checkout_creation_enabled = true')
+    expect(result.log).not.toContain('curl ')
   })
 })

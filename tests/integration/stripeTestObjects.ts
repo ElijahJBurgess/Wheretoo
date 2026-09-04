@@ -43,6 +43,15 @@ export function createStripeProofCheckoutAttempt(): {
   }
 }
 
+export function toSafeHostedCheckoutBrowserError(error: unknown): Error {
+  const category = error instanceof Error && (
+      error.name === 'TimeoutError' || /(?:timed?\s*out|timeout)/i.test(error.message)
+    )
+    ? 'TIMEOUT'
+    : 'BROWSER'
+  return new Error(`Hosted Checkout browser failure: ${category}`)
+}
+
 export type ConnectProof = {
   ok: boolean
   livemode: boolean
@@ -59,17 +68,12 @@ export type ConnectProof = {
 }
 
 export type OrderProof = {
-  id: string
+  order_handle: 'paid' | 'declined'
   status: string
   subtotal_minor: number
   total_minor: number
   application_fee_amount_minor: number
   expected_organizer_proceeds_minor: number
-  stripe_payment_intent_id: string | null
-  stripe_charge_id: string | null
-  stripe_transfer_id: string | null
-  stripe_application_fee_id: string | null
-  stripe_balance_transaction_id: string | null
   reconciliation_status: string
   failure_code: string | null
 }
@@ -78,9 +82,8 @@ export type FixtureProof = {
   ok: boolean
   orders: OrderProof[]
   items: Array<{
-    id: string
-    order_id: string
-    ticket_tier_id: string
+    order_handle: 'paid' | 'declined'
+    tier_label: 'ga' | 'vip'
     tier_name: string
     unit_amount_minor: number
     quantity: number
@@ -88,16 +91,17 @@ export type FixtureProof = {
     currency: string
   }>
   tickets: Array<{
-    id: string
-    order_id: string
-    order_item_id: string
-    ticket_tier_id: string
-    unit_sequence: number
-    status: string
-    refunded_at: string | null
+    order_handle: 'paid' | 'declined'
+    ticket_count: number
+    unique_ticket_count: number
+    valid_count: number
+    refunded_count: number
+    bindings_valid: boolean
+    sequences_valid: boolean
+    refunded_timestamps_valid: boolean
   }>
   refunds: Array<{
-    order_id: string
+    order_handle: 'paid' | 'declined'
     status: string
     amount_minor: number
     reverse_transfer: boolean
@@ -106,8 +110,6 @@ export type FixtureProof = {
     application_fee_refund_amount_minor: number
     policy_verified: boolean
     policy_failure_code: string | null
-    stripe_transfer_reversal_id: string | null
-    stripe_application_fee_refund_id: string | null
   }>
   receipts: Array<{
     event_type: string
@@ -133,6 +135,7 @@ export type ReconciliationProof = {
   balance_transaction_amount: number
   balance_transaction_fee: number
   destination_charge: boolean
+  cross_object_relations_match: boolean
   line_bindings_valid: boolean
   line_count: number
   admission_count: number

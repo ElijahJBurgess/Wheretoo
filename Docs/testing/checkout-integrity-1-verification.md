@@ -89,6 +89,9 @@ database owner/operator inside a read-only transaction.
 - [ ] A verified duplicate webhook causes no second domain transition.
 - [ ] Exact current provider objects and line-item bindings are reconciled
   before payment fulfillment.
+- [ ] Destination-charge reconciliation verifies charge-to-PaymentIntent,
+  charge-to-transfer, transfer-to-source-charge, and application-fee-to-charge
+  and connected-account relationships.
 - [ ] Atomic fulfillment produces exactly one ticket per admission and is
   idempotent.
 - [ ] Cancellation releases only an authoritative unpaid whole order.
@@ -103,6 +106,11 @@ database owner/operator inside a read-only transaction.
   all disposable database state and temporary function/secrets/materialization,
   deactivates inline Prices/Products, and closes the disposable connected
   account on both success and failure.
+- [ ] Before any proof mutation, exactly one linked `ACTIVE_HEALTHY` project
+  matches the expected reference and canonical URL, and its database policy
+  environment is `development`.
+- [ ] Fixture Auth lookup scans every page, deletes only the exact known
+  identity, and proves both its Auth ID and fixture email absent.
 - [ ] Browser success/return state never creates tickets or marks an order paid.
 
 ## Logging safety gates
@@ -119,6 +127,10 @@ database owner/operator inside a read-only transaction.
 - [ ] No record contains buyer identity, request IDs, confirmation/cancellation
   bearers, headers, authorization/signature values, raw bodies, IP/user agent,
   Checkout URLs, payment details, arbitrary provider errors, or credentials.
+- [ ] Managed proof responses contain only opaque handles and aggregates; they
+  reject provider IDs, individual ticket IDs, order-item IDs, receipt/event
+  IDs, and similarly identifying fields. Hosted Checkout browser failures are
+  sanitized before reaching the test runner.
 - [ ] A failed log sink does not change a checkout, webhook, cancellation,
   fulfillment, or refund result, including a rejected asynchronous sink.
 - [ ] Refund events use the exact durable order/ticket status returned by

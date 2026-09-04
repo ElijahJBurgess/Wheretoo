@@ -16,6 +16,12 @@ TEST_CONNECTED_ACCOUNT_DISPOSABLE=1 \
   tests/integration/run-stripe-ticketing-proof.sh
 ```
 
+Before installing a temporary secret, deploying the driver, or changing the checkout-creation
+switch, the runner requires exactly one CLI-linked project, verifies its reference and canonical
+Supabase URL, requires `ACTIVE_HEALTHY`, and confirms the linked database policy environment is
+`development`. A command or parse failure, ambiguous/missing link, reference or URL mismatch,
+unhealthy project, or other environment aborts before mutation.
+
 The account fixture must be an open, fully onboarded TEST Accounts v2 recipient using the approved
 Express/application-owned responsibility configuration. It must be created solely for this proof:
 the explicit `TEST_CONNECTED_ACCOUNT_DISPOSABLE=1` acknowledgement authorizes the cleanup guard to
@@ -43,12 +49,21 @@ the shared whole-order helper and proves the full 5,500-minor-unit refund, desti
 reversal, full 425-minor-unit application-fee refund, three refunded tickets, and duplicate refund
 idempotency.
 
+The managed proof surface resolves provider and database identifiers inside the temporary driver.
+It exposes only fixed order handles, tier labels, aggregate ticket counts, and safe receipt status
+summaries. Payment reconciliation also verifies the charge-to-PaymentIntent, charge-to-transfer,
+transfer-to-source-charge, and application-fee-to-charge/account relationships. Browser failures
+are reduced to a safe timeout or browser category before the test framework can render them.
+
 The runner refuses to replace an existing temporary driver or temporary proof secret. Files that
 hold the token, cleanup authorization, switch state, or materialized driver are mode `0600`; its
 temporary directory is mode `0700`. Any inherited Stripe credential with a live-mode prefix is
 rejected before fixture collection. The managed client rejects hosted Checkout URLs,
 credential-shaped values, confirmation bearers, auth tokens, and buyer identity returned across the
 driver boundary.
+
+Fixture Auth lookup is paginated, deletion targets the exact fixture identity, and teardown verifies
+that both the known Auth ID and the fixture email are absent before reporting success.
 
 ## Credential modes
 
