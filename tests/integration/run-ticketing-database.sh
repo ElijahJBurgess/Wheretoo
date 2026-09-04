@@ -73,15 +73,17 @@ restore_checkout_switch() {
 }
 
 capture_cleanup_targets() {
+  local read_file="$temporary_directory/cleanup-targets-read.json"
+  local next_file="$temporary_directory/cleanup-targets-next.json"
   "$supabase_cli" db query --linked --output-format json "select jsonb_build_object(
       'event_ids', coalesce((select jsonb_agg(id order by id) from public.events where organizer_id in ($ids_sql)), '[]'::jsonb),
       'tier_ids', coalesce((select jsonb_agg(ticket_tiers.id order by ticket_tiers.id)
         from public.ticket_tiers join public.events on events.id = ticket_tiers.event_id
         where events.organizer_id in ($ids_sql)), '[]'::jsonb),
       'order_ids', coalesce((select jsonb_agg(id order by id) from public.orders where organizer_id in ($ids_sql)), '[]'::jsonb)
-    ) as targets;" >"$temporary_directory/cleanup-targets-read.json"
-  CLEANUP_TARGETS_READ_FILE="$temporary_directory/cleanup-targets-read.json" \
-  CLEANUP_TARGETS_FILE="$cleanup_targets_file" node --input-type=module <<'NODE'
+    ) as targets;" >"$read_file" || { rm -f -- "$read_file" "$next_file"; return 1; }
+  CLEANUP_TARGETS_READ_FILE="$read_file" \
+  CLEANUP_TARGETS_FILE="$next_file" node --input-type=module <<'NODE'
 import fs from 'node:fs'
 const payload = JSON.parse(fs.readFileSync(process.env.CLEANUP_TARGETS_READ_FILE, 'utf8'))
 const row = payload.rows?.[0] ?? payload.result?.[0]
@@ -90,7 +92,10 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 if (!targets || !['event_ids', 'tier_ids', 'order_ids'].every((key) => Array.isArray(targets[key]) && targets[key].every((id) => typeof id === 'string' && uuid.test(id)))) process.exit(1)
 fs.writeFileSync(process.env.CLEANUP_TARGETS_FILE, JSON.stringify(targets), { mode: 0o600 })
 NODE
-  chmod 600 "$cleanup_targets_file"
+  [[ $? -eq 0 ]] || { rm -f -- "$read_file" "$next_file"; return 1; }
+  chmod 600 "$next_file" || { rm -f -- "$read_file" "$next_file"; return 1; }
+  mv -f -- "$next_file" "$cleanup_targets_file" || { rm -f -- "$read_file" "$next_file"; return 1; }
+  rm -f -- "$read_file" || return 1
 }
 
 load_cleanup_ids_sql() {
@@ -98,6 +103,7 @@ load_cleanup_ids_sql() {
   CLEANUP_TARGETS_FILE="$cleanup_targets_file" CLEANUP_FIELD="$field" node --input-type=module <<'NODE'
 import fs from 'node:fs'
 const ids = JSON.parse(fs.readFileSync(process.env.CLEANUP_TARGETS_FILE, 'utf8'))[process.env.CLEANUP_FIELD]
+if (!Array.isArray(ids)) process.exit(1)
 process.stdout.write(ids.length === 0 ? 'array[]::uuid[]' : `array[${ids.map((id) => `'${id}'::uuid`).join(',')}]`)
 NODE
 }
@@ -163,26 +169,36 @@ NODE
       ids_sql="$ids_sql'$organizer_b_id'::uuid"
     fi
 
-    capture_cleanup_targets
-    capture_targets_exit=$?
-    event_ids_sql="array[]::uuid[]"
-    tier_ids_sql="array[]::uuid[]"
-    order_ids_sql="array[]::uuid[]"
-    if [[ $capture_targets_exit -eq 0 ]]; then
-      event_ids_sql="$(load_cleanup_ids_sql event_ids)"
-      tier_ids_sql="$(load_cleanup_ids_sql tier_ids)"
-      order_ids_sql="$(load_cleanup_ids_sql order_ids)"
+    event_ids_sql=""
+    tier_ids_sql=""
+    order_ids_sql=""
+    capture_targets_exit=0
+    if capture_cleanup_targets; then
+      event_ids_sql="$(load_cleanup_ids_sql event_ids)" || capture_targets_exit=1
+      tier_ids_sql="$(load_cleanup_ids_sql tier_ids)" || capture_targets_exit=1
+      order_ids_sql="$(load_cleanup_ids_sql order_ids)" || capture_targets_exit=1
+      if [[ -n "$event_ids_sql" && -n "$tier_ids_sql" && -n "$order_ids_sql" ]]; then
+        capture_targets_exit=${capture_targets_exit:-0}
+      else
+        capture_targets_exit=1
+      fi
+    else
+      capture_targets_exit=$?
     fi
 
-    "$supabase_cli" db query --linked "$(build_cleanup_sql)" >"$temporary_directory/cleanup-database.log" 2>&1
-    database_cleanup_exit=$?
+    if [[ $capture_targets_exit -ne 0 ]]; then
+      echo "Fresh ticketing cleanup targets could not be captured; refusing destructive cleanup." >&2
+      cleanup_exit=1
+    else
+      "$supabase_cli" db query --linked "$(build_cleanup_sql)" >"$temporary_directory/cleanup-database.log" 2>&1
+      database_cleanup_exit=$?
 
-    delete_auth_user "$organizer_a_id"
-    auth_a_cleanup_exit=$?
-    delete_auth_user "$organizer_b_id"
-    auth_b_cleanup_exit=$?
+      delete_auth_user "$organizer_a_id"
+      auth_a_cleanup_exit=$?
+      delete_auth_user "$organizer_b_id"
+      auth_b_cleanup_exit=$?
 
-    "$supabase_cli" db query --linked "select
+      "$supabase_cli" db query --linked "select
       (select count(*) from auth.users where id in ($ids_sql))
       + (select count(*) from public.organizers where id in ($ids_sql))
       + (select count(*) from public.events where id = any($event_ids_sql))
@@ -203,17 +219,18 @@ NODE
       + (select count(*) from private.event_legacy_history_resolutions where event_id = any($event_ids_sql))
       + (select count(*) from private.event_risk_disclosures where event_id = any($event_ids_sql))
       as residue_count;" >"$temporary_directory/residue.log" 2>&1
-    residue_exit=$?
-    grep -q '"residue_count": 0' "$temporary_directory/residue.log"
-    residue_zero_exit=$?
+      residue_exit=$?
+      grep -q '"residue_count": 0' "$temporary_directory/residue.log"
+      residue_zero_exit=$?
 
-    if [[ $checkout_switch_cleanup_exit -ne 0 || $capture_targets_exit -ne 0 || $database_cleanup_exit -ne 0 || $auth_a_cleanup_exit -ne 0 || $auth_b_cleanup_exit -ne 0 || $residue_exit -ne 0 || $residue_zero_exit -ne 0 ]]; then
-      echo "Exact Task 11 fixture cleanup, switch restoration, or zero-residue proof failed." >&2
-      sed -n '1,120p' "$temporary_directory/cleanup-database.log" >&2
-      sed -n '1,80p' "$temporary_directory/residue.log" >&2
-      cleanup_exit=1
-    else
-      cleanup_exit=0
+      if [[ $checkout_switch_cleanup_exit -ne 0 || $database_cleanup_exit -ne 0 || $auth_a_cleanup_exit -ne 0 || $auth_b_cleanup_exit -ne 0 || $residue_exit -ne 0 || $residue_zero_exit -ne 0 ]]; then
+        echo "Exact Task 11 fixture cleanup, switch restoration, or zero-residue proof failed." >&2
+        sed -n '1,120p' "$temporary_directory/cleanup-database.log" >&2
+        sed -n '1,80p' "$temporary_directory/residue.log" >&2
+        cleanup_exit=1
+      else
+        cleanup_exit=0
+      fi
     fi
   else
     cleanup_exit=$checkout_switch_cleanup_exit

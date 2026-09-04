@@ -41,27 +41,29 @@ sanitize_log() {
 
 assert_linked_development() {
   local project_ref
-  project_ref="$(tr -d '\r\n' <"$repository_root/supabase/.temp/project-ref")"
+  project_ref="$(tr -d '\r\n' <"$repository_root/supabase/.temp/project-ref")" || return 1
   if [[ ! "$project_ref" =~ ^[a-z]{20}$ ]]; then
     echo "The linked project reference is missing or malformed." >&2
     return 1
   fi
-  "$supabase_cli" projects list --output json >"$temporary_directory/projects.json"
+  "$supabase_cli" projects list --output json >"$temporary_directory/projects.json" || return 1
   PROJECT_REF="$project_ref" PROJECTS_FILE="$temporary_directory/projects.json" node --input-type=module <<'NODE'
 import fs from 'node:fs'
 const projects = JSON.parse(fs.readFileSync(process.env.PROJECTS_FILE, 'utf8'))
 const linked = projects.filter((project) => project.linked === true)
 if (linked.length !== 1 || linked[0].id !== process.env.PROJECT_REF || linked[0].status !== 'ACTIVE_HEALTHY') process.exit(1)
 NODE
+  [[ $? -eq 0 ]] || return 1
   "$supabase_cli" db query --linked --output-format json \
     "select environment as policy_environment from private.organizer_policy_release_settings where singleton_id;" \
-    >"$temporary_directory/environment.json"
+    >"$temporary_directory/environment.json" || return 1
   ENVIRONMENT_FILE="$temporary_directory/environment.json" node --input-type=module <<'NODE'
 import fs from 'node:fs'
 const payload = JSON.parse(fs.readFileSync(process.env.ENVIRONMENT_FILE, 'utf8'))
 const row = payload.rows?.[0] ?? payload.result?.[0]
 if (row?.policy_environment !== 'development') process.exit(1)
 NODE
+  [[ $? -eq 0 ]] || return 1
 }
 
 run_query() {
@@ -108,11 +110,13 @@ restore_checkout_switch() {
 }
 
 capture_cleanup_targets() {
+  local read_file="$temporary_directory/cleanup-targets-read.json"
+  local next_file="$temporary_directory/cleanup-targets-next.json"
   "$supabase_cli" db query --linked --output-format json "select jsonb_build_object(
       'order_ids', coalesce((select jsonb_agg(id order by id) from public.orders where event_id = '$event_id'::uuid), '[]'::jsonb)
-    ) as targets;" >"$temporary_directory/cleanup-targets-read.json"
-  CLEANUP_TARGETS_READ_FILE="$temporary_directory/cleanup-targets-read.json" \
-  CLEANUP_TARGETS_FILE="$cleanup_targets_file" node --input-type=module <<'NODE'
+    ) as targets;" >"$read_file" || { rm -f -- "$read_file" "$next_file"; return 1; }
+  CLEANUP_TARGETS_READ_FILE="$read_file" \
+  CLEANUP_TARGETS_FILE="$next_file" node --input-type=module <<'NODE'
 import fs from 'node:fs'
 const payload = JSON.parse(fs.readFileSync(process.env.CLEANUP_TARGETS_READ_FILE, 'utf8'))
 const row = payload.rows?.[0] ?? payload.result?.[0]
@@ -121,25 +125,26 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 if (!targets || !Array.isArray(targets.order_ids) || targets.order_ids.some((id) => typeof id !== 'string' || !uuid.test(id))) process.exit(1)
 fs.writeFileSync(process.env.CLEANUP_TARGETS_FILE, JSON.stringify(targets), { mode: 0o600 })
 NODE
-  chmod 600 "$cleanup_targets_file"
+  [[ $? -eq 0 ]] || { rm -f -- "$read_file" "$next_file"; return 1; }
+  chmod 600 "$next_file" || { rm -f -- "$read_file" "$next_file"; return 1; }
+  mv -f -- "$next_file" "$cleanup_targets_file" || { rm -f -- "$read_file" "$next_file"; return 1; }
+  rm -f -- "$read_file" || return 1
 }
 
 load_order_ids_sql() {
   CLEANUP_TARGETS_FILE="$cleanup_targets_file" node --input-type=module <<'NODE'
 import fs from 'node:fs'
 const { order_ids: ids } = JSON.parse(fs.readFileSync(process.env.CLEANUP_TARGETS_FILE, 'utf8'))
+if (!Array.isArray(ids)) process.exit(1)
 process.stdout.write(ids.length === 0 ? 'array[]::uuid[]' : `array[${ids.map((id) => `'${id}'::uuid`).join(',')}]`)
 NODE
 }
 
 prepare_cleanup_targets() {
-  capture_cleanup_targets
-  capture_targets_status=$?
-  order_ids_sql="array[]::uuid[]"
-  if [[ $capture_targets_status -eq 0 ]]; then
-    order_ids_sql="$(load_order_ids_sql)"
-  fi
-  return "$capture_targets_status"
+  order_ids_sql=""
+  capture_cleanup_targets || return 1
+  order_ids_sql="$(load_order_ids_sql)" || { order_ids_sql=""; return 1; }
+  [[ -n "$order_ids_sql" ]] || return 1
 }
 
 build_cleanup_sql() {
@@ -181,12 +186,19 @@ cleanup() {
     echo "CHECKOUT_SWITCH_RESTORE_FAILED: stop checkout work and restore the checkout control from the controlled deployment configuration." >&2
     cleanup_status=1
   fi
-  prepare_cleanup_targets
-  local capture_targets_status=$?
-  [[ $capture_targets_status -eq 0 ]] || cleanup_status=1
-  "$supabase_cli" db query --linked "$(build_cleanup_sql)" >"$temporary_directory/cleanup.log" 2>&1
-  local database_cleanup_status=$?
-  [[ $database_cleanup_status -eq 0 ]] || cleanup_status=1
+  if prepare_cleanup_targets; then
+    local capture_targets_status=0
+  else
+    local capture_targets_status=$?
+    echo "Fresh epoch cleanup targets could not be captured; refusing destructive cleanup." >&2
+    cleanup_status=1
+  fi
+  local database_cleanup_status=1
+  if [[ $capture_targets_status -eq 0 ]]; then
+    "$supabase_cli" db query --linked "$(build_cleanup_sql)" >"$temporary_directory/cleanup.log" 2>&1
+    database_cleanup_status=$?
+    [[ $database_cleanup_status -eq 0 ]] || cleanup_status=1
+  fi
   if [[ $capture_targets_status -eq 0 && $database_cleanup_status -eq 0 ]]; then
     "$supabase_cli" db query --linked "
       do \$assert\$
@@ -216,7 +228,8 @@ cleanup() {
       end
       \$assert\$;
     " >"$temporary_directory/residue.log" 2>&1
-    cleanup_status=$?
+    local residue_status=$?
+    [[ $residue_status -eq 0 ]] || cleanup_status=1
   fi
   [[ $cleanup_status -eq 0 ]] || sanitize_log "$temporary_directory/cleanup.log"
   find "$temporary_directory" -type f -delete
@@ -270,7 +283,10 @@ wait_for_marker() {
   return 1
 }
 
-prepare_cleanup_targets
+if ! prepare_cleanup_targets; then
+  echo "Fresh epoch cleanup targets could not be captured; refusing fixture setup." >&2
+  exit 1
+fi
 run_query pre-cleanup "$(build_cleanup_sql)"
 run_query setup "
   begin;
