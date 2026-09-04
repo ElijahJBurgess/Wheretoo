@@ -190,6 +190,7 @@ function dependencies(
     markCheckoutReconciliationReview: async () => undefined,
     applyRefund: async () => undefined,
     applyDispute: async () => undefined,
+    operationalSink: () => undefined,
     ...overrides,
   };
 }
@@ -1819,4 +1820,129 @@ Deno.test("unknown signed event types are durably acknowledged without Stripe re
     "processed",
     "IGNORED_EVENT_TYPE",
   ]]);
+});
+
+Deno.test("webhook operational events distinguish duplicate, reconciliation mismatch, retry, fulfillment, and refund review", async () => {
+  const records: Array<Record<string, unknown>> = [];
+  const operationalSink = (serialized: string) => {
+    records.push(JSON.parse(serialized));
+  };
+
+  await createStripeWebhookHandler(dependencies({
+    operationalSink,
+    recordReceipt: async () => ({ shouldProcess: false }),
+  }))(request(snapshotEvent(
+    "checkout.session.completed",
+    { id: SESSION_ID },
+    { id: "evt_Task10Duplicate" },
+  )));
+
+  await createStripeWebhookHandler(dependencies({
+    operationalSink,
+    retrieveSession: async () => checkoutSessionFixture({
+      line_items: {
+        ...checkoutLineItemsFixture(),
+        data: [checkoutLineFixture(ORDER_ITEMS[0])],
+      },
+    }),
+  }))(request(snapshotEvent(
+    "checkout.session.completed",
+    { id: SESSION_ID },
+    { id: "evt_Task10Mismatch" },
+  )));
+
+  await createStripeWebhookHandler(dependencies({
+    operationalSink,
+    retrieveSession: async () => {
+      throw new TypeError("fixture provider unavailable");
+    },
+  }))(request(snapshotEvent(
+    "checkout.session.completed",
+    { id: SESSION_ID },
+    { id: "evt_Task10Retry" },
+  )));
+
+  await createStripeWebhookHandler(dependencies({ operationalSink }))(
+    request(snapshotEvent(
+      "checkout.session.completed",
+      { id: SESSION_ID },
+      { id: "evt_Task10Fulfilled" },
+    )),
+  );
+
+  await createStripeWebhookHandler(dependencies({
+    operationalSink,
+    retrieveRefund: async () => refundFixture({ metadata: {} }),
+    retrieveTransfer: async () => transferFixture({
+      amount: 5_500,
+      amount_reversed: 5_500,
+      reversed: true,
+    }),
+    retrieveTransferReversal: async () =>
+      transferReversalFixture({ amount: 5_500 }),
+  }))(request(snapshotEvent(
+    "refund.updated",
+    { id: REFUND_ID },
+    { id: "evt_Task10RefundReview" },
+  )));
+
+  assertEquals(records, [
+    {
+      contractVersion: "checkout_integrity_v1",
+      operation: "webhook.delivery",
+      outcome: "duplicate",
+      stripeEventId: "evt_Task10Duplicate",
+      providerObjectId: SESSION_ID,
+    },
+    {
+      contractVersion: "checkout_integrity_v1",
+      operation: "webhook.reconciliation",
+      outcome: "mismatch",
+      orderId: ORDER_ID,
+      stripeEventId: "evt_Task10Mismatch",
+      providerObjectId: SESSION_ID,
+      itemCount: 2,
+      aggregateQuantity: 3,
+      currency: "usd",
+      subtotalMinor: 5_500,
+      totalMinor: 5_500,
+      errorCode: "CHECKOUT_LINE_COUNT_MISMATCH",
+    },
+    {
+      contractVersion: "checkout_integrity_v1",
+      operation: "webhook.delivery",
+      outcome: "retry",
+      stripeEventId: "evt_Task10Retry",
+      providerObjectId: SESSION_ID,
+      errorCode: "TRANSIENT_PROCESSING_FAILURE",
+    },
+    {
+      contractVersion: "checkout_integrity_v1",
+      operation: "webhook.fulfillment",
+      outcome: "fulfilled",
+      orderId: ORDER_ID,
+      stripeEventId: "evt_Task10Fulfilled",
+      providerObjectId: SESSION_ID,
+      itemCount: 2,
+      aggregateQuantity: 3,
+      currency: "usd",
+      subtotalMinor: 5_500,
+      totalMinor: 5_500,
+      applicationFeeAmountMinor: 450,
+      resultStatus: "paid",
+    },
+    {
+      contractVersion: "checkout_integrity_v1",
+      operation: "refund.reconcile",
+      outcome: "review",
+      orderId: ORDER_ID,
+      stripeEventId: "evt_Task10RefundReview",
+      providerObjectId: REFUND_ID,
+      currency: "usd",
+      totalMinor: 5_500,
+      amountMinor: 5_500,
+      resultStatus: "requires_review",
+      errorCode: "REFUND_POLICY_MISMATCH",
+    },
+  ]);
 });

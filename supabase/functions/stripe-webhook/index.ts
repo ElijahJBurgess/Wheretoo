@@ -3,6 +3,11 @@ import type { ConnectStatusProjection } from "../_shared/contracts.ts";
 import { getServiceClient } from "../_shared/database.ts";
 import { getStripeWebhookSecrets } from "../_shared/env.ts";
 import { jsonResponse } from "../_shared/http.ts";
+import {
+  type CheckoutOperationalEvent,
+  emitOperationalEvent,
+  type OperationalEventSink,
+} from "../_shared/operationalLog.ts";
 import { getStripe } from "../_shared/stripeClient.ts";
 import {
   ACCOUNT_INCLUDE,
@@ -227,6 +232,7 @@ export interface StripeWebhookDependencies {
   ): Promise<void>;
   applyRefund(snapshot: RefundSnapshot): Promise<void>;
   applyDispute(snapshot: DisputeSnapshot): Promise<void>;
+  operationalSink?: OperationalEventSink;
 }
 
 interface NormalizedEvent {
@@ -249,6 +255,42 @@ class CheckoutReconciliationError extends PermanentWebhookError {
   constructor(readonly checkoutCode: CheckoutReconciliationCode) {
     super(checkoutCode);
     this.name = "CheckoutReconciliationError";
+  }
+}
+
+function safeWebhookErrorCode(
+  code: string,
+): NonNullable<CheckoutOperationalEvent["errorCode"]> {
+  switch (code) {
+    case "CHECKOUT_AGGREGATE_MISMATCH":
+    case "CHECKOUT_ITEM_BINDING_DUPLICATE":
+    case "CHECKOUT_ITEM_BINDING_MISSING":
+    case "CHECKOUT_ITEM_BINDING_UNKNOWN":
+    case "CHECKOUT_LINE_AMOUNT_MISMATCH":
+    case "CHECKOUT_LINE_COUNT_MISMATCH":
+    case "CHECKOUT_LINE_CURRENCY_MISMATCH":
+    case "CHECKOUT_LINE_QUANTITY_MISMATCH":
+    case "CHECKOUT_LINE_TIER_MISMATCH":
+    case "DISPUTE_RECOVERY_MISMATCH":
+    case "DISPUTE_SNAPSHOT_MISMATCH":
+    case "INVALID_EVENT_ENVELOPE":
+    case "INVALID_STRIPE_ACCOUNT":
+    case "LIVE_MODE_FORBIDDEN":
+    case "ORDER_NOT_FOUND":
+    case "PAYMENT_BINDING_MISMATCH":
+    case "PAYMENT_NOT_PAID":
+    case "PAYMENT_OBJECT_ALREADY_USED":
+    case "PAYMENT_SNAPSHOT_MISMATCH":
+    case "REFUND_POLICY_MISMATCH":
+    case "REFUND_SNAPSHOT_MISMATCH":
+    case "REFUND_TOTAL_INVALID":
+    case "STRIPE_OBJECT_INVALID":
+    case "WEBHOOK_EVENT_MISMATCH":
+    case "WEBHOOK_RECEIPT_INVALID":
+    case "WEBHOOK_RECEIPT_MISMATCH":
+      return code;
+    default:
+      return "INTERNAL_ERROR";
   }
 }
 
@@ -1013,6 +1055,23 @@ async function currentSessionSnapshot(
       checkoutSessionId: sessionId,
       failureCode: error.checkoutCode,
     });
+    emitOperationalEvent({
+      contractVersion: "checkout_integrity_v1",
+      operation: "webhook.reconciliation",
+      outcome: "mismatch",
+      orderId: order.orderId,
+      stripeEventId: event.id,
+      providerObjectId: sessionId,
+      itemCount: order.items.length,
+      aggregateQuantity: order.items.reduce(
+        (sum, item) => sum + item.quantity,
+        0,
+      ),
+      currency: order.currency,
+      subtotalMinor: order.subtotalMinor,
+      totalMinor: order.totalMinor,
+      errorCode: error.checkoutCode,
+    }, dependencies.operationalSink);
     return null;
   }
   let paymentIntent = null;
@@ -1057,6 +1116,16 @@ async function dispatchCheckout(
         permanent("PAYMENT_SNAPSHOT_MISMATCH");
       }
       await dependencies.markPaymentProcessing(current.payment);
+      emitOperationalEvent({
+        contractVersion: "checkout_integrity_v1",
+        operation: "webhook.lifecycle",
+        outcome: "processing",
+        orderId: current.order.orderId,
+        stripeEventId: event.id,
+        providerObjectId: current.order.checkoutSessionId,
+        priorStatus: "checkout_open",
+        resultStatus: "payment_processing",
+      }, dependencies.operationalSink);
       return;
     }
   } else if (event.type === "checkout.session.async_payment_succeeded") {
@@ -1081,6 +1150,20 @@ async function dispatchCheckout(
         ? "CHECKOUT_EXPIRED"
         : "ASYNC_PAYMENT_FAILED",
     });
+    emitOperationalEvent({
+      contractVersion: "checkout_integrity_v1",
+      operation: "webhook.lifecycle",
+      outcome: "failed",
+      orderId: current.order.orderId,
+      stripeEventId: event.id,
+      providerObjectId: current.order.checkoutSessionId,
+      resultStatus: event.type === "checkout.session.expired"
+        ? "expired"
+        : "payment_failed",
+      errorCode: event.type === "checkout.session.expired"
+        ? "CHECKOUT_EXPIRED"
+        : "ASYNC_PAYMENT_FAILED",
+    }, dependencies.operationalSink);
     return;
   }
   if (current.paymentIntent === null || current.paymentIntent.charge === null) {
@@ -1107,6 +1190,21 @@ async function dispatchCheckout(
         ? "PAYMENT_CHARGE_DISPUTED"
         : "PAYMENT_CHARGE_REFUNDED",
     });
+    emitOperationalEvent({
+      contractVersion: "checkout_integrity_v1",
+      operation: "webhook.reconciliation",
+      outcome: "review",
+      orderId: current.order.orderId,
+      stripeEventId: event.id,
+      providerObjectId: current.order.checkoutSessionId,
+      currency: current.order.currency,
+      subtotalMinor: current.order.subtotalMinor,
+      totalMinor: current.order.totalMinor,
+      resultStatus: "requires_review",
+      errorCode: charge.disputed
+        ? "PAYMENT_CHARGE_DISPUTED"
+        : "PAYMENT_CHARGE_REFUNDED",
+    }, dependencies.operationalSink);
     return;
   }
   try {
@@ -1119,6 +1217,24 @@ async function dispatchCheckout(
       balanceTransactionId: charge.balanceTransactionId,
       customerId: charge.customerId,
     });
+    emitOperationalEvent({
+      contractVersion: "checkout_integrity_v1",
+      operation: "webhook.fulfillment",
+      outcome: "fulfilled",
+      orderId: current.order.orderId,
+      stripeEventId: event.id,
+      providerObjectId: current.order.checkoutSessionId,
+      itemCount: current.order.items.length,
+      aggregateQuantity: current.order.items.reduce(
+        (sum, item) => sum + item.quantity,
+        0,
+      ),
+      currency: current.order.currency,
+      subtotalMinor: current.order.subtotalMinor,
+      totalMinor: current.order.totalMinor,
+      applicationFeeAmountMinor: current.order.applicationFeeAmountMinor,
+      resultStatus: "paid",
+    }, dependencies.operationalSink);
   } catch (error) {
     const code = error instanceof PermanentWebhookError
       ? error.code
@@ -1132,6 +1248,15 @@ async function dispatchCheckout(
       checkoutSessionId: current.order.checkoutSessionId,
       failureCode: "PAYMENT_OBJECT_ALREADY_USED",
     });
+    emitOperationalEvent({
+      contractVersion: "checkout_integrity_v1",
+      operation: "webhook.reconciliation",
+      outcome: "mismatch",
+      orderId: current.order.orderId,
+      stripeEventId: event.id,
+      providerObjectId: current.order.checkoutSessionId,
+      errorCode: "PAYMENT_OBJECT_ALREADY_USED",
+    }, dependencies.operationalSink);
   }
 }
 
@@ -1466,6 +1591,33 @@ async function dispatchRefund(
     policyVerified: policy.policyVerified,
     policyFailureCode: policy.policyFailureCode,
   });
+  const requiresReview = !policy.policyVerified ||
+    (status === "succeeded" && amount !== binding.order.totalMinor);
+  emitOperationalEvent({
+    contractVersion: "checkout_integrity_v1",
+    operation: "refund.reconcile",
+    outcome: requiresReview ? "review" : "applied",
+    orderId: binding.order.orderId,
+    stripeEventId: event.id,
+    providerObjectId: refundId,
+    currency,
+    totalMinor: binding.order.totalMinor,
+    amountMinor: amount,
+    resultStatus: requiresReview
+      ? "requires_review"
+      : status === "succeeded"
+      ? "refunded"
+      : status === "failed"
+      ? "failed"
+      : status === "cancelled" || status === "canceled"
+      ? "cancelled"
+      : "pending",
+    errorCode: !policy.policyVerified
+      ? "REFUND_POLICY_MISMATCH"
+      : requiresReview
+      ? "PARTIAL_REFUND_REQUIRES_REVIEW"
+      : undefined,
+  }, dependencies.operationalSink);
 }
 
 function isPermanentStripeMutationFailure(error: unknown): boolean {
@@ -1665,6 +1817,12 @@ export function createStripeWebhookHandler(
     if (request.method !== "POST") return webhookResponse(405);
     const signature = request.headers.get("stripe-signature");
     if (signature === null || signature.length === 0) {
+      emitOperationalEvent({
+        contractVersion: "checkout_integrity_v1",
+        operation: "webhook.delivery",
+        outcome: "signature_failed",
+        errorCode: "INVALID_WEBHOOK",
+      }, dependencies.operationalSink);
       return webhookResponse(400);
     }
 
@@ -1683,6 +1841,12 @@ export function createStripeWebhookHandler(
     try {
       eventValue = await dependencies.verifyEvent(raw, signature);
     } catch {
+      emitOperationalEvent({
+        contractVersion: "checkout_integrity_v1",
+        operation: "webhook.delivery",
+        outcome: "signature_failed",
+        errorCode: "INVALID_WEBHOOK",
+      }, dependencies.operationalSink);
       return webhookResponse(400);
     }
 
@@ -1690,6 +1854,12 @@ export function createStripeWebhookHandler(
     try {
       event = normalizeEvent(eventValue);
     } catch {
+      emitOperationalEvent({
+        contractVersion: "checkout_integrity_v1",
+        operation: "webhook.reconciliation",
+        outcome: "mismatch",
+        errorCode: "INVALID_EVENT_ENVELOPE",
+      }, dependencies.operationalSink);
       return webhookResponse(400);
     }
 
@@ -1703,9 +1873,36 @@ export function createStripeWebhookHandler(
         stripeCreatedAt: event.createdAt,
         payloadSha256: await sha256Hex(raw),
       });
-      if (!receipt.shouldProcess) return webhookResponse();
+      if (!receipt.shouldProcess) {
+        emitOperationalEvent({
+          contractVersion: "checkout_integrity_v1",
+          operation: "webhook.delivery",
+          outcome: "duplicate",
+          stripeEventId: event.id,
+          providerObjectId: event.objectId,
+        }, dependencies.operationalSink);
+        return webhookResponse();
+      }
     } catch (error) {
-      if (error instanceof PermanentWebhookError) return webhookResponse();
+      if (error instanceof PermanentWebhookError) {
+        emitOperationalEvent({
+          contractVersion: "checkout_integrity_v1",
+          operation: "webhook.reconciliation",
+          outcome: "mismatch",
+          stripeEventId: event.id,
+          providerObjectId: event.objectId,
+          errorCode: safeWebhookErrorCode(error.code),
+        }, dependencies.operationalSink);
+        return webhookResponse();
+      }
+      emitOperationalEvent({
+        contractVersion: "checkout_integrity_v1",
+        operation: "webhook.delivery",
+        outcome: "retry",
+        stripeEventId: event.id,
+        providerObjectId: event.objectId,
+        errorCode: "TRANSIENT_PROCESSING_FAILURE",
+      }, dependencies.operationalSink);
       return webhookResponse(503);
     }
 
@@ -1725,8 +1922,24 @@ export function createStripeWebhookHandler(
       if (error instanceof PermanentWebhookError) {
         try {
           await dependencies.finalizeReceipt(event.id, "processed", error.code);
+          emitOperationalEvent({
+            contractVersion: "checkout_integrity_v1",
+            operation: "webhook.reconciliation",
+            outcome: "mismatch",
+            stripeEventId: event.id,
+            providerObjectId: event.objectId,
+            errorCode: safeWebhookErrorCode(error.code),
+          }, dependencies.operationalSink);
           return webhookResponse();
         } catch {
+          emitOperationalEvent({
+            contractVersion: "checkout_integrity_v1",
+            operation: "webhook.delivery",
+            outcome: "retry",
+            stripeEventId: event.id,
+            providerObjectId: event.objectId,
+            errorCode: "TRANSIENT_PROCESSING_FAILURE",
+          }, dependencies.operationalSink);
           return webhookResponse(503);
         }
       }
@@ -1740,6 +1953,14 @@ export function createStripeWebhookHandler(
         // A non-2xx response keeps Stripe's delivery retryable even if the
         // receipt update itself is temporarily unavailable.
       }
+      emitOperationalEvent({
+        contractVersion: "checkout_integrity_v1",
+        operation: "webhook.delivery",
+        outcome: "retry",
+        stripeEventId: event.id,
+        providerObjectId: event.objectId,
+        errorCode: "TRANSIENT_PROCESSING_FAILURE",
+      }, dependencies.operationalSink);
       return webhookResponse(503);
     }
   };

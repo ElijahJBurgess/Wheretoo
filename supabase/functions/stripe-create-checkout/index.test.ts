@@ -458,6 +458,7 @@ function dependencies(
     attachSession: async () => undefined,
     releaseReservation: async () => undefined,
     nowEpochSeconds: () => 1_787_773_920,
+    operationalSink: () => undefined,
     ...overrides,
   } as StripeCreateCheckoutDependencies;
 }
@@ -1459,6 +1460,100 @@ Deno.test("checkout suppresses buyer and upstream details", async () => {
   assertEquals(raw, '{"error":{"code":"INTERNAL_ERROR"}}');
   assertEquals(raw.includes("synthetic-sensitive-detail"), false);
   assertStringIncludes(response.headers.get("cache-control") ?? "", "no-store");
+});
+
+Deno.test("checkout emits one sanitized created, reused, failed, or uncertain operational outcome", async () => {
+  const records: Array<Record<string, unknown>> = [];
+  const operationalSink = (serialized: string) => {
+    records.push(JSON.parse(serialized));
+  };
+
+  const created = await createStripeCreateCheckoutHandler(dependencies({
+    operationalSink,
+  }))(request());
+  const reused = await createStripeCreateCheckoutHandler(dependencies({
+    operationalSink,
+    reserveCheckout: async () =>
+      reservation({ existingCheckoutSessionId: SESSION_ID }),
+  }))(request());
+  const failed = await createStripeCreateCheckoutHandler(dependencies({
+    operationalSink,
+    createSession: async () => {
+      throw { type: "StripeInvalidRequestError" };
+    },
+  }))(request());
+  const uncertain = await createStripeCreateCheckoutHandler(dependencies({
+    operationalSink,
+    createSession: async () => {
+      throw new TypeError("fixture connection closed");
+    },
+  }))(request());
+
+  assertEquals(
+    [created.status, reused.status, failed.status, uncertain.status],
+    [200, 200, 502, 502],
+  );
+  assertEquals(records, [
+    {
+      contractVersion: "checkout_integrity_v1",
+      operation: "checkout.create",
+      outcome: "created",
+      orderId: ORDER_ID,
+      eventId: EVENT_ID,
+      providerObjectId: SESSION_ID,
+      itemCount: 2,
+      aggregateQuantity: 3,
+      currency: "usd",
+      subtotalMinor: 5_500,
+      totalMinor: 5_500,
+      applicationFeeAmountMinor: 450,
+      resultStatus: "checkout_open",
+    },
+    {
+      contractVersion: "checkout_integrity_v1",
+      operation: "checkout.create",
+      outcome: "reused",
+      orderId: ORDER_ID,
+      eventId: EVENT_ID,
+      providerObjectId: SESSION_ID,
+      itemCount: 2,
+      aggregateQuantity: 3,
+      currency: "usd",
+      subtotalMinor: 5_500,
+      totalMinor: 5_500,
+      applicationFeeAmountMinor: 450,
+      priorStatus: "checkout_open",
+      resultStatus: "checkout_open",
+    },
+    {
+      contractVersion: "checkout_integrity_v1",
+      operation: "checkout.create",
+      outcome: "failed",
+      orderId: ORDER_ID,
+      eventId: EVENT_ID,
+      itemCount: 2,
+      aggregateQuantity: 3,
+      currency: "usd",
+      subtotalMinor: 5_500,
+      totalMinor: 5_500,
+      applicationFeeAmountMinor: 450,
+      errorCode: "STRIPE_REQUEST_FAILED",
+    },
+    {
+      contractVersion: "checkout_integrity_v1",
+      operation: "checkout.create",
+      outcome: "uncertain",
+      orderId: ORDER_ID,
+      eventId: EVENT_ID,
+      itemCount: 2,
+      aggregateQuantity: 3,
+      currency: "usd",
+      subtotalMinor: 5_500,
+      totalMinor: 5_500,
+      applicationFeeAmountMinor: 450,
+      errorCode: "STRIPE_REQUEST_FAILED",
+    },
+  ]);
 });
 
 // Mutation caught: sibling origins or omission of the Checkout bearer header.

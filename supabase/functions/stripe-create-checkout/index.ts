@@ -5,6 +5,10 @@ import { getServiceClient } from "../_shared/database.ts";
 import { getAppBaseUrl } from "../_shared/env.ts";
 import { jsonResponse } from "../_shared/http.ts";
 import {
+  emitOperationalEvent,
+  type OperationalEventSink,
+} from "../_shared/operationalLog.ts";
+import {
   getStripe,
   STRIPE_REQUEST_ATTEMPT_ENVELOPE_SECONDS,
 } from "../_shared/stripeClient.ts";
@@ -126,6 +130,7 @@ export interface StripeCreateCheckoutDependencies {
   ): Promise<void>;
   releaseReservation(orderId: string, reason: string): Promise<void>;
   nowEpochSeconds(): number;
+  operationalSink?: OperationalEventSink;
 }
 
 type FailureReleaseOrigin =
@@ -983,6 +988,8 @@ export function createStripeCreateCheckoutHandler(
     let reservation: ReservationSnapshot | undefined;
     let sessionValue: unknown;
     let failureReleaseOrigin: FailureReleaseOrigin | undefined;
+    let eventId: string | undefined;
+    let stripeCreateOutcomeUnknown = false;
     try {
       if (!headers.has("access-control-allow-origin")) {
         throw new CheckoutHttpError(403, "CORS_ORIGIN_DENIED");
@@ -1027,6 +1034,7 @@ export function createStripeCreateCheckoutHandler(
       if (reservation === undefined) {
         throw new CheckoutHttpError(410, "CHECKOUT_EXPIRED");
       }
+      eventId = input.eventId;
 
       if (
         await canonicalRequestDigest(
@@ -1067,6 +1075,22 @@ export function createStripeCreateCheckoutHandler(
           failureReleaseOrigin = "attached-session";
           throw error;
         }
+        emitOperationalEvent({
+          contractVersion: "checkout_integrity_v1",
+          operation: "checkout.create",
+          outcome: "reused",
+          orderId: reservation.orderId,
+          eventId: input.eventId,
+          providerObjectId: validated.id,
+          itemCount: reservation.items.length,
+          aggregateQuantity: reservation.quantity,
+          currency: reservation.currency,
+          subtotalMinor: reservation.subtotalMinor,
+          totalMinor: reservation.totalMinor,
+          applicationFeeAmountMinor: reservation.applicationFeeAmountMinor,
+          priorStatus: "checkout_open",
+          resultStatus: "checkout_open",
+        }, dependencies.operationalSink);
         return jsonResponse({ checkoutUrl: validated.url }, 200, headers);
       }
 
@@ -1087,6 +1111,8 @@ export function createStripeCreateCheckoutHandler(
       } catch (error) {
         if (isDefinitiveStripeNonCreation(error)) {
           failureReleaseOrigin = "definitive-create-noncreation";
+        } else {
+          stripeCreateOutcomeUnknown = true;
         }
         throw new CheckoutHttpError(502, "STRIPE_REQUEST_FAILED");
       }
@@ -1110,8 +1136,24 @@ export function createStripeCreateCheckoutHandler(
         failureReleaseOrigin = "created-session";
         throw error;
       }
+      emitOperationalEvent({
+        contractVersion: "checkout_integrity_v1",
+        operation: "checkout.create",
+        outcome: "created",
+        orderId: reservation.orderId,
+        eventId: input.eventId,
+        providerObjectId: validated.id,
+        itemCount: reservation.items.length,
+        aggregateQuantity: reservation.quantity,
+        currency: reservation.currency,
+        subtotalMinor: reservation.subtotalMinor,
+        totalMinor: reservation.totalMinor,
+        applicationFeeAmountMinor: reservation.applicationFeeAmountMinor,
+        resultStatus: "checkout_open",
+      }, dependencies.operationalSink);
       return jsonResponse({ checkoutUrl: validated.url }, 200, headers);
     } catch (error) {
+      let responseError = checkoutError(error);
       if (reservation !== undefined && failureReleaseOrigin !== undefined) {
         try {
           await releaseAfterFailure(
@@ -1121,13 +1163,24 @@ export function createStripeCreateCheckoutHandler(
             sessionValue,
           );
         } catch {
-          return checkoutErrorResponse(
-            new CheckoutHttpError(500, "INTERNAL_ERROR"),
-            headers,
-          );
+          responseError = new CheckoutHttpError(500, "INTERNAL_ERROR");
         }
       }
-      return checkoutErrorResponse(error, headers);
+      emitOperationalEvent({
+        contractVersion: "checkout_integrity_v1",
+        operation: "checkout.create",
+        outcome: stripeCreateOutcomeUnknown ? "uncertain" : "failed",
+        orderId: reservation?.orderId,
+        eventId,
+        itemCount: reservation?.items.length,
+        aggregateQuantity: reservation?.quantity,
+        currency: reservation?.currency,
+        subtotalMinor: reservation?.subtotalMinor,
+        totalMinor: reservation?.totalMinor,
+        applicationFeeAmountMinor: reservation?.applicationFeeAmountMinor,
+        errorCode: responseError.code,
+      }, dependencies.operationalSink);
+      return checkoutErrorResponse(responseError, headers);
     }
   };
 }

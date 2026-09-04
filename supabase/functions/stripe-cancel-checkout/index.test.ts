@@ -2,6 +2,7 @@
 import { assertEquals } from "@std/assert";
 import {
   type CancellationOrder,
+  type CancellationOrderStatus,
   createStripeCancelCheckoutHandler,
   defaultFindOrder,
   type StripeCancelCheckoutDependencies,
@@ -23,7 +24,7 @@ function request(body: unknown = { confirmationToken: TOKEN }): Request {
 }
 
 function order(
-  status = "checkout_open",
+  status: CancellationOrderStatus = "checkout_open",
   sessionId: string | null = SESSION_ID,
 ): CancellationOrder {
   return { orderId: ORDER_ID, status, stripeCheckoutSessionId: sessionId };
@@ -54,8 +55,9 @@ function dependencies(
     retrieveSession: async () => session("open"),
     expireSession: async () => session("expired"),
     releaseReservation: async () => undefined,
+    operationalSink: () => undefined,
     ...overrides,
-  };
+  } as StripeCancelCheckoutDependencies;
 }
 
 Deno.test("cancellation hashes the bearer token, verifies an open test Session, expires it, then releases inventory", async () => {
@@ -184,7 +186,7 @@ Deno.test("cancellation treats an already released database retry as safe withou
       "cancelled",
       "expired",
       "payment_failed",
-    ]
+    ] as const
   ) {
     let stripeTouched = false;
     const response = await createStripeCancelCheckoutHandler(dependencies({
@@ -208,7 +210,7 @@ Deno.test("cancellation refuses paid, processing, refund, and review orders with
       "partially_refunded",
       "refunded",
       "requires_review",
-    ]
+    ] as const
   ) {
     let touched = false;
     const response = await createStripeCancelCheckoutHandler(dependencies({
@@ -339,4 +341,59 @@ Deno.test("default cancellation resolves its bearer through the narrow service-o
   assertEquals(await defaultFindOrder(TOKEN_HASH, client), order());
   assertEquals(capturedName, "server_lookup_checkout_cancellation");
   assertEquals(capturedArgs, { p_token_hash: TOKEN_HASH });
+});
+
+Deno.test("cancellation emits sanitized cancelled, blocked, and provider-ambiguous outcomes", async () => {
+  const records: Array<Record<string, unknown>> = [];
+  const operationalSink = (serialized: string) => {
+    records.push(JSON.parse(serialized));
+  };
+
+  const cancelled = await createStripeCancelCheckoutHandler(dependencies({
+    operationalSink,
+  }))(request());
+  const blocked = await createStripeCancelCheckoutHandler(dependencies({
+    operationalSink,
+    findOrder: async () => order("paid"),
+  }))(request());
+  const ambiguous = await createStripeCancelCheckoutHandler(dependencies({
+    operationalSink,
+    retrieveSession: async () => {
+      throw new Error("fixture provider error with unsafe detail");
+    },
+  }))(request());
+
+  assertEquals(
+    [cancelled.status, blocked.status, ambiguous.status],
+    [200, 409, 502],
+  );
+  assertEquals(records, [
+    {
+      contractVersion: "checkout_integrity_v1",
+      operation: "checkout.cancel",
+      outcome: "cancelled",
+      orderId: ORDER_ID,
+      providerObjectId: SESSION_ID,
+      priorStatus: "checkout_open",
+      resultStatus: "cancelled",
+    },
+    {
+      contractVersion: "checkout_integrity_v1",
+      operation: "checkout.cancel",
+      outcome: "blocked",
+      orderId: ORDER_ID,
+      providerObjectId: SESSION_ID,
+      priorStatus: "paid",
+      errorCode: "CHECKOUT_UNAVAILABLE",
+    },
+    {
+      contractVersion: "checkout_integrity_v1",
+      operation: "checkout.cancel",
+      outcome: "ambiguous",
+      orderId: ORDER_ID,
+      providerObjectId: SESSION_ID,
+      priorStatus: "checkout_open",
+      errorCode: "STRIPE_REQUEST_FAILED",
+    },
+  ]);
 });
