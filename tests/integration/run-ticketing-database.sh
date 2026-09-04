@@ -6,6 +6,8 @@ repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 supabase_cli="$repository_root/node_modules/.bin/supabase"
 temporary_directory="$(mktemp -d)"
 chmod 700 "$temporary_directory"
+checkout_switch_state_file="$temporary_directory/checkout-switch-prior"
+checkout_switch_captured=0
 
 organizer_a_id=""
 organizer_b_id=""
@@ -32,10 +34,50 @@ delete_auth_user() {
     --output "$temporary_directory/delete-${user_id}.json"
 }
 
+capture_checkout_switch() {
+  "$supabase_cli" db query --linked --output-format json \
+    "select checkout_creation_enabled as enabled from private.checkout_runtime_control where singleton;" \
+    >"$temporary_directory/checkout-switch-read.json"
+  CHECKOUT_SWITCH_READ_FILE="$temporary_directory/checkout-switch-read.json" \
+  CHECKOUT_SWITCH_STATE_FILE="$checkout_switch_state_file" node --input-type=module <<'NODE'
+import fs from 'node:fs'
+const payload = JSON.parse(fs.readFileSync(process.env.CHECKOUT_SWITCH_READ_FILE, 'utf8'))
+const row = payload.rows?.[0] ?? payload.result?.[0]
+if (typeof row?.enabled !== 'boolean') process.exit(1)
+fs.writeFileSync(process.env.CHECKOUT_SWITCH_STATE_FILE, `${row.enabled}\n`, { mode: 0o600 })
+NODE
+  chmod 600 "$checkout_switch_state_file"
+  checkout_switch_captured=1
+}
+
+enable_checkout_for_fixture() {
+  "$supabase_cli" db query --linked "update private.checkout_runtime_control
+    set checkout_creation_enabled = true, updated_at = statement_timestamp()
+    where singleton;" >"$temporary_directory/checkout-switch-enable.log" 2>&1
+}
+
+restore_checkout_switch() {
+  [[ $checkout_switch_captured -eq 1 && -f "$checkout_switch_state_file" ]] || return 0
+  local prior_state
+  prior_state="$(tr -d '\r\n' <"$checkout_switch_state_file")"
+  [[ "$prior_state" == true || "$prior_state" == false ]] || return 1
+  "$supabase_cli" db query --linked --output-format json "with restored as (
+      update private.checkout_runtime_control
+      set checkout_creation_enabled = $prior_state, updated_at = statement_timestamp()
+      where singleton
+      returning checkout_creation_enabled
+    ) select checkout_creation_enabled = $prior_state as restored from restored;" \
+    >"$temporary_directory/checkout-switch-restore.json"
+  grep -q '"restored": true' "$temporary_directory/checkout-switch-restore.json"
+}
+
 cleanup() {
   original_exit=$?
   trap - EXIT
   set +e
+
+  restore_checkout_switch
+  checkout_switch_cleanup_exit=$?
 
   if [[ -z "$organizer_a_id" && -f "$temporary_directory/user-a.json" ]]; then
     organizer_a_id="$(USER_FILE="$temporary_directory/user-a.json" node --input-type=module <<'NODE'
@@ -67,6 +109,7 @@ NODE
     fi
 
     "$supabase_cli" db query --linked "begin;
+      set local session_replication_role = replica;
       delete from public.refunds where order_id in (select id from public.orders where organizer_id in ($ids_sql));
       delete from public.disputes where order_id in (select id from public.orders where organizer_id in ($ids_sql));
       delete from public.tickets where organizer_id in ($ids_sql);
@@ -74,6 +117,15 @@ NODE
       delete from public.orders where organizer_id in ($ids_sql);
       delete from public.ticket_tiers where event_id in (select id from public.events where organizer_id in ($ids_sql));
       delete from public.organizer_stripe_accounts where organizer_id in ($ids_sql);
+      delete from private.event_public_eligibility_intervals where event_id in (select id from public.events where organizer_id in ($ids_sql));
+      delete from private.event_reports where event_id in (select id from public.events where organizer_id in ($ids_sql));
+      delete from private.moderation_review_requests where event_id in (select id from public.events where organizer_id in ($ids_sql));
+      delete from private.event_moderation_evaluations where event_id in (select id from public.events where organizer_id in ($ids_sql));
+      delete from private.event_moderation_actions where event_id in (select id from public.events where organizer_id in ($ids_sql));
+      delete from private.event_policy_acceptances where event_id in (select id from public.events where organizer_id in ($ids_sql));
+      delete from private.event_policy_legacy_exemptions where event_id in (select id from public.events where organizer_id in ($ids_sql));
+      delete from private.event_legacy_history_resolutions where event_id in (select id from public.events where organizer_id in ($ids_sql));
+      delete from private.event_risk_disclosures where event_id in (select id from public.events where organizer_id in ($ids_sql));
       delete from public.events where organizer_id in ($ids_sql);
       delete from public.organizers where id in ($ids_sql);
       commit;" >"$temporary_directory/cleanup-database.log" 2>&1
@@ -91,14 +143,26 @@ NODE
       + (select count(*) from public.ticket_tiers where event_id in (select id from public.events where organizer_id in ($ids_sql)))
       + (select count(*) from public.organizer_stripe_accounts where organizer_id in ($ids_sql))
       + (select count(*) from public.orders where organizer_id in ($ids_sql))
+      + (select count(*) from public.order_items where order_id in (select id from public.orders where organizer_id in ($ids_sql)))
       + (select count(*) from public.tickets where organizer_id in ($ids_sql))
+      + (select count(*) from public.refunds where order_id in (select id from public.orders where organizer_id in ($ids_sql)))
+      + (select count(*) from public.disputes where order_id in (select id from public.orders where organizer_id in ($ids_sql)))
+      + (select count(*) from private.event_public_eligibility_intervals where event_id in (select id from public.events where organizer_id in ($ids_sql)))
+      + (select count(*) from private.event_reports where event_id in (select id from public.events where organizer_id in ($ids_sql)))
+      + (select count(*) from private.moderation_review_requests where event_id in (select id from public.events where organizer_id in ($ids_sql)))
+      + (select count(*) from private.event_moderation_evaluations where event_id in (select id from public.events where organizer_id in ($ids_sql)))
+      + (select count(*) from private.event_moderation_actions where event_id in (select id from public.events where organizer_id in ($ids_sql)))
+      + (select count(*) from private.event_policy_acceptances where event_id in (select id from public.events where organizer_id in ($ids_sql)))
+      + (select count(*) from private.event_policy_legacy_exemptions where event_id in (select id from public.events where organizer_id in ($ids_sql)))
+      + (select count(*) from private.event_legacy_history_resolutions where event_id in (select id from public.events where organizer_id in ($ids_sql)))
+      + (select count(*) from private.event_risk_disclosures where event_id in (select id from public.events where organizer_id in ($ids_sql)))
       as residue_count;" >"$temporary_directory/residue.log" 2>&1
     residue_exit=$?
     grep -q '"residue_count": 0' "$temporary_directory/residue.log"
     residue_zero_exit=$?
 
-    if [[ $database_cleanup_exit -ne 0 || $auth_a_cleanup_exit -ne 0 || $auth_b_cleanup_exit -ne 0 || $residue_exit -ne 0 || $residue_zero_exit -ne 0 ]]; then
-      echo "Exact Task 16 fixture cleanup or zero-residue proof failed." >&2
+    if [[ $checkout_switch_cleanup_exit -ne 0 || $database_cleanup_exit -ne 0 || $auth_a_cleanup_exit -ne 0 || $auth_b_cleanup_exit -ne 0 || $residue_exit -ne 0 || $residue_zero_exit -ne 0 ]]; then
+      echo "Exact Task 11 fixture cleanup, switch restoration, or zero-residue proof failed." >&2
       sed -n '1,120p' "$temporary_directory/cleanup-database.log" >&2
       sed -n '1,80p' "$temporary_directory/residue.log" >&2
       cleanup_exit=1
@@ -106,7 +170,7 @@ NODE
       cleanup_exit=0
     fi
   else
-    cleanup_exit=0
+    cleanup_exit=$checkout_switch_cleanup_exit
   fi
 
   rm -rf -- "$temporary_directory"
@@ -135,6 +199,16 @@ if (!Array.isArray(payload.migrations) || payload.migrations.length === 0 ||
   console.error('Local and linked migration histories are not aligned.')
   process.exit(1)
 }
+NODE
+
+"$supabase_cli" db query --linked --output-format json \
+  "select environment as policy_environment from private.organizer_policy_release_settings where singleton_id;" \
+  >"$temporary_directory/environment.json"
+ENVIRONMENT_FILE="$temporary_directory/environment.json" node --input-type=module <<'NODE'
+import fs from 'node:fs'
+const payload = JSON.parse(fs.readFileSync(process.env.ENVIRONMENT_FILE, 'utf8'))
+const row = payload.rows?.[0] ?? payload.result?.[0]
+if (row?.policy_environment !== 'development') process.exit(1)
 NODE
 
 "$supabase_cli" projects api-keys --project-ref "$project_ref" --reveal --output json >"$temporary_directory/api-keys.json"
@@ -198,6 +272,13 @@ organizer_b_id="$(create_user "$organizer_b_email" "$organizer_b_password" b)"
     '$organizer_a_id', 'acct_task16${run_id}', 'active', 'active', 'clear', 0, 0, now()
   );
   commit;" >"$temporary_directory/setup.log" 2>&1
+
+capture_checkout_switch
+enable_checkout_for_fixture
+
+if [[ "${WHERETO_TEST_ABORT_AFTER_CHECKOUT_SWITCH:-}" == "1" ]]; then
+  exit 86
+fi
 
 TEST_SUPABASE_URL="$supabase_url" \
 TEST_SUPABASE_PUBLISHABLE_KEY="$publishable_key" \

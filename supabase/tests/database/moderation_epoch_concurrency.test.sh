@@ -5,6 +5,8 @@ set -euo pipefail
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd -P)"
 supabase_cli="$repository_root/node_modules/.bin/supabase"
 temporary_directory="$(mktemp -d)"
+checkout_switch_state_file="$temporary_directory/checkout-switch-prior"
+checkout_switch_captured=0
 reservation_pid=""
 removal_pid=""
 run_id="$(openssl rand -hex 10)"
@@ -47,6 +49,37 @@ run_query() {
   fi
 }
 
+capture_checkout_switch() {
+  "$supabase_cli" db query --linked --output-format json \
+    "select checkout_creation_enabled as enabled from private.checkout_runtime_control where singleton;" \
+    >"$temporary_directory/checkout-switch-read.json"
+  CHECKOUT_SWITCH_READ_FILE="$temporary_directory/checkout-switch-read.json" \
+  CHECKOUT_SWITCH_STATE_FILE="$checkout_switch_state_file" node --input-type=module <<'NODE'
+import fs from 'node:fs'
+const payload = JSON.parse(fs.readFileSync(process.env.CHECKOUT_SWITCH_READ_FILE, 'utf8'))
+const row = payload.rows?.[0] ?? payload.result?.[0]
+if (typeof row?.enabled !== 'boolean') process.exit(1)
+fs.writeFileSync(process.env.CHECKOUT_SWITCH_STATE_FILE, `${row.enabled}\n`, { mode: 0o600 })
+NODE
+  chmod 600 "$checkout_switch_state_file"
+  checkout_switch_captured=1
+}
+
+restore_checkout_switch() {
+  [[ $checkout_switch_captured -eq 1 && -f "$checkout_switch_state_file" ]] || return 0
+  local prior_state
+  prior_state="$(tr -d '\r\n' <"$checkout_switch_state_file")"
+  [[ "$prior_state" == true || "$prior_state" == false ]] || return 1
+  "$supabase_cli" db query --linked --output-format json "with restored as (
+      update private.checkout_runtime_control
+      set checkout_creation_enabled = $prior_state, updated_at = statement_timestamp()
+      where singleton
+      returning checkout_creation_enabled
+    ) select checkout_creation_enabled = $prior_state as restored from restored;" \
+    >"$temporary_directory/checkout-switch-restore.json"
+  grep -q '"restored": true' "$temporary_directory/checkout-switch-restore.json"
+}
+
 cleanup_sql="begin;
 set local session_replication_role = replica;
 delete from public.order_items where order_id in (select id from public.orders where event_id = '$event_id'::uuid);
@@ -73,6 +106,8 @@ cleanup() {
   set +e
   [[ -n "$reservation_pid" ]] && wait "$reservation_pid"
   [[ -n "$removal_pid" ]] && wait "$removal_pid"
+  restore_checkout_switch
+  local switch_restore_status=$?
   "$supabase_cli" db query --linked "$cleanup_sql" >"$temporary_directory/cleanup.log" 2>&1
   local cleanup_status=$?
   if [[ $cleanup_status -eq 0 ]]; then
@@ -90,6 +125,7 @@ cleanup() {
     cleanup_status=$?
   fi
   [[ $cleanup_status -eq 0 ]] || sanitize_log "$temporary_directory/cleanup.log"
+  [[ $switch_restore_status -eq 0 ]] || cleanup_status=1
   find "$temporary_directory" -type f -delete
   rmdir "$temporary_directory"
   [[ $original_status -eq 0 ]] || exit "$original_status"
@@ -180,6 +216,13 @@ run_query setup "
   commit;
 "
 
+capture_checkout_switch
+run_query enable-checkout-for-epoch-fixture "
+  update private.checkout_runtime_control
+  set checkout_creation_enabled = true, updated_at = statement_timestamp()
+  where singleton;
+"
+
 case_json="$("$supabase_cli" db query --linked --output-format json "
   begin;
   select set_config('request.jwt.claim.sub', '$staff_id', true);
@@ -201,7 +244,7 @@ NODE
   set local statement_timeout = '30s';
   set local role service_role;
   select * from public.server_reserve_checkout(
-    '$event_id', '$tier_id'::uuid, 'Task 15 Buyer',
+    '$event_id', jsonb_build_array(jsonb_build_object('tier_id', '$tier_id', 'quantity', 1)), 'Task 15 Buyer',
     'whereto-task15-buyer-${run_id}@example.invalid', '$request_id', repeat('a', 64)
   );
   select pg_catalog.pg_advisory_xact_lock($marker);
@@ -263,7 +306,7 @@ run_query option-a "
   begin
     begin
       perform * from public.server_reserve_checkout(
-        '$event_id', '$tier_id'::uuid, 'Blocked Buyer',
+        '$event_id', jsonb_build_array(jsonb_build_object('tier_id', '$tier_id', 'quantity', 1)), 'Blocked Buyer',
         'whereto-task15-blocked-${run_id}@example.invalid',
         '$(new_uuid)', repeat('b', 64)
       );

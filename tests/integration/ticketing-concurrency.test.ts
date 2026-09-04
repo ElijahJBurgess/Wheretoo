@@ -51,14 +51,24 @@ describe('hosted ticketing concurrency boundary', () => {
 
     const tier = await first.rpc('save_ticket_tiers', {
       p_event_id: eventId,
-      p_tiers: [{
-        name: 'Final ticket',
-        description: null,
-        unit_amount_minor: 3_001,
-        currency: 'usd',
-        quantity_total: 1,
-        sort_order: 1,
-      }],
+      p_tiers: [
+        {
+          name: 'Final ticket',
+          description: null,
+          unit_amount_minor: 3_001,
+          currency: 'usd',
+          quantity_total: 1,
+          sort_order: 1,
+        },
+        {
+          name: 'Supporting ticket',
+          description: null,
+          unit_amount_minor: 2_001,
+          currency: 'usd',
+          quantity_total: 2,
+          sort_order: 2,
+        },
+      ],
     })
     expect(tier.error).toBeNull()
 
@@ -74,6 +84,9 @@ describe('hosted ticketing concurrency boundary', () => {
 
     const tiers = await first.rpc('list_owned_ticket_tiers', { p_event_id: eventId })
     expect(tiers.error).toBeNull()
-    expect(tiers.data).toMatchObject([{ name: 'Final ticket', quantity_total: 1, status: 'active' }])
+    expect(tiers.data).toMatchObject([
+      { name: 'Final ticket', quantity_total: 1, status: 'active' },
+      { name: 'Supporting ticket', quantity_total: 2, status: 'active' },
+    ])
   })
 })

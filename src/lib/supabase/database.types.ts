@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.17"
+    PostgrestVersion: "14.5"
   }
   public: {
     Tables: {
@@ -265,7 +265,7 @@ export type Database = {
           {
             foreignKeyName: "order_items_order_id_fkey"
             columns: ["order_id"]
-            isOneToOne: true
+            isOneToOne: false
             referencedRelation: "orders"
             referencedColumns: ["id"]
           },
@@ -615,10 +615,13 @@ export type Database = {
       refunds: {
         Row: {
           amount_minor: number
+          application_fee_refund_amount_minor: number
           created_at: string
           currency: string
           id: string
           order_id: string
+          policy_failure_code: string | null
+          policy_verified: boolean
           processed_at: string | null
           reason: string | null
           refund_application_fee: boolean
@@ -630,14 +633,18 @@ export type Database = {
           stripe_payment_intent_id: string | null
           stripe_refund_id: string
           stripe_transfer_reversal_id: string | null
+          transfer_reversal_amount_minor: number
           updated_at: string
         }
         Insert: {
           amount_minor: number
+          application_fee_refund_amount_minor?: number
           created_at?: string
           currency: string
           id?: string
           order_id: string
+          policy_failure_code?: string | null
+          policy_verified?: boolean
           processed_at?: string | null
           reason?: string | null
           refund_application_fee: boolean
@@ -649,14 +656,18 @@ export type Database = {
           stripe_payment_intent_id?: string | null
           stripe_refund_id: string
           stripe_transfer_reversal_id?: string | null
+          transfer_reversal_amount_minor?: number
           updated_at?: string
         }
         Update: {
           amount_minor?: number
+          application_fee_refund_amount_minor?: number
           created_at?: string
           currency?: string
           id?: string
           order_id?: string
+          policy_failure_code?: string | null
+          policy_verified?: boolean
           processed_at?: string | null
           reason?: string | null
           refund_application_fee?: boolean
@@ -668,6 +679,7 @@ export type Database = {
           stripe_payment_intent_id?: string | null
           stripe_refund_id?: string
           stripe_transfer_reversal_id?: string | null
+          transfer_reversal_amount_minor?: number
           updated_at?: string
         }
         Relationships: [
@@ -1502,17 +1514,21 @@ export type Database = {
       server_apply_verified_refund: {
         Args: {
           p_amount_minor: number
+          p_application_fee_refund_amount_minor: number
           p_application_fee_refund_id: string
           p_charge_id: string
           p_currency: string
           p_order_id: string
           p_payment_intent_id: string
+          p_policy_failure_code: string
+          p_policy_verified: boolean
           p_reason: string
           p_refund_application_fee: boolean
           p_reverse_transfer: boolean
           p_status: string
           p_stripe_event_id: string
           p_stripe_refund_id: string
+          p_transfer_reversal_amount_minor: number
           p_transfer_reversal_id: string
         }
         Returns: {
@@ -1598,16 +1614,52 @@ export type Database = {
         Returns: {
           order_id: string
           order_status: string
-          ticket_id: string
+          ticket_count: number
         }[]
       }
-      server_get_checkout_preflight: {
-        Args: { p_event_id: string; p_tier_id: string }
+      server_get_checkout_integrity_order_snapshot: {
+        Args: { p_checkout_session_id: string; p_order_id: string }
         Returns: {
-          organizer_id: string
-          stripe_account_id: string
+          application_fee_amount_minor: number
+          checkout_session_id: string
+          currency: string
+          destination_account_id: string
+          event_id: string
+          order_id: string
+          order_items: Json
+          subtotal_minor: number
+          total_minor: number
         }[]
       }
+      server_get_checkout_integrity_payment_snapshot: {
+        Args: { p_order_id: string }
+        Returns: {
+          application_fee_amount_minor: number
+          checkout_session_id: string
+          currency: string
+          destination_account_id: string
+          event_id: string
+          order_id: string
+          order_items: Json
+          subtotal_minor: number
+          total_minor: number
+        }[]
+      }
+      server_get_checkout_preflight:
+        | {
+            Args: { p_event_id: string; p_tier_id: string }
+            Returns: {
+              organizer_id: string
+              stripe_account_id: string
+            }[]
+          }
+        | {
+            Args: { p_event_id: string; p_tier_ids: string[] }
+            Returns: {
+              organizer_id: string
+              stripe_account_id: string
+            }[]
+          }
       server_get_webhook_order_snapshot: {
         Args: { p_checkout_session_id: string; p_order_id: string }
         Returns: {
@@ -1643,6 +1695,24 @@ export type Database = {
           stripe_checkout_session_id: string
         }[]
       }
+      server_lookup_checkout_integrity_confirmation: {
+        Args: { p_token_hash: string }
+        Returns: {
+          confirmation_status: string
+          currency: string
+          event_ends_at: string
+          event_starts_at: string
+          event_timezone: string
+          event_title: string
+          event_venue_name: string
+          items: Json
+          order_number: string
+          quantity: number
+          subtotal_minor: number
+          tax_amount_minor: number
+          total_minor: number
+        }[]
+      }
       server_lookup_order_confirmation: {
         Args: { p_token_hash: string }
         Returns: {
@@ -1655,6 +1725,15 @@ export type Database = {
           order_number: string
           tier_name: string
         }[]
+      }
+      server_mark_checkout_reconciliation_review: {
+        Args: {
+          p_checkout_session_id: string
+          p_failure_code: string
+          p_order_id: string
+          p_stripe_event_id: string
+        }
+        Returns: string
       }
       server_mark_payment_failed: {
         Args: {
@@ -1731,6 +1810,20 @@ export type Database = {
           persistence_result: string
         }[]
       }
+      server_prepare_whole_order_refund: {
+        Args: { p_order_id: string; p_reason: string }
+        Returns: {
+          application_fee_amount_minor: number
+          application_fee_id: string
+          charge_id: string
+          currency: string
+          order_id: string
+          payment_intent_id: string
+          reason: string
+          total_minor: number
+          transfer_id: string
+        }[]
+      }
       server_record_webhook_receipt: {
         Args: {
           p_api_version: string
@@ -1747,28 +1840,57 @@ export type Database = {
           should_process: boolean
         }[]
       }
-      server_reserve_checkout: {
-        Args: {
-          p_client_request_id: string
-          p_confirmation_token_hash: string
-          p_email: string
-          p_event_id: string
-          p_name: string
-          p_tier_id: string
-        }
-        Returns: {
-          application_fee_amount_minor: number
-          checkout_expires_at: string
-          create_request_digest: string
-          currency: string
-          existing_checkout_session_id: string
-          integration_identifier: string
-          order_id: string
-          organizer_id: string
-          stripe_account_id: string
-          subtotal_minor: number
-        }[]
-      }
+      server_reserve_checkout:
+        | {
+            Args: {
+              p_client_request_id: string
+              p_confirmation_token_hash: string
+              p_email: string
+              p_event_id: string
+              p_items: Json
+              p_name: string
+            }
+            Returns: {
+              application_fee_amount_minor: number
+              checkout_expires_at: string
+              create_request_digest: string
+              currency: string
+              existing_checkout_session_id: string
+              expected_organizer_proceeds_minor: number
+              integration_identifier: string
+              order_id: string
+              order_items: Json
+              organizer_id: string
+              platform_product_fee_minor: number
+              quantity: number
+              stripe_account_id: string
+              stripe_fee_estimate_minor: number
+              subtotal_minor: number
+              total_minor: number
+            }[]
+          }
+        | {
+            Args: {
+              p_client_request_id: string
+              p_confirmation_token_hash: string
+              p_email: string
+              p_event_id: string
+              p_name: string
+              p_tier_id: string
+            }
+            Returns: {
+              application_fee_amount_minor: number
+              checkout_expires_at: string
+              create_request_digest: string
+              currency: string
+              existing_checkout_session_id: string
+              integration_identifier: string
+              order_id: string
+              organizer_id: string
+              stripe_account_id: string
+              subtotal_minor: number
+            }[]
+          }
       server_submit_event_report: {
         Args: {
           p_event_id: string
@@ -1797,12 +1919,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1826,11 +1948,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1851,11 +1973,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1876,11 +1998,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1893,11 +2015,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }

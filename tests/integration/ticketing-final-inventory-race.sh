@@ -8,10 +8,12 @@ temporary_directory="$(mktemp -d)"
 fixture_user="16000000-0000-4000-8000-000000000001"
 fixture_event="26000000-0000-4000-8000-000000000001"
 fixture_tier="36000000-0000-4000-8000-000000000001"
+fixture_support_tier="36000000-0000-4000-8000-000000000003"
 other_event="26000000-0000-4000-8000-000000000002"
 other_tier="36000000-0000-4000-8000-000000000002"
 
 cleanup_sql="begin;
+set local session_replication_role = replica;
 delete from public.refunds where order_id in (select id from public.orders where organizer_id = '$fixture_user');
 delete from public.disputes where order_id in (select id from public.orders where organizer_id = '$fixture_user');
 delete from public.tickets where organizer_id = '$fixture_user';
@@ -19,6 +21,15 @@ delete from public.order_items where order_id in (select id from public.orders w
 delete from public.orders where organizer_id = '$fixture_user';
 delete from public.ticket_tiers where event_id in ('$fixture_event', '$other_event');
 delete from public.organizer_stripe_accounts where organizer_id = '$fixture_user';
+delete from private.event_public_eligibility_intervals where event_id in ('$fixture_event', '$other_event');
+delete from private.event_reports where event_id in ('$fixture_event', '$other_event');
+delete from private.moderation_review_requests where event_id in ('$fixture_event', '$other_event');
+delete from private.event_moderation_evaluations where event_id in ('$fixture_event', '$other_event');
+delete from private.event_moderation_actions where event_id in ('$fixture_event', '$other_event');
+delete from private.event_policy_acceptances where event_id in ('$fixture_event', '$other_event');
+delete from private.event_policy_legacy_exemptions where event_id in ('$fixture_event', '$other_event');
+delete from private.event_legacy_history_resolutions where event_id in ('$fixture_event', '$other_event');
+delete from private.event_risk_disclosures where event_id in ('$fixture_event', '$other_event');
 delete from public.events where id in ('$fixture_event', '$other_event');
 delete from public.organizers where id = '$fixture_user';
 delete from auth.users where id = '$fixture_user';
@@ -35,9 +46,18 @@ cleanup() {
     + (select count(*) from public.organizers where id = '$fixture_user')
     + (select count(*) from public.events where id = '$fixture_event')
     + (select count(*) from public.events where id = '$other_event')
-    + (select count(*) from public.ticket_tiers where id in ('$fixture_tier', '$other_tier'))
+    + (select count(*) from public.ticket_tiers where id in ('$fixture_tier', '$fixture_support_tier', '$other_tier'))
     + (select count(*) from public.orders where organizer_id = '$fixture_user')
-    + (select count(*) from public.order_items where ticket_tier_id = '$fixture_tier')
+    + (select count(*) from public.order_items where order_id in (select id from public.orders where organizer_id = '$fixture_user'))
+    + (select count(*) from private.event_public_eligibility_intervals where event_id in ('$fixture_event', '$other_event'))
+    + (select count(*) from private.event_reports where event_id in ('$fixture_event', '$other_event'))
+    + (select count(*) from private.moderation_review_requests where event_id in ('$fixture_event', '$other_event'))
+    + (select count(*) from private.event_moderation_evaluations where event_id in ('$fixture_event', '$other_event'))
+    + (select count(*) from private.event_moderation_actions where event_id in ('$fixture_event', '$other_event'))
+    + (select count(*) from private.event_policy_acceptances where event_id in ('$fixture_event', '$other_event'))
+    + (select count(*) from private.event_policy_legacy_exemptions where event_id in ('$fixture_event', '$other_event'))
+    + (select count(*) from private.event_legacy_history_resolutions where event_id in ('$fixture_event', '$other_event'))
+    + (select count(*) from private.event_risk_disclosures where event_id in ('$fixture_event', '$other_event'))
     as residue_count;" >"$temporary_directory/residue.log" 2>&1
   residue_exit=$?
   grep -q '"residue_count": 0' "$temporary_directory/residue.log"
@@ -63,37 +83,49 @@ insert into auth.users (id, email) values ('$fixture_user', 'task16-final-ticket
 insert into public.organizers (id, display_name) values ('$fixture_user', 'Task 16 Final Ticket');
 insert into public.events (
   id, organizer_id, title, description, category, starts_at, ends_at, venue_name,
-  address_line1, city, region, postal_code, country_code, mapbox_feature_id,
-  latitude, longitude, admission_type, status, published_at
+  timezone, address_line1, city, region, postal_code, country_code, mapbox_feature_id,
+  latitude, longitude, admission_type, status
 ) values (
   '$fixture_event', '$fixture_user', 'Task 16 Final Ticket Race',
   'A disposable event proving exactly one final ticket can be reserved.', 'community',
-  now() + interval '10 days', now() + interval '10 days 2 hours', 'Race Venue',
+  now() + interval '10 days', now() + interval '10 days 2 hours', 'Race Venue', 'America/Los_Angeles',
   '1 Market Street', 'San Francisco', 'CA', '94105', 'US', 'task16.final-ticket-race',
-  37.7936, -122.3958, 'paid', 'published', now()
+  37.7936, -122.3958, 'paid', 'draft'
 ), (
   '$other_event', '$fixture_user', 'Task 16 Mismatched Tier Event',
   'A disposable event proving mismatched event and tier identifiers stay safe.', 'community',
-  now() + interval '11 days', now() + interval '11 days 2 hours', 'Mismatch Venue',
+  now() + interval '11 days', now() + interval '11 days 2 hours', 'Mismatch Venue', 'America/Los_Angeles',
   '2 Market Street', 'San Francisco', 'CA', '94105', 'US', 'task16.mismatched-tier',
-  37.7936, -122.3958, 'paid', 'published', now()
+  37.7936, -122.3958, 'paid', 'draft'
 );
+insert into private.event_risk_disclosures (
+  event_id, minimum_age, alcohol_present, cannabis_present,
+  explicit_adult_content, gambling_present, weapons_present, high_risk_activity
+) values
+  ('$fixture_event', 'all_ages', false, false, false, false, false, false),
+  ('$other_event', 'all_ages', false, false, false, false, false, false);
 insert into public.ticket_tiers (
   id, event_id, name, unit_amount_minor, quantity_total, status, sort_order
 ) values
   ('$fixture_tier', '$fixture_event', 'Last ticket', 3001, 1, 'active', 1),
+  ('$fixture_support_tier', '$fixture_event', 'Supporting ticket', 2000, 2, 'active', 2),
   ('$other_tier', '$other_event', 'Other event ticket', 4500, 3, 'active', 1);
 insert into public.organizer_stripe_accounts (
   organizer_id, stripe_account_id, transfers_status, payouts_status, requirements_status,
   requirements_currently_due_count, requirements_past_due_count, last_synced_at
 ) values ('$fixture_user', 'acct_task16finalrace', 'active', 'active', 'clear', 0, 0, now());
+select set_config('request.jwt.claim.sub', '$fixture_user', true);
+set local role authenticated;
+select public.accept_current_event_policies('$fixture_event');
+select public.publish_event('$fixture_event');
+reset role;
 commit;" >"$temporary_directory/setup.log" 2>&1
 
 set +e
 "$supabase_cli" db query --linked "begin;
 set local role service_role;
 select * from public.server_reserve_checkout(
-  '$fixture_event', '$other_tier', 'Mismatch Buyer', 'mismatch@example.invalid',
+  '$fixture_event', jsonb_build_array(jsonb_build_object('tier_id', '$other_tier', 'quantity', 1)), 'Mismatch Buyer', 'mismatch@example.invalid',
   '46000000-0000-4000-8000-000000000010', repeat('c', 64)
 );
 commit;" >"$temporary_directory/mismatched-tier.log" 2>&1
@@ -101,27 +133,41 @@ mismatched_tier_exit=$?
 "$supabase_cli" db query --linked "begin;
 set local role service_role;
 select * from public.server_reserve_checkout(
-  '26000000-0000-4000-8000-000000000099', '$fixture_tier',
+  '26000000-0000-4000-8000-000000000099', jsonb_build_array(jsonb_build_object('tier_id', '$fixture_tier', 'quantity', 1)),
   'Missing Event Buyer', 'missing-event@example.invalid',
   '46000000-0000-4000-8000-000000000011', repeat('d', 64)
 );
 commit;" >"$temporary_directory/missing-event.log" 2>&1
 missing_event_exit=$?
+"$supabase_cli" db query --linked "begin;
+set local role service_role;
+select * from public.server_reserve_checkout(
+  '$fixture_event', jsonb_build_array(jsonb_build_object('tier_id', '$fixture_tier', 'quantity', 11)),
+  'Overflow Buyer', 'overflow@example.invalid',
+  '46000000-0000-4000-8000-000000000012', repeat('f', 64)
+);
+commit;" >"$temporary_directory/admission-overflow.log" 2>&1
+admission_overflow_exit=$?
 set -e
 
-if [[ $mismatched_tier_exit -eq 0 || $missing_event_exit -eq 0 ]] \
-  || ! grep -q 'TIER_NOT_FOUND' "$temporary_directory/mismatched-tier.log" \
-  || ! grep -q 'EVENT_NOT_FOUND' "$temporary_directory/missing-event.log"; then
-  echo "Mismatched event/tier reservation inputs did not return authorization-safe codes." >&2
+if [[ $mismatched_tier_exit -eq 0 || $missing_event_exit -eq 0 || $admission_overflow_exit -eq 0 ]] \
+  || ! grep -q 'TIER_NOT_ACTIVE' "$temporary_directory/mismatched-tier.log" \
+  || ! grep -q 'EVENT_NOT_SELLABLE' "$temporary_directory/missing-event.log" \
+  || ! grep -q 'CHECKOUT_INPUT_INVALID' "$temporary_directory/admission-overflow.log"; then
+  echo "Mismatched, missing, or over-ten-admission cart inputs did not return safe codes." >&2
   sed -n '1,100p' "$temporary_directory/mismatched-tier.log" >&2
   sed -n '1,100p' "$temporary_directory/missing-event.log" >&2
+  sed -n '1,100p' "$temporary_directory/admission-overflow.log" >&2
   exit 1
 fi
 
 "$supabase_cli" db query --linked "begin;
 set local role service_role;
 select * from public.server_reserve_checkout(
-  '$fixture_event', '$fixture_tier', 'First Buyer', 'first@example.invalid',
+  '$fixture_event', jsonb_build_array(
+    jsonb_build_object('tier_id', '$fixture_tier', 'quantity', 1),
+    jsonb_build_object('tier_id', '$fixture_support_tier', 'quantity', 2)
+  ), 'First Buyer', 'first@example.invalid',
   '46000000-0000-4000-8000-000000000001', repeat('a', 64)
 );
 select pg_advisory_xact_lock(916016);
@@ -151,7 +197,10 @@ set +e
 "$supabase_cli" db query --linked "begin;
 set local role service_role;
 select * from public.server_reserve_checkout(
-  '$fixture_event', '$fixture_tier', 'Second Buyer', 'second@example.invalid',
+  '$fixture_event', jsonb_build_array(
+    jsonb_build_object('tier_id', '$fixture_tier', 'quantity', 1),
+    jsonb_build_object('tier_id', '$fixture_support_tier', 'quantity', 2)
+  ), 'Second Buyer', 'second@example.invalid',
   '46000000-0000-4000-8000-000000000002', repeat('b', 64)
 );
 commit;" >"$temporary_directory/second.log" 2>&1
@@ -171,7 +220,10 @@ fi
 set local role service_role;
 with retry as (
   select * from public.server_reserve_checkout(
-    '$fixture_event', '$fixture_tier', 'First Buyer', 'first@example.invalid',
+    '$fixture_event', jsonb_build_array(
+      jsonb_build_object('tier_id', '$fixture_tier', 'quantity', 1),
+      jsonb_build_object('tier_id', '$fixture_support_tier', 'quantity', 2)
+    ), 'First Buyer', 'first@example.invalid',
     '46000000-0000-4000-8000-000000000001', repeat('a', 64)
   )
 )
@@ -188,6 +240,15 @@ select
     and retry.existing_checkout_session_id is not distinct from orders.stripe_checkout_session_id
     and retry.integration_identifier = orders.stripe_checkout_integration_identifier
     and retry.create_request_digest = orders.stripe_checkout_request_digest
+    and retry.order_items = (
+      select jsonb_agg(jsonb_build_object(
+        'order_item_id', items.id, 'ticket_tier_id', items.ticket_tier_id,
+        'tier_name', items.tier_name, 'unit_amount_minor', items.unit_amount_minor,
+        'quantity', items.quantity, 'subtotal_minor', items.subtotal_minor,
+        'currency', items.currency
+      ) order by items.ticket_tier_id)
+      from public.order_items as items where items.order_id = orders.id
+    )
   ) as retry_snapshot_matches
 from retry
 join public.orders as orders on orders.id = retry.order_id;
@@ -201,7 +262,7 @@ if ! grep -q '"retry_row_count": 1' "$temporary_directory/retry.log" \
 fi
 
 "$supabase_cli" db query --linked "select
-  count(*) as order_count,
+  count(distinct orders.id) as order_count,
   coalesce(sum(items.quantity), 0) as reserved_quantity,
   min(orders.platform_product_fee_minor) as fee_minor
 from public.orders as orders
@@ -209,11 +270,75 @@ join public.order_items as items on items.order_id = orders.id
 where orders.organizer_id = '$fixture_user';" >"$temporary_directory/result.log" 2>&1
 
 if ! grep -q '"order_count": 1' "$temporary_directory/result.log" \
-  || ! grep -q '"reserved_quantity": 1' "$temporary_directory/result.log" \
-  || ! grep -q '"fee_minor": 200' "$temporary_directory/result.log"; then
+  || ! grep -q '"reserved_quantity": 3' "$temporary_directory/result.log" \
+  || ! grep -q '"fee_minor": 500' "$temporary_directory/result.log"; then
   echo "Final-ticket race did not preserve one reservation with exact 5%-plus-50 fee arithmetic." >&2
   sed -n '1,100p' "$temporary_directory/result.log" >&2
   exit 1
 fi
 
-echo "Reservation retry, safe mismatch codes, final-ticket race, and exact fee passed; cleanup runs on EXIT."
+"$supabase_cli" db query --linked "begin;
+update public.ticket_tiers
+set name = 'Mutated after reservation', unit_amount_minor = 1
+where id = '$fixture_support_tier';
+update public.orders
+set status = 'requires_review'
+where organizer_id = '$fixture_user' and client_request_id = '46000000-0000-4000-8000-000000000001';
+select
+  count(*) as item_count,
+  sum(quantity) as admission_count,
+  bool_and(
+    (ticket_tier_id = '$fixture_tier' and tier_name = 'Last ticket' and unit_amount_minor = 3001 and quantity = 1 and subtotal_minor = 3001)
+    or (ticket_tier_id = '$fixture_support_tier' and tier_name = 'Supporting ticket' and unit_amount_minor = 2000 and quantity = 2 and subtotal_minor = 4000)
+  ) as immutable_item_snapshots
+from public.order_items
+where order_id = (select id from public.orders where organizer_id = '$fixture_user' and client_request_id = '46000000-0000-4000-8000-000000000001');
+commit;" >"$temporary_directory/snapshot.log" 2>&1
+
+if ! grep -q '"item_count": 2' "$temporary_directory/snapshot.log" \
+  || ! grep -q '"admission_count": 3' "$temporary_directory/snapshot.log" \
+  || ! grep -q '"immutable_item_snapshots": true' "$temporary_directory/snapshot.log"; then
+  echo "Two-item three-admission order did not retain immutable purchase snapshots." >&2
+  sed -n '1,120p' "$temporary_directory/snapshot.log" >&2
+  exit 1
+fi
+
+set +e
+"$supabase_cli" db query --linked "begin;
+set local role service_role;
+select * from public.server_reserve_checkout(
+  '$fixture_event', jsonb_build_array(jsonb_build_object('tier_id', '$fixture_support_tier', 'quantity', 1)),
+  'Review Inventory Buyer', 'review-inventory@example.invalid',
+  '46000000-0000-4000-8000-000000000003', repeat('e', 64)
+);
+commit;" >"$temporary_directory/review-inventory.log" 2>&1
+review_inventory_exit=$?
+set -e
+if [[ $review_inventory_exit -eq 0 ]] || ! grep -q 'TIER_SOLD_OUT' "$temporary_directory/review-inventory.log"; then
+  echo "Requires-review admissions did not continue to count against tier inventory." >&2
+  sed -n '1,100p' "$temporary_directory/review-inventory.log" >&2
+  exit 1
+fi
+
+"$supabase_cli" db query --linked "begin;
+update public.orders
+set status = 'checkout_open', reservation_expires_at = clock_timestamp() - interval '1 second'
+where organizer_id = '$fixture_user' and client_request_id = '46000000-0000-4000-8000-000000000001';
+do \$assert\$
+begin
+  if public.server_expire_checkout_reservations(clock_timestamp()) <> 1 then
+    raise exception using errcode = 'P0001', message = 'ASSERT_TIMESTAMP_EXPIRY_COUNT';
+  end if;
+end
+\$assert\$;
+select status = 'expired' and expired_at is not null as timestamp_expiry_authoritative
+from public.orders
+where organizer_id = '$fixture_user' and client_request_id = '46000000-0000-4000-8000-000000000001';
+commit;" >"$temporary_directory/expiry.log" 2>&1
+if ! grep -q '"timestamp_expiry_authoritative": true' "$temporary_directory/expiry.log"; then
+  echo "Checkout expiry was not driven by the persisted reservation timestamp." >&2
+  sed -n '1,120p' "$temporary_directory/expiry.log" >&2
+  exit 1
+fi
+
+echo "Two-item three-admission snapshots, review inventory, timestamp expiry, final-ticket race, and exact fee passed; cleanup runs on EXIT."
