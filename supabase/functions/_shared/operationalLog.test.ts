@@ -94,6 +94,56 @@ const invalidAppliedRefundState: CheckoutOperationalEvent = {
   ticketStatus: "none",
 };
 
+const invalidAppliedPaymentProcessingTickets = {
+  contractVersion: "checkout_integrity_v1",
+  operation: "refund.reconcile",
+  outcome: "applied",
+  orderId: ORDER_ID,
+  stripeEventId: STRIPE_EVENT_ID,
+  providerObjectId: REFUND_ID,
+  currency: "usd",
+  amountMinor: 100,
+  resultStatus: "payment_processing",
+  ticketStatus: "valid",
+} as const;
+// @ts-expect-error Payment processing is coherent only before any ticket exists.
+const invalidAppliedPaymentProcessingEvent: CheckoutOperationalEvent =
+  invalidAppliedPaymentProcessingTickets;
+
+const invalidReviewPaymentProcessingState = {
+  contractVersion: "checkout_integrity_v1",
+  operation: "refund.reconcile",
+  outcome: "review",
+  orderId: ORDER_ID,
+  stripeEventId: STRIPE_EVENT_ID,
+  providerObjectId: REFUND_ID,
+  currency: "usd",
+  amountMinor: 100,
+  resultStatus: "payment_processing",
+  ticketStatus: "none",
+  errorCode: "REFUND_DURABLE_STATE_REVIEW",
+} as const;
+// @ts-expect-error Payment processing without tickets is coherent, not a review.
+const invalidReviewPaymentProcessingEvent: CheckoutOperationalEvent =
+  invalidReviewPaymentProcessingState;
+
+const invalidAppliedPaymentProcessingError = {
+  contractVersion: "checkout_integrity_v1",
+  operation: "refund.reconcile",
+  outcome: "applied",
+  orderId: ORDER_ID,
+  stripeEventId: STRIPE_EVENT_ID,
+  providerObjectId: REFUND_ID,
+  currency: "usd",
+  amountMinor: 100,
+  resultStatus: "payment_processing",
+  ticketStatus: "none",
+  errorCode: "REFUND_DURABLE_STATE_REVIEW",
+} as const;
+// @ts-expect-error An applied coherent refund state cannot carry a review reason.
+const invalidAppliedPaymentProcessingErrorEvent: CheckoutOperationalEvent =
+  invalidAppliedPaymentProcessingError;
+
 // @ts-expect-error A refund held for review must include a specific safe reason.
 const invalidReasonlessRefundReview: CheckoutOperationalEvent = {
   contractVersion: "checkout_integrity_v1",
@@ -123,6 +173,12 @@ void invalidCheckoutUncertainty;
 void invalidBlockedCancellation;
 void invalidAmbiguousCancellation;
 void invalidAppliedRefundState;
+void invalidAppliedPaymentProcessingTickets;
+void invalidAppliedPaymentProcessingEvent;
+void invalidReviewPaymentProcessingState;
+void invalidReviewPaymentProcessingEvent;
+void invalidAppliedPaymentProcessingError;
+void invalidAppliedPaymentProcessingErrorEvent;
 void invalidReasonlessRefundReview;
 void invalidCheckoutError;
 
@@ -263,6 +319,32 @@ Deno.test("operational events serialize only the bounded fields for each discrim
         providerObjectId: SESSION_ID,
         priorStatus: "checkout_open",
         errorCode: "STRIPE_REQUEST_FAILED",
+      },
+    },
+    {
+      event: {
+        contractVersion: "checkout_integrity_v1",
+        operation: "refund.reconcile",
+        outcome: "applied",
+        stripeEventId: STRIPE_EVENT_ID,
+        orderId: ORDER_ID,
+        providerObjectId: REFUND_ID,
+        currency: "usd",
+        amountMinor: 1_000,
+        resultStatus: "payment_processing",
+        ticketStatus: "none",
+      },
+      expected: {
+        contractVersion: "checkout_integrity_v1",
+        operation: "refund.reconcile",
+        outcome: "applied",
+        orderId: ORDER_ID,
+        stripeEventId: STRIPE_EVENT_ID,
+        providerObjectId: REFUND_ID,
+        currency: "usd",
+        amountMinor: 1_000,
+        resultStatus: "payment_processing",
+        ticketStatus: "none",
       },
     },
     {
@@ -600,6 +682,47 @@ Deno.test("operational logger rejects misleading discriminator combinations at r
     amountMinor: 100,
     resultStatus: "refunded",
     ticketStatus: "none",
+  } as unknown as CheckoutOperationalEvent, sink);
+
+  emitOperationalEvent({
+    contractVersion: "checkout_integrity_v1",
+    operation: "refund.reconcile",
+    outcome: "applied",
+    orderId: ORDER_ID,
+    stripeEventId: STRIPE_EVENT_ID,
+    providerObjectId: REFUND_ID,
+    currency: "usd",
+    amountMinor: 100,
+    resultStatus: "payment_processing",
+    ticketStatus: "valid",
+  } as unknown as CheckoutOperationalEvent, sink);
+
+  emitOperationalEvent({
+    contractVersion: "checkout_integrity_v1",
+    operation: "refund.reconcile",
+    outcome: "review",
+    orderId: ORDER_ID,
+    stripeEventId: STRIPE_EVENT_ID,
+    providerObjectId: REFUND_ID,
+    currency: "usd",
+    amountMinor: 100,
+    resultStatus: "payment_processing",
+    ticketStatus: "none",
+    errorCode: "REFUND_DURABLE_STATE_REVIEW",
+  } as unknown as CheckoutOperationalEvent, sink);
+
+  emitOperationalEvent({
+    contractVersion: "checkout_integrity_v1",
+    operation: "refund.reconcile",
+    outcome: "applied",
+    orderId: ORDER_ID,
+    stripeEventId: STRIPE_EVENT_ID,
+    providerObjectId: REFUND_ID,
+    currency: "usd",
+    amountMinor: 100,
+    resultStatus: "payment_processing",
+    ticketStatus: "none",
+    errorCode: "REFUND_DURABLE_STATE_REVIEW",
   } as unknown as CheckoutOperationalEvent, sink);
 
   emitOperationalEvent({

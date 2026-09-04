@@ -289,6 +289,12 @@ type RefundReconciliationEvent =
   }
   | RefundEventFields & {
     outcome: "applied";
+    resultStatus: "payment_processing";
+    ticketStatus: "none";
+    errorCode?: never;
+  }
+  | RefundEventFields & {
+    outcome: "applied";
     resultStatus: "paid";
     ticketStatus: "valid";
     errorCode?: never;
@@ -307,7 +313,16 @@ type RefundReconciliationEvent =
   }
   | RefundEventFields & {
     outcome: "review";
-    resultStatus: Exclude<RefundOrderStatus, "requires_review">;
+    resultStatus: "payment_processing";
+    ticketStatus: Exclude<RefundTicketStatus, "none">;
+    errorCode: "REFUND_DURABLE_STATE_REVIEW";
+  }
+  | RefundEventFields & {
+    outcome: "review";
+    resultStatus: Exclude<
+      RefundOrderStatus,
+      "payment_processing" | "requires_review"
+    >;
     ticketStatus: RefundTicketStatus;
     errorCode: "REFUND_DURABLE_STATE_REVIEW";
   };
@@ -885,13 +900,20 @@ function validCombination(
         return source.errorCode === "REFUND_DURABLE_STATE_REVIEW" ||
           source.errorCode === "REFUND_POLICY_MISMATCH";
       }
+      if (source.resultStatus === "payment_processing") {
+        return source.ticketStatus !== "none" &&
+          source.errorCode === "REFUND_DURABLE_STATE_REVIEW";
+      }
       return source.resultStatus !== "requires_review" &&
+        source.resultStatus !== "payment_processing" &&
         ORDER_STATUSES.has(source.resultStatus as OrderStatus) &&
         source.errorCode === "REFUND_DURABLE_STATE_REVIEW";
     }
     if (outcome !== "applied") return false;
     return (source.resultStatus === "checkout_open" &&
       source.ticketStatus === "none") ||
+      (source.resultStatus === "payment_processing" &&
+        source.ticketStatus === "none") ||
       (source.resultStatus === "paid" && source.ticketStatus === "valid") ||
       (source.resultStatus === "refunded" &&
         source.ticketStatus === "refunded");

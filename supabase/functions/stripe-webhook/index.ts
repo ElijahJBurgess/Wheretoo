@@ -1725,6 +1725,35 @@ async function dispatchRefund(
         ? "REFUND_DURABLE_STATE_REVIEW"
         : "REFUND_POLICY_MISMATCH",
     }, dependencies.operationalSink);
+  } else if (durable.orderStatus === "payment_processing") {
+    if (ticketStatus === "none") {
+      emitOperationalEvent({
+        contractVersion: "checkout_integrity_v1",
+        operation: "refund.reconcile",
+        outcome: "applied",
+        orderId: durable.orderId,
+        stripeEventId: event.id,
+        providerObjectId: refundId,
+        currency,
+        amountMinor: amount,
+        resultStatus: "payment_processing",
+        ticketStatus: "none",
+      }, dependencies.operationalSink);
+    } else {
+      emitOperationalEvent({
+        contractVersion: "checkout_integrity_v1",
+        operation: "refund.reconcile",
+        outcome: "review",
+        orderId: durable.orderId,
+        stripeEventId: event.id,
+        providerObjectId: refundId,
+        currency,
+        amountMinor: amount,
+        resultStatus: "payment_processing",
+        ticketStatus,
+        errorCode: "REFUND_DURABLE_STATE_REVIEW",
+      }, dependencies.operationalSink);
+    }
   } else if (
     !(
       (durable.orderStatus === "checkout_open" && ticketStatus === "none") ||

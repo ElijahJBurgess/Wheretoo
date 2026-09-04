@@ -1661,6 +1661,37 @@ Deno.test("valid unchanged out-of-order refund result is acknowledged after comm
   }]);
 });
 
+Deno.test("pending refund with unchanged payment processing state is applied without review", async () => {
+  const records: Array<Record<string, unknown>> = [];
+  const response = await createStripeWebhookHandler(dependencies({
+    operationalSink: (serialized) => records.push(JSON.parse(serialized)),
+    retrieveRefund: async () => refundFixture({ status: "pending" }),
+    applyRefund: async () => ({
+      orderId: ORDER_ID,
+      orderStatus: "payment_processing",
+      ticketStatus: null,
+    }),
+  }))(request(snapshotEvent(
+    "refund.updated",
+    { id: REFUND_ID },
+    { id: "evt_Task10PendingRefundProcessing" },
+  )));
+
+  assertEquals(response.status, 200);
+  assertEquals(records, [{
+    contractVersion: "checkout_integrity_v1",
+    operation: "refund.reconcile",
+    outcome: "applied",
+    orderId: ORDER_ID,
+    stripeEventId: "evt_Task10PendingRefundProcessing",
+    providerObjectId: REFUND_ID,
+    currency: "usd",
+    amountMinor: 5_500,
+    resultStatus: "payment_processing",
+    ticketStatus: "none",
+  }]);
+});
+
 Deno.test("full refund before payment reconciliation emits conservative durable review", async () => {
   const records: Array<Record<string, unknown>> = [];
   const response = await createStripeWebhookHandler(dependencies({
