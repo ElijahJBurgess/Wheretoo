@@ -6,6 +6,7 @@ repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 supabase_cli="$repository_root/node_modules/.bin/supabase"
 temporary_directory="$(mktemp -d)"
 chmod 700 "$temporary_directory"
+cleanup_targets_file="$temporary_directory/cleanup-targets.json"
 checkout_switch_state_file="$temporary_directory/checkout-switch-prior"
 checkout_switch_captured=0
 
@@ -71,6 +72,60 @@ restore_checkout_switch() {
   grep -q '"restored": true' "$temporary_directory/checkout-switch-restore.json"
 }
 
+capture_cleanup_targets() {
+  "$supabase_cli" db query --linked --output-format json "select jsonb_build_object(
+      'event_ids', coalesce((select jsonb_agg(id order by id) from public.events where organizer_id in ($ids_sql)), '[]'::jsonb),
+      'tier_ids', coalesce((select jsonb_agg(ticket_tiers.id order by ticket_tiers.id)
+        from public.ticket_tiers join public.events on events.id = ticket_tiers.event_id
+        where events.organizer_id in ($ids_sql)), '[]'::jsonb),
+      'order_ids', coalesce((select jsonb_agg(id order by id) from public.orders where organizer_id in ($ids_sql)), '[]'::jsonb)
+    ) as targets;" >"$temporary_directory/cleanup-targets-read.json"
+  CLEANUP_TARGETS_READ_FILE="$temporary_directory/cleanup-targets-read.json" \
+  CLEANUP_TARGETS_FILE="$cleanup_targets_file" node --input-type=module <<'NODE'
+import fs from 'node:fs'
+const payload = JSON.parse(fs.readFileSync(process.env.CLEANUP_TARGETS_READ_FILE, 'utf8'))
+const row = payload.rows?.[0] ?? payload.result?.[0]
+const targets = row?.targets
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+if (!targets || !['event_ids', 'tier_ids', 'order_ids'].every((key) => Array.isArray(targets[key]) && targets[key].every((id) => typeof id === 'string' && uuid.test(id)))) process.exit(1)
+fs.writeFileSync(process.env.CLEANUP_TARGETS_FILE, JSON.stringify(targets), { mode: 0o600 })
+NODE
+  chmod 600 "$cleanup_targets_file"
+}
+
+load_cleanup_ids_sql() {
+  local field="$1"
+  CLEANUP_TARGETS_FILE="$cleanup_targets_file" CLEANUP_FIELD="$field" node --input-type=module <<'NODE'
+import fs from 'node:fs'
+const ids = JSON.parse(fs.readFileSync(process.env.CLEANUP_TARGETS_FILE, 'utf8'))[process.env.CLEANUP_FIELD]
+process.stdout.write(ids.length === 0 ? 'array[]::uuid[]' : `array[${ids.map((id) => `'${id}'::uuid`).join(',')}]`)
+NODE
+}
+
+build_cleanup_sql() {
+  printf '%s\n' "begin;
+      set local session_replication_role = replica;
+      delete from public.refunds where order_id = any($order_ids_sql);
+      delete from public.disputes where order_id = any($order_ids_sql);
+      delete from public.tickets where organizer_id in ($ids_sql);
+      delete from public.order_items where order_id = any($order_ids_sql) or ticket_tier_id = any($tier_ids_sql);
+      delete from public.orders where id = any($order_ids_sql);
+      delete from public.ticket_tiers where id = any($tier_ids_sql);
+      delete from public.organizer_stripe_accounts where organizer_id in ($ids_sql);
+      delete from private.event_public_eligibility_intervals where event_id = any($event_ids_sql);
+      delete from private.event_reports where event_id = any($event_ids_sql);
+      delete from private.moderation_review_requests where event_id = any($event_ids_sql);
+      delete from private.event_moderation_evaluations where event_id = any($event_ids_sql);
+      delete from private.event_moderation_actions where event_id = any($event_ids_sql);
+      delete from private.event_policy_acceptances where event_id = any($event_ids_sql);
+      delete from private.event_policy_legacy_exemptions where event_id = any($event_ids_sql);
+      delete from private.event_legacy_history_resolutions where event_id = any($event_ids_sql);
+      delete from private.event_risk_disclosures where event_id = any($event_ids_sql);
+      delete from public.events where id = any($event_ids_sql);
+      delete from public.organizers where id in ($ids_sql);
+      commit;"
+}
+
 cleanup() {
   original_exit=$?
   trap - EXIT
@@ -108,27 +163,18 @@ NODE
       ids_sql="$ids_sql'$organizer_b_id'::uuid"
     fi
 
-    "$supabase_cli" db query --linked "begin;
-      set local session_replication_role = replica;
-      delete from public.refunds where order_id in (select id from public.orders where organizer_id in ($ids_sql));
-      delete from public.disputes where order_id in (select id from public.orders where organizer_id in ($ids_sql));
-      delete from public.tickets where organizer_id in ($ids_sql);
-      delete from public.order_items where order_id in (select id from public.orders where organizer_id in ($ids_sql));
-      delete from public.orders where organizer_id in ($ids_sql);
-      delete from public.ticket_tiers where event_id in (select id from public.events where organizer_id in ($ids_sql));
-      delete from public.organizer_stripe_accounts where organizer_id in ($ids_sql);
-      delete from private.event_public_eligibility_intervals where event_id in (select id from public.events where organizer_id in ($ids_sql));
-      delete from private.event_reports where event_id in (select id from public.events where organizer_id in ($ids_sql));
-      delete from private.moderation_review_requests where event_id in (select id from public.events where organizer_id in ($ids_sql));
-      delete from private.event_moderation_evaluations where event_id in (select id from public.events where organizer_id in ($ids_sql));
-      delete from private.event_moderation_actions where event_id in (select id from public.events where organizer_id in ($ids_sql));
-      delete from private.event_policy_acceptances where event_id in (select id from public.events where organizer_id in ($ids_sql));
-      delete from private.event_policy_legacy_exemptions where event_id in (select id from public.events where organizer_id in ($ids_sql));
-      delete from private.event_legacy_history_resolutions where event_id in (select id from public.events where organizer_id in ($ids_sql));
-      delete from private.event_risk_disclosures where event_id in (select id from public.events where organizer_id in ($ids_sql));
-      delete from public.events where organizer_id in ($ids_sql);
-      delete from public.organizers where id in ($ids_sql);
-      commit;" >"$temporary_directory/cleanup-database.log" 2>&1
+    capture_cleanup_targets
+    capture_targets_exit=$?
+    event_ids_sql="array[]::uuid[]"
+    tier_ids_sql="array[]::uuid[]"
+    order_ids_sql="array[]::uuid[]"
+    if [[ $capture_targets_exit -eq 0 ]]; then
+      event_ids_sql="$(load_cleanup_ids_sql event_ids)"
+      tier_ids_sql="$(load_cleanup_ids_sql tier_ids)"
+      order_ids_sql="$(load_cleanup_ids_sql order_ids)"
+    fi
+
+    "$supabase_cli" db query --linked "$(build_cleanup_sql)" >"$temporary_directory/cleanup-database.log" 2>&1
     database_cleanup_exit=$?
 
     delete_auth_user "$organizer_a_id"
@@ -139,29 +185,29 @@ NODE
     "$supabase_cli" db query --linked "select
       (select count(*) from auth.users where id in ($ids_sql))
       + (select count(*) from public.organizers where id in ($ids_sql))
-      + (select count(*) from public.events where organizer_id in ($ids_sql))
-      + (select count(*) from public.ticket_tiers where event_id in (select id from public.events where organizer_id in ($ids_sql)))
+      + (select count(*) from public.events where id = any($event_ids_sql))
+      + (select count(*) from public.ticket_tiers where id = any($tier_ids_sql))
       + (select count(*) from public.organizer_stripe_accounts where organizer_id in ($ids_sql))
-      + (select count(*) from public.orders where organizer_id in ($ids_sql))
-      + (select count(*) from public.order_items where order_id in (select id from public.orders where organizer_id in ($ids_sql)))
+      + (select count(*) from public.orders where id = any($order_ids_sql))
+      + (select count(*) from public.order_items where order_id = any($order_ids_sql) or ticket_tier_id = any($tier_ids_sql))
       + (select count(*) from public.tickets where organizer_id in ($ids_sql))
-      + (select count(*) from public.refunds where order_id in (select id from public.orders where organizer_id in ($ids_sql)))
-      + (select count(*) from public.disputes where order_id in (select id from public.orders where organizer_id in ($ids_sql)))
-      + (select count(*) from private.event_public_eligibility_intervals where event_id in (select id from public.events where organizer_id in ($ids_sql)))
-      + (select count(*) from private.event_reports where event_id in (select id from public.events where organizer_id in ($ids_sql)))
-      + (select count(*) from private.moderation_review_requests where event_id in (select id from public.events where organizer_id in ($ids_sql)))
-      + (select count(*) from private.event_moderation_evaluations where event_id in (select id from public.events where organizer_id in ($ids_sql)))
-      + (select count(*) from private.event_moderation_actions where event_id in (select id from public.events where organizer_id in ($ids_sql)))
-      + (select count(*) from private.event_policy_acceptances where event_id in (select id from public.events where organizer_id in ($ids_sql)))
-      + (select count(*) from private.event_policy_legacy_exemptions where event_id in (select id from public.events where organizer_id in ($ids_sql)))
-      + (select count(*) from private.event_legacy_history_resolutions where event_id in (select id from public.events where organizer_id in ($ids_sql)))
-      + (select count(*) from private.event_risk_disclosures where event_id in (select id from public.events where organizer_id in ($ids_sql)))
+      + (select count(*) from public.refunds where order_id = any($order_ids_sql))
+      + (select count(*) from public.disputes where order_id = any($order_ids_sql))
+      + (select count(*) from private.event_public_eligibility_intervals where event_id = any($event_ids_sql))
+      + (select count(*) from private.event_reports where event_id = any($event_ids_sql))
+      + (select count(*) from private.moderation_review_requests where event_id = any($event_ids_sql))
+      + (select count(*) from private.event_moderation_evaluations where event_id = any($event_ids_sql))
+      + (select count(*) from private.event_moderation_actions where event_id = any($event_ids_sql))
+      + (select count(*) from private.event_policy_acceptances where event_id = any($event_ids_sql))
+      + (select count(*) from private.event_policy_legacy_exemptions where event_id = any($event_ids_sql))
+      + (select count(*) from private.event_legacy_history_resolutions where event_id = any($event_ids_sql))
+      + (select count(*) from private.event_risk_disclosures where event_id = any($event_ids_sql))
       as residue_count;" >"$temporary_directory/residue.log" 2>&1
     residue_exit=$?
     grep -q '"residue_count": 0' "$temporary_directory/residue.log"
     residue_zero_exit=$?
 
-    if [[ $checkout_switch_cleanup_exit -ne 0 || $database_cleanup_exit -ne 0 || $auth_a_cleanup_exit -ne 0 || $auth_b_cleanup_exit -ne 0 || $residue_exit -ne 0 || $residue_zero_exit -ne 0 ]]; then
+    if [[ $checkout_switch_cleanup_exit -ne 0 || $capture_targets_exit -ne 0 || $database_cleanup_exit -ne 0 || $auth_a_cleanup_exit -ne 0 || $auth_b_cleanup_exit -ne 0 || $residue_exit -ne 0 || $residue_zero_exit -ne 0 ]]; then
       echo "Exact Task 11 fixture cleanup, switch restoration, or zero-residue proof failed." >&2
       sed -n '1,120p' "$temporary_directory/cleanup-database.log" >&2
       sed -n '1,80p' "$temporary_directory/residue.log" >&2

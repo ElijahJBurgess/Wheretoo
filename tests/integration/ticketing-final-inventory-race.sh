@@ -5,6 +5,7 @@ set -euo pipefail
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 supabase_cli="$repository_root/node_modules/.bin/supabase"
 temporary_directory="$(mktemp -d)"
+cleanup_targets_file="$temporary_directory/cleanup-targets.json"
 fixture_user="16000000-0000-4000-8000-000000000001"
 fixture_event="26000000-0000-4000-8000-000000000001"
 fixture_tier="36000000-0000-4000-8000-000000000001"
@@ -12,13 +13,64 @@ fixture_support_tier="36000000-0000-4000-8000-000000000003"
 other_event="26000000-0000-4000-8000-000000000002"
 other_tier="36000000-0000-4000-8000-000000000002"
 
-cleanup_sql="begin;
+assert_linked_development() {
+  local project_ref
+  project_ref="$(tr -d '\r\n' <"$repository_root/supabase/.temp/project-ref")"
+  if [[ ! "$project_ref" =~ ^[a-z]{20}$ ]]; then
+    echo "The linked project reference is missing or malformed." >&2
+    return 1
+  fi
+  "$supabase_cli" projects list --output json >"$temporary_directory/projects.json"
+  PROJECT_REF="$project_ref" PROJECTS_FILE="$temporary_directory/projects.json" node --input-type=module <<'NODE'
+import fs from 'node:fs'
+const projects = JSON.parse(fs.readFileSync(process.env.PROJECTS_FILE, 'utf8'))
+const linked = projects.filter((project) => project.linked === true)
+if (linked.length !== 1 || linked[0].id !== process.env.PROJECT_REF || linked[0].status !== 'ACTIVE_HEALTHY') process.exit(1)
+NODE
+  "$supabase_cli" db query --linked --output-format json \
+    "select environment as policy_environment from private.organizer_policy_release_settings where singleton_id;" \
+    >"$temporary_directory/environment.json"
+  ENVIRONMENT_FILE="$temporary_directory/environment.json" node --input-type=module <<'NODE'
+import fs from 'node:fs'
+const payload = JSON.parse(fs.readFileSync(process.env.ENVIRONMENT_FILE, 'utf8'))
+const row = payload.rows?.[0] ?? payload.result?.[0]
+if (row?.policy_environment !== 'development') process.exit(1)
+NODE
+}
+
+capture_cleanup_targets() {
+  "$supabase_cli" db query --linked --output-format json "select jsonb_build_object(
+      'order_ids', coalesce((select jsonb_agg(id order by id) from public.orders where organizer_id = '$fixture_user'::uuid), '[]'::jsonb)
+    ) as targets;" >"$temporary_directory/cleanup-targets-read.json"
+  CLEANUP_TARGETS_READ_FILE="$temporary_directory/cleanup-targets-read.json" \
+  CLEANUP_TARGETS_FILE="$cleanup_targets_file" node --input-type=module <<'NODE'
+import fs from 'node:fs'
+const payload = JSON.parse(fs.readFileSync(process.env.CLEANUP_TARGETS_READ_FILE, 'utf8'))
+const row = payload.rows?.[0] ?? payload.result?.[0]
+const targets = row?.targets
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+if (!targets || !Array.isArray(targets.order_ids) || targets.order_ids.some((id) => typeof id !== 'string' || !uuid.test(id))) process.exit(1)
+fs.writeFileSync(process.env.CLEANUP_TARGETS_FILE, JSON.stringify(targets), { mode: 0o600 })
+NODE
+  chmod 600 "$cleanup_targets_file"
+}
+
+load_order_ids_sql() {
+  CLEANUP_TARGETS_FILE="$cleanup_targets_file" node --input-type=module <<'NODE'
+import fs from 'node:fs'
+const { order_ids: ids } = JSON.parse(fs.readFileSync(process.env.CLEANUP_TARGETS_FILE, 'utf8'))
+process.stdout.write(ids.length === 0 ? 'array[]::uuid[]' : `array[${ids.map((id) => `'${id}'::uuid`).join(',')}]`)
+NODE
+}
+
+build_cleanup_sql() {
+  printf '%s\n' "begin;
 set local session_replication_role = replica;
-delete from public.refunds where order_id in (select id from public.orders where organizer_id = '$fixture_user');
-delete from public.disputes where order_id in (select id from public.orders where organizer_id = '$fixture_user');
+delete from public.refunds where order_id = any($order_ids_sql);
+delete from public.disputes where order_id = any($order_ids_sql);
 delete from public.tickets where organizer_id = '$fixture_user';
-delete from public.order_items where order_id in (select id from public.orders where organizer_id = '$fixture_user');
-delete from public.orders where organizer_id = '$fixture_user';
+delete from public.order_items where order_id = any($order_ids_sql) or ticket_tier_id in ('$fixture_tier', '$fixture_support_tier', '$other_tier');
+delete from public.orders where id = any($order_ids_sql);
 delete from public.ticket_tiers where event_id in ('$fixture_event', '$other_event');
 delete from public.organizer_stripe_accounts where organizer_id = '$fixture_user';
 delete from private.event_public_eligibility_intervals where event_id in ('$fixture_event', '$other_event');
@@ -34,12 +86,25 @@ delete from public.events where id in ('$fixture_event', '$other_event');
 delete from public.organizers where id = '$fixture_user';
 delete from auth.users where id = '$fixture_user';
 commit;"
+}
+
+prepare_cleanup_targets() {
+  capture_cleanup_targets
+  capture_targets_exit=$?
+  order_ids_sql="array[]::uuid[]"
+  if [[ $capture_targets_exit -eq 0 ]]; then
+    order_ids_sql="$(load_order_ids_sql)"
+  fi
+  return "$capture_targets_exit"
+}
 
 cleanup() {
   original_exit=$?
   trap - EXIT
   set +e
-  "$supabase_cli" db query --linked "$cleanup_sql" >"$temporary_directory/cleanup.log" 2>&1
+  prepare_cleanup_targets
+  capture_targets_exit=$?
+  "$supabase_cli" db query --linked "$(build_cleanup_sql)" >"$temporary_directory/cleanup.log" 2>&1
   cleanup_exit=$?
   "$supabase_cli" db query --linked "select
     (select count(*) from auth.users where id = '$fixture_user')
@@ -47,8 +112,12 @@ cleanup() {
     + (select count(*) from public.events where id = '$fixture_event')
     + (select count(*) from public.events where id = '$other_event')
     + (select count(*) from public.ticket_tiers where id in ('$fixture_tier', '$fixture_support_tier', '$other_tier'))
-    + (select count(*) from public.orders where organizer_id = '$fixture_user')
-    + (select count(*) from public.order_items where order_id in (select id from public.orders where organizer_id = '$fixture_user'))
+    + (select count(*) from public.orders where id = any($order_ids_sql))
+    + (select count(*) from public.order_items where order_id = any($order_ids_sql) or ticket_tier_id in ('$fixture_tier', '$fixture_support_tier', '$other_tier'))
+    + (select count(*) from public.tickets where organizer_id = '$fixture_user')
+    + (select count(*) from public.refunds where order_id = any($order_ids_sql))
+    + (select count(*) from public.disputes where order_id = any($order_ids_sql))
+    + (select count(*) from public.organizer_stripe_accounts where organizer_id = '$fixture_user')
     + (select count(*) from private.event_public_eligibility_intervals where event_id in ('$fixture_event', '$other_event'))
     + (select count(*) from private.event_reports where event_id in ('$fixture_event', '$other_event'))
     + (select count(*) from private.moderation_review_requests where event_id in ('$fixture_event', '$other_event'))
@@ -62,7 +131,7 @@ cleanup() {
   residue_exit=$?
   grep -q '"residue_count": 0' "$temporary_directory/residue.log"
   residue_zero_exit=$?
-  if [[ $cleanup_exit -ne 0 || $residue_exit -ne 0 || $residue_zero_exit -ne 0 ]]; then
+  if [[ $capture_targets_exit -ne 0 || $cleanup_exit -ne 0 || $residue_exit -ne 0 || $residue_zero_exit -ne 0 ]]; then
     echo "Exact final-ticket race cleanup or zero-residue proof failed." >&2
     sed -n '1,120p' "$temporary_directory/cleanup.log" >&2
     sed -n '1,80p' "$temporary_directory/residue.log" >&2
@@ -75,8 +144,29 @@ cleanup() {
   exit "$final_cleanup_exit"
 }
 
+if [[ ! -x "$supabase_cli" ]]; then
+  echo "Supabase CLI is not installed at the project-local path." >&2
+  find "$temporary_directory" -type f -delete
+  rmdir "$temporary_directory"
+  exit 1
+fi
+chmod 700 "$temporary_directory"
+if ! assert_linked_development; then
+  echo "Direct linked fixture runner requires one ACTIVE_HEALTHY development project." >&2
+  find "$temporary_directory" -type f -delete
+  rmdir "$temporary_directory"
+  exit 1
+fi
+if [[ "${WHERETO_TEST_GATE_ONLY:-}" == "1" ]]; then
+  echo "Linked development gate passed without mutation."
+  find "$temporary_directory" -type f -delete
+  rmdir "$temporary_directory"
+  exit 0
+fi
+
 trap cleanup EXIT
-"$supabase_cli" db query --linked "$cleanup_sql" >"$temporary_directory/pre-cleanup.log" 2>&1
+prepare_cleanup_targets
+"$supabase_cli" db query --linked "$(build_cleanup_sql)" >"$temporary_directory/pre-cleanup.log" 2>&1
 
 "$supabase_cli" db query --linked "begin;
 insert into auth.users (id, email) values ('$fixture_user', 'task16-final-ticket@example.invalid');
