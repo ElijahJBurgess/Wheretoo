@@ -932,14 +932,14 @@ async function releaseAfterFailure(
   reservation: ReservationSnapshot,
   origin: FailureReleaseOrigin,
   sessionValue?: unknown,
-): Promise<void> {
+): Promise<boolean> {
   if (sessionValue === undefined) {
-    if (origin !== "definitive-create-noncreation") return;
+    if (origin !== "definitive-create-noncreation") return false;
     await dependencies.releaseReservation(
       reservation.orderId,
       "CHECKOUT_CREATION_FAILED",
     );
-    return;
+    return true;
   }
   if (
     !isRecord(sessionValue) || sessionValue.object !== "checkout.session" ||
@@ -948,34 +948,42 @@ async function releaseAfterFailure(
     (reservation.existingCheckoutSessionId !== null &&
       sessionValue.id !== reservation.existingCheckoutSessionId)
   ) {
-    return;
+    return false;
   }
   if (sessionValue.status === "complete") {
     // Completion truth belongs to the webhook. A retry must not downgrade the
     // still-open database order during the interval before fulfillment lands.
-    return;
+    return false;
   }
   if (sessionValue.status === "open") {
     let expired: unknown;
     try {
       expired = await dependencies.expireSession(sessionValue.id);
     } catch {
-      return;
+      return false;
     }
     if (
       !isRecord(expired) || expired.object !== "checkout.session" ||
       expired.livemode !== false || expired.id !== sessionValue.id ||
       expired.status !== "expired"
     ) {
-      return;
+      return false;
     }
   } else if (sessionValue.status !== "expired") {
-    return;
+    return false;
   }
   await dependencies.releaseReservation(
     reservation.orderId,
     "CHECKOUT_CREATION_FAILED",
   );
+  return true;
+}
+
+function operationalSessionId(value: unknown): string | undefined {
+  return isRecord(value) && typeof value.id === "string" &&
+      SESSION_PATTERN.test(value.id)
+    ? value.id
+    : undefined;
 }
 
 export function createStripeCreateCheckoutHandler(
@@ -1155,8 +1163,9 @@ export function createStripeCreateCheckoutHandler(
     } catch (error) {
       let responseError = checkoutError(error);
       if (reservation !== undefined && failureReleaseOrigin !== undefined) {
+        let cleanupComplete = false;
         try {
-          await releaseAfterFailure(
+          cleanupComplete = await releaseAfterFailure(
             dependencies,
             reservation,
             failureReleaseOrigin,
@@ -1165,6 +1174,10 @@ export function createStripeCreateCheckoutHandler(
         } catch {
           responseError = new CheckoutHttpError(500, "INTERNAL_ERROR");
         }
+        if (
+          failureReleaseOrigin !== "definitive-create-noncreation" &&
+          !cleanupComplete
+        ) stripeCreateOutcomeUnknown = true;
       }
       emitOperationalEvent({
         contractVersion: "checkout_integrity_v1",
@@ -1172,6 +1185,7 @@ export function createStripeCreateCheckoutHandler(
         outcome: stripeCreateOutcomeUnknown ? "uncertain" : "failed",
         orderId: reservation?.orderId,
         eventId,
+        providerObjectId: operationalSessionId(sessionValue),
         itemCount: reservation?.items.length,
         aggregateQuantity: reservation?.quantity,
         currency: reservation?.currency,

@@ -3,11 +3,13 @@ import { getServiceClient } from "../_shared/database.ts";
 import { getAppBaseUrl } from "../_shared/env.ts";
 import { jsonResponse } from "../_shared/http.ts";
 import {
+  type CancellationOperationalErrorCode,
   emitOperationalEvent,
   type OperationalEventSink,
 } from "../_shared/operationalLog.ts";
 import { getStripe } from "../_shared/stripeClient.ts";
 import {
+  type CheckoutErrorCode,
   checkoutErrorResponse,
   CheckoutHttpError,
   defaultAnonymousRateLimit,
@@ -17,14 +19,23 @@ import {
   type RateLimitResult,
 } from "../stripe-create-checkout/index.ts";
 
+function cancellationOperationalErrorCode(
+  code: CheckoutErrorCode,
+): CancellationOperationalErrorCode {
+  switch (code) {
+    case "CHECKOUT_UNAVAILABLE":
+    case "INVALID_STRIPE_SESSION":
+    case "STRIPE_REQUEST_FAILED":
+      return code;
+    default:
+      return "INTERNAL_ERROR";
+  }
+}
+
 const MAX_REQUEST_BYTES = 512;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SESSION_PATTERN = /^cs_test_[A-Za-z0-9]+$/;
-const CANCELLABLE_DATABASE_STATUSES = new Set([
-  "creating_checkout",
-  "checkout_open",
-]);
 const ORDER_STATUSES = new Set([
   "creating_checkout",
   "checkout_open",
@@ -198,7 +209,9 @@ export function createStripeCancelCheckoutHandler(
         throw new CheckoutHttpError(404, "CHECKOUT_NOT_FOUND");
       }
 
-      if (!CANCELLABLE_DATABASE_STATUSES.has(order.status)) {
+      if (
+        order.status !== "creating_checkout" && order.status !== "checkout_open"
+      ) {
         if (
           order.status === "cancelled" || order.status === "expired" ||
           order.status === "payment_failed"
@@ -206,7 +219,7 @@ export function createStripeCancelCheckoutHandler(
           emitOperationalEvent({
             contractVersion: "checkout_integrity_v1",
             operation: "checkout.cancel",
-            outcome: "cancelled",
+            outcome: "no_transition",
             orderId: order.orderId,
             providerObjectId: order.stripeCheckoutSessionId ?? undefined,
             priorStatus: order.status,
@@ -303,7 +316,7 @@ export function createStripeCancelCheckoutHandler(
           orderId: order.orderId,
           providerObjectId: order.stripeCheckoutSessionId ?? undefined,
           priorStatus: order.status,
-          errorCode: safeError.code,
+          errorCode: cancellationOperationalErrorCode(safeError.code),
         }, dependencies.operationalSink);
       }
       return checkoutErrorResponse(error, headers);

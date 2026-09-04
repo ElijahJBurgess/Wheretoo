@@ -1,11 +1,12 @@
 // deno-lint-ignore-file require-await
-import { assertEquals, assertRejects } from "@std/assert";
+import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import Stripe from "stripe";
 import {
   createStripeWebhookHandler,
   type DisputeSnapshot,
   type PaymentReviewSnapshot,
   type ReceiptInput,
+  refundApplyResultFromRpc,
   type StripeWebhookDependencies,
   verifyStripeSignature,
   verifyStripeSignatureAgainstSecrets,
@@ -70,6 +71,12 @@ interface CheckoutReviewInput {
 type Task7Dependencies = StripeWebhookDependencies & {
   markCheckoutReconciliationReview(input: CheckoutReviewInput): Promise<void>;
 };
+
+const REFUND_APPLY_RESULT = {
+  orderId: ORDER_ID,
+  orderStatus: "refunded",
+  ticketStatus: "refunded",
+} as const;
 
 function orderSnapshot(
   items = ORDER_ITEMS.map((item) => ({
@@ -188,7 +195,7 @@ function dependencies(
     markPaymentFailed: async () => undefined,
     markPaymentRequiresReview: async () => undefined,
     markCheckoutReconciliationReview: async () => undefined,
-    applyRefund: async () => undefined,
+    applyRefund: async () => REFUND_APPLY_RESULT,
     applyDispute: async () => undefined,
     operationalSink: () => undefined,
     ...overrides,
@@ -1407,6 +1414,7 @@ Deno.test("refund reconciliation retrieves authoritative refund, charge, and Pay
     },
     applyRefund: async (snapshot) => {
       applied = snapshot;
+      return REFUND_APPLY_RESULT;
     },
   }))(request(snapshotEvent("refund.updated", { id: REFUND_ID })));
 
@@ -1432,6 +1440,105 @@ Deno.test("refund reconciliation retrieves authoritative refund, charge, and Pay
   });
 });
 
+Deno.test("refund reconciliation logs the authoritative cumulative durable result", async () => {
+  const records: Array<Record<string, unknown>> = [];
+  const response = await createStripeWebhookHandler(dependencies({
+    operationalSink: (serialized) => records.push(JSON.parse(serialized)),
+    retrieveRefund: async () =>
+      refundFixture({
+        amount: 1_000,
+        metadata: {
+          order_id: ORDER_ID,
+          whereto_refund_policy: "destination_v1",
+          whereto_reverse_transfer: "true",
+          whereto_refund_application_fee: "true",
+          whereto_transfer_reversal_amount: "1000",
+          whereto_application_fee_refund_id: FEE_REFUND_ID,
+          whereto_application_fee_refund_amount: "100",
+        },
+      }),
+    retrieveTransfer: async () =>
+      transferFixture({
+        amount: 5_500,
+        amount_reversed: 5_500,
+        reversed: true,
+      }),
+    retrieveTransferReversal: async () =>
+      transferReversalFixture({ amount: 1_000 }),
+    retrieveApplicationFee: async () =>
+      applicationFeeFixture({ amount_refunded: 450 }),
+    retrieveApplicationFeeRefund: async () => feeRefundFixture({ amount: 100 }),
+    applyRefund: async () => ({
+      orderId: ORDER_ID,
+      orderStatus: "refunded",
+      ticketStatus: "refunded",
+    }),
+  }))(request(snapshotEvent(
+    "refund.updated",
+    { id: REFUND_ID },
+    { id: "evt_Task10CumulativeRefund" },
+  )));
+
+  assertEquals(response.status, 200);
+  assertEquals(records, [{
+    contractVersion: "checkout_integrity_v1",
+    operation: "refund.reconcile",
+    outcome: "applied",
+    orderId: ORDER_ID,
+    stripeEventId: "evt_Task10CumulativeRefund",
+    providerObjectId: REFUND_ID,
+    currency: "usd",
+    amountMinor: 1_000,
+    resultStatus: "refunded",
+    ticketStatus: "refunded",
+  }]);
+});
+
+Deno.test("refund RPC result validation accepts exactly one authoritative bounded row", () => {
+  assertEquals(
+    refundApplyResultFromRpc([{
+      order_id: ORDER_ID,
+      order_status: "requires_review",
+      ticket_status: "cancelled",
+    }], ORDER_ID),
+    {
+      orderId: ORDER_ID,
+      orderStatus: "requires_review",
+      ticketStatus: "cancelled",
+    },
+  );
+
+  for (
+    const invalid of [
+      [],
+      [{ order_id: ORDER_ID, order_status: "refunded" }],
+      [{
+        order_id: ORDER_ID,
+        order_status: "refunded",
+        ticket_status: "refunded",
+        raw_provider_result: "unsafe",
+      }],
+      [{
+        order_id: "00000000-0000-4000-8000-000000000099",
+        order_status: "refunded",
+        ticket_status: "refunded",
+      }],
+      [{
+        order_id: ORDER_ID,
+        order_status: "provider_unknown",
+        ticket_status: "refunded",
+      }],
+      [{
+        order_id: ORDER_ID,
+        order_status: "refunded",
+        ticket_status: "provider_unknown",
+      }],
+    ]
+  ) {
+    assertThrows(() => refundApplyResultFromRpc(invalid, ORDER_ID));
+  }
+});
+
 Deno.test("missing automatic-refund policy persists authoritative mismatch evidence for review", async () => {
   let applied: unknown;
   const response = await createStripeWebhookHandler(dependencies({
@@ -1446,6 +1553,7 @@ Deno.test("missing automatic-refund policy persists authoritative mismatch evide
       transferReversalFixture({ amount: 5_500 }),
     applyRefund: async (snapshot) => {
       applied = snapshot;
+      return REFUND_APPLY_RESULT;
     },
   }))(request(snapshotEvent("refund.updated", { id: REFUND_ID })));
 
@@ -1485,6 +1593,7 @@ Deno.test("permanent refund evidence lookup mismatches persist succeeded money f
       },
       applyRefund: async (snapshot) => {
         applied = snapshot as unknown as Record<string, unknown>;
+        return REFUND_APPLY_RESULT;
       },
     }))(request(snapshotEvent(
       "refund.updated",
@@ -1542,6 +1651,7 @@ Deno.test("refund evidence network, authentication, and permission failures rema
       },
       applyRefund: async () => {
         applied = true;
+        return REFUND_APPLY_RESULT;
       },
       finalizeReceipt: async (...args) => {
         finalizations.push(args);
@@ -1589,6 +1699,7 @@ Deno.test("refund metadata enrichment advances the same succeeded refund from bo
       transferReversalFixture({ amount: 5_500 }),
     applyRefund: async (snapshot) => {
       applied.push(snapshot as unknown as Record<string, unknown>);
+      return REFUND_APPLY_RESULT;
     },
   });
 
@@ -1608,25 +1719,28 @@ Deno.test("refund metadata enrichment advances the same succeeded refund from bo
   ));
 
   assertEquals([raced.status, enriched.status], [200, 200]);
-  assertEquals(applied.map((snapshot) => ({
-    policyVerified: snapshot.policyVerified,
-    policyFailureCode: snapshot.policyFailureCode,
-    reversalAmount: snapshot.transferReversalAmountMinor,
-    feeRefundAmount: snapshot.applicationFeeRefundAmountMinor,
-  })), [
-    {
-      policyVerified: false,
-      policyFailureCode: "REFUND_POLICY_MISMATCH",
-      reversalAmount: 5_500,
-      feeRefundAmount: 0,
-    },
-    {
-      policyVerified: true,
-      policyFailureCode: null,
-      reversalAmount: 5_500,
-      feeRefundAmount: 450,
-    },
-  ]);
+  assertEquals(
+    applied.map((snapshot) => ({
+      policyVerified: snapshot.policyVerified,
+      policyFailureCode: snapshot.policyFailureCode,
+      reversalAmount: snapshot.transferReversalAmountMinor,
+      feeRefundAmount: snapshot.applicationFeeRefundAmountMinor,
+    })),
+    [
+      {
+        policyVerified: false,
+        policyFailureCode: "REFUND_POLICY_MISMATCH",
+        reversalAmount: 5_500,
+        feeRefundAmount: 0,
+      },
+      {
+        policyVerified: true,
+        policyFailureCode: null,
+        reversalAmount: 5_500,
+        feeRefundAmount: 450,
+      },
+    ],
+  );
 });
 
 Deno.test("a failed refund event reconciles the current authoritative failed refund state", async () => {
@@ -1635,6 +1749,7 @@ Deno.test("a failed refund event reconciles the current authoritative failed ref
     retrieveRefund: async () => refundFixture({ status: "failed" }),
     applyRefund: async (snapshot) => {
       status = snapshot.status;
+      return REFUND_APPLY_RESULT;
     },
   }))(request(snapshotEvent(
     "refund.failed",
@@ -1839,12 +1954,13 @@ Deno.test("webhook operational events distinguish duplicate, reconciliation mism
 
   await createStripeWebhookHandler(dependencies({
     operationalSink,
-    retrieveSession: async () => checkoutSessionFixture({
-      line_items: {
-        ...checkoutLineItemsFixture(),
-        data: [checkoutLineFixture(ORDER_ITEMS[0])],
-      },
-    }),
+    retrieveSession: async () =>
+      checkoutSessionFixture({
+        line_items: {
+          ...checkoutLineItemsFixture(),
+          data: [checkoutLineFixture(ORDER_ITEMS[0])],
+        },
+      }),
   }))(request(snapshotEvent(
     "checkout.session.completed",
     { id: SESSION_ID },
@@ -1873,13 +1989,19 @@ Deno.test("webhook operational events distinguish duplicate, reconciliation mism
   await createStripeWebhookHandler(dependencies({
     operationalSink,
     retrieveRefund: async () => refundFixture({ metadata: {} }),
-    retrieveTransfer: async () => transferFixture({
-      amount: 5_500,
-      amount_reversed: 5_500,
-      reversed: true,
-    }),
+    retrieveTransfer: async () =>
+      transferFixture({
+        amount: 5_500,
+        amount_reversed: 5_500,
+        reversed: true,
+      }),
     retrieveTransferReversal: async () =>
       transferReversalFixture({ amount: 5_500 }),
+    applyRefund: async () => ({
+      orderId: ORDER_ID,
+      orderStatus: "requires_review",
+      ticketStatus: "cancelled",
+    }),
   }))(request(snapshotEvent(
     "refund.updated",
     { id: REFUND_ID },
@@ -1939,9 +2061,9 @@ Deno.test("webhook operational events distinguish duplicate, reconciliation mism
       stripeEventId: "evt_Task10RefundReview",
       providerObjectId: REFUND_ID,
       currency: "usd",
-      totalMinor: 5_500,
       amountMinor: 5_500,
       resultStatus: "requires_review",
+      ticketStatus: "cancelled",
       errorCode: "REFUND_POLICY_MISMATCH",
     },
   ]);

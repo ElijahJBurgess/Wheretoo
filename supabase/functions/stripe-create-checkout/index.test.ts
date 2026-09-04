@@ -1556,6 +1556,97 @@ Deno.test("checkout emits one sanitized created, reused, failed, or uncertain op
   ]);
 });
 
+Deno.test("post-create checkout failures are uncertain unless expiry and release both complete", async () => {
+  const cases: Array<{
+    name: string;
+    overrides: Partial<StripeCreateCheckoutDependencies>;
+    expectedOutcome: "failed" | "uncertain";
+  }> = [
+    {
+      name: "invalid session with verified cleanup",
+      overrides: {
+        createSession: async () =>
+          sessionFixture({ url: "https://attacker.example/checkout" }),
+      },
+      expectedOutcome: "failed",
+    },
+    {
+      name: "invalid session without trustworthy cleanup identity",
+      overrides: {
+        createSession: async () => sessionFixture({ livemode: true }),
+      },
+      expectedOutcome: "uncertain",
+    },
+    {
+      name: "complete session owned by webhook",
+      overrides: {
+        createSession: async () =>
+          sessionFixture({
+            status: "complete",
+            payment_status: "paid",
+            url: null,
+          }),
+      },
+      expectedOutcome: "uncertain",
+    },
+    {
+      name: "attachment failure with expiration failure",
+      overrides: {
+        attachSession: async () => {
+          throw new Error("fixture database unavailable");
+        },
+        expireSession: async () => {
+          throw new Error("fixture Stripe unavailable");
+        },
+      },
+      expectedOutcome: "uncertain",
+    },
+    {
+      name: "attachment failure with invalid expiration evidence",
+      overrides: {
+        attachSession: async () => {
+          throw new Error("fixture database unavailable");
+        },
+        expireSession: async () =>
+          sessionFixture({ id: "cs_test_DifferentSession", status: "expired" }),
+      },
+      expectedOutcome: "uncertain",
+    },
+    {
+      name: "verified expiration followed by release failure",
+      overrides: {
+        attachSession: async () => {
+          throw new Error("fixture database unavailable");
+        },
+        releaseReservation: async () => {
+          throw new Error("fixture database unavailable");
+        },
+      },
+      expectedOutcome: "uncertain",
+    },
+    {
+      name: "expired session followed by completed release",
+      overrides: {
+        createSession: async () =>
+          sessionFixture({ status: "expired", url: null }),
+      },
+      expectedOutcome: "failed",
+    },
+  ];
+
+  for (const testCase of cases) {
+    const records: Array<Record<string, unknown>> = [];
+    const response = await createStripeCreateCheckoutHandler(dependencies({
+      ...testCase.overrides,
+      operationalSink: (serialized) => records.push(JSON.parse(serialized)),
+    }))(request());
+    assertEquals(response.status >= 500, true, testCase.name);
+    assertEquals(records.length, 1, testCase.name);
+    assertEquals(records[0].operation, "checkout.create", testCase.name);
+    assertEquals(records[0].outcome, testCase.expectedOutcome, testCase.name);
+  }
+});
+
 // Mutation caught: sibling origins or omission of the Checkout bearer header.
 Deno.test("checkout keeps exact-origin CORS and allows the bearer header", async () => {
   const handler = createStripeCreateCheckoutHandler(dependencies());

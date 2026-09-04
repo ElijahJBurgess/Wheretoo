@@ -10,6 +10,61 @@ const STRIPE_EVENT_ID = "evt_Task10Delivery";
 const SESSION_ID = "cs_test_Task10Checkout";
 const REFUND_ID = "re_Task10Refund";
 
+const invalidCheckoutSuccess: CheckoutOperationalEvent = {
+  contractVersion: "checkout_integrity_v1",
+  operation: "checkout.create",
+  outcome: "created",
+  resultStatus: "checkout_open",
+  orderId: ORDER_ID,
+  eventId: EVENT_ID,
+  providerObjectId: SESSION_ID,
+  itemCount: 1,
+  aggregateQuantity: 1,
+  currency: "usd",
+  subtotalMinor: 100,
+  totalMinor: 100,
+  applicationFeeAmountMinor: 10,
+  // @ts-expect-error A successful checkout must not carry a failure code.
+  errorCode: "INTERNAL_ERROR",
+};
+
+const invalidTerminalCancellation: CheckoutOperationalEvent = {
+  contractVersion: "checkout_integrity_v1",
+  operation: "checkout.cancel",
+  outcome: "cancelled",
+  orderId: ORDER_ID,
+  // @ts-expect-error A terminal order retry is not a cancellation transition.
+  priorStatus: "expired",
+  resultStatus: "cancelled",
+};
+
+const invalidRefundOutcome: CheckoutOperationalEvent = {
+  contractVersion: "checkout_integrity_v1",
+  operation: "refund.reconcile",
+  outcome: "applied",
+  orderId: ORDER_ID,
+  stripeEventId: STRIPE_EVENT_ID,
+  providerObjectId: REFUND_ID,
+  currency: "usd",
+  amountMinor: 100,
+  // @ts-expect-error An applied refund cannot have a review status.
+  resultStatus: "requires_review",
+  ticketStatus: "refunded",
+};
+
+// @ts-expect-error Webhook validation is not a checkout-create error.
+const invalidCheckoutError: CheckoutOperationalEvent = {
+  contractVersion: "checkout_integrity_v1",
+  operation: "checkout.create",
+  outcome: "failed",
+  errorCode: "INVALID_WEBHOOK",
+};
+
+void invalidCheckoutSuccess;
+void invalidTerminalCancellation;
+void invalidRefundOutcome;
+void invalidCheckoutError;
+
 function capture(event: CheckoutOperationalEvent): Record<string, unknown> {
   let serialized = "";
   emitOperationalEvent(event, (value) => serialized = value);
@@ -97,6 +152,7 @@ Deno.test("operational events serialize only the bounded fields for each discrim
         stripeEventId: STRIPE_EVENT_ID,
         providerObjectId: SESSION_ID,
         attempt: 2,
+        durationMs: 250,
       },
       expected: {
         contractVersion: "checkout_integrity_v1",
@@ -105,6 +161,7 @@ Deno.test("operational events serialize only the bounded fields for each discrim
         stripeEventId: STRIPE_EVENT_ID,
         providerObjectId: SESSION_ID,
         attempt: 2,
+        durationMs: 250,
       },
     },
     {
@@ -134,6 +191,7 @@ Deno.test("operational events serialize only the bounded fields for each discrim
         outcome: "ambiguous",
         orderId: ORDER_ID,
         providerObjectId: SESSION_ID,
+        priorStatus: "checkout_open",
         errorCode: "STRIPE_REQUEST_FAILED",
       },
       expected: {
@@ -142,6 +200,7 @@ Deno.test("operational events serialize only the bounded fields for each discrim
         outcome: "ambiguous",
         orderId: ORDER_ID,
         providerObjectId: SESSION_ID,
+        priorStatus: "checkout_open",
         errorCode: "STRIPE_REQUEST_FAILED",
       },
     },
@@ -155,8 +214,9 @@ Deno.test("operational events serialize only the bounded fields for each discrim
         providerObjectId: REFUND_ID,
         currency: "usd",
         amountMinor: 1_000,
-        totalMinor: 5_500,
-        errorCode: "PARTIAL_REFUND_REQUIRES_REVIEW",
+        resultStatus: "requires_review",
+        ticketStatus: "cancelled",
+        errorCode: "REFUND_POLICY_MISMATCH",
       },
       expected: {
         contractVersion: "checkout_integrity_v1",
@@ -166,9 +226,10 @@ Deno.test("operational events serialize only the bounded fields for each discrim
         stripeEventId: STRIPE_EVENT_ID,
         providerObjectId: REFUND_ID,
         currency: "usd",
-        totalMinor: 5_500,
         amountMinor: 1_000,
-        errorCode: "PARTIAL_REFUND_REQUIRES_REVIEW",
+        resultStatus: "requires_review",
+        ticketStatus: "cancelled",
+        errorCode: "REFUND_POLICY_MISMATCH",
       },
     },
   ];
@@ -184,6 +245,7 @@ Deno.test("runtime rebuilding drops request, buyer, bearer, provider, payment, U
     operation: "checkout.create",
     outcome: "created",
     orderId: ORDER_ID,
+    resultStatus: "checkout_open",
     buyerName: "Avery Stone",
     buyerEmail: "avery@example.com",
     clientRequestId: "900a9142-9111-4f87-84d5-b8545a94c7fb",
@@ -204,31 +266,75 @@ Deno.test("runtime rebuilding drops request, buyer, bearer, provider, payment, U
     operation: "checkout.create",
     outcome: "created",
     orderId: ORDER_ID,
+    resultStatus: "checkout_open",
   });
 });
 
 Deno.test("invalid bounded identifiers, enums, counters, money, duration, attempts, and error codes emit nothing", () => {
+  const checkoutFailure = {
+    contractVersion: "checkout_integrity_v1",
+    operation: "checkout.create",
+    outcome: "failed",
+    errorCode: "INTERNAL_ERROR",
+  };
   const invalid: unknown[] = [
-    { orderId: "not-an-order" },
-    { providerObjectId: "sk_fixture_secret" },
-    { currency: "eur" },
-    { itemCount: 11 },
-    { aggregateQuantity: -1 },
-    { totalMinor: Number.MAX_SAFE_INTEGER + 1 },
-    { amountMinor: 1.5 },
-    { durationMs: 86_400_001 },
-    { attempt: 0 },
-    { priorStatus: "arbitrary-provider-status" },
-    { errorCode: "card declined because fixture buyer" },
-  ];
-  for (const fields of invalid) {
-    const output: string[] = [];
-    emitOperationalEvent({
+    { ...checkoutFailure, orderId: "not-an-order" },
+    { ...checkoutFailure, providerObjectId: "sk_fixture_secret" },
+    { ...checkoutFailure, currency: "eur" },
+    { ...checkoutFailure, itemCount: 11 },
+    { ...checkoutFailure, aggregateQuantity: -1 },
+    { ...checkoutFailure, totalMinor: Number.MAX_SAFE_INTEGER + 1 },
+    {
+      contractVersion: "checkout_integrity_v1",
+      operation: "refund.reconcile",
+      outcome: "applied",
+      orderId: ORDER_ID,
+      stripeEventId: STRIPE_EVENT_ID,
+      providerObjectId: REFUND_ID,
+      currency: "usd",
+      amountMinor: 1.5,
+      resultStatus: "refunded",
+      ticketStatus: "refunded",
+    },
+    {
+      contractVersion: "checkout_integrity_v1",
+      operation: "webhook.delivery",
+      outcome: "retry",
+      stripeEventId: STRIPE_EVENT_ID,
+      providerObjectId: SESSION_ID,
+      errorCode: "TRANSIENT_PROCESSING_FAILURE",
+      durationMs: 86_400_001,
+    },
+    {
+      contractVersion: "checkout_integrity_v1",
+      operation: "webhook.delivery",
+      outcome: "duplicate",
+      stripeEventId: STRIPE_EVENT_ID,
+      providerObjectId: SESSION_ID,
+      attempt: 0,
+    },
+    {
+      contractVersion: "checkout_integrity_v1",
+      operation: "checkout.cancel",
+      outcome: "blocked",
+      orderId: ORDER_ID,
+      priorStatus: "arbitrary-provider-status",
+      errorCode: "CHECKOUT_UNAVAILABLE",
+    },
+    {
       contractVersion: "checkout_integrity_v1",
       operation: "checkout.create",
-      outcome: "failed",
-      ...(fields as Record<string, unknown>),
-    } as CheckoutOperationalEvent, (value) => output.push(value));
+      outcome: "created",
+      resultStatus: "arbitrary-provider-status",
+    },
+    { ...checkoutFailure, errorCode: "card declined because fixture buyer" },
+  ];
+  for (const event of invalid) {
+    const output: string[] = [];
+    emitOperationalEvent(
+      event as CheckoutOperationalEvent,
+      (value) => output.push(value),
+    );
     assertEquals(output, []);
   }
 });
@@ -242,6 +348,125 @@ Deno.test("a failing operational sink cannot change the caller outcome", () => {
   }, () => {
     throw new Error("fixture sink unavailable");
   });
+});
+
+Deno.test("a rejected async operational sink cannot change the caller outcome", async () => {
+  let unhandled = false;
+  const onUnhandled = (event: PromiseRejectionEvent) => {
+    unhandled = true;
+    event.preventDefault();
+  };
+  globalThis.addEventListener("unhandledrejection", onUnhandled);
+
+  try {
+    emitOperationalEvent({
+      contractVersion: "checkout_integrity_v1",
+      operation: "webhook.delivery",
+      outcome: "signature_failed",
+      errorCode: "INVALID_WEBHOOK",
+    }, async () => {
+      await Promise.resolve();
+      throw new Error("fixture async sink unavailable");
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assertEquals(unhandled, false);
+  } finally {
+    globalThis.removeEventListener("unhandledrejection", onUnhandled);
+  }
+});
+
+Deno.test("operational logger rejects inherited and accessor-backed contract fields", () => {
+  const serialized: string[] = [];
+  const sink = (value: string) => serialized.push(value);
+
+  emitOperationalEvent(
+    Object.create({
+      contractVersion: "checkout_integrity_v1",
+      operation: "webhook.delivery",
+      outcome: "signature_failed",
+      errorCode: "INVALID_WEBHOOK",
+    }) as CheckoutOperationalEvent,
+    sink,
+  );
+
+  emitOperationalEvent(
+    Object.assign(
+      Object.create({ orderId: ORDER_ID }),
+      {
+        contractVersion: "checkout_integrity_v1",
+        operation: "checkout.create",
+        outcome: "failed",
+        errorCode: "INTERNAL_ERROR",
+      },
+    ) as CheckoutOperationalEvent,
+    sink,
+  );
+
+  const accessorBacked = {
+    contractVersion: "checkout_integrity_v1",
+    operation: "checkout.create",
+    outcome: "failed",
+    errorCode: "INTERNAL_ERROR",
+  } as Record<string, unknown>;
+  Object.defineProperty(accessorBacked, "orderId", {
+    enumerable: true,
+    get: () => ORDER_ID,
+  });
+  emitOperationalEvent(
+    accessorBacked as unknown as CheckoutOperationalEvent,
+    sink,
+  );
+
+  assertEquals(serialized, []);
+});
+
+Deno.test("operational logger rejects misleading discriminator combinations at runtime", () => {
+  const serialized: string[] = [];
+  const sink = (value: string) => serialized.push(value);
+
+  emitOperationalEvent({
+    contractVersion: "checkout_integrity_v1",
+    operation: "checkout.create",
+    outcome: "created",
+    resultStatus: "checkout_open",
+    orderId: ORDER_ID,
+    eventId: EVENT_ID,
+    providerObjectId: SESSION_ID,
+    itemCount: 1,
+    aggregateQuantity: 1,
+    currency: "usd",
+    subtotalMinor: 100,
+    totalMinor: 100,
+    applicationFeeAmountMinor: 10,
+    errorCode: "INTERNAL_ERROR",
+  } as unknown as CheckoutOperationalEvent, sink);
+
+  emitOperationalEvent({
+    contractVersion: "checkout_integrity_v1",
+    operation: "checkout.cancel",
+    outcome: "cancelled",
+    orderId: ORDER_ID,
+    priorStatus: "expired",
+    resultStatus: "expired",
+  } as unknown as CheckoutOperationalEvent, sink);
+
+  emitOperationalEvent({
+    contractVersion: "checkout_integrity_v1",
+    operation: "checkout.create",
+    outcome: "failed",
+    errorCode: "INVALID_WEBHOOK",
+  } as unknown as CheckoutOperationalEvent, sink);
+
+  emitOperationalEvent({
+    contractVersion: "checkout_integrity_v1",
+    operation: "checkout.cancel",
+    outcome: "blocked",
+    orderId: ORDER_ID,
+    priorStatus: "open",
+    errorCode: "CHECKOUT_UNAVAILABLE",
+  } as unknown as CheckoutOperationalEvent, sink);
+
+  assertEquals(serialized, []);
 });
 
 if (import.meta.main) {

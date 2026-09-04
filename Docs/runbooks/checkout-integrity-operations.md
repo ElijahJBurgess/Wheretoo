@@ -142,7 +142,11 @@ order by orders.id;
 ```
 
 Detect ticket references or unit sequences that disagree with their order and
-order item, including gaps in the required `1..quantity` sequence.
+order item. Sequence completeness applies once an order has any issued ticket:
+an ordinary zero-ticket open, expired, cancelled, or payment-failed order is
+not anomalous here, while a partial issued set (including an entirely missing
+order-item slice) still exposes gaps in the required `1..quantity` sequence.
+The separate paid-order query above continues to catch paid zero-ticket sets.
 
 ```sql
 with incoherent_references as (
@@ -163,7 +167,12 @@ with incoherent_references as (
   from public.order_items as items
   cross join lateral generate_series(1, items.quantity)
     as expected(unit_sequence)
-  where not exists (
+  where exists (
+    select 1
+    from public.tickets as issued
+    where issued.order_id = items.order_id
+  )
+  and not exists (
     select 1
     from public.tickets as tickets
     where tickets.order_id = items.order_id
@@ -304,7 +313,8 @@ order by orders.id;
 
 Detect a provider object identifier bound to more than one order. These
 identifiers are non-secret reconciliation identities; no provider object body
-is selected.
+is selected. Customer identifiers are intentionally excluded because one
+Stripe Customer may validly be reused across multiple orders.
 
 ```sql
 with provider_references as (
@@ -319,8 +329,7 @@ with provider_references as (
     ('charge', orders.stripe_charge_id),
     ('transfer', orders.stripe_transfer_id),
     ('application_fee', orders.stripe_application_fee_id),
-    ('balance_transaction', orders.stripe_balance_transaction_id),
-    ('customer', orders.stripe_customer_id)
+    ('balance_transaction', orders.stripe_balance_transaction_id)
   ) as provider_values(object_type, object_id)
   where provider_values.object_id is not null
 )

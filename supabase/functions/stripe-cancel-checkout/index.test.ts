@@ -343,7 +343,7 @@ Deno.test("default cancellation resolves its bearer through the narrow service-o
   assertEquals(capturedArgs, { p_token_hash: TOKEN_HASH });
 });
 
-Deno.test("cancellation emits sanitized cancelled, blocked, and provider-ambiguous outcomes", async () => {
+Deno.test("cancellation emits truthful transition, no-transition, blocked, and ambiguous outcomes", async () => {
   const records: Array<Record<string, unknown>> = [];
   const operationalSink = (serialized: string) => {
     records.push(JSON.parse(serialized));
@@ -351,6 +351,10 @@ Deno.test("cancellation emits sanitized cancelled, blocked, and provider-ambiguo
 
   const cancelled = await createStripeCancelCheckoutHandler(dependencies({
     operationalSink,
+  }))(request());
+  const noTransition = await createStripeCancelCheckoutHandler(dependencies({
+    operationalSink,
+    findOrder: async () => order("expired"),
   }))(request());
   const blocked = await createStripeCancelCheckoutHandler(dependencies({
     operationalSink,
@@ -364,8 +368,8 @@ Deno.test("cancellation emits sanitized cancelled, blocked, and provider-ambiguo
   }))(request());
 
   assertEquals(
-    [cancelled.status, blocked.status, ambiguous.status],
-    [200, 409, 502],
+    [cancelled.status, noTransition.status, blocked.status, ambiguous.status],
+    [200, 200, 409, 502],
   );
   assertEquals(records, [
     {
@@ -376,6 +380,15 @@ Deno.test("cancellation emits sanitized cancelled, blocked, and provider-ambiguo
       providerObjectId: SESSION_ID,
       priorStatus: "checkout_open",
       resultStatus: "cancelled",
+    },
+    {
+      contractVersion: "checkout_integrity_v1",
+      operation: "checkout.cancel",
+      outcome: "no_transition",
+      orderId: ORDER_ID,
+      providerObjectId: SESSION_ID,
+      priorStatus: "expired",
+      resultStatus: "expired",
     },
     {
       contractVersion: "checkout_integrity_v1",

@@ -47,7 +47,8 @@ database owner/operator inside a read-only transaction.
 - [ ] Duplicate tiers return zero rows.
 - [ ] Mixed event, organizer, or currency returns zero rows.
 - [ ] Paid incomplete ticket sets return zero rows.
-- [ ] Incoherent ticket references or sequences return zero rows.
+- [ ] Incoherent ticket references or sequences return zero rows; a zero-ticket
+  non-paid order is excluded, while any partial issued order remains covered.
 - [ ] Cleanup-eligible count drains and oldest eligible age does not grow.
 - [ ] Review inventory is included in protected quantity; no tier is over
   capacity.
@@ -85,13 +86,18 @@ database owner/operator inside a read-only transaction.
   allowlisted operation/outcome.
 - [ ] Extra fields are rebuilt away at runtime, even when structural typing or
   a cast supplies them.
+- [ ] Inherited or accessor-backed contract fields emit nothing.
+- [ ] Operation/outcome/status combinations are discriminated and terminal
+  cancellation retries report no transition.
 - [ ] Invalid identifiers, enums, counters, money, duration, attempts, statuses,
   and error codes emit nothing.
 - [ ] No record contains buyer identity, request IDs, confirmation/cancellation
   bearers, headers, authorization/signature values, raw bodies, IP/user agent,
   Checkout URLs, payment details, arbitrary provider errors, or credentials.
 - [ ] A failed log sink does not change a checkout, webhook, cancellation,
-  fulfillment, or refund result.
+  fulfillment, or refund result, including a rejected asynchronous sink.
+- [ ] Refund events use the exact durable order/ticket status returned by
+  `server_apply_verified_refund`, including cumulative refund outcomes.
 - [ ] Operational events correlate only by already-known internal IDs, webhook
   IDs, and non-secret provider object identity.
 
