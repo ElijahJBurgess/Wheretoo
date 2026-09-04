@@ -17,11 +17,14 @@ TEMP_DIR=""
 TEMP_SECRET_FILE=""
 CURL_CONFIG=""
 CLEANUP_RESPONSE=""
+DIAGNOSTIC_CURL_CONFIG=""
+DIAGNOSTIC_RESPONSE=""
 CHECKOUT_SWITCH_STATE_FILE=""
 DRIVER_DEPLOYED=0
 DRIVER_DELETE_REQUIRED=0
 TEMP_SECRETS_SET=0
 CHECKOUT_SWITCH_CAPTURED=0
+ACCOUNT_OWNERSHIP_ACCEPTED=0
 TEARDOWN_FAILURE=0
 
 read_public_env() {
@@ -57,6 +60,31 @@ temporary_secret_count() {
     const names = new Set(["TASK17_PROOF_TOKEN", "TASK17_FIXTURE_PREFIX", "TASK17_CONNECTED_ACCOUNT_ID", "TASK17_CLOSE_CONNECTED_ACCOUNT"]);
     process.stdout.write(String(secrets.filter((item) => names.has(item.name)).length));
   ' "$list_file"
+}
+
+write_driver_request_config() {
+  task17_config_file=$1
+  task17_request_body=$2
+  {
+    printf 'url = "%s"\n' "$TEST_FUNCTION_URL"
+    printf 'request = "POST"\n'
+    printf 'header = "content-type: application/json"\n'
+    printf 'header = "apikey: %s"\n' "$TEST_SUPABASE_PUBLISHABLE_KEY"
+    printf 'header = "authorization: Bearer %s"\n' "$TEST_SUPABASE_PUBLISHABLE_KEY"
+    printf 'header = "x-task17-proof-token: %s"\n' "$PROOF_TOKEN"
+    printf 'data = "%s"\n' "$task17_request_body"
+  } > "$task17_config_file"
+  chmod 600 "$task17_config_file"
+}
+
+write_cleanup_config() {
+  if [ "$ACCOUNT_OWNERSHIP_ACCEPTED" -eq 1 ]; then
+    write_driver_request_config "$CURL_CONFIG" \
+      '{\"action\":\"cleanup\",\"close_connected_account\":true}'
+  else
+    write_driver_request_config "$CURL_CONFIG" \
+      '{\"action\":\"cleanup\",\"close_connected_account\":false}'
+  fi
 }
 
 capture_checkout_switch() {
@@ -126,6 +154,7 @@ cleanup() {
   [ $? -eq 0 ] || TEARDOWN_FAILURE=1
 
   if [ "$DRIVER_DEPLOYED" -eq 1 ] && [ -n "$CURL_CONFIG" ] && [ -f "$CURL_CONFIG" ]; then
+    write_cleanup_config
     curl --silent --show-error --fail-with-body --config "$CURL_CONFIG" > "$CLEANUP_RESPONSE"
     cleanup_status=$?
     if [ "$cleanup_status" -ne 0 ]; then
@@ -138,11 +167,15 @@ cleanup() {
         }
       ' "$CLEANUP_RESPONSE" 2>/dev/null || true
     fi
-    if [ "$cleanup_status" -ne 0 ] || ! node -e '
+    if [ "$cleanup_status" -ne 0 ] || ! EXPECT_ACCOUNT_CLOSED="$ACCOUNT_OWNERSHIP_ACCEPTED" node -e '
       const fs = require("node:fs");
       const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
       const counts = ["event_count", "organizer_count", "connect_count", "order_count", "tier_count", "receipt_count", "ticket_count", "dispute_count", "refund_count", "item_count"];
-      if (value.ok !== true || value.auth_user_absent !== true || value.connected_account_closed !== true || !counts.every((name) => value[name] === 0)) process.exit(1);
+      const closeExpected = process.env.EXPECT_ACCOUNT_CLOSED === "1";
+      const lifecycleMatches = closeExpected
+        ? value.connected_account_closed === true && value.connected_account_preserved === false
+        : value.connected_account_closed === false && value.connected_account_preserved === true;
+      if (value.ok !== true || value.auth_user_absent !== true || !lifecycleMatches || !counts.every((name) => value[name] === 0)) process.exit(1);
     ' "$CLEANUP_RESPONSE"; then
       TEARDOWN_FAILURE=1
     fi
@@ -272,6 +305,8 @@ chmod 600 "$projects_file" "$environment_file"
 TEMP_SECRET_FILE="$TEMP_DIR/driver-secrets.env"
 CURL_CONFIG="$TEMP_DIR/cleanup.curl"
 CLEANUP_RESPONSE="$TEMP_DIR/cleanup.json"
+DIAGNOSTIC_CURL_CONFIG="$TEMP_DIR/account-diagnostic.curl"
+DIAGNOSTIC_RESPONSE="$TEMP_DIR/account-diagnostic.json"
 PROOF_TOKEN=$(openssl rand -hex 32)
 FIXTURE_SUFFIX=$(openssl rand -hex 6)
 TEST_STRIPE_FIXTURE_PREFIX="task17_$FIXTURE_SUFFIX"
@@ -283,15 +318,9 @@ TEST_FUNCTION_URL="${TEST_SUPABASE_URL%/}/functions/v1/task17-transaction-driver
   printf 'TASK17_CONNECTED_ACCOUNT_ID=%s\n' "$TEST_CONNECTED_ACCOUNT_ID"
   printf 'TASK17_CLOSE_CONNECTED_ACCOUNT=true\n'
 } > "$TEMP_SECRET_FILE"
-{
-  printf 'url = "%s"\n' "$TEST_FUNCTION_URL"
-  printf 'request = "POST"\n'
-  printf 'header = "content-type: application/json"\n'
-  printf 'header = "apikey: %s"\n' "$TEST_SUPABASE_PUBLISHABLE_KEY"
-  printf 'header = "authorization: Bearer %s"\n' "$TEST_SUPABASE_PUBLISHABLE_KEY"
-  printf 'header = "x-task17-proof-token: %s"\n' "$PROOF_TOKEN"
-  printf 'data = "{\\"action\\":\\"cleanup\\"}"\n'
-} > "$CURL_CONFIG"
+write_cleanup_config
+write_driver_request_config "$DIAGNOSTIC_CURL_CONFIG" \
+  '{\"action\":\"account_diagnostic\"}'
 
 [ -d "$MATERIALIZED_DIR" ] || MATERIALIZED_DIR_CREATED=1
 mkdir -p "$MATERIALIZED_DIR"
@@ -320,6 +349,61 @@ DRIVER_DELETE_REQUIRED=1
 pnpm exec supabase functions deploy task17-transaction-driver \
   --project-ref "$PROJECT_REF" --no-verify-jwt --import-map deno.json >/dev/null
 DRIVER_DEPLOYED=1
+
+diagnostic_curl_status=0
+curl --silent --show-error --fail-with-body --config "$DIAGNOSTIC_CURL_CONFIG" \
+  > "$DIAGNOSTIC_RESPONSE" || diagnostic_curl_status=$?
+chmod 600 "$DIAGNOSTIC_RESPONSE"
+diagnostic_parse_status=0
+DIAGNOSTIC_RESPONSE_FILE="$DIAGNOSTIC_RESPONSE" node --input-type=module <<'NODE' || diagnostic_parse_status=$?
+import fs from 'node:fs'
+const value = JSON.parse(fs.readFileSync(process.env.DIAGNOSTIC_RESPONSE_FILE, 'utf8'))
+const record = (candidate) => typeof candidate === 'object' && candidate !== null && !Array.isArray(candidate)
+const exactKeys = (candidate, keys) => Object.keys(candidate).sort().join(',') === [...keys].sort().join(',')
+const predicateKeys = [
+  'dashboard_is_express',
+  'recipient_configuration_only',
+  'default_currency_is_usd',
+  'fees_collector_is_application',
+  'losses_collector_is_application',
+  'requirements_collector_is_stripe',
+]
+if (record(value) && value.ok === false && value.kind === 'ACCOUNT_RETRIEVE_FAILED' &&
+  exactKeys(value, ['kind', 'ok'])) {
+  process.stderr.write('Task 17 account diagnostic: ACCOUNT_RETRIEVE_FAILED\n')
+  process.exit(1)
+}
+if (record(value) && value.ok === false && value.kind === 'ACCOUNT_CONTRACT_MISMATCH' &&
+  exactKeys(value, ['account_contract', 'kind', 'ok']) && record(value.account_contract) &&
+  exactKeys(value.account_contract, predicateKeys) &&
+  predicateKeys.every((key) => typeof value.account_contract[key] === 'boolean')) {
+  const bitmap = predicateKeys.map((key) => `${key}=${value.account_contract[key]}`).join(' ')
+  process.stderr.write(`Task 17 account diagnostic: ACCOUNT_CONTRACT_MISMATCH ${bitmap}\n`)
+  process.exit(1)
+}
+const readyKeys = [
+  'ok',
+  'restricted_key_authenticated',
+  'webhook_signature_verified',
+  'livemode',
+  'connected_account_matches',
+  'transfers_status',
+  'payouts_status',
+  'requirements_status',
+]
+if (!record(value) || !exactKeys(value, readyKeys) || value.ok !== true ||
+  value.restricted_key_authenticated !== true || value.webhook_signature_verified !== true ||
+  value.livemode !== false || value.connected_account_matches !== true ||
+  value.transfers_status !== 'active' || value.payouts_status !== 'active' ||
+  value.requirements_status !== 'clear') {
+  process.stderr.write('Task 17 account diagnostic: INVALID_OR_NOT_READY\n')
+  process.exit(1)
+}
+NODE
+if [ "$diagnostic_curl_status" -ne 0 ] || [ "$diagnostic_parse_status" -ne 0 ]; then
+  exit 1
+fi
+ACCOUNT_OWNERSHIP_ACCEPTED=1
 
 capture_checkout_switch
 enable_checkout_for_fixture

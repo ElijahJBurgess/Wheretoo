@@ -60,6 +60,77 @@ describe('Stripe transaction proof configuration', () => {
 })
 
 describe('managed proof client boundary', () => {
+  it('accepts only fixed-shape account diagnostics at the managed response boundary', async () => {
+    const contractMismatch = {
+      ok: false,
+      kind: 'ACCOUNT_CONTRACT_MISMATCH',
+      account_contract: {
+        dashboard_is_express: false,
+        recipient_configuration_only: false,
+        default_currency_is_usd: true,
+        fees_collector_is_application: true,
+        losses_collector_is_application: true,
+        requirements_collector_is_stripe: true,
+      },
+    }
+    const retrievalFailure = { ok: false, kind: 'ACCOUNT_RETRIEVE_FAILED' }
+    const readyDiagnostic = {
+      ok: true,
+      restricted_key_authenticated: true,
+      webhook_signature_verified: true,
+      livemode: false,
+      connected_account_matches: true,
+      transfers_status: 'active',
+      payouts_status: 'active',
+      requirements_status: 'clear',
+    }
+    const responses = [
+      contractMismatch,
+      retrievalFailure,
+      readyDiagnostic,
+      {
+        ok: false,
+        kind: 'ACCOUNT_CONTRACT_MISMATCH',
+        account_contract: {
+          dashboard_is_express: false,
+          recipient_configuration_only: false,
+          default_currency_is_usd: true,
+          fees_collector_is_application: true,
+          losses_collector_is_application: true,
+          requirements_collector_is_stripe: true,
+          arbitrary_provider_field: false,
+        },
+      },
+      { ok: false, kind: 'ACCOUNT_RETRIEVE_FAILED', account_id: 'acct_forbidden' },
+    ]
+    const client = createManagedStripeProofClient(
+      {
+        credentialMode: 'managed_edge',
+        supabaseUrl: base.TEST_SUPABASE_URL,
+        supabasePublishableKey: base.TEST_SUPABASE_PUBLISHABLE_KEY,
+        stripePublishableKey: base.VITE_STRIPE_PUBLISHABLE_KEY,
+        functionUrl: base.TEST_FUNCTION_URL,
+        driverToken: base.TEST_STRIPE_DRIVER_TOKEN,
+        fixturePrefix: base.TEST_STRIPE_FIXTURE_PREFIX,
+        connectedAccountId: base.TEST_CONNECTED_ACCOUNT_ID,
+        connectedAccountDisposable: true,
+        restrictedKeyProof: 'managed:test-mode-authenticated',
+        webhookSecretProof: 'managed:signature-verified',
+      },
+      async () => Response.json(responses.shift()),
+    )
+
+    await expect(client.invoke('account_diagnostic')).resolves.toEqual(contractMismatch)
+    await expect(client.invoke('account_diagnostic')).resolves.toEqual(retrievalFailure)
+    await expect(client.invoke('account_diagnostic')).resolves.toEqual(readyDiagnostic)
+    await expect(client.invoke('account_diagnostic')).rejects.toThrow(
+      'Managed Stripe diagnostic returned invalid shape',
+    )
+    await expect(client.invoke('account_diagnostic')).rejects.toThrow(
+      'Managed Stripe proof returned unsafe data',
+    )
+  })
+
   it('rejects an unenumerated driver action before making a request', async () => {
     let requests = 0
     const client = createManagedStripeProofClient(
@@ -233,7 +304,7 @@ describe('managed proof client boundary', () => {
     )
     expect(driver).toContain('createWholeOrderRefund(')
     expect(driver).not.toContain('stripe.refunds.create(')
-    expect(driver).toContain('{ applied_configurations: connectedAccount.applied_configurations }')
+    expect(driver).toContain('applied_configurations: connectedAccount.applied_configurations,')
     expect(driver).not.toContain('from("disputes").delete()')
   })
 

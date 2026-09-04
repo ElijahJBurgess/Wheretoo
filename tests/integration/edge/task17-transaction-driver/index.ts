@@ -19,13 +19,17 @@ import {
   createStripeWebhookHandler,
 } from "../../../../supabase/functions/stripe-webhook/index.ts";
 import {
+  applyDiagnosticAccountCleanup,
   assertSafeProofResponse,
   deleteAndVerifyFixtureAuthUser,
   destinationChargeRelationsMatch,
   findExactFixtureAuthUser,
+  retrieveAccountForDiagnostic,
+  validateAccountForDiagnostic,
 } from "./contracts.ts";
 
 const actions = new Set([
+  "account_diagnostic",
   "server_proof",
   "setup",
   "inspect",
@@ -247,16 +251,22 @@ async function receipt(eventId: string): Promise<Record<string, unknown>> {
 }
 
 async function serverProof(): Promise<Record<string, unknown>> {
-  mustCloseConnectedAccount();
   const stripe = getStripe();
   const accountId = connectedAccountId();
-  const account = await stripe.v2.core.accounts.retrieve(accountId, {
-    include: ACCOUNT_INCLUDE,
-  });
+  const retrieved = await retrieveAccountForDiagnostic(() =>
+    stripe.v2.core.accounts.retrieve(accountId, { include: ACCOUNT_INCLUDE })
+  );
+  if (!retrieved.ok) return retrieved;
+  const account = retrieved.account;
   if (account.livemode !== false || account.id !== accountId) {
     throw new Error("LIVE_MODE_FORBIDDEN");
   }
-  const projection = validateApprovedConnectAccount(account);
+  const validated = validateAccountForDiagnostic(
+    account,
+    validateApprovedConnectAccount,
+  );
+  if (!validated.ok) return validated;
+  const projection = validated.projection;
   const safe = toSafeConnectStatus(projection, new Date().toISOString());
   const proofPayload = JSON.stringify({
     id: `evt_task17proof${crypto.randomUUID().replaceAll("-", "")}`,
@@ -345,7 +355,8 @@ async function fixtureAuthUser(
 }
 
 async function setup(): Promise<Record<string, unknown>> {
-  await serverProof();
+  const proof = await serverProof();
+  if (proof.ok !== true) throw new Error("STRIPE");
   const client = getServiceClient();
   let organizer = await fixtureOrganizer();
   if (organizer === null) {
@@ -1111,8 +1122,10 @@ async function createRefund(
   };
 }
 
-async function cleanup(): Promise<Record<string, unknown>> {
-  mustCloseConnectedAccount();
+async function cleanup(
+  closeConnectedAccount: unknown,
+): Promise<Record<string, unknown>> {
+  if (typeof closeConnectedAccount !== "boolean") throw new Error("INPUT");
   const client = getServiceClient();
   const organizer = await fixtureOrganizer();
   const authUser = await fixtureAuthUser(organizer?.id);
@@ -1357,24 +1370,28 @@ async function cleanup(): Promise<Record<string, unknown>> {
     ],
   );
   const disputeCount = 0; // A dispute row would have blocked the order delete.
-  const stripe = getStripe();
-  let connectedAccount = await stripe.v2.core.accounts.retrieve(
-    connectedAccountId(),
-    { include: ACCOUNT_INCLUDE },
+  if (closeConnectedAccount) mustCloseConnectedAccount();
+  const accountLifecycle = await applyDiagnosticAccountCleanup(
+    closeConnectedAccount,
+    () =>
+      getStripe().v2.core.accounts.retrieve(connectedAccountId(), {
+        include: ACCOUNT_INCLUDE,
+      }),
+    (connectedAccount) =>
+      getStripe().v2.core.accounts.close(connectedAccount.id, {
+        applied_configurations: connectedAccount.applied_configurations,
+      }),
+    (connectedAccount) => {
+      if (connectedAccount.livemode !== false) {
+        throw new Error("LIVE_MODE_FORBIDDEN");
+      }
+    },
   );
-  if (connectedAccount.livemode !== false) {
-    throw new Error("LIVE_MODE_FORBIDDEN");
-  }
-  if (connectedAccount.closed !== true) {
-    connectedAccount = await stripe.v2.core.accounts.close(
-      connectedAccount.id,
-      { applied_configurations: connectedAccount.applied_configurations },
-    );
-  }
-  const connectedAccountClosed = connectedAccount.closed === true &&
-    connectedAccount.livemode === false;
+  const accountLifecycleVerified = closeConnectedAccount
+    ? accountLifecycle.connectedAccountClosed
+    : accountLifecycle.connectedAccountPreserved;
   return {
-    ok: connectedAccountClosed && [
+    ok: accountLifecycleVerified && [
       eventCount,
       organizerCount,
       connectCount,
@@ -1406,7 +1423,8 @@ async function cleanup(): Promise<Record<string, unknown>> {
     archived_price_count: priceIds.size,
     archived_product_count: productIds.size,
     auth_user_absent: true,
-    connected_account_closed: connectedAccountClosed,
+    connected_account_closed: accountLifecycle.connectedAccountClosed,
+    connected_account_preserved: accountLifecycle.connectedAccountPreserved,
   };
 }
 
@@ -1423,6 +1441,7 @@ Deno.serve(async (request) => {
       return json({ ok: false }, 400);
     }
     const input = body as Record<string, unknown>;
+    if (action === "account_diagnostic") return json(await serverProof());
     if (action === "server_proof") return json(await serverProof());
     if (action === "setup") return json(await setup());
     if (action === "inspect") return json(await inspect(input.event_id));
@@ -1446,7 +1465,9 @@ Deno.serve(async (request) => {
     if (action === "create_refund") {
       return json(await createRefund(input.order_handle));
     }
-    if (action === "cleanup") return json(await cleanup());
+    if (action === "cleanup") {
+      return json(await cleanup(input.close_connected_account));
+    }
     return json({ ok: false }, 400);
   } catch (error) {
     const kind = error instanceof Error && ([

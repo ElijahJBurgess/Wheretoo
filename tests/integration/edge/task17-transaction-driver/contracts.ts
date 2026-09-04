@@ -15,6 +15,110 @@ function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+export type ApprovedAccountContractBitmap = {
+  dashboard_is_express: boolean;
+  recipient_configuration_only: boolean;
+  default_currency_is_usd: boolean;
+  fees_collector_is_application: boolean;
+  losses_collector_is_application: boolean;
+  requirements_collector_is_stripe: boolean;
+};
+
+function approvedAccountContractBitmap(
+  value: unknown,
+): ApprovedAccountContractBitmap {
+  const account = record(value) ? value : {};
+  const defaults = record(account.defaults) ? account.defaults : {};
+  const responsibilities = record(defaults.responsibilities)
+    ? defaults.responsibilities
+    : {};
+  return {
+    dashboard_is_express: account.dashboard === "express",
+    recipient_configuration_only: Array.isArray(
+      account.applied_configurations,
+    ) &&
+      account.applied_configurations.length === 1 &&
+      account.applied_configurations[0] === "recipient",
+    default_currency_is_usd: defaults.currency === "usd",
+    fees_collector_is_application:
+      responsibilities.fees_collector === "application",
+    losses_collector_is_application:
+      responsibilities.losses_collector === "application",
+    requirements_collector_is_stripe:
+      responsibilities.requirements_collector === "stripe",
+  };
+}
+
+export async function retrieveAccountForDiagnostic<T>(
+  retrieve: () => Promise<T>,
+): Promise<
+  { ok: true; account: T } | {
+    ok: false;
+    kind: "ACCOUNT_RETRIEVE_FAILED";
+  }
+> {
+  try {
+    return { ok: true, account: await retrieve() };
+  } catch {
+    return { ok: false, kind: "ACCOUNT_RETRIEVE_FAILED" };
+  }
+}
+
+export function validateAccountForDiagnostic<TAccount, TProjection>(
+  account: TAccount,
+  validate: (value: TAccount) => TProjection,
+):
+  | { ok: true; projection: TProjection }
+  | {
+    ok: false;
+    kind: "ACCOUNT_CONTRACT_MISMATCH";
+    account_contract: ApprovedAccountContractBitmap;
+  } {
+  const accountContract = approvedAccountContractBitmap(account);
+  try {
+    const projection = validate(account);
+    if (Object.values(accountContract).every((predicate) => predicate)) {
+      return { ok: true, projection };
+    }
+  } catch {
+    // The fixed predicate bitmap below is the only safe diagnostic surface.
+  }
+  return {
+    ok: false,
+    kind: "ACCOUNT_CONTRACT_MISMATCH",
+    account_contract: accountContract,
+  };
+}
+
+export async function applyDiagnosticAccountCleanup<
+  T extends {
+    closed?: boolean;
+  },
+>(
+  ownershipAccepted: boolean,
+  retrieve: () => Promise<T>,
+  close: (account: T) => Promise<T>,
+  assertTestMode: (account: T) => void,
+): Promise<{
+  connectedAccountClosed: boolean;
+  connectedAccountPreserved: boolean;
+}> {
+  if (!ownershipAccepted) {
+    return {
+      connectedAccountClosed: false,
+      connectedAccountPreserved: true,
+    };
+  }
+  let account = await retrieve();
+  assertTestMode(account);
+  if (account.closed !== true) account = await close(account);
+  assertTestMode(account);
+  return {
+    connectedAccountClosed: account.closed === true,
+    connectedAccountPreserved: false,
+  };
+}
+
 function expandableId(value: unknown): string | null {
   if (typeof value === "string") return value;
   return record(value) && typeof value.id === "string" ? value.id : null;

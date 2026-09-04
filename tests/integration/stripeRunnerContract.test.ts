@@ -86,14 +86,26 @@ esac
   const fakeCurl = `#!/bin/sh
 printf 'curl %s\\n' "$*" >> "$FAKE_COMMAND_LOG"
 previous=''
+config_file=''
 for argument in "$@"; do
   if [ "$previous" = '--config' ]; then
+    config_file="$argument"
     mode=$(stat -f '%Lp' "$argument")
     printf 'curl-config-mode %s\\n' "$mode" >> "$FAKE_COMMAND_LOG"
   fi
   previous=$argument
 done
-printf '%s\\n' "$FAKE_CLEANUP_RESPONSE"
+if grep -q 'account_diagnostic' "$config_file"; then
+  printf '%s\\n' 'curl-action account_diagnostic' >> "$FAKE_COMMAND_LOG"
+  printf '%s\\n' "$FAKE_DIAGNOSTIC_RESPONSE"
+else
+  if grep -q 'close_connected_account.*true' "$config_file"; then
+    printf '%s\\n' 'cleanup-close-request true' >> "$FAKE_COMMAND_LOG"
+  else
+    printf '%s\\n' 'cleanup-close-request false' >> "$FAKE_COMMAND_LOG"
+  fi
+  printf '%s\\n' "$FAKE_CLEANUP_RESPONSE"
+fi
 `
   await writeFile(path.join(root, 'fake-bin/pnpm'), fakePnpm)
   await writeFile(path.join(root, 'fake-bin/curl'), fakeCurl)
@@ -113,7 +125,8 @@ printf '%s\\n' "$FAKE_CLEANUP_RESPONSE"
       FAKE_PROJECTS_RESPONSE: '[{"id":"abcdefghijklmnopqrst","linked":true,"status":"ACTIVE_HEALTHY"}]',
       FAKE_POLICY_QUERY_FAILURE: '0',
       FAKE_POLICY_RESPONSE: '{"rows":[{"policy_environment":"development"}]}',
-      FAKE_CLEANUP_RESPONSE: '{"ok":true,"event_count":0,"organizer_count":0,"connect_count":0,"order_count":0,"tier_count":0,"receipt_count":0,"ticket_count":0,"dispute_count":0,"refund_count":0,"item_count":0,"auth_user_absent":true,"connected_account_closed":true}',
+      FAKE_DIAGNOSTIC_RESPONSE: '{"ok":true,"restricted_key_authenticated":true,"webhook_signature_verified":true,"livemode":false,"connected_account_matches":true,"transfers_status":"active","payouts_status":"active","requirements_status":"clear"}',
+      FAKE_CLEANUP_RESPONSE: '{"ok":true,"event_count":0,"organizer_count":0,"connect_count":0,"order_count":0,"tier_count":0,"receipt_count":0,"ticket_count":0,"dispute_count":0,"refund_count":0,"item_count":0,"auth_user_absent":true,"connected_account_closed":true,"connected_account_preserved":false}',
       TEST_SUPABASE_URL: 'https://abcdefghijklmnopqrst.supabase.co',
       TEST_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_contract',
       VITE_STRIPE_PUBLISHABLE_KEY: 'pk_test_contract',
@@ -143,6 +156,51 @@ printf '%s\\n' "$FAKE_CLEANUP_RESPONSE"
 }
 
 describe('Task 17 managed proof runner', () => {
+  it('diagnoses before ownership and preserves the account when the contract mismatches', async () => {
+    const result = await runRunner(false, false, {
+      FAKE_DIAGNOSTIC_RESPONSE: '{"ok":false,"kind":"ACCOUNT_CONTRACT_MISMATCH","account_contract":{"dashboard_is_express":false,"recipient_configuration_only":false,"default_currency_is_usd":true,"fees_collector_is_application":true,"losses_collector_is_application":true,"requirements_collector_is_stripe":true}}',
+      FAKE_CLEANUP_RESPONSE: '{"ok":true,"event_count":0,"organizer_count":0,"connect_count":0,"order_count":0,"tier_count":0,"receipt_count":0,"ticket_count":0,"dispute_count":0,"refund_count":0,"item_count":0,"auth_user_absent":true,"connected_account_closed":false,"connected_account_preserved":true}',
+    })
+
+    expect(result.exitCode).not.toBe(0)
+    expect(result.log).toContain('curl-action account_diagnostic')
+    expect(result.log).toContain('cleanup-close-request false')
+    expect(result.log).not.toContain('set checkout_creation_enabled = true')
+    expect(result.log).not.toContain('vitest run')
+    expect(result.log).toContain('supabase functions delete task17-transaction-driver')
+    expect(result.log).toContain(
+      'supabase secrets unset TASK17_PROOF_TOKEN TASK17_FIXTURE_PREFIX TASK17_CONNECTED_ACCOUNT_ID TASK17_CLOSE_CONNECTED_ACCOUNT',
+    )
+  })
+
+  it('preserves the account when the diagnostic cannot retrieve it', async () => {
+    const result = await runRunner(false, false, {
+      FAKE_DIAGNOSTIC_RESPONSE: '{"ok":false,"kind":"ACCOUNT_RETRIEVE_FAILED"}',
+      FAKE_CLEANUP_RESPONSE: '{"ok":true,"event_count":0,"organizer_count":0,"connect_count":0,"order_count":0,"tier_count":0,"receipt_count":0,"ticket_count":0,"dispute_count":0,"refund_count":0,"item_count":0,"auth_user_absent":true,"connected_account_closed":false,"connected_account_preserved":true}',
+    })
+
+    expect(result.exitCode).not.toBe(0)
+    expect(result.log).toContain('curl-action account_diagnostic')
+    expect(result.log).toContain('cleanup-close-request false')
+    expect(result.log).not.toContain('set checkout_creation_enabled = true')
+    expect(result.log).not.toContain('vitest run')
+  })
+
+  it('accepts ownership only after a passing diagnostic and then requires exact closure', async () => {
+    const result = await runRunner(false)
+
+    expect(result.exitCode).toBe(0)
+    expect(result.log).toContain('curl-action account_diagnostic')
+    expect(result.log.indexOf('curl-action account_diagnostic')).toBeLessThan(
+      result.log.indexOf('set checkout_creation_enabled = true'),
+    )
+    expect(result.log.indexOf('curl-action account_diagnostic')).toBeLessThan(
+      result.log.indexOf('vitest run'),
+    )
+    expect(result.log.match(/cleanup-close-request true/g)).toHaveLength(1)
+    expect(result.log).not.toContain('cleanup-close-request false')
+  })
+
   it('deploys the committed driver and tears down the endpoint and temporary secrets', async () => {
     const result = await runRunner(false)
     expect(result.exitCode).toBe(0)

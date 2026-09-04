@@ -1,5 +1,175 @@
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
+import type Stripe from "stripe";
+import { validateApprovedConnectAccount } from "../../../../supabase/functions/stripe-connect-session/connect.ts";
 import * as contracts from "./contracts.ts";
+
+const approvedAccountContract: Stripe.V2.Core.Account = {
+  id: "acct_ApprovedDiagnosticFixture",
+  object: "v2.core.account",
+  dashboard: "express",
+  applied_configurations: ["recipient"],
+  configuration: {
+    recipient: {
+      applied: true,
+      capabilities: {
+        stripe_balance: {
+          stripe_transfers: { status: "active", status_details: [] },
+          payouts: { status: "active", status_details: [] },
+        },
+      },
+    },
+  },
+  created: "2026-09-04T00:00:00.000Z",
+  defaults: {
+    currency: "usd",
+    responsibilities: {
+      fees_collector: "application",
+      losses_collector: "application",
+      requirements_collector: "stripe",
+    },
+  },
+  livemode: false,
+  requirements: { entries: [] },
+};
+
+Deno.test("account diagnostic classifies retrieval failure without exposing the provider error", async () => {
+  const retrieve = Reflect.get(contracts, "retrieveAccountForDiagnostic");
+  assertEquals(typeof retrieve, "function");
+  if (typeof retrieve !== "function") return;
+
+  const result = await retrieve(async () => {
+    throw new Error("provider body must not escape");
+  });
+
+  assertEquals(result, { ok: false, kind: "ACCOUNT_RETRIEVE_FAILED" });
+  assertEquals(JSON.stringify(result).includes("provider body"), false);
+});
+
+Deno.test("account diagnostic reports only the fixed approved-contract bitmap on mismatch", () => {
+  const validate = Reflect.get(contracts, "validateAccountForDiagnostic");
+  assertEquals(typeof validate, "function");
+  if (typeof validate !== "function") return;
+
+  const result = validate(
+    {
+      id: "acct_must_not_escape",
+      dashboard: "full",
+      applied_configurations: ["merchant"],
+      defaults: {
+        currency: "eur",
+        responsibilities: {
+          fees_collector: "stripe",
+          losses_collector: "stripe",
+          requirements_collector: "application",
+          arbitrary_provider_field: "must not escape",
+        },
+      },
+    },
+    () => {
+      throw new Error("INVALID_STRIPE_ACCOUNT");
+    },
+  );
+
+  assertEquals(result, {
+    ok: false,
+    kind: "ACCOUNT_CONTRACT_MISMATCH",
+    account_contract: {
+      dashboard_is_express: false,
+      recipient_configuration_only: false,
+      default_currency_is_usd: false,
+      fees_collector_is_application: false,
+      losses_collector_is_application: false,
+      requirements_collector_is_stripe: false,
+    },
+  });
+  const serialized = JSON.stringify(result);
+  assertEquals(serialized.includes("acct_"), false);
+  assertEquals(serialized.includes("arbitrary_provider_field"), false);
+  assertEquals(serialized.includes("must not escape"), false);
+});
+
+Deno.test("account diagnostic requires the authoritative validator before reporting success", () => {
+  const validate = Reflect.get(contracts, "validateAccountForDiagnostic");
+  assertEquals(typeof validate, "function");
+  if (typeof validate !== "function") return;
+
+  let validationCount = 0;
+  const projection: ReturnType<typeof validateApprovedConnectAccount> = {
+    transfersStatus: "active",
+    payoutsStatus: "active",
+    requirementsStatus: "clear",
+    requirementsCurrentlyDueCount: 0,
+    requirementsPastDueCount: 0,
+    lastStatusCode: null,
+  };
+  assertEquals(
+    validate(approvedAccountContract, (account: Stripe.V2.Core.Account) => {
+      validationCount += 1;
+      return validateApprovedConnectAccount(account);
+    }),
+    { ok: true, projection },
+  );
+  assertEquals(validationCount, 1);
+
+  assertEquals(
+    validate(approvedAccountContract, () => {
+      throw new Error("INVALID_STRIPE_ACCOUNT");
+    }),
+    {
+      ok: false,
+      kind: "ACCOUNT_CONTRACT_MISMATCH",
+      account_contract: {
+        dashboard_is_express: true,
+        recipient_configuration_only: true,
+        default_currency_is_usd: true,
+        fees_collector_is_application: true,
+        losses_collector_is_application: true,
+        requirements_collector_is_stripe: true,
+      },
+    },
+  );
+});
+
+Deno.test("diagnostic cleanup preserves before ownership and closes exactly after acceptance", async () => {
+  const cleanupAccount = Reflect.get(
+    contracts,
+    "applyDiagnosticAccountCleanup",
+  );
+  assertEquals(typeof cleanupAccount, "function");
+  if (typeof cleanupAccount !== "function") return;
+
+  let retrieveCount = 0;
+  let closeCount = 0;
+  const retrieve = async () => {
+    retrieveCount += 1;
+    return { closed: false, livemode: false };
+  };
+  const close = async () => {
+    closeCount += 1;
+    return { closed: true, livemode: false };
+  };
+  const assertTestMode = (account: { livemode: boolean }) => {
+    if (account.livemode !== false) throw new Error("LIVE_MODE_FORBIDDEN");
+  };
+
+  assertEquals(
+    await cleanupAccount(false, retrieve, close, assertTestMode),
+    { connectedAccountClosed: false, connectedAccountPreserved: true },
+  );
+  assertEquals({ retrieveCount, closeCount }, {
+    retrieveCount: 0,
+    closeCount: 0,
+  });
+
+  assertEquals(
+    await cleanupAccount(true, retrieve, close, assertTestMode),
+    { connectedAccountClosed: true, connectedAccountPreserved: false },
+  );
+  assertEquals({ retrieveCount, closeCount }, {
+    retrieveCount: 1,
+    closeCount: 1,
+  });
+});
 
 Deno.test("fixture Auth lookup follows every page and returns only the exact identity", async () => {
   const findUser = Reflect.get(contracts, "findExactFixtureAuthUser");
