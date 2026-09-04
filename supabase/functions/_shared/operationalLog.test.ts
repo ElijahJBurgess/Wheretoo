@@ -94,6 +94,20 @@ const invalidAppliedRefundState: CheckoutOperationalEvent = {
   ticketStatus: "none",
 };
 
+// @ts-expect-error A refund held for review must include a specific safe reason.
+const invalidReasonlessRefundReview: CheckoutOperationalEvent = {
+  contractVersion: "checkout_integrity_v1",
+  operation: "refund.reconcile",
+  outcome: "review",
+  orderId: ORDER_ID,
+  stripeEventId: STRIPE_EVENT_ID,
+  providerObjectId: REFUND_ID,
+  currency: "usd",
+  amountMinor: 100,
+  resultStatus: "requires_review",
+  ticketStatus: "cancelled",
+};
+
 // @ts-expect-error Webhook validation is not a checkout-create error.
 const invalidCheckoutError: CheckoutOperationalEvent = {
   contractVersion: "checkout_integrity_v1",
@@ -109,6 +123,7 @@ void invalidCheckoutUncertainty;
 void invalidBlockedCancellation;
 void invalidAmbiguousCancellation;
 void invalidAppliedRefundState;
+void invalidReasonlessRefundReview;
 void invalidCheckoutError;
 
 function capture(event: CheckoutOperationalEvent): Record<string, unknown> {
@@ -497,6 +512,15 @@ Deno.test("operational logger rejects inherited and accessor-backed contract fie
 Deno.test("operational logger rejects misleading discriminator combinations at runtime", () => {
   const serialized: string[] = [];
   const sink = (value: string) => serialized.push(value);
+
+  emitOperationalEvent({
+    contractVersion: "checkout_integrity_v1",
+    operation: "checkout.create",
+    outcome: "created",
+    resultStatus: "checkout_open",
+    orderId: ORDER_ID,
+    actualTicketCount: 1,
+  } as unknown as CheckoutOperationalEvent, sink);
 
   emitOperationalEvent({
     contractVersion: "checkout_integrity_v1",

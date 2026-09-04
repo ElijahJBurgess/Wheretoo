@@ -74,6 +74,7 @@ export type WebhookMismatchOperationalErrorCode =
   | "CHECKOUT_LINE_CURRENCY_MISMATCH"
   | "CHECKOUT_LINE_QUANTITY_MISMATCH"
   | "CHECKOUT_LINE_TIER_MISMATCH"
+  | "CHECKOUT_RECONCILIATION_REVIEW_MISMATCH"
   | "DISPUTE_RECOVERY_MISMATCH"
   | "DISPUTE_SNAPSHOT_MISMATCH"
   | "INTERNAL_ERROR"
@@ -246,6 +247,7 @@ type WebhookFulfillmentEvent = OperationalBase & CheckoutSummaryFields & {
   stripeEventId: string;
   providerObjectId: string;
   resultStatus: "paid";
+  actualTicketCount: number;
   priorStatus?: never;
   errorCode?: never;
 };
@@ -301,7 +303,7 @@ type RefundReconciliationEvent =
     outcome: "review";
     resultStatus: "requires_review";
     ticketStatus: RefundTicketStatus;
-    errorCode?: "REFUND_POLICY_MISMATCH";
+    errorCode: "REFUND_DURABLE_STATE_REVIEW" | "REFUND_POLICY_MISMATCH";
   }
   | RefundEventFields & {
     outcome: "review";
@@ -586,6 +588,7 @@ const WEBHOOK_MISMATCH_ERROR_CODES = new Set<
   "CHECKOUT_LINE_CURRENCY_MISMATCH",
   "CHECKOUT_LINE_QUANTITY_MISMATCH",
   "CHECKOUT_LINE_TIER_MISMATCH",
+  "CHECKOUT_RECONCILIATION_REVIEW_MISMATCH",
   "DISPUTE_RECOVERY_MISMATCH",
   "DISPUTE_SNAPSHOT_MISMATCH",
   "INTERNAL_ERROR",
@@ -623,6 +626,7 @@ const KNOWN_FIELDS = new Set([
   ...CHECKOUT_SUMMARY_FIELDS,
   "stripeEventId",
   "amountMinor",
+  "actualTicketCount",
   "attempt",
   "durationMs",
   "priorStatus",
@@ -748,6 +752,7 @@ function schemaFields(
     return [
       ...CHECKOUT_SUMMARY_FIELDS,
       "stripeEventId",
+      "actualTicketCount",
       "resultStatus",
     ];
   }
@@ -860,7 +865,8 @@ function validCombination(
   if (operation === "webhook.fulfillment") {
     return outcome === "fulfilled" &&
       hasAll(source, ["orderId", "stripeEventId", "providerObjectId"]) &&
-      source.resultStatus === "paid";
+      source.resultStatus === "paid" &&
+      typeof source.actualTicketCount === "number";
   }
   if (operation === "refund.reconcile") {
     if (
@@ -876,7 +882,7 @@ function validCombination(
     ) return false;
     if (outcome === "review") {
       if (source.resultStatus === "requires_review") {
-        return source.errorCode === undefined ||
+        return source.errorCode === "REFUND_DURABLE_STATE_REVIEW" ||
           source.errorCode === "REFUND_POLICY_MISMATCH";
       }
       return source.resultStatus !== "requires_review" &&
@@ -972,6 +978,7 @@ function validatedRecord(value: unknown): Record<string, unknown> | null {
       0,
       MAX_MONEY_MINOR,
     ) ||
+    !optionalInteger(source, record, "actualTicketCount", 0, 10) ||
     !optionalInteger(source, record, "attempt", 1, MAX_DELIVERY_ATTEMPT) ||
     !optionalInteger(source, record, "durationMs", 0, MAX_DURATION_MS) ||
     !optionalString(

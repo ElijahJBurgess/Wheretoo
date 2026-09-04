@@ -179,6 +179,14 @@ with incoherent_references as (
       and tickets.order_item_id = items.id
       and tickets.unit_sequence = expected.unit_sequence
   )
+), duplicate_sequences as (
+  select
+    tickets.order_id,
+    tickets.order_item_id,
+    tickets.unit_sequence
+  from public.tickets as tickets
+  group by tickets.order_id, tickets.order_item_id, tickets.unit_sequence
+  having count(*) > 1
 )
 select
   'incoherent_reference'::text as anomaly_status,
@@ -191,6 +199,12 @@ select
   missing_sequences.order_id,
   missing_sequences.order_item_id as object_id
 from missing_sequences
+union all
+select
+  'duplicate_sequence'::text as anomaly_status,
+  duplicate_sequences.order_id,
+  duplicate_sequences.order_item_id as object_id
+from duplicate_sequences
 order by order_id, anomaly_status, object_id;
 ```
 
@@ -330,6 +344,20 @@ with provider_references as (
     ('transfer', orders.stripe_transfer_id),
     ('application_fee', orders.stripe_application_fee_id),
     ('balance_transaction', orders.stripe_balance_transaction_id)
+  ) as provider_values(object_type, object_id)
+  where provider_values.object_id is not null
+  union all
+  select
+    refunds.order_id,
+    provider_values.object_type,
+    provider_values.object_id
+  from public.refunds as refunds
+  cross join lateral (values
+    ('refund', refunds.stripe_refund_id),
+    ('payment_intent', refunds.stripe_payment_intent_id),
+    ('charge', refunds.stripe_charge_id),
+    ('transfer_reversal', refunds.stripe_transfer_reversal_id),
+    ('application_fee_refund', refunds.stripe_application_fee_refund_id)
   ) as provider_values(object_type, object_id)
   where provider_values.object_id is not null
 )

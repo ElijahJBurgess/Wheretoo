@@ -139,6 +139,12 @@ export interface FulfillmentSnapshot extends PaymentSnapshot {
   customerId: string | null;
 }
 
+export interface FulfillmentApplyResult {
+  orderId: string;
+  orderStatus: "paid" | "partially_refunded" | "refunded" | "requires_review";
+  ticketCount: number;
+}
+
 export interface PaymentFailureSnapshot extends PaymentSnapshot {
   failureCode: "ASYNC_PAYMENT_FAILED" | "CHECKOUT_EXPIRED";
 }
@@ -239,7 +245,9 @@ export interface StripeWebhookDependencies {
     refreshSequence: number,
     projection: ConnectStatusProjection,
   ): Promise<boolean>;
-  fulfillPaidOrder(snapshot: FulfillmentSnapshot): Promise<void>;
+  fulfillPaidOrder(
+    snapshot: FulfillmentSnapshot,
+  ): Promise<FulfillmentApplyResult>;
   markPaymentProcessing(snapshot: PaymentSnapshot): Promise<void>;
   markPaymentFailed(snapshot: PaymentFailureSnapshot): Promise<void>;
   markPaymentRequiresReview(snapshot: PaymentReviewSnapshot): Promise<void>;
@@ -287,6 +295,7 @@ function safeWebhookErrorCode(
     case "CHECKOUT_LINE_CURRENCY_MISMATCH":
     case "CHECKOUT_LINE_QUANTITY_MISMATCH":
     case "CHECKOUT_LINE_TIER_MISMATCH":
+    case "CHECKOUT_RECONCILIATION_REVIEW_MISMATCH":
     case "DISPUTE_RECOVERY_MISMATCH":
     case "DISPUTE_SNAPSHOT_MISMATCH":
     case "INVALID_EVENT_ENVELOPE":
@@ -665,6 +674,33 @@ async function domainRpc(name: string, params: Record<string, unknown>) {
   if (error !== null) throwRpc(error);
 }
 
+export function fulfillmentApplyResultFromRpc(
+  value: unknown,
+  expectedOrderId: string,
+): FulfillmentApplyResult {
+  if (!Array.isArray(value) || value.length !== 1) {
+    permanent("CHECKOUT_RECONCILIATION_REVIEW_MISMATCH");
+  }
+  const row = value[0];
+  if (
+    !isRecord(row) || Object.getPrototypeOf(row) !== Object.prototype ||
+    !exactKeys(row, ["order_id", "order_status", "ticket_count"]) ||
+    row.order_id !== expectedOrderId || !UUID_PATTERN.test(expectedOrderId) ||
+    (row.order_status !== "paid" &&
+      row.order_status !== "partially_refunded" &&
+      row.order_status !== "refunded" &&
+      row.order_status !== "requires_review") ||
+    !Number.isSafeInteger(row.ticket_count) ||
+    (row.ticket_count as number) < 0 ||
+    (row.ticket_count as number) > 10
+  ) permanent("CHECKOUT_RECONCILIATION_REVIEW_MISMATCH");
+  return {
+    orderId: row.order_id,
+    orderStatus: row.order_status,
+    ticketCount: row.ticket_count as number,
+  };
+}
+
 export function refundApplyResultFromRpc(
   value: unknown,
   expectedOrderId: string,
@@ -779,25 +815,31 @@ export function createDefaultStripeWebhookDependencies(): StripeWebhookDependenc
       );
       return true;
     },
-    fulfillPaidOrder: (value) =>
-      domainRpc("server_fulfill_paid_order", {
-        p_stripe_event_id: value.stripeEventId,
-        p_order_id: value.orderId,
-        p_checkout_session_id: value.checkoutSessionId,
-        p_payment_intent_id: value.paymentIntentId,
-        p_charge_id: value.chargeId,
-        p_transfer_id: value.transferId,
-        p_application_fee_id: value.applicationFeeId,
-        p_balance_transaction_id: value.balanceTransactionId,
-        p_customer_id: value.customerId,
-        p_mode: value.mode,
-        p_payment_status: value.paymentStatus,
-        p_currency: value.currency,
-        p_subtotal_minor: value.subtotalMinor,
-        p_total_minor: value.totalMinor,
-        p_application_fee_amount_minor: value.applicationFeeAmountMinor,
-        p_destination_account_id: value.destinationAccountId,
-      }),
+    fulfillPaidOrder: async (value) => {
+      const { data, error } = await getServiceClient().rpc(
+        "server_fulfill_paid_order",
+        {
+          p_stripe_event_id: value.stripeEventId,
+          p_order_id: value.orderId,
+          p_checkout_session_id: value.checkoutSessionId,
+          p_payment_intent_id: value.paymentIntentId,
+          p_charge_id: value.chargeId,
+          p_transfer_id: value.transferId,
+          p_application_fee_id: value.applicationFeeId,
+          p_balance_transaction_id: value.balanceTransactionId,
+          p_customer_id: value.customerId,
+          p_mode: value.mode,
+          p_payment_status: value.paymentStatus,
+          p_currency: value.currency,
+          p_subtotal_minor: value.subtotalMinor,
+          p_total_minor: value.totalMinor,
+          p_application_fee_amount_minor: value.applicationFeeAmountMinor,
+          p_destination_account_id: value.destinationAccountId,
+        },
+      );
+      if (error !== null) throwRpc(error);
+      return fulfillmentApplyResultFromRpc(data, value.orderId);
+    },
     markPaymentProcessing: (value) =>
       domainRpc("server_mark_payment_processing", paymentRpcParams(value)),
     markPaymentFailed: (value) =>
@@ -1275,7 +1317,11 @@ async function dispatchCheckout(
     return;
   }
   try {
-    await dependencies.fulfillPaidOrder({
+    const expectedTicketCount = current.order.items.reduce(
+      (sum, item) => sum + item.quantity,
+      0,
+    );
+    const fulfillment = await dependencies.fulfillPaidOrder({
       ...current.payment,
       paymentIntentId: current.paymentIntent.id,
       chargeId: charge.id,
@@ -1284,6 +1330,11 @@ async function dispatchCheckout(
       balanceTransactionId: charge.balanceTransactionId,
       customerId: charge.customerId,
     });
+    if (
+      fulfillment.orderId !== current.order.orderId ||
+      fulfillment.orderStatus !== "paid" ||
+      fulfillment.ticketCount !== expectedTicketCount
+    ) permanent("CHECKOUT_RECONCILIATION_REVIEW_MISMATCH");
     emitOperationalEvent({
       contractVersion: "checkout_integrity_v1",
       operation: "webhook.fulfillment",
@@ -1292,14 +1343,12 @@ async function dispatchCheckout(
       stripeEventId: event.id,
       providerObjectId: current.order.checkoutSessionId,
       itemCount: current.order.items.length,
-      aggregateQuantity: current.order.items.reduce(
-        (sum, item) => sum + item.quantity,
-        0,
-      ),
+      aggregateQuantity: expectedTicketCount,
       currency: current.order.currency,
       subtotalMinor: current.order.subtotalMinor,
       totalMinor: current.order.totalMinor,
       applicationFeeAmountMinor: current.order.applicationFeeAmountMinor,
+      actualTicketCount: fulfillment.ticketCount,
       resultStatus: "paid",
     }, dependencies.operationalSink);
   } catch (error) {
@@ -1672,7 +1721,9 @@ async function dispatchRefund(
       amountMinor: amount,
       resultStatus: "requires_review",
       ticketStatus,
-      errorCode: policy.policyVerified ? undefined : "REFUND_POLICY_MISMATCH",
+      errorCode: policy.policyVerified
+        ? "REFUND_DURABLE_STATE_REVIEW"
+        : "REFUND_POLICY_MISMATCH",
     }, dependencies.operationalSink);
   } else if (
     !(

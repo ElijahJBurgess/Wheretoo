@@ -4,6 +4,7 @@ import Stripe from "stripe";
 import {
   createStripeWebhookHandler,
   type DisputeSnapshot,
+  fulfillmentApplyResultFromRpc,
   type PaymentReviewSnapshot,
   type ReceiptInput,
   refundApplyResultFromRpc,
@@ -76,6 +77,12 @@ const REFUND_APPLY_RESULT = {
   orderId: ORDER_ID,
   orderStatus: "refunded",
   ticketStatus: "refunded",
+} as const;
+
+const FULFILLMENT_APPLY_RESULT = {
+  orderId: ORDER_ID,
+  orderStatus: "paid",
+  ticketCount: 3,
 } as const;
 
 function orderSnapshot(
@@ -190,7 +197,7 @@ function dependencies(
     retrieveAccount: async () => accountFixture(),
     beginAccountRefresh: async () => 401,
     persistAccountStatus: async () => true,
-    fulfillPaidOrder: async () => undefined,
+    fulfillPaidOrder: async () => FULFILLMENT_APPLY_RESULT,
     markPaymentProcessing: async () => undefined,
     markPaymentFailed: async () => undefined,
     markPaymentRequiresReview: async () => undefined,
@@ -350,6 +357,7 @@ Deno.test("live events are rejected before a durable receipt and live retrieved 
     retrieveSession: async () => checkoutSessionFixture({ livemode: true }),
     fulfillPaidOrder: async () => {
       fulfilled += 1;
+      return FULFILLMENT_APPLY_RESULT;
     },
   }));
 
@@ -396,6 +404,7 @@ Deno.test("identical delivery is a no-op and conflicting digest reuse cannot mut
     },
     fulfillPaidOrder: async () => {
       fulfillmentCount += 1;
+      return FULFILLMENT_APPLY_RESULT;
     },
   }));
   const event = snapshotEvent(
@@ -442,6 +451,7 @@ Deno.test("paid completion re-retrieves reordered Product-bound lines and fulfil
         (total, item) => total + item.quantity,
         0,
       );
+      return FULFILLMENT_APPLY_RESULT;
     },
   }))(request(snapshotEvent("checkout.session.completed", { id: SESSION_ID })));
 
@@ -468,6 +478,31 @@ Deno.test("paid completion re-retrieves reordered Product-bound lines and fulfil
   assertEquals(ticketCount, 3);
 });
 
+Deno.test("fulfillment RPC result validation returns the actual committed ticket count", () => {
+  assertEquals(
+    fulfillmentApplyResultFromRpc([{
+      order_id: ORDER_ID,
+      order_status: "paid",
+      ticket_count: 3,
+    }], ORDER_ID),
+    FULFILLMENT_APPLY_RESULT,
+  );
+
+  for (
+    const invalid of [
+      [],
+      [{ order_id: ORDER_ID, order_status: "paid", ticket_count: 11 }],
+      [{ order_id: ORDER_ID, order_status: "paid", ticket_count: 3, raw: {} }],
+    ]
+  ) {
+    assertThrows(
+      () => fulfillmentApplyResultFromRpc(invalid, ORDER_ID),
+      Error,
+      "CHECKOUT_RECONCILIATION_REVIEW_MISMATCH",
+    );
+  }
+});
+
 Deno.test("a paid Session whose current Charge is already refunded or disputed is marked review and never fulfilled", async () => {
   const reviews: PaymentReviewSnapshot[] = [];
   let fulfilled = 0;
@@ -483,6 +518,7 @@ Deno.test("a paid Session whose current Charge is already refunded or disputed i
     },
     fulfillPaidOrder: async () => {
       fulfilled += 1;
+      return FULFILLMENT_APPLY_RESULT;
     },
   }));
 
@@ -524,6 +560,7 @@ Deno.test("a paid Session whose current Charge is already refunded or disputed i
     },
     fulfillPaidOrder: async () => {
       fulfilled += 1;
+      return FULFILLMENT_APPLY_RESULT;
     },
   }));
   await disputedHandler(request(snapshotEvent(
@@ -554,6 +591,7 @@ Deno.test("unpaid completion marks processing and an out-of-order async success 
     },
     fulfillPaidOrder: async () => {
       transitions.push("paid");
+      return FULFILLMENT_APPLY_RESULT;
     },
   }));
 
@@ -594,6 +632,7 @@ Deno.test("async success before completed preserves one three-ticket set and sta
       ];
       if (providerIds === undefined) providerIds = currentIds;
       assertEquals(currentIds, providerIds);
+      return FULFILLMENT_APPLY_RESULT;
     },
   }));
 
@@ -672,6 +711,7 @@ Deno.test("async failure after paid is durably ignored without a failed transiti
     },
     fulfillPaidOrder: async () => {
       fulfillments += 1;
+      return FULFILLMENT_APPLY_RESULT;
     },
     finalizeReceipt: async (...args) => {
       finalizations.push(args);
@@ -696,14 +736,21 @@ Deno.test("late paid truth reaches atomic fulfillment without issuing tickets fo
   let status = "expired";
   let ticketCount = 0;
   let persistedPaymentIntent: string | undefined;
+  const records: Array<Record<string, unknown>> = [];
   const response = await createStripeWebhookHandler(dependencies({
+    operationalSink: (serialized) => records.push(JSON.parse(serialized)),
     fulfillPaidOrder: async (snapshot) => {
       persistedPaymentIntent = snapshot.paymentIntentId;
       if (["cancelled", "expired", "payment_failed"].includes(status)) {
         status = "requires_review";
-        return;
+        return {
+          orderId: ORDER_ID,
+          orderStatus: "requires_review",
+          ticketCount: 0,
+        };
       }
       ticketCount = 3;
+      return FULFILLMENT_APPLY_RESULT;
     },
   }))(request(snapshotEvent(
     "checkout.session.async_payment_succeeded",
@@ -717,6 +764,14 @@ Deno.test("late paid truth reaches atomic fulfillment without issuing tickets fo
     0,
     PAYMENT_INTENT_ID,
   ]);
+  assertEquals(records, [{
+    contractVersion: "checkout_integrity_v1",
+    operation: "webhook.reconciliation",
+    outcome: "mismatch",
+    stripeEventId: "evt_Task7LateInvalidatedPayment",
+    providerObjectId: SESSION_ID,
+    errorCode: "CHECKOUT_RECONCILIATION_REVIEW_MISMATCH",
+  }]);
 });
 
 // Mutation caught: a provider ID already owned by another order must route the
@@ -938,6 +993,7 @@ Deno.test("every known-order line mismatch enters review with its exact safe cod
       },
       fulfillPaidOrder: async () => {
         fulfilled += 1;
+        return FULFILLMENT_APPLY_RESULT;
       },
       finalizeReceipt: async (...args) => {
         finalizations.push(args);
@@ -1063,6 +1119,7 @@ Deno.test("non-line Stripe snapshot mismatches fail closed without fulfillment",
       retrieveSession: async () => session,
       fulfillPaidOrder: async () => {
         fulfilled += 1;
+        return FULFILLMENT_APPLY_RESULT;
       },
       markCheckoutReconciliationReview: async () => {
         reviewed += 1;
@@ -1171,6 +1228,7 @@ for (const [name, session] of collectedFundsCases) {
       retrieveSession: async () => session,
       fulfillPaidOrder: async () => {
         fulfilled += 1;
+        return FULFILLMENT_APPLY_RESULT;
       },
       markCheckoutReconciliationReview: async () => {
         reviewed += 1;
@@ -1224,6 +1282,7 @@ Deno.test("missing or unknown Session order identity never invokes a domain muta
       },
       fulfillPaidOrder: async () => {
         domainWrites += 1;
+        return FULFILLMENT_APPLY_RESULT;
       },
       markPaymentProcessing: async () => {
         domainWrites += 1;
@@ -1268,6 +1327,7 @@ Deno.test("transient Stripe retrieval failures remain retryable and return non-2
     },
     fulfillPaidOrder: async () => {
       fulfilled += 1;
+      return FULFILLMENT_APPLY_RESULT;
     },
   }));
   const event = snapshotEvent(
@@ -1605,6 +1665,30 @@ Deno.test("full refund before payment reconciliation emits conservative durable 
   const records: Array<Record<string, unknown>> = [];
   const response = await createStripeWebhookHandler(dependencies({
     operationalSink: (serialized) => records.push(JSON.parse(serialized)),
+    retrieveRefund: async () =>
+      refundFixture({
+        amount: 1_000,
+        metadata: {
+          order_id: ORDER_ID,
+          whereto_refund_policy: "destination_v1",
+          whereto_reverse_transfer: "true",
+          whereto_refund_application_fee: "true",
+          whereto_transfer_reversal_amount: "1000",
+          whereto_application_fee_refund_id: FEE_REFUND_ID,
+          whereto_application_fee_refund_amount: "100",
+        },
+      }),
+    retrieveTransfer: async () =>
+      transferFixture({
+        amount: 5_500,
+        amount_reversed: 5_500,
+        reversed: true,
+      }),
+    retrieveTransferReversal: async () =>
+      transferReversalFixture({ amount: 1_000 }),
+    retrieveApplicationFee: async () =>
+      applicationFeeFixture({ amount_refunded: 450 }),
+    retrieveApplicationFeeRefund: async () => feeRefundFixture({ amount: 100 }),
     applyRefund: async () => ({
       orderId: ORDER_ID,
       orderStatus: "refunded",
@@ -1625,9 +1709,64 @@ Deno.test("full refund before payment reconciliation emits conservative durable 
     stripeEventId: "evt_Task10PrePaymentRefund",
     providerObjectId: REFUND_ID,
     currency: "usd",
-    amountMinor: 5_500,
+    amountMinor: 1_000,
     resultStatus: "refunded",
     ticketStatus: "none",
+    errorCode: "REFUND_DURABLE_STATE_REVIEW",
+  }]);
+});
+
+Deno.test("policy-valid aggregate refund review emits a truthful durable-state reason", async () => {
+  const records: Array<Record<string, unknown>> = [];
+  const response = await createStripeWebhookHandler(dependencies({
+    operationalSink: (serialized) => records.push(JSON.parse(serialized)),
+    retrieveRefund: async () =>
+      refundFixture({
+        amount: 1_000,
+        metadata: {
+          order_id: ORDER_ID,
+          whereto_refund_policy: "destination_v1",
+          whereto_reverse_transfer: "true",
+          whereto_refund_application_fee: "true",
+          whereto_transfer_reversal_amount: "1000",
+          whereto_application_fee_refund_id: FEE_REFUND_ID,
+          whereto_application_fee_refund_amount: "100",
+        },
+      }),
+    retrieveTransfer: async () =>
+      transferFixture({
+        amount: 5_500,
+        amount_reversed: 5_500,
+        reversed: true,
+      }),
+    retrieveTransferReversal: async () =>
+      transferReversalFixture({ amount: 1_000 }),
+    retrieveApplicationFee: async () =>
+      applicationFeeFixture({ amount_refunded: 450 }),
+    retrieveApplicationFeeRefund: async () => feeRefundFixture({ amount: 100 }),
+    applyRefund: async () => ({
+      orderId: ORDER_ID,
+      orderStatus: "requires_review",
+      ticketStatus: "cancelled",
+    }),
+  }))(request(snapshotEvent(
+    "refund.updated",
+    { id: REFUND_ID },
+    { id: "evt_Task10PartialRefundReview" },
+  )));
+
+  assertEquals(response.status, 200);
+  assertEquals(records, [{
+    contractVersion: "checkout_integrity_v1",
+    operation: "refund.reconcile",
+    outcome: "review",
+    orderId: ORDER_ID,
+    stripeEventId: "evt_Task10PartialRefundReview",
+    providerObjectId: REFUND_ID,
+    currency: "usd",
+    amountMinor: 1_000,
+    resultStatus: "requires_review",
+    ticketStatus: "cancelled",
     errorCode: "REFUND_DURABLE_STATE_REVIEW",
   }]);
 });
@@ -2144,6 +2283,7 @@ Deno.test("webhook operational events distinguish duplicate, reconciliation mism
       subtotalMinor: 5_500,
       totalMinor: 5_500,
       applicationFeeAmountMinor: 450,
+      actualTicketCount: 3,
       resultStatus: "paid",
     },
     {

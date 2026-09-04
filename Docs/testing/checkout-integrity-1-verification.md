@@ -97,7 +97,12 @@ database owner/operator inside a read-only transaction.
 - [ ] A failed log sink does not change a checkout, webhook, cancellation,
   fulfillment, or refund result, including a rejected asynchronous sink.
 - [ ] Refund events use the exact durable order/ticket status returned by
-  `server_apply_verified_refund`, including cumulative refund outcomes.
+  `server_apply_verified_refund`, including cumulative refund outcomes, and
+  every review includes a specific safe reason.
+- [ ] Fulfillment events compare expected quantity with the exact committed
+  ticket count returned by `server_fulfill_paid_order`; a non-paid or
+  mismatched result fails closed, while receipt-level duplicates remain
+  distinct from committed fulfillment.
 - [ ] Operational events correlate only by already-known internal IDs, webhook
   IDs, and non-secret provider object identity.
 
