@@ -45,6 +45,24 @@ select results_eq(
   'only service_role can execute the multi-item confirmation projection'
 );
 
+select results_eq(
+  $$
+    select array[
+      pg_catalog.has_function_privilege(
+        'anon', 'private.lookup_checkout_integrity_confirmation(text)', 'EXECUTE'
+      ),
+      pg_catalog.has_function_privilege(
+        'authenticated', 'private.lookup_checkout_integrity_confirmation(text)', 'EXECUTE'
+      ),
+      pg_catalog.has_function_privilege(
+        'service_role', 'private.lookup_checkout_integrity_confirmation(text)', 'EXECUTE'
+      )
+    ]
+  $$,
+  $$ values (array[false, false, false]) $$,
+  'browser and service roles cannot execute the private confirmation projection directly'
+);
+
 insert into auth.users (id, email)
 values ('c9100000-0000-4000-8000-000000000001', 'task9-owner@example.invalid');
 
