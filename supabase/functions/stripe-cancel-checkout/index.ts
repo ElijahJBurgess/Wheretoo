@@ -3,7 +3,8 @@ import { getServiceClient } from "../_shared/database.ts";
 import { getAppBaseUrl } from "../_shared/env.ts";
 import { jsonResponse } from "../_shared/http.ts";
 import {
-  type CancellationOperationalErrorCode,
+  type CancellationAmbiguousOperationalErrorCode,
+  type CancellationBlockedOperationalErrorCode,
   emitOperationalEvent,
   type OperationalEventSink,
 } from "../_shared/operationalLog.ts";
@@ -19,17 +20,24 @@ import {
   type RateLimitResult,
 } from "../stripe-create-checkout/index.ts";
 
-function cancellationOperationalErrorCode(
+function cancellationAmbiguousOperationalErrorCode(
   code: CheckoutErrorCode,
-): CancellationOperationalErrorCode {
+): CancellationAmbiguousOperationalErrorCode {
   switch (code) {
-    case "CHECKOUT_UNAVAILABLE":
     case "INVALID_STRIPE_SESSION":
     case "STRIPE_REQUEST_FAILED":
       return code;
     default:
       return "INTERNAL_ERROR";
   }
+}
+
+function cancellationBlockedOperationalErrorCode(
+  code: CheckoutErrorCode,
+): CancellationBlockedOperationalErrorCode | null {
+  return code === "CHECKOUT_UNAVAILABLE" || code === "INVALID_STRIPE_SESSION"
+    ? code
+    : null;
 }
 
 const MAX_REQUEST_BYTES = 512;
@@ -309,15 +317,34 @@ export function createStripeCancelCheckoutHandler(
         ? error
         : new CheckoutHttpError(500, "INTERNAL_ERROR");
       if (order !== null) {
-        emitOperationalEvent({
-          contractVersion: "checkout_integrity_v1",
-          operation: "checkout.cancel",
-          outcome: cancellationOutcomeAmbiguous ? "ambiguous" : "blocked",
-          orderId: order.orderId,
-          providerObjectId: order.stripeCheckoutSessionId ?? undefined,
-          priorStatus: order.status,
-          errorCode: cancellationOperationalErrorCode(safeError.code),
-        }, dependencies.operationalSink);
+        if (cancellationOutcomeAmbiguous) {
+          emitOperationalEvent({
+            contractVersion: "checkout_integrity_v1",
+            operation: "checkout.cancel",
+            outcome: "ambiguous",
+            orderId: order.orderId,
+            providerObjectId: order.stripeCheckoutSessionId ?? undefined,
+            priorStatus: order.status,
+            errorCode: cancellationAmbiguousOperationalErrorCode(
+              safeError.code,
+            ),
+          }, dependencies.operationalSink);
+        } else {
+          const blockedErrorCode = cancellationBlockedOperationalErrorCode(
+            safeError.code,
+          );
+          if (blockedErrorCode !== null) {
+            emitOperationalEvent({
+              contractVersion: "checkout_integrity_v1",
+              operation: "checkout.cancel",
+              outcome: "blocked",
+              orderId: order.orderId,
+              providerObjectId: order.stripeCheckoutSessionId ?? undefined,
+              priorStatus: order.status,
+              errorCode: blockedErrorCode,
+            }, dependencies.operationalSink);
+          }
+        }
       }
       return checkoutErrorResponse(error, headers);
     }

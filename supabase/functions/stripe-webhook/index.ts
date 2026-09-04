@@ -172,7 +172,17 @@ export interface RefundSnapshot {
 
 export interface RefundApplyResult {
   orderId: string;
-  orderStatus: "paid" | "partially_refunded" | "refunded" | "requires_review";
+  orderStatus:
+    | "creating_checkout"
+    | "checkout_open"
+    | "payment_processing"
+    | "paid"
+    | "expired"
+    | "payment_failed"
+    | "cancelled"
+    | "partially_refunded"
+    | "refunded"
+    | "requires_review";
   ticketStatus: "valid" | "cancelled" | "refunded" | "mixed" | null;
 }
 
@@ -675,7 +685,13 @@ export function refundApplyResultFromRpc(
   }
   if (
     row.order_id !== expectedOrderId || !UUID_PATTERN.test(expectedOrderId) ||
-    (row.order_status !== "paid" &&
+    (row.order_status !== "creating_checkout" &&
+      row.order_status !== "checkout_open" &&
+      row.order_status !== "payment_processing" &&
+      row.order_status !== "paid" &&
+      row.order_status !== "expired" &&
+      row.order_status !== "payment_failed" &&
+      row.order_status !== "cancelled" &&
       row.order_status !== "partially_refunded" &&
       row.order_status !== "refunded" &&
       row.order_status !== "requires_review") ||
@@ -1658,6 +1674,52 @@ async function dispatchRefund(
       ticketStatus,
       errorCode: policy.policyVerified ? undefined : "REFUND_POLICY_MISMATCH",
     }, dependencies.operationalSink);
+  } else if (
+    !(
+      (durable.orderStatus === "checkout_open" && ticketStatus === "none") ||
+      (durable.orderStatus === "paid" && ticketStatus === "valid") ||
+      (durable.orderStatus === "refunded" && ticketStatus === "refunded")
+    )
+  ) {
+    emitOperationalEvent({
+      contractVersion: "checkout_integrity_v1",
+      operation: "refund.reconcile",
+      outcome: "review",
+      orderId: durable.orderId,
+      stripeEventId: event.id,
+      providerObjectId: refundId,
+      currency,
+      amountMinor: amount,
+      resultStatus: durable.orderStatus,
+      ticketStatus: durable.ticketStatus ?? "none",
+      errorCode: "REFUND_DURABLE_STATE_REVIEW",
+    }, dependencies.operationalSink);
+  } else if (durable.orderStatus === "checkout_open") {
+    emitOperationalEvent({
+      contractVersion: "checkout_integrity_v1",
+      operation: "refund.reconcile",
+      outcome: "applied",
+      orderId: durable.orderId,
+      stripeEventId: event.id,
+      providerObjectId: refundId,
+      currency,
+      amountMinor: amount,
+      resultStatus: "checkout_open",
+      ticketStatus: "none",
+    }, dependencies.operationalSink);
+  } else if (durable.orderStatus === "paid") {
+    emitOperationalEvent({
+      contractVersion: "checkout_integrity_v1",
+      operation: "refund.reconcile",
+      outcome: "applied",
+      orderId: durable.orderId,
+      stripeEventId: event.id,
+      providerObjectId: refundId,
+      currency,
+      amountMinor: amount,
+      resultStatus: "paid",
+      ticketStatus: "valid",
+    }, dependencies.operationalSink);
   } else {
     emitOperationalEvent({
       contractVersion: "checkout_integrity_v1",
@@ -1668,8 +1730,8 @@ async function dispatchRefund(
       providerObjectId: refundId,
       currency,
       amountMinor: amount,
-      resultStatus: durable.orderStatus,
-      ticketStatus,
+      resultStatus: "refunded",
+      ticketStatus: "refunded",
     }, dependencies.operationalSink);
   }
 }

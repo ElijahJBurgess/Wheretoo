@@ -1179,21 +1179,44 @@ export function createStripeCreateCheckoutHandler(
           !cleanupComplete
         ) stripeCreateOutcomeUnknown = true;
       }
-      emitOperationalEvent({
-        contractVersion: "checkout_integrity_v1",
-        operation: "checkout.create",
-        outcome: stripeCreateOutcomeUnknown ? "uncertain" : "failed",
-        orderId: reservation?.orderId,
-        eventId,
-        providerObjectId: operationalSessionId(sessionValue),
-        itemCount: reservation?.items.length,
-        aggregateQuantity: reservation?.quantity,
-        currency: reservation?.currency,
-        subtotalMinor: reservation?.subtotalMinor,
-        totalMinor: reservation?.totalMinor,
-        applicationFeeAmountMinor: reservation?.applicationFeeAmountMinor,
-        errorCode: responseError.code,
-      }, dependencies.operationalSink);
+      if (stripeCreateOutcomeUnknown) {
+        const uncertainErrorCode =
+          responseError.code === "STRIPE_REQUEST_FAILED" ||
+            responseError.code === "INVALID_STRIPE_SESSION"
+            ? responseError.code
+            : "INTERNAL_ERROR";
+        emitOperationalEvent({
+          contractVersion: "checkout_integrity_v1",
+          operation: "checkout.create",
+          outcome: "uncertain",
+          orderId: reservation?.orderId,
+          eventId,
+          providerObjectId: operationalSessionId(sessionValue),
+          itemCount: reservation?.items.length,
+          aggregateQuantity: reservation?.quantity,
+          currency: reservation?.currency,
+          subtotalMinor: reservation?.subtotalMinor,
+          totalMinor: reservation?.totalMinor,
+          applicationFeeAmountMinor: reservation?.applicationFeeAmountMinor,
+          errorCode: uncertainErrorCode,
+        }, dependencies.operationalSink);
+      } else {
+        emitOperationalEvent({
+          contractVersion: "checkout_integrity_v1",
+          operation: "checkout.create",
+          outcome: "failed",
+          orderId: reservation?.orderId,
+          eventId,
+          providerObjectId: operationalSessionId(sessionValue),
+          itemCount: reservation?.items.length,
+          aggregateQuantity: reservation?.quantity,
+          currency: reservation?.currency,
+          subtotalMinor: reservation?.subtotalMinor,
+          totalMinor: reservation?.totalMinor,
+          applicationFeeAmountMinor: reservation?.applicationFeeAmountMinor,
+          errorCode: responseError.code,
+        }, dependencies.operationalSink);
+      }
       return checkoutErrorResponse(responseError, headers);
     }
   };

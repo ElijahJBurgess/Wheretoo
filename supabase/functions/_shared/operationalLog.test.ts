@@ -52,6 +52,48 @@ const invalidRefundOutcome: CheckoutOperationalEvent = {
   ticketStatus: "refunded",
 };
 
+// @ts-expect-error INVALID_REQUEST is a definitive checkout failure, not uncertainty.
+const invalidCheckoutUncertainty: CheckoutOperationalEvent = {
+  contractVersion: "checkout_integrity_v1",
+  operation: "checkout.create",
+  outcome: "uncertain",
+  errorCode: "INVALID_REQUEST",
+};
+
+// @ts-expect-error A Stripe request failure makes cancellation state ambiguous, not blocked.
+const invalidBlockedCancellation: CheckoutOperationalEvent = {
+  contractVersion: "checkout_integrity_v1",
+  operation: "checkout.cancel",
+  outcome: "blocked",
+  orderId: ORDER_ID,
+  priorStatus: "checkout_open",
+  errorCode: "STRIPE_REQUEST_FAILED",
+};
+
+// @ts-expect-error A known cancellation block is not an ambiguous provider outcome.
+const invalidAmbiguousCancellation: CheckoutOperationalEvent = {
+  contractVersion: "checkout_integrity_v1",
+  operation: "checkout.cancel",
+  outcome: "ambiguous",
+  orderId: ORDER_ID,
+  priorStatus: "checkout_open",
+  errorCode: "CHECKOUT_UNAVAILABLE",
+};
+
+const invalidAppliedRefundState: CheckoutOperationalEvent = {
+  contractVersion: "checkout_integrity_v1",
+  operation: "refund.reconcile",
+  outcome: "applied",
+  orderId: ORDER_ID,
+  stripeEventId: STRIPE_EVENT_ID,
+  providerObjectId: REFUND_ID,
+  currency: "usd",
+  amountMinor: 100,
+  resultStatus: "refunded",
+  // @ts-expect-error A durably refunded order is applied only with refunded tickets.
+  ticketStatus: "none",
+};
+
 // @ts-expect-error Webhook validation is not a checkout-create error.
 const invalidCheckoutError: CheckoutOperationalEvent = {
   contractVersion: "checkout_integrity_v1",
@@ -63,6 +105,10 @@ const invalidCheckoutError: CheckoutOperationalEvent = {
 void invalidCheckoutSuccess;
 void invalidTerminalCancellation;
 void invalidRefundOutcome;
+void invalidCheckoutUncertainty;
+void invalidBlockedCancellation;
+void invalidAmbiguousCancellation;
+void invalidAppliedRefundState;
 void invalidCheckoutError;
 
 function capture(event: CheckoutOperationalEvent): Record<string, unknown> {
@@ -230,6 +276,34 @@ Deno.test("operational events serialize only the bounded fields for each discrim
         resultStatus: "requires_review",
         ticketStatus: "cancelled",
         errorCode: "REFUND_POLICY_MISMATCH",
+      },
+    },
+    {
+      event: {
+        contractVersion: "checkout_integrity_v1",
+        operation: "refund.reconcile",
+        outcome: "review",
+        stripeEventId: STRIPE_EVENT_ID,
+        orderId: ORDER_ID,
+        providerObjectId: REFUND_ID,
+        currency: "usd",
+        amountMinor: 1_000,
+        resultStatus: "refunded",
+        ticketStatus: "none",
+        errorCode: "REFUND_DURABLE_STATE_REVIEW",
+      },
+      expected: {
+        contractVersion: "checkout_integrity_v1",
+        operation: "refund.reconcile",
+        outcome: "review",
+        orderId: ORDER_ID,
+        stripeEventId: STRIPE_EVENT_ID,
+        providerObjectId: REFUND_ID,
+        currency: "usd",
+        amountMinor: 1_000,
+        resultStatus: "refunded",
+        ticketStatus: "none",
+        errorCode: "REFUND_DURABLE_STATE_REVIEW",
       },
     },
   ];
@@ -444,6 +518,15 @@ Deno.test("operational logger rejects misleading discriminator combinations at r
   emitOperationalEvent({
     contractVersion: "checkout_integrity_v1",
     operation: "checkout.cancel",
+    outcome: "ambiguous",
+    orderId: ORDER_ID,
+    priorStatus: "checkout_open",
+    errorCode: "CHECKOUT_UNAVAILABLE",
+  } as unknown as CheckoutOperationalEvent, sink);
+
+  emitOperationalEvent({
+    contractVersion: "checkout_integrity_v1",
+    operation: "checkout.cancel",
     outcome: "cancelled",
     orderId: ORDER_ID,
     priorStatus: "expired",
@@ -464,6 +547,49 @@ Deno.test("operational logger rejects misleading discriminator combinations at r
     orderId: ORDER_ID,
     priorStatus: "open",
     errorCode: "CHECKOUT_UNAVAILABLE",
+  } as unknown as CheckoutOperationalEvent, sink);
+
+  emitOperationalEvent({
+    contractVersion: "checkout_integrity_v1",
+    operation: "checkout.create",
+    outcome: "uncertain",
+    errorCode: "INVALID_REQUEST",
+  } as unknown as CheckoutOperationalEvent, sink);
+
+  emitOperationalEvent({
+    contractVersion: "checkout_integrity_v1",
+    operation: "checkout.cancel",
+    outcome: "blocked",
+    orderId: ORDER_ID,
+    priorStatus: "checkout_open",
+    errorCode: "STRIPE_REQUEST_FAILED",
+  } as unknown as CheckoutOperationalEvent, sink);
+
+  emitOperationalEvent({
+    contractVersion: "checkout_integrity_v1",
+    operation: "refund.reconcile",
+    outcome: "applied",
+    orderId: ORDER_ID,
+    stripeEventId: STRIPE_EVENT_ID,
+    providerObjectId: REFUND_ID,
+    currency: "usd",
+    amountMinor: 100,
+    resultStatus: "refunded",
+    ticketStatus: "none",
+  } as unknown as CheckoutOperationalEvent, sink);
+
+  emitOperationalEvent({
+    contractVersion: "checkout_integrity_v1",
+    operation: "refund.reconcile",
+    outcome: "review",
+    orderId: ORDER_ID,
+    stripeEventId: STRIPE_EVENT_ID,
+    providerObjectId: REFUND_ID,
+    currency: "usd",
+    amountMinor: 100,
+    resultStatus: "succeeded",
+    ticketStatus: "none",
+    errorCode: "REFUND_DURABLE_STATE_REVIEW",
   } as unknown as CheckoutOperationalEvent, sink);
 
   assertEquals(serialized, []);

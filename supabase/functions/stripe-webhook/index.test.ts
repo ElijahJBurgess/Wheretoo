@@ -1495,6 +1495,34 @@ Deno.test("refund reconciliation logs the authoritative cumulative durable resul
 });
 
 Deno.test("refund RPC result validation accepts exactly one authoritative bounded row", () => {
+  for (
+    const orderStatus of [
+      "creating_checkout",
+      "checkout_open",
+      "payment_processing",
+      "paid",
+      "expired",
+      "payment_failed",
+      "cancelled",
+      "partially_refunded",
+      "refunded",
+      "requires_review",
+    ] as const
+  ) {
+    assertEquals(
+      refundApplyResultFromRpc([{
+        order_id: ORDER_ID,
+        order_status: orderStatus,
+        ticket_status: null,
+      }], ORDER_ID),
+      {
+        orderId: ORDER_ID,
+        orderStatus,
+        ticketStatus: null,
+      },
+    );
+  }
+
   assertEquals(
     refundApplyResultFromRpc([{
       order_id: ORDER_ID,
@@ -1537,6 +1565,71 @@ Deno.test("refund RPC result validation accepts exactly one authoritative bounde
   ) {
     assertThrows(() => refundApplyResultFromRpc(invalid, ORDER_ID));
   }
+});
+
+Deno.test("valid unchanged out-of-order refund result is acknowledged after commit", async () => {
+  let committed = false;
+  const records: Array<Record<string, unknown>> = [];
+  const response = await createStripeWebhookHandler(dependencies({
+    operationalSink: (serialized) => records.push(JSON.parse(serialized)),
+    applyRefund: async () => {
+      committed = true;
+      return refundApplyResultFromRpc([{
+        order_id: ORDER_ID,
+        order_status: "checkout_open",
+        ticket_status: null,
+      }], ORDER_ID);
+    },
+  }))(request(snapshotEvent(
+    "refund.updated",
+    { id: REFUND_ID },
+    { id: "evt_Task10OutOfOrderRefund" },
+  )));
+
+  assertEquals([committed, response.status], [true, 200]);
+  assertEquals(records, [{
+    contractVersion: "checkout_integrity_v1",
+    operation: "refund.reconcile",
+    outcome: "applied",
+    orderId: ORDER_ID,
+    stripeEventId: "evt_Task10OutOfOrderRefund",
+    providerObjectId: REFUND_ID,
+    currency: "usd",
+    amountMinor: 5_500,
+    resultStatus: "checkout_open",
+    ticketStatus: "none",
+  }]);
+});
+
+Deno.test("full refund before payment reconciliation emits conservative durable review", async () => {
+  const records: Array<Record<string, unknown>> = [];
+  const response = await createStripeWebhookHandler(dependencies({
+    operationalSink: (serialized) => records.push(JSON.parse(serialized)),
+    applyRefund: async () => ({
+      orderId: ORDER_ID,
+      orderStatus: "refunded",
+      ticketStatus: null,
+    }),
+  }))(request(snapshotEvent(
+    "refund.updated",
+    { id: REFUND_ID },
+    { id: "evt_Task10PrePaymentRefund" },
+  )));
+
+  assertEquals(response.status, 200);
+  assertEquals(records, [{
+    contractVersion: "checkout_integrity_v1",
+    operation: "refund.reconcile",
+    outcome: "review",
+    orderId: ORDER_ID,
+    stripeEventId: "evt_Task10PrePaymentRefund",
+    providerObjectId: REFUND_ID,
+    currency: "usd",
+    amountMinor: 5_500,
+    resultStatus: "refunded",
+    ticketStatus: "none",
+    errorCode: "REFUND_DURABLE_STATE_REVIEW",
+  }]);
 });
 
 Deno.test("missing automatic-refund policy persists authoritative mismatch evidence for review", async () => {

@@ -50,8 +50,16 @@ type CheckoutCreateOperationalErrorCode =
   | "TIER_NOT_FOUND"
   | "TIER_SOLD_OUT";
 
-export type CancellationOperationalErrorCode =
+type CheckoutUncertainOperationalErrorCode =
+  | "INTERNAL_ERROR"
+  | "INVALID_STRIPE_SESSION"
+  | "STRIPE_REQUEST_FAILED";
+
+export type CancellationBlockedOperationalErrorCode =
   | "CHECKOUT_UNAVAILABLE"
+  | "INVALID_STRIPE_SESSION";
+
+export type CancellationAmbiguousOperationalErrorCode =
   | "INTERNAL_ERROR"
   | "INVALID_STRIPE_SESSION"
   | "STRIPE_REQUEST_FAILED";
@@ -103,8 +111,16 @@ type CheckoutReusedEvent = OperationalBase & CheckoutSummaryFields & {
 
 type CheckoutFailedEvent = OperationalBase & CheckoutSummaryFields & {
   operation: "checkout.create";
-  outcome: "failed" | "uncertain";
+  outcome: "failed";
   errorCode: CheckoutCreateOperationalErrorCode;
+  priorStatus?: never;
+  resultStatus?: never;
+};
+
+type CheckoutUncertainEvent = OperationalBase & CheckoutSummaryFields & {
+  operation: "checkout.create";
+  outcome: "uncertain";
+  errorCode: CheckoutUncertainOperationalErrorCode;
   priorStatus?: never;
   resultStatus?: never;
 };
@@ -129,13 +145,23 @@ type CancellationNoTransitionEvent = OperationalBase & {
   resultStatus: "cancelled" | "expired" | "payment_failed";
 };
 
-type CancellationFailureEvent = OperationalBase & {
+type CancellationBlockedEvent = OperationalBase & {
   operation: "checkout.cancel";
-  outcome: "blocked" | "ambiguous";
+  outcome: "blocked";
   orderId: string;
   providerObjectId?: string;
   priorStatus: OrderStatus;
-  errorCode: CancellationOperationalErrorCode;
+  errorCode: CancellationBlockedOperationalErrorCode;
+  resultStatus?: never;
+};
+
+type CancellationAmbiguousEvent = OperationalBase & {
+  operation: "checkout.cancel";
+  outcome: "ambiguous";
+  orderId: string;
+  providerObjectId?: string;
+  priorStatus: OrderStatus;
+  errorCode: CancellationAmbiguousOperationalErrorCode;
   resultStatus?: never;
 };
 
@@ -225,7 +251,13 @@ type WebhookFulfillmentEvent = OperationalBase & CheckoutSummaryFields & {
 };
 
 export type RefundOrderStatus =
+  | "creating_checkout"
+  | "checkout_open"
+  | "payment_processing"
   | "paid"
+  | "expired"
+  | "payment_failed"
+  | "cancelled"
   | "partially_refunded"
   | "refunded"
   | "requires_review";
@@ -243,29 +275,50 @@ interface RefundEventFields extends OperationalBase {
   providerObjectId: string;
   currency: "usd";
   amountMinor: number;
-  ticketStatus: RefundTicketStatus;
   priorStatus?: never;
 }
 
 type RefundReconciliationEvent =
   | RefundEventFields & {
     outcome: "applied";
-    resultStatus: Exclude<RefundOrderStatus, "requires_review">;
+    resultStatus: "checkout_open";
+    ticketStatus: "none";
+    errorCode?: never;
+  }
+  | RefundEventFields & {
+    outcome: "applied";
+    resultStatus: "paid";
+    ticketStatus: "valid";
+    errorCode?: never;
+  }
+  | RefundEventFields & {
+    outcome: "applied";
+    resultStatus: "refunded";
+    ticketStatus: "refunded";
     errorCode?: never;
   }
   | RefundEventFields & {
     outcome: "review";
     resultStatus: "requires_review";
+    ticketStatus: RefundTicketStatus;
     errorCode?: "REFUND_POLICY_MISMATCH";
+  }
+  | RefundEventFields & {
+    outcome: "review";
+    resultStatus: Exclude<RefundOrderStatus, "requires_review">;
+    ticketStatus: RefundTicketStatus;
+    errorCode: "REFUND_DURABLE_STATE_REVIEW";
   };
 
 export type CheckoutOperationalEvent =
   | CheckoutCreatedEvent
   | CheckoutReusedEvent
   | CheckoutFailedEvent
+  | CheckoutUncertainEvent
   | CancellationTransitionEvent
   | CancellationNoTransitionEvent
-  | CancellationFailureEvent
+  | CancellationBlockedEvent
+  | CancellationAmbiguousEvent
   | WebhookDeliveryEvent
   | WebhookReconciliationEvent
   | WebhookLifecycleEvent
@@ -354,6 +407,7 @@ type OperationalErrorCode =
   | "PAYMENT_SNAPSHOT_MISMATCH"
   | "PARTIAL_REFUND_REQUIRES_REVIEW"
   | "RATE_LIMITED"
+  | "REFUND_DURABLE_STATE_REVIEW"
   | "REFUND_POLICY_MISMATCH"
   | "REFUND_SNAPSHOT_MISMATCH"
   | "REFUND_TOTAL_INVALID"
@@ -443,6 +497,7 @@ const OPERATIONAL_ERROR_CODES = new Set<OperationalErrorCode>([
   "PAYMENT_SNAPSHOT_MISMATCH",
   "PARTIAL_REFUND_REQUIRES_REVIEW",
   "RATE_LIMITED",
+  "REFUND_DURABLE_STATE_REVIEW",
   "REFUND_POLICY_MISMATCH",
   "REFUND_SNAPSHOT_MISMATCH",
   "REFUND_TOTAL_INVALID",
@@ -496,8 +551,24 @@ const CHECKOUT_CREATE_ERROR_CODES = new Set<CheckoutCreateOperationalErrorCode>(
   ],
 );
 
-const CANCELLATION_ERROR_CODES = new Set<CancellationOperationalErrorCode>([
+const CHECKOUT_UNCERTAIN_ERROR_CODES = new Set<
+  CheckoutUncertainOperationalErrorCode
+>([
+  "INTERNAL_ERROR",
+  "INVALID_STRIPE_SESSION",
+  "STRIPE_REQUEST_FAILED",
+]);
+
+const CANCELLATION_BLOCKED_ERROR_CODES = new Set<
+  CancellationBlockedOperationalErrorCode
+>([
   "CHECKOUT_UNAVAILABLE",
+  "INVALID_STRIPE_SESSION",
+]);
+
+const CANCELLATION_AMBIGUOUS_ERROR_CODES = new Set<
+  CancellationAmbiguousOperationalErrorCode
+>([
   "INTERNAL_ERROR",
   "INVALID_STRIPE_SESSION",
   "STRIPE_REQUEST_FAILED",
@@ -711,10 +782,15 @@ function validCombination(
       return source.priorStatus === "checkout_open" &&
         source.resultStatus === "checkout_open";
     }
-    return (outcome === "failed" || outcome === "uncertain") &&
-      typeof source.errorCode === "string" &&
-      CHECKOUT_CREATE_ERROR_CODES.has(
-        source.errorCode as CheckoutCreateOperationalErrorCode,
+    if (outcome === "failed") {
+      return typeof source.errorCode === "string" &&
+        CHECKOUT_CREATE_ERROR_CODES.has(
+          source.errorCode as CheckoutCreateOperationalErrorCode,
+        );
+    }
+    return outcome === "uncertain" && typeof source.errorCode === "string" &&
+      CHECKOUT_UNCERTAIN_ERROR_CODES.has(
+        source.errorCode as CheckoutUncertainOperationalErrorCode,
       );
   }
   if (operation === "checkout.cancel") {
@@ -731,11 +807,18 @@ function validCombination(
           source.priorStatus === "payment_failed") &&
         source.resultStatus === source.priorStatus;
     }
-    return (outcome === "blocked" || outcome === "ambiguous") &&
-      hasAll(source, ["orderId", "priorStatus", "errorCode"]) &&
-      ORDER_STATUSES.has(source.priorStatus as OrderStatus) &&
-      CANCELLATION_ERROR_CODES.has(
-        source.errorCode as CancellationOperationalErrorCode,
+    if (
+      !hasAll(source, ["orderId", "priorStatus", "errorCode"]) ||
+      !ORDER_STATUSES.has(source.priorStatus as OrderStatus)
+    ) return false;
+    if (outcome === "blocked") {
+      return CANCELLATION_BLOCKED_ERROR_CODES.has(
+        source.errorCode as CancellationBlockedOperationalErrorCode,
+      );
+    }
+    return outcome === "ambiguous" &&
+      CANCELLATION_AMBIGUOUS_ERROR_CODES.has(
+        source.errorCode as CancellationAmbiguousOperationalErrorCode,
       );
   }
   if (operation === "webhook.delivery") {
@@ -792,14 +875,20 @@ function validCombination(
       ])
     ) return false;
     if (outcome === "review") {
-      return source.resultStatus === "requires_review" &&
-        (source.errorCode === undefined ||
-          source.errorCode === "REFUND_POLICY_MISMATCH");
+      if (source.resultStatus === "requires_review") {
+        return source.errorCode === undefined ||
+          source.errorCode === "REFUND_POLICY_MISMATCH";
+      }
+      return source.resultStatus !== "requires_review" &&
+        ORDER_STATUSES.has(source.resultStatus as OrderStatus) &&
+        source.errorCode === "REFUND_DURABLE_STATE_REVIEW";
     }
-    return outcome === "applied" &&
-      (source.resultStatus === "paid" ||
-        source.resultStatus === "partially_refunded" ||
-        source.resultStatus === "refunded");
+    if (outcome !== "applied") return false;
+    return (source.resultStatus === "checkout_open" &&
+      source.ticketStatus === "none") ||
+      (source.resultStatus === "paid" && source.ticketStatus === "valid") ||
+      (source.resultStatus === "refunded" &&
+        source.ticketStatus === "refunded");
   }
   return false;
 }
