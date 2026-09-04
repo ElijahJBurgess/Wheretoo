@@ -21,6 +21,16 @@ export type ManagedStripeProofClient = {
   invoke<T>(action: ManagedStripeProofAction, input?: Record<string, unknown>): Promise<T>
 }
 
+const unsafeValuePattern = /(?:https:\/\/checkout\.stripe\.com\/|(?:pk|rk|sk)_(?:test|live)_[A-Za-z0-9]|whsec_[A-Za-z0-9]|sb_secret_[A-Za-z0-9])/i
+const unsafeKeyPattern = /^(?:checkout_?url|confirmation_?bearer|authorization|service_?token|auth_?token|secret|buyer_?(?:email|name)|guest_?(?:email|name)|email)$/i
+
+function hasUnsafeProofData(value: unknown): boolean {
+  if (typeof value === 'string') return unsafeValuePattern.test(value)
+  if (Array.isArray(value)) return value.some(hasUnsafeProofData)
+  if (typeof value !== 'object' || value === null) return false
+  return Object.entries(value).some(([key, nested]) => unsafeKeyPattern.test(key) || hasUnsafeProofData(nested))
+}
+
 export function createManagedStripeProofClient(
   env: StripeIntegrationTestEnv,
   fetcher: typeof fetch = fetch,
@@ -41,6 +51,9 @@ export function createManagedStripeProofClient(
         body: JSON.stringify({ action, ...input }),
       })
       const value: unknown = await response.json()
+      if (hasUnsafeProofData(value)) {
+        throw new Error('Managed Stripe proof returned unsafe data')
+      }
       if (!response.ok) {
         throw new Error(`Managed Stripe proof action failed: ${action} (${response.status})`)
       }

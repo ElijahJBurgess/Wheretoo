@@ -4,7 +4,9 @@ Task 17 uses the exact temporary Edge driver source in
 `tests/integration/edge/task17-transaction-driver/index.ts`. The runner materializes that source
 under `supabase/functions` only for deployment, supplies a one-time token and fixture tag through
 temporary managed secrets, runs the canonical proof, and removes the function, temporary secrets,
-local materialization, and exact Supabase fixture from its `EXIT` trap.
+local materialization, and exact Supabase fixture from its `EXIT` trap. It also captures the current
+checkout-creation switch, enables creation only for the fixture, and restores the captured boolean
+on success, test failure, signal, or setup failure after capture.
 
 Run it only against the linked development Supabase project and Stripe test mode:
 
@@ -21,7 +23,32 @@ close it. The runner proves test mode and readiness server-side before creating 
 Session. All Whereto Auth, organizer, Connect, event, order, ticket, refund, receipt, temporary
 function, temporary-secret, and connected-account fixture state is deleted or closed and verified.
 Stripe payment, refund, and event records are immutable test records and are reconciled without
-writing their identifiers to a report.
+writing their identifiers to a report. Inline test Prices and Products are deactivated during
+cleanup, and the disposable connected account is closed.
+
+## Exact transaction contract
+
+The proof creates one Checkout Session with two distinct lines: two General Admission admissions at
+1,500 minor units each and one VIP admission at 2,500 minor units. The 5,500-minor-unit order has
+three admissions and a 425-minor-unit application fee: five percent of the aggregate plus 50 minor
+units per admission. Each Stripe Product carries only the stable internal order-item binding, and
+the proof reconciles both lines to their distinct order items before accepting payment.
+
+The paid path proves a destination charge, the expected platform fee and organizer proceeds, three
+individually sequenced tickets, duplicate completion idempotency, and a confirmation response that
+contains aggregate ticket information rather than ticket identifiers. A separate checkout attempt
+uses a new request ID and bearer, proves a declined payment remains unpaid, expires the Session,
+retries a transient expiry webhook, and releases only that order's reservation. The refund path uses
+the shared whole-order helper and proves the full 5,500-minor-unit refund, destination-transfer
+reversal, full 425-minor-unit application-fee refund, three refunded tickets, and duplicate refund
+idempotency.
+
+The runner refuses to replace an existing temporary driver or temporary proof secret. Files that
+hold the token, cleanup authorization, switch state, or materialized driver are mode `0600`; its
+temporary directory is mode `0700`. Any inherited Stripe credential with a live-mode prefix is
+rejected before fixture collection. The managed client rejects hosted Checkout URLs,
+credential-shaped values, confirmation bearers, auth tokens, and buyer identity returned across the
+driver boundary.
 
 ## Credential modes
 
@@ -51,6 +78,6 @@ Both modes require these names and fail nonzero with names only when configurati
 - `STRIPE_RESTRICTED_KEY`
 - `STRIPE_WEBHOOK_SECRET`
 
-Live publishable or restricted key prefixes are rejected before test collection. Every Stripe
+Live publishable or secret/restricted key prefixes are rejected before test collection. Every Stripe
 object retrieved by the temporary server is also checked for `livemode: false`; any live object
 aborts the proof and still runs teardown.

@@ -1,19 +1,25 @@
 #!/bin/sh
 set -eu
+umask 077
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
 DRIVER_SOURCE="$SCRIPT_DIR/edge/task17-transaction-driver/index.ts"
 MATERIALIZED_DIR="$REPO_ROOT/supabase/functions/task17-transaction-driver"
 MATERIALIZED_SOURCE="$MATERIALIZED_DIR/index.ts"
+MATERIALIZED_CREATED=0
+MATERIALIZED_DIR_CREATED=0
 PROJECT_REF_FILE="$REPO_ROOT/supabase/.temp/project-ref"
 ENV_FILE="$REPO_ROOT/.env.local"
 TEMP_DIR=""
 TEMP_SECRET_FILE=""
 CURL_CONFIG=""
 CLEANUP_RESPONSE=""
+CHECKOUT_SWITCH_STATE_FILE=""
 DRIVER_DEPLOYED=0
 DRIVER_DELETE_REQUIRED=0
+TEMP_SECRETS_SET=0
+CHECKOUT_SWITCH_CAPTURED=0
 TEARDOWN_FAILURE=0
 
 read_public_env() {
@@ -51,10 +57,71 @@ temporary_secret_count() {
   ' "$list_file"
 }
 
+capture_checkout_switch() {
+  switch_read="$TEMP_DIR/checkout-switch-read.json"
+  CHECKOUT_SWITCH_STATE_FILE="$TEMP_DIR/checkout-switch-prior"
+  pnpm exec supabase db query --linked --output-format json \
+    "select checkout_creation_enabled as enabled from private.checkout_runtime_control where singleton;" \
+    > "$switch_read"
+  SWITCH_READ_FILE="$switch_read" SWITCH_STATE_FILE="$CHECKOUT_SWITCH_STATE_FILE" \
+    node --input-type=module <<'NODE'
+import fs from 'node:fs'
+const payload = JSON.parse(fs.readFileSync(process.env.SWITCH_READ_FILE, 'utf8'))
+const row = payload.rows?.[0] ?? payload.result?.[0]
+if (typeof row?.enabled !== 'boolean') process.exit(1)
+fs.writeFileSync(process.env.SWITCH_STATE_FILE, `${row.enabled}\n`, { mode: 0o600 })
+NODE
+  chmod 600 "$switch_read" "$CHECKOUT_SWITCH_STATE_FILE"
+  CHECKOUT_SWITCH_CAPTURED=1
+}
+
+enable_checkout_for_fixture() {
+  switch_enable="$TEMP_DIR/checkout-switch-enable.json"
+  pnpm exec supabase db query --linked --output-format json "with enabled as (
+      update private.checkout_runtime_control
+      set checkout_creation_enabled = true, updated_at = statement_timestamp()
+      where singleton
+      returning checkout_creation_enabled
+    ) select checkout_creation_enabled = true as enabled from enabled;" \
+    > "$switch_enable"
+  SWITCH_ENABLE_FILE="$switch_enable" node --input-type=module <<'NODE'
+import fs from 'node:fs'
+const payload = JSON.parse(fs.readFileSync(process.env.SWITCH_ENABLE_FILE, 'utf8'))
+const row = payload.rows?.[0] ?? payload.result?.[0]
+if (row?.enabled !== true) process.exit(1)
+NODE
+  chmod 600 "$switch_enable"
+}
+
+restore_checkout_switch() {
+  [ "$CHECKOUT_SWITCH_CAPTURED" -eq 1 ] || return 0
+  [ -f "$CHECKOUT_SWITCH_STATE_FILE" ] || return 1
+  prior_state=$(tr -d '\r\n' < "$CHECKOUT_SWITCH_STATE_FILE")
+  case "$prior_state" in true|false) ;; *) return 1 ;; esac
+  switch_restore="$TEMP_DIR/checkout-switch-restore.json"
+  pnpm exec supabase db query --linked --output-format json "with restored as (
+      update private.checkout_runtime_control
+      set checkout_creation_enabled = $prior_state, updated_at = statement_timestamp()
+      where singleton
+      returning checkout_creation_enabled
+    ) select checkout_creation_enabled = $prior_state as restored from restored;" \
+    > "$switch_restore"
+  SWITCH_RESTORE_FILE="$switch_restore" node --input-type=module <<'NODE'
+import fs from 'node:fs'
+const payload = JSON.parse(fs.readFileSync(process.env.SWITCH_RESTORE_FILE, 'utf8'))
+const row = payload.rows?.[0] ?? payload.result?.[0]
+if (row?.restored !== true) process.exit(1)
+NODE
+  chmod 600 "$switch_restore"
+}
+
 cleanup() {
   original_status=$?
   trap - EXIT HUP INT TERM
   set +e
+
+  restore_checkout_switch
+  [ $? -eq 0 ] || TEARDOWN_FAILURE=1
 
   if [ "$DRIVER_DEPLOYED" -eq 1 ] && [ -n "$CURL_CONFIG" ] && [ -f "$CURL_CONFIG" ]; then
     curl --silent --show-error --fail-with-body --config "$CURL_CONFIG" > "$CLEANUP_RESPONSE"
@@ -84,14 +151,20 @@ cleanup() {
       --project-ref "$PROJECT_REF" --yes >/dev/null
     [ $? -eq 0 ] || TEARDOWN_FAILURE=1
   fi
-  pnpm exec supabase secrets unset \
-    TASK17_PROOF_TOKEN TASK17_FIXTURE_PREFIX TASK17_CONNECTED_ACCOUNT_ID \
-    TASK17_CLOSE_CONNECTED_ACCOUNT \
-    --project-ref "$PROJECT_REF" >/dev/null
-  [ $? -eq 0 ] || TEARDOWN_FAILURE=1
+  if [ "$TEMP_SECRETS_SET" -eq 1 ]; then
+    pnpm exec supabase secrets unset \
+      TASK17_PROOF_TOKEN TASK17_FIXTURE_PREFIX TASK17_CONNECTED_ACCOUNT_ID \
+      TASK17_CLOSE_CONNECTED_ACCOUNT \
+      --project-ref "$PROJECT_REF" >/dev/null
+    [ $? -eq 0 ] || TEARDOWN_FAILURE=1
+  fi
 
-  rm -f "$MATERIALIZED_SOURCE"
-  rmdir "$MATERIALIZED_DIR" 2>/dev/null || true
+  if [ "$MATERIALIZED_CREATED" -eq 1 ]; then
+    rm -f "$MATERIALIZED_SOURCE"
+  fi
+  if [ "$MATERIALIZED_DIR_CREATED" -eq 1 ]; then
+    rmdir "$MATERIALIZED_DIR" 2>/dev/null || true
+  fi
 
   if [ -n "$TEMP_DIR" ] && [ -d "$TEMP_DIR" ]; then
     functions_after="$TEMP_DIR/functions-after.json"
@@ -107,7 +180,7 @@ cleanup() {
     rm -rf "$TEMP_DIR"
   fi
 
-  if [ -e "$MATERIALIZED_SOURCE" ]; then
+  if [ "$MATERIALIZED_CREATED" -eq 1 ] && [ -e "$MATERIALIZED_SOURCE" ]; then
     TEARDOWN_FAILURE=1
   fi
   if [ "$TEARDOWN_FAILURE" -ne 0 ]; then
@@ -127,6 +200,15 @@ cd "$REPO_ROOT"
   printf '%s\n' 'Refusing to overwrite an existing Task 17 function source.' >&2
   exit 1
 }
+
+for inherited_stripe_credential in \
+  "${STRIPE_RESTRICTED_KEY-}" "${STRIPE_SECRET_KEY-}" "${STRIPE_API_KEY-}"
+do
+  case "$inherited_stripe_credential" in
+    rk_live_*|sk_live_*) printf '%s\n' 'Inherited live Stripe credential rejected.' >&2; exit 1 ;;
+  esac
+done
+unset STRIPE_RESTRICTED_KEY STRIPE_SECRET_KEY STRIPE_API_KEY STRIPE_WEBHOOK_SECRET
 
 PROJECT_REF=$(tr -d '\r\n' < "$PROJECT_REF_FILE")
 case "$PROJECT_REF" in
@@ -159,7 +241,6 @@ FIXTURE_SUFFIX=$(openssl rand -hex 6)
 TEST_STRIPE_FIXTURE_PREFIX="task17_$FIXTURE_SUFFIX"
 TEST_FUNCTION_URL="${TEST_SUPABASE_URL%/}/functions/v1/task17-transaction-driver"
 
-umask 077
 {
   printf 'TASK17_PROOF_TOKEN=%s\n' "$PROOF_TOKEN"
   printf 'TASK17_FIXTURE_PREFIX=%s\n' "$TEST_STRIPE_FIXTURE_PREFIX"
@@ -176,22 +257,35 @@ umask 077
   printf 'data = "{\\"action\\":\\"cleanup\\"}"\n'
 } > "$CURL_CONFIG"
 
+[ -d "$MATERIALIZED_DIR" ] || MATERIALIZED_DIR_CREATED=1
 mkdir -p "$MATERIALIZED_DIR"
-install -m 600 "$DRIVER_SOURCE" "$MATERIALIZED_SOURCE"
+MATERIALIZED_CREATED=1
+sed 's#../../../../supabase/functions/#../#g' "$DRIVER_SOURCE" > "$MATERIALIZED_SOURCE"
+chmod 600 "$MATERIALIZED_SOURCE"
 
 pre_functions="$TEMP_DIR/functions-before.json"
+pre_secrets="$TEMP_DIR/secrets-before.json"
 pnpm exec supabase functions list --project-ref "$PROJECT_REF" --output json > "$pre_functions"
 [ "$(remote_function_count "$pre_functions")" = 0 ] || {
   printf '%s\n' 'A Task 17 test driver is already deployed; refusing to replace it.' >&2
   exit 1
 }
+pnpm exec supabase secrets list --project-ref "$PROJECT_REF" --output json > "$pre_secrets"
+[ "$(temporary_secret_count "$pre_secrets")" = 0 ] || {
+  printf '%s\n' 'Task 17 temporary secrets already exist; refusing to replace them.' >&2
+  exit 1
+}
 
 pnpm exec deno check --config deno.json "$MATERIALIZED_SOURCE"
+TEMP_SECRETS_SET=1
 pnpm exec supabase secrets set --env-file "$TEMP_SECRET_FILE" --project-ref "$PROJECT_REF" >/dev/null
 DRIVER_DELETE_REQUIRED=1
 pnpm exec supabase functions deploy task17-transaction-driver \
   --project-ref "$PROJECT_REF" --no-verify-jwt --import-map deno.json >/dev/null
 DRIVER_DEPLOYED=1
+
+capture_checkout_switch
+enable_checkout_for_fixture
 
 export RUN_STRIPE_TRANSACTION_PROOF=1
 export TEST_STRIPE_CREDENTIAL_MODE=managed_edge

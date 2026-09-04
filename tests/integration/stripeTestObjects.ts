@@ -1,9 +1,46 @@
-export const TASK17_SUBTOTAL_MINOR = 3_001
+import { randomBytes, randomUUID } from 'node:crypto'
+
 export const TASK17_PERCENT_BPS = 500
 export const TASK17_FIXED_MINOR = 50
 
-export function applicationFeeMinor(subtotalMinor: number): number {
-  return Math.floor((subtotalMinor * TASK17_PERCENT_BPS) / 10_000) + TASK17_FIXED_MINOR
+export const TASK17_CART = [
+  {
+    label: 'ga',
+    name: 'Task 17 General Admission',
+    unitAmountMinor: 1_500,
+    quantity: 2,
+    subtotalMinor: 3_000,
+  },
+  {
+    label: 'vip',
+    name: 'Task 17 VIP',
+    unitAmountMinor: 2_500,
+    quantity: 1,
+    subtotalMinor: 2_500,
+  },
+] as const
+
+export const TASK17_ADMISSION_QUANTITY = 3
+export const TASK17_SUBTOTAL_MINOR = 5_500
+
+export function applicationFeeMinor(subtotalMinor: number, quantity: number): number {
+  return Math.floor((subtotalMinor * TASK17_PERCENT_BPS) / 10_000) + TASK17_FIXED_MINOR * quantity
+}
+
+export const TASK17_APPLICATION_FEE_MINOR = applicationFeeMinor(
+  TASK17_SUBTOTAL_MINOR,
+  TASK17_ADMISSION_QUANTITY,
+)
+export const TASK17_ORGANIZER_PROCEEDS_MINOR = TASK17_SUBTOTAL_MINOR - TASK17_APPLICATION_FEE_MINOR
+
+export function createStripeProofCheckoutAttempt(): {
+  clientRequestId: string
+  confirmationBearer: string
+} {
+  return {
+    clientRequestId: randomUUID(),
+    confirmationBearer: randomBytes(32).toString('base64url'),
+  }
 }
 
 export type ConnectProof = {
@@ -40,14 +77,35 @@ export type OrderProof = {
 export type FixtureProof = {
   ok: boolean
   orders: OrderProof[]
-  items: Array<{ id: string; order_id: string }>
-  tickets: Array<{ id: string; order_id: string; status: string; refunded_at: string | null }>
+  items: Array<{
+    id: string
+    order_id: string
+    ticket_tier_id: string
+    tier_name: string
+    unit_amount_minor: number
+    quantity: number
+    subtotal_minor: number
+    currency: string
+  }>
+  tickets: Array<{
+    id: string
+    order_id: string
+    order_item_id: string
+    ticket_tier_id: string
+    unit_sequence: number
+    status: string
+    refunded_at: string | null
+  }>
   refunds: Array<{
     order_id: string
     status: string
     amount_minor: number
     reverse_transfer: boolean
     refund_application_fee: boolean
+    transfer_reversal_amount_minor: number
+    application_fee_refund_amount_minor: number
+    policy_verified: boolean
+    policy_failure_code: string | null
     stripe_transfer_reversal_id: string | null
     stripe_application_fee_refund_id: string | null
   }>
@@ -74,6 +132,10 @@ export type ReconciliationProof = {
   transfer_less_application_fee: number
   balance_transaction_amount: number
   balance_transaction_fee: number
+  destination_charge: boolean
+  line_bindings_valid: boolean
+  line_count: number
+  admission_count: number
 }
 
 export type EventProof = {

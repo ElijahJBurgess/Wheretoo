@@ -1,21 +1,23 @@
-// This exact source is materialized under supabase/functions only for the
-// duration of run-stripe-ticketing-proof.sh, then the function and secrets are
-// deleted by its EXIT trap. Imports intentionally resolve from that location.
-import { getServiceClient } from "../_shared/database.ts";
+// The runner rewrites only this source's repository-relative import prefix
+// while materializing it under supabase/functions, then removes the function,
+// source, and secrets from its EXIT trap.
+import type Stripe from "stripe";
+import { getServiceClient } from "../../../../supabase/functions/_shared/database.ts";
 import {
   getStripeWebhookSecret,
   getSupabaseServiceConfig,
-} from "../_shared/env.ts";
-import { getStripe } from "../_shared/stripeClient.ts";
+} from "../../../../supabase/functions/_shared/env.ts";
+import { createWholeOrderRefund } from "../../../../supabase/functions/_shared/refundOrder.ts";
+import { getStripe } from "../../../../supabase/functions/_shared/stripeClient.ts";
 import {
   ACCOUNT_INCLUDE,
   toSafeConnectStatus,
   validateApprovedConnectAccount,
-} from "../stripe-connect-session/connect.ts";
+} from "../../../../supabase/functions/stripe-connect-session/connect.ts";
 import {
   createDefaultStripeWebhookDependencies,
   createStripeWebhookHandler,
-} from "../stripe-webhook/index.ts";
+} from "../../../../supabase/functions/stripe-webhook/index.ts";
 
 const actions = new Set([
   "server_proof",
@@ -33,6 +35,30 @@ const actions = new Set([
 ]);
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const fixtureTiers = [
+  {
+    label: "ga",
+    name: "Task 17 General Admission",
+    unitAmountMinor: 1_500,
+    quantity: 2,
+    subtotalMinor: 3_000,
+    quantityTotal: 10,
+    sortOrder: 1,
+  },
+  {
+    label: "vip",
+    name: "Task 17 VIP",
+    unitAmountMinor: 2_500,
+    quantity: 1,
+    subtotalMinor: 2_500,
+    quantityTotal: 10,
+    sortOrder: 2,
+  },
+] as const;
+const fixtureQuantity = 3;
+const fixtureSubtotalMinor = 5_500;
+const fixtureApplicationFeeMinor = 425;
+const fixtureOrganizerProceedsMinor = 5_075;
 
 function json(body: Record<string, unknown>, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -318,32 +344,86 @@ async function setup(): Promise<Record<string, unknown>> {
     if (error !== null) throw new Error("DATABASE");
     event = { id: eventId };
   }
-  const tierRead = await client.from("ticket_tiers")
-    .select("id")
-    .eq("event_id", event.id).eq("sort_order", 1).maybeSingle();
-  if (tierRead.error !== null) throw new Error("DATABASE");
-  let tier = tierRead.data;
-  if (tier === null) {
-    const tierId = crypto.randomUUID();
-    const { error } = await client.from("ticket_tiers").insert({
-      id: tierId,
-      event_id: event.id,
-      name: "Task 17 General Admission",
-      unit_amount_minor: 3001,
-      currency: "usd",
-      quantity_total: 10,
-      status: "active",
-      sort_order: 1,
+  const tiers: Array<{
+    label: "ga" | "vip";
+    id: string;
+    name: string;
+    unitAmountMinor: number;
+    quantity: number;
+    subtotalMinor: number;
+  }> = [];
+  for (const definition of fixtureTiers) {
+    const tierRead = await client.from("ticket_tiers")
+      .select(
+        "id,name,unit_amount_minor,currency,quantity_total,status,sort_order",
+      )
+      .eq("event_id", event.id).eq("sort_order", definition.sortOrder)
+      .maybeSingle();
+    if (tierRead.error !== null) throw new Error("DATABASE");
+    let tier = tierRead.data;
+    if (tier === null) {
+      const tierId = crypto.randomUUID();
+      const { error } = await client.from("ticket_tiers").insert({
+        id: tierId,
+        event_id: event.id,
+        name: definition.name,
+        unit_amount_minor: definition.unitAmountMinor,
+        currency: "usd",
+        quantity_total: definition.quantityTotal,
+        status: "active",
+        sort_order: definition.sortOrder,
+      });
+      if (error !== null) throw new Error("DATABASE");
+      tier = {
+        id: tierId,
+        name: definition.name,
+        unit_amount_minor: definition.unitAmountMinor,
+        currency: "usd",
+        quantity_total: definition.quantityTotal,
+        status: "active",
+        sort_order: definition.sortOrder,
+      };
+    }
+    if (
+      tier.name !== definition.name ||
+      tier.unit_amount_minor !== definition.unitAmountMinor ||
+      tier.currency !== "usd" ||
+      tier.quantity_total !== definition.quantityTotal ||
+      tier.status !== "active" || tier.sort_order !== definition.sortOrder
+    ) throw new Error("DATABASE");
+    tiers.push({
+      label: definition.label,
+      id: tier.id,
+      name: definition.name,
+      unitAmountMinor: definition.unitAmountMinor,
+      quantity: definition.quantity,
+      subtotalMinor: definition.subtotalMinor,
     });
-    if (error !== null) throw new Error("DATABASE");
-    tier = { id: tierId };
+  }
+  const gaTier = tiers.find((tier) => tier.label === "ga");
+  const vipTier = tiers.find((tier) => tier.label === "vip");
+  if (gaTier === undefined || vipTier === undefined) {
+    throw new Error("DATABASE");
   }
   return {
     ok: true,
     event_id: event.id,
-    tier_id: tier.id,
-    subtotal_minor: 3001,
-    application_fee_minor: 200,
+    ga_tier_id: gaTier.id,
+    vip_tier_id: vipTier.id,
+    items: tiers.map((tier) => ({
+      label: tier.label,
+      tier_id: tier.id,
+      name: tier.name,
+      unit_amount_minor: tier.unitAmountMinor,
+      quantity: tier.quantity,
+      subtotal_minor: tier.subtotalMinor,
+      currency: "usd",
+    })),
+    quantity: fixtureQuantity,
+    subtotal_minor: fixtureSubtotalMinor,
+    total_minor: fixtureSubtotalMinor,
+    application_fee_minor: fixtureApplicationFeeMinor,
+    organizer_proceeds_minor: fixtureOrganizerProceedsMinor,
   };
 }
 
@@ -354,26 +434,25 @@ async function inspect(eventId: unknown): Promise<Record<string, unknown>> {
   const client = getServiceClient();
   const { data: orders, error: orderError } = await client.from("orders")
     .select(
-      "id,buyer_email,status,failure_code,reconciliation_status,stripe_checkout_session_id,stripe_payment_intent_id,stripe_charge_id,stripe_transfer_id,stripe_application_fee_id,stripe_balance_transaction_id,last_stripe_event_id,subtotal_minor,total_minor,application_fee_amount_minor,expected_organizer_proceeds_minor",
+      "id,status,failure_code,reconciliation_status,stripe_checkout_session_id,stripe_payment_intent_id,stripe_charge_id,stripe_transfer_id,stripe_application_fee_id,stripe_balance_transaction_id,subtotal_minor,total_minor,application_fee_amount_minor,expected_organizer_proceeds_minor",
     ).eq("event_id", eventId).order("created_at", { ascending: true });
   if (orderError !== null) throw new Error("DATABASE");
   const orderIds = orders.map((order) => order.id);
   const itemResult = orderIds.length === 0
     ? { data: [], error: null }
     : await client.from("order_items").select(
-      "id,order_id,ticket_tier_id,quantity",
+      "id,order_id,ticket_tier_id,tier_name,unit_amount_minor,quantity,subtotal_minor,currency",
     )
       .in("order_id", orderIds);
   const ticketResult = orderIds.length === 0
     ? { data: [], error: null }
-    : await client.from("tickets").select("id,order_id,status,refunded_at").in(
-      "order_id",
-      orderIds,
-    );
+    : await client.from("tickets").select(
+      "id,order_id,order_item_id,ticket_tier_id,unit_sequence,status,refunded_at",
+    ).in("order_id", orderIds);
   const refundResult = orderIds.length === 0
     ? { data: [], error: null }
     : await client.from("refunds").select(
-      "id,order_id,stripe_refund_id,status,amount_minor,stripe_transfer_reversal_id,stripe_application_fee_refund_id,reverse_transfer,refund_application_fee,stripe_event_id",
+      "id,order_id,stripe_refund_id,status,amount_minor,stripe_transfer_reversal_id,stripe_application_fee_refund_id,reverse_transfer,refund_application_fee,transfer_reversal_amount_minor,application_fee_refund_amount_minor,policy_verified,policy_failure_code,stripe_event_id",
     ).in("order_id", orderIds);
   if (
     itemResult.error !== null || ticketResult.error !== null ||
@@ -385,7 +464,8 @@ async function inspect(eventId: unknown): Promise<Record<string, unknown>> {
   const tickets = ticketResult.data;
   const refunds = refundResult.data;
   const { data: tiers, error: tierError } = await client.from("ticket_tiers")
-    .select("id,quantity_total").eq("event_id", eventId);
+    .select("id,quantity_total,sort_order").eq("event_id", eventId)
+    .order("sort_order", { ascending: true });
   if (tierError !== null) throw new Error("DATABASE");
   const inventory = tiers.map((tier) => {
     const reservedQuantity = items.reduce((sum, item) => {
@@ -419,7 +499,32 @@ async function inspect(eventId: unknown): Promise<Record<string, unknown>> {
       "stripe_event_id,event_type,stripe_object_id,processing_status,delivery_attempt_count,error_code",
     ).in("stripe_object_id", objectIds);
   if (receiptError !== null) throw new Error("DATABASE");
-  return { ok: true, orders, items, tickets, refunds, receipts, inventory };
+  return {
+    ok: true,
+    orders,
+    items,
+    tickets,
+    refunds: refunds.map(({ stripe_event_id: _eventId, ...refund }) => refund),
+    receipts: receipts.map((value) => ({
+      event_type: value.event_type,
+      processing_status: value.processing_status,
+      delivery_attempt_count: value.delivery_attempt_count,
+      error_code: value.error_code,
+    })),
+    inventory,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function assertTestMode(
+  value: unknown,
+): asserts value is Record<string, unknown> {
+  if (!isRecord(value) || value.livemode !== false) {
+    throw new Error("LIVE_MODE_FORBIDDEN");
+  }
 }
 
 function stripeId(value: unknown, prefix: string): string {
@@ -434,15 +539,81 @@ async function checkoutStatus(
 ): Promise<Record<string, unknown>> {
   const session = await getStripe().checkout.sessions.retrieve(
     stripeId(sessionIdValue, "cs_test_"),
-    { expand: ["payment_intent.latest_charge"] },
+    {
+      expand: [
+        "line_items.data.price.product",
+        "payment_intent.latest_charge",
+      ],
+    },
   );
-  if (session.livemode !== false) throw new Error("LIVE_MODE_FORBIDDEN");
+  assertTestMode(session);
+  const orderId = session.client_reference_id;
+  if (typeof orderId !== "string" || !uuidPattern.test(orderId)) {
+    throw new Error("STRIPE");
+  }
+  const { data: orderItems, error } = await getServiceClient().from(
+    "order_items",
+  ).select(
+    "id,tier_name,unit_amount_minor,quantity,subtotal_minor,currency",
+  ).eq("order_id", orderId);
+  if (error !== null || orderItems.length === 0) throw new Error("DATABASE");
+  const expectedById = new Map(orderItems.map((item) => [item.id, item]));
+  const lineItems = session.line_items as unknown;
+  if (
+    !isRecord(lineItems) || lineItems.has_more !== false ||
+    !Array.isArray(lineItems.data) ||
+    lineItems.data.length !== expectedById.size
+  ) throw new Error("STRIPE");
+  const seen = new Set<string>();
+  const lines: Array<Record<string, unknown>> = [];
+  for (const line of lineItems.data) {
+    if (!isRecord(line) || !isRecord(line.price)) throw new Error("STRIPE");
+    assertTestMode(line.price);
+    const product = line.price.product;
+    assertTestMode(product);
+    if (!isRecord(product.metadata)) throw new Error("STRIPE");
+    const metadataKeys = Object.keys(product.metadata);
+    const orderItemId = product.metadata.whereto_order_item_id;
+    const expected = typeof orderItemId === "string"
+      ? expectedById.get(orderItemId)
+      : undefined;
+    if (
+      metadataKeys.length !== 1 ||
+      metadataKeys[0] !== "whereto_order_item_id" ||
+      typeof orderItemId !== "string" || !uuidPattern.test(orderItemId) ||
+      expected === undefined || seen.has(orderItemId) ||
+      line.quantity !== expected.quantity ||
+      line.amount_subtotal !== expected.subtotal_minor ||
+      line.amount_total !== expected.subtotal_minor ||
+      line.currency !== expected.currency ||
+      line.description !== expected.tier_name ||
+      line.price.unit_amount !== expected.unit_amount_minor ||
+      line.price.currency !== expected.currency ||
+      line.price.type !== "one_time" ||
+      product.name !== expected.tier_name
+    ) throw new Error("STRIPE");
+    seen.add(orderItemId);
+    lines.push({
+      tier_name: expected.tier_name,
+      unit_amount_minor: expected.unit_amount_minor,
+      quantity: expected.quantity,
+      subtotal_minor: expected.subtotal_minor,
+      currency: expected.currency,
+      binding: "order_item",
+    });
+  }
+  if (seen.size !== expectedById.size) throw new Error("STRIPE");
+  lines.sort((left, right) =>
+    Number(left.unit_amount_minor) - Number(right.unit_amount_minor)
+  );
   const intent = typeof session.payment_intent === "object"
     ? session.payment_intent
     : null;
+  if (intent !== null) assertTestMode(intent);
   const charge = intent !== null && typeof intent.latest_charge === "object"
     ? intent.latest_charge
     : null;
+  if (charge !== null) assertTestMode(charge);
   return {
     ok: true,
     livemode: session.livemode,
@@ -451,6 +622,13 @@ async function checkoutStatus(
     amount_total: session.amount_total,
     application_fee_amount: intent?.application_fee_amount ?? null,
     charge_paid: charge?.paid ?? null,
+    line_bindings_valid: true,
+    line_count: lines.length,
+    admission_count: lines.reduce(
+      (sum, line) => sum + Number(line.quantity),
+      0,
+    ),
+    lines,
   };
 }
 
@@ -487,7 +665,8 @@ async function expireCheckout(
   const session = await getStripe().checkout.sessions.expire(
     stripeId(sessionIdValue, "cs_test_"),
   );
-  if (session.livemode !== false || session.status !== "expired") {
+  assertTestMode(session);
+  if (session.status !== "expired") {
     throw new Error("LIVE_MODE_FORBIDDEN");
   }
   return { ok: true, livemode: session.livemode, status: session.status };
@@ -535,7 +714,7 @@ async function paidOrder(orderIdValue: unknown) {
     throw new Error("INPUT");
   }
   const { data, error } = await getServiceClient().from("orders").select(
-    "id,status,total_minor,application_fee_amount_minor,expected_organizer_proceeds_minor,stripe_payment_intent_id,stripe_charge_id,stripe_transfer_id,stripe_application_fee_id,stripe_balance_transaction_id",
+    "id,status,total_minor,application_fee_amount_minor,expected_organizer_proceeds_minor,stripe_checkout_session_id,stripe_payment_intent_id,stripe_charge_id,stripe_transfer_id,stripe_application_fee_id,stripe_balance_transaction_id",
   ).eq("id", orderIdValue).single();
   if (error !== null) throw new Error("DATABASE");
   return data;
@@ -561,31 +740,38 @@ async function reconcilePayment(
   const balance = await stripe.balanceTransactions.retrieve(
     stripeId(order.stripe_balance_transaction_id, "txn_"),
   );
-  if (
-    [intent.livemode, charge.livemode, transfer.livemode, fee.livemode].some(
-      Boolean,
-    )
-  ) {
-    throw new Error("LIVE_MODE_FORBIDDEN");
-  }
+  assertTestMode(intent);
+  assertTestMode(charge);
+  assertTestMode(transfer);
+  assertTestMode(fee);
   const destination = typeof transfer.destination === "string"
     ? transfer.destination
     : transfer.destination?.id;
   if (destination === undefined) throw new Error("STRIPE");
+  const lineStatus = await checkoutStatus(order.stripe_checkout_session_id);
+  const connectedAccountMatches = destination === connectedAccountId() &&
+    intent.transfer_data?.destination === connectedAccountId();
+  const persistedIdsMatch = intent.id === order.stripe_payment_intent_id &&
+    charge.id === order.stripe_charge_id &&
+    transfer.id === order.stripe_transfer_id &&
+    fee.id === order.stripe_application_fee_id &&
+    balance.id === order.stripe_balance_transaction_id;
   return {
     ok: intent.amount === order.total_minor &&
       charge.amount === order.total_minor &&
       transfer.amount === order.total_minor &&
       fee.amount === order.application_fee_amount_minor &&
-      transfer.amount - fee.amount === order.expected_organizer_proceeds_minor,
+      transfer.amount - fee.amount ===
+        order.expected_organizer_proceeds_minor &&
+      connectedAccountMatches && persistedIdsMatch &&
+      lineStatus.line_bindings_valid === true,
     livemode: false,
-    connected_account_matches: destination === connectedAccountId() &&
-      intent.transfer_data?.destination === connectedAccountId(),
-    persisted_ids_match: intent.id === order.stripe_payment_intent_id &&
-      charge.id === order.stripe_charge_id &&
-      transfer.id === order.stripe_transfer_id &&
-      fee.id === order.stripe_application_fee_id &&
-      balance.id === order.stripe_balance_transaction_id,
+    connected_account_matches: connectedAccountMatches,
+    persisted_ids_match: persistedIdsMatch,
+    destination_charge: connectedAccountMatches,
+    line_bindings_valid: lineStatus.line_bindings_valid,
+    line_count: lineStatus.line_count,
+    admission_count: lineStatus.admission_count,
     total_minor: order.total_minor,
     application_fee_actual: fee.amount,
     transfer_less_application_fee: transfer.amount - fee.amount,
@@ -613,72 +799,132 @@ async function reconcileEvents(
     ) matching.add(event.type);
   }
   return {
-    ok: events.data.every((event) => event.livemode === false) &&
+    ok: events.has_more === false &&
+      events.data.every((event) => event.livemode === false) &&
       matching.has("checkout.session.completed") &&
       [...matching].some((type) => type.startsWith("refund.")),
-    livemode: events.data.some((event) => event.livemode),
+    livemode: events.data.some((event) => event.livemode !== false),
     matching_types: [...matching].sort(),
+    has_more: events.has_more,
   };
 }
 
 async function createRefund(
   orderIdValue: unknown,
 ): Promise<Record<string, unknown>> {
-  const order = await paidOrder(orderIdValue);
-  if (!["paid", "requires_review", "refunded"].includes(order.status)) {
+  if (typeof orderIdValue !== "string" || !uuidPattern.test(orderIdValue)) {
     throw new Error("INPUT");
   }
-  const stripe = getStripe();
-  const intentId = stripeId(order.stripe_payment_intent_id, "pi_");
-  const refund = await stripe.refunds.create({
-    payment_intent: intentId,
-    amount: order.total_minor,
-    reverse_transfer: true,
-    refund_application_fee: true,
-    metadata: { order_id: order.id },
-  }, { idempotencyKey: `${fixturePrefix()}-${order.id}` });
-  const intent = await stripe.paymentIntents.retrieve(intentId);
-  if (intent.livemode !== false) throw new Error("LIVE_MODE_FORBIDDEN");
-  const transfer = await stripe.transfers.retrieve(
-    stripeId(order.stripe_transfer_id, "tr_"),
-    { expand: ["reversals"] },
+  const stripeClient = getStripe();
+  let prepared: {
+    totalMinor: number;
+    applicationFeeAmountMinor: number;
+  } | undefined;
+  let evidence: {
+    transferReversalAmountMinor: number;
+    applicationFeeRefundAmountMinor: number;
+  } | undefined;
+  const result = await createWholeOrderRefund(
+    orderIdValue,
+    "requested_by_customer",
+    {
+      prepareWholeOrderRefund: async (orderId, reason) => {
+        const { data, error } = await getServiceClient().rpc(
+          "server_prepare_whole_order_refund",
+          { p_order_id: orderId, p_reason: reason },
+        );
+        if (error !== null || !Array.isArray(data) || data.length !== 1) {
+          throw new Error("DATABASE");
+        }
+        const row = data[0];
+        prepared = {
+          totalMinor: row.total_minor,
+          applicationFeeAmountMinor: row.application_fee_amount_minor,
+        };
+        return {
+          orderId: row.order_id,
+          paymentIntentId: row.payment_intent_id,
+          chargeId: row.charge_id,
+          transferId: row.transfer_id,
+          applicationFeeId: row.application_fee_id,
+          currency: row.currency,
+          totalMinor: row.total_minor,
+          applicationFeeAmountMinor: row.application_fee_amount_minor,
+          reason: row.reason,
+        };
+      },
+      createRefund: async (params, options) => {
+        const created = await stripeClient.refunds.create(
+          params as Stripe.RefundCreateParams,
+          options,
+        );
+        assertTestMode(created);
+        return created;
+      },
+      retrieveRefundEvidence: async (refundId, snapshot) => {
+        const transfer = await stripeClient.transfers.retrieve(
+          snapshot.transferId,
+          { expand: ["reversals"] },
+        );
+        assertTestMode(transfer);
+        const reversal = transfer.reversals?.data.find((value) => {
+          const source = typeof value.source_refund === "string"
+            ? value.source_refund
+            : value.source_refund?.id;
+          return source === refundId;
+        });
+        const applicationFee = await stripeClient.applicationFees.retrieve(
+          snapshot.applicationFeeId,
+        );
+        assertTestMode(applicationFee);
+        const feeRefunds = await stripeClient.applicationFees.listRefunds(
+          snapshot.applicationFeeId,
+          { limit: 10 },
+        );
+        const feeRefund = feeRefunds.data.length === 1
+          ? feeRefunds.data[0]
+          : undefined;
+        if (
+          reversal === undefined || reversal.object !== "transfer_reversal" ||
+          feeRefund === undefined || feeRefund.object !== "fee_refund" ||
+          feeRefund.currency !== snapshot.currency ||
+          (typeof feeRefund.fee === "string"
+              ? feeRefund.fee
+              : feeRefund.fee.id) !== snapshot.applicationFeeId
+        ) throw new Error("STRIPE");
+        evidence = {
+          transferReversalAmountMinor: reversal.amount,
+          applicationFeeRefundAmountMinor: feeRefund.amount,
+        };
+        return {
+          transferReversalId: reversal.id,
+          transferReversalAmountMinor: reversal.amount,
+          applicationFeeRefundId: feeRefund.id,
+          applicationFeeRefundAmountMinor: feeRefund.amount,
+        };
+      },
+      updateRefundMetadata: async (refundId, metadata) => {
+        const updated = await stripeClient.refunds.update(refundId, {
+          metadata,
+        });
+        assertTestMode(updated);
+      },
+    },
   );
-  const reversal = transfer.reversals?.data.find((value) => {
-    const source = typeof value.source_refund === "string"
-      ? value.source_refund
-      : value.source_refund?.id;
-    return source === refund.id;
-  }) ?? (transfer.reversals?.data.length === 1
-    ? transfer.reversals.data[0]
-    : undefined);
-  const feeId = stripeId(order.stripe_application_fee_id, "fee_");
-  const feeRefunds = await stripe.applicationFees.listRefunds(feeId, {
-    limit: 10,
-  });
-  const feeRefund = feeRefunds.data.length === 1
-    ? feeRefunds.data[0]
-    : undefined;
-  if (reversal === undefined || feeRefund === undefined) {
+  if (prepared === undefined || evidence === undefined) {
     throw new Error("STRIPE");
   }
-  const updated = await stripe.refunds.update(refund.id, {
-    metadata: {
-      order_id: order.id,
-      whereto_refund_policy: "destination_v1",
-      whereto_reverse_transfer: "true",
-      whereto_refund_application_fee: "true",
-      whereto_transfer_reversal_amount: String(reversal.amount),
-      whereto_application_fee_refund_id: feeRefund.id,
-      whereto_application_fee_refund_amount: String(feeRefund.amount),
-    },
-  });
   return {
     ok: true,
-    livemode: intent.livemode,
-    refund_id: updated.id,
-    amount: updated.amount,
-    reversal_amount: reversal.amount,
-    application_fee_refund_amount: feeRefund.amount,
+    livemode: false,
+    refund_id: result.stripeRefundId,
+    status: result.status,
+    amount: prepared.totalMinor,
+    reverse_transfer: true,
+    refund_application_fee: true,
+    reversal_amount: evidence.transferReversalAmountMinor,
+    application_fee_refund_amount: evidence.applicationFeeRefundAmountMinor,
+    expected_application_fee_amount: prepared.applicationFeeAmountMinor,
   };
 }
 
@@ -691,6 +937,12 @@ async function cleanup(): Promise<Record<string, unknown>> {
   const orderIds: string[] = [];
   const objectIds: string[] = [];
   const receiptIds = new Set<string>();
+  const priceIds = new Set<string>();
+  const productIds = new Set<string>();
+  let deletedItemCount = 0;
+  let deletedTicketCount = 0;
+  let deletedRefundCount = 0;
+  let deletedTierCount = 0;
   if (organizer !== null) {
     const { data: events, error: eventReadError } = await client.from("events")
       .select("id")
@@ -698,6 +950,11 @@ async function cleanup(): Promise<Record<string, unknown>> {
     if (eventReadError !== null) throw new Error("DATABASE");
     eventIds.push(...(events ?? []).map((event) => event.id));
     if (eventIds.length > 0) {
+      const { data: tierRows, error: tierReadError } = await client.from(
+        "ticket_tiers",
+      ).select("id").in("event_id", eventIds);
+      if (tierReadError !== null) throw new Error("DATABASE");
+      deletedTierCount = tierRows.length;
       const { data: orders, error: orderReadError } = await client.from(
         "orders",
       ).select(
@@ -717,15 +974,37 @@ async function cleanup(): Promise<Record<string, unknown>> {
           ]
         ) if (value) objectIds.push(value);
         if (order.stripe_checkout_session_id) {
-          try {
-            const session = await getStripe().checkout.sessions.retrieve(
-              order.stripe_checkout_session_id,
+          const session = await getStripe().checkout.sessions.retrieve(
+            stripeId(order.stripe_checkout_session_id, "cs_test_"),
+            { expand: ["line_items.data.price.product"] },
+          );
+          assertTestMode(session);
+          if (session.status === "open") {
+            const expired = await getStripe().checkout.sessions.expire(
+              session.id,
             );
-            if (session.status === "open") {
-              await getStripe().checkout.sessions.expire(session.id);
+            assertTestMode(expired);
+            if (expired.status !== "expired") throw new Error("STRIPE");
+          }
+          const lineItems = session.line_items as unknown;
+          if (
+            !isRecord(lineItems) || lineItems.has_more !== false ||
+            !Array.isArray(lineItems.data)
+          ) throw new Error("STRIPE");
+          for (const line of lineItems.data) {
+            if (!isRecord(line) || !isRecord(line.price)) {
+              throw new Error("STRIPE");
             }
-          } catch {
-            // Supabase cleanup must continue for immutable or already-terminal test objects.
+            assertTestMode(line.price);
+            const product = line.price.product;
+            assertTestMode(product);
+            if (
+              typeof line.price.id !== "string" ||
+              !line.price.id.startsWith("price_") ||
+              typeof product.id !== "string" || !product.id.startsWith("prod_")
+            ) throw new Error("STRIPE");
+            priceIds.add(line.price.id);
+            productIds.add(product.id);
           }
         }
       }
@@ -737,10 +1016,20 @@ async function cleanup(): Promise<Record<string, unknown>> {
         "stripe_refund_id,stripe_event_id",
       ).in("order_id", orderIds);
       if (refundReadError !== null) throw new Error("DATABASE");
+      deletedRefundCount = (refunds ?? []).length;
       for (const refund of refunds ?? []) {
         objectIds.push(refund.stripe_refund_id);
-        receiptIds.add(refund.stripe_event_id);
+        if (refund.stripe_event_id) receiptIds.add(refund.stripe_event_id);
       }
+      const [trackedItems, trackedTickets] = await Promise.all([
+        client.from("order_items").select("id").in("order_id", orderIds),
+        client.from("tickets").select("id").in("order_id", orderIds),
+      ]);
+      if (trackedItems.error !== null || trackedTickets.error !== null) {
+        throw new Error("DATABASE");
+      }
+      deletedItemCount = trackedItems.data.length;
+      deletedTicketCount = trackedTickets.data.length;
     }
     if (objectIds.length > 0) {
       const { data: receipts, error: receiptReadError } = await client.from(
@@ -750,6 +1039,18 @@ async function cleanup(): Promise<Record<string, unknown>> {
       ).in("stripe_object_id", objectIds);
       if (receiptReadError !== null) throw new Error("DATABASE");
       for (const value of receipts ?? []) receiptIds.add(value.stripe_event_id);
+    }
+    for (const priceId of priceIds) {
+      const price = await getStripe().prices.update(priceId, { active: false });
+      assertTestMode(price);
+      if (price.active !== false) throw new Error("STRIPE");
+    }
+    for (const productId of productIds) {
+      const product = await getStripe().products.update(productId, {
+        active: false,
+      });
+      assertTestMode(product);
+      if (product.active !== false) throw new Error("STRIPE");
     }
     const ensureDelete = (error: unknown, stage: string) => {
       if (error !== null) throw new Error(`DATABASE_DELETE_${stage}`);
@@ -905,6 +1206,14 @@ async function cleanup(): Promise<Record<string, unknown>> {
     dispute_count: disputeCount,
     refund_count: refundCount,
     item_count: itemCount,
+    deleted_order_count: orderIds.length,
+    deleted_tier_count: deletedTierCount,
+    deleted_receipt_count: receiptIds.size,
+    deleted_ticket_count: deletedTicketCount,
+    deleted_refund_count: deletedRefundCount,
+    deleted_item_count: deletedItemCount,
+    archived_price_count: priceIds.size,
+    archived_product_count: productIds.size,
     connected_account_closed: connectedAccountClosed,
   };
 }
@@ -954,7 +1263,8 @@ Deno.serve(async (request) => {
         "INPUT",
         "LIVE_MODE_FORBIDDEN",
         "STRIPE",
-      ].includes(error.message) || /^DATABASE_DELETE_[A-Z_]+$/.test(error.message))
+      ].includes(error.message) ||
+        /^DATABASE_DELETE_[A-Z_]+$/.test(error.message))
       ? error.message
       : "UNKNOWN";
     return json({ ok: false, kind }, 500);

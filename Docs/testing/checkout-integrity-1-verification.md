@@ -29,13 +29,26 @@ payment evidence.
   pnpm typecheck:functions
   ```
 
+- [ ] The committed disposable Stripe harness contracts, portable temporary
+  driver, and repository typecheck pass without contacting Stripe:
+
+  ```bash
+  pnpm exec vitest run --config vitest.integration.config.ts \
+    tests/integration/stripeHarnessContract.test.ts \
+    tests/integration/stripeRunnerContract.test.ts
+  pnpm exec deno check --config deno.json \
+    tests/integration/edge/task17-transaction-driver/index.ts
+  pnpm typecheck
+  ```
+
 - [ ] The documentation credential-shape scan exits zero without printing
   matched content:
 
   ```bash
   if rg -q '(rk_(test|live)_[A-Za-z0-9]|sk_(test|live)_[A-Za-z0-9]|whsec_[A-Za-z0-9]|sb_secret_[A-Za-z0-9])' \
     Docs/runbooks/checkout-integrity-operations.md \
-    Docs/testing/checkout-integrity-1-verification.md; then exit 1; fi
+    Docs/testing/checkout-integrity-1-verification.md \
+    Docs/testing/day2-stripe-transaction-proof.md; then exit 1; fi
   ```
 
 ## Operational integrity gates
@@ -66,6 +79,11 @@ database owner/operator inside a read-only transaction.
   aggregate.
 - [ ] One order item exists per distinct tier and persisted item totals equal
   the order totals.
+- [ ] The bounded real test-mode proof uses one two-line Checkout Session for
+  two General Admission admissions and one VIP admission, then reconciles all
+  three admissions to exact Product/order-item bindings.
+- [ ] The application fee is 425 minor units on the 5,500-minor-unit aggregate:
+  five percent plus 50 minor units per admission.
 - [ ] A retry reuses the same order and validated Checkout Session.
 - [ ] An uncertain provider result preserves inventory for deterministic retry.
 - [ ] A verified duplicate webhook causes no second domain transition.
@@ -78,6 +96,13 @@ database owner/operator inside a read-only transaction.
   review inventory.
 - [ ] Whole-order refunds reconcile refund money, destination reversal, and
   application-fee unwind; partial or incomplete economics enter review.
+- [ ] The real test-mode proof uses a distinct second checkout attempt for the
+  decline/expiry path, creates no tickets for it, and leaves inventory reserved
+  only for the paid order.
+- [ ] Proof teardown restores the captured checkout-creation switch, removes
+  all disposable database state and temporary function/secrets/materialization,
+  deactivates inline Prices/Products, and closes the disposable connected
+  account on both success and failure.
 - [ ] Browser success/return state never creates tickets or marks an order paid.
 
 ## Logging safety gates
