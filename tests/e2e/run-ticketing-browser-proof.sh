@@ -166,7 +166,7 @@ NODE
   fi
 
   if [[ $driver_deployed -eq 1 && $cleanup_failed -eq 0 ]]; then
-    driver_request '{"action":"cleanup"}' "$temporary_directory/driver-cleanup.json" && \
+    driver_request '{"action":"cleanup","close_connected_account":true}' "$temporary_directory/driver-cleanup.json" && \
       validate_driver_output cleanup "$temporary_directory/driver-cleanup.json" || cleanup_failed=1
   fi
 
