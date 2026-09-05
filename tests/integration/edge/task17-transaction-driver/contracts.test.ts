@@ -130,7 +130,7 @@ Deno.test("account diagnostic requires the authoritative validator before report
   );
 });
 
-Deno.test("diagnostic cleanup preserves before ownership and closes exactly after acceptance", async () => {
+Deno.test("diagnostic cleanup preserves unless account retirement is explicitly requested", async () => {
   const cleanupAccount = Reflect.get(
     contracts,
     "applyDiagnosticAccountCleanup",
@@ -169,6 +169,22 @@ Deno.test("diagnostic cleanup preserves before ownership and closes exactly afte
     retrieveCount: 1,
     closeCount: 1,
   });
+});
+
+Deno.test("fixture Auth passwords stay within the Supabase Auth bcrypt boundary", () => {
+  const createPassword = Reflect.get(contracts, "createFixtureAuthPassword");
+  assertEquals(typeof createPassword, "function");
+  if (typeof createPassword !== "function") return;
+
+  const password = createPassword("12345678-1234-4234-8234-123456789abc");
+
+  assertEquals(password, "12345678123442348234123456789abcAa1!");
+  assertEquals(password.length <= 72, true);
+  assertEquals(/[a-z]/.test(password), true);
+  assertEquals(/[A-Z]/.test(password), true);
+  assertEquals(/[0-9]/.test(password), true);
+  assertEquals(/[^A-Za-z0-9]/.test(password), true);
+  assertEquals(password.includes("-"), false);
 });
 
 Deno.test("fixture Auth lookup follows every page and returns only the exact identity", async () => {
@@ -380,7 +396,31 @@ Deno.test("driver tombstone safety trusts only facts the driver directly observe
   );
 });
 
-Deno.test("failed fixture cleanup independently attempts Auth inerting and account closure", async () => {
+Deno.test("failed fixture cleanup retries Auth inerting without retiring the account", async () => {
+  const runCleanupWithFailureFinalizers = Reflect.get(
+    contracts,
+    "runCleanupWithFailureFinalizers",
+  );
+  assertEquals(typeof runCleanupWithFailureFinalizers, "function");
+  if (typeof runCleanupWithFailureFinalizers !== "function") return;
+
+  const calls: string[] = [];
+  await assertRejects(
+    () =>
+      runCleanupWithFailureFinalizers(
+        async () => {
+          calls.push("cleanup");
+          throw new Error("DATABASE");
+        },
+        async () => calls.push("auth"),
+      ),
+    Error,
+    "DATABASE",
+  );
+  assertEquals(calls, ["cleanup", "auth"]);
+});
+
+Deno.test("failed fixture cleanup reports unsafe when Auth inerting also fails", async () => {
   const runCleanupWithFailureFinalizers = Reflect.get(
     contracts,
     "runCleanupWithFailureFinalizers",
@@ -400,12 +440,11 @@ Deno.test("failed fixture cleanup independently attempts Auth inerting and accou
           calls.push("auth");
           throw new Error("auth finalizer failed");
         },
-        async () => calls.push("account"),
       ),
     Error,
     "FIXTURE_CLEANUP_UNSAFE",
   );
-  assertEquals(calls, ["cleanup", "auth", "account"]);
+  assertEquals(calls, ["cleanup", "auth"]);
 });
 
 Deno.test("fixture publication uses the authenticated owner flow before checkout preflight", async () => {

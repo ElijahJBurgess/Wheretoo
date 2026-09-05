@@ -240,13 +240,15 @@ describe('Task 17 managed proof runner', () => {
   it('fails closed before checkout enablement when the fixture is not sellable', async () => {
     const result = await runRunner(false, false, {
       FAKE_FIXTURE_PREFLIGHT_RESPONSE: '{"ok":false,"kind":"FIXTURE_NOT_SELLABLE"}',
+      FAKE_CLEANUP_RESPONSE: '{"ok":true,"stable_fixture":true,"fixture_reusable":true,"event_count":1,"organizer_count":1,"auth_user_inert":true,"event_sellable":false,"public_projection_count":0,"active_tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"receipt_count":0,"refund_count":0,"dispute_count":0,"connected_account_closed":false,"connected_account_preserved":true}',
     })
 
     expect(result.exitCode).not.toBe(0)
     expect(result.log).toContain('curl-action fixture_preflight')
     expect(result.log).not.toContain('set checkout_creation_enabled = true')
     expect(result.log).not.toContain('vitest run')
-    expect(result.log).toContain('cleanup-close-request true')
+    expect(result.log).toContain('cleanup-close-request false')
+    expect(result.log).not.toContain('cleanup-close-request true')
   })
 
   it('accepts only the inert reusable audit tombstone cleanup contract', async () => {
@@ -308,7 +310,7 @@ describe('Task 17 managed proof runner', () => {
     expect(result.log).not.toContain('vitest run')
   })
 
-  it('accepts ownership only after a passing diagnostic and then requires exact closure', async () => {
+  it('closes the connected account only after a fully successful proof', async () => {
     const result = await runRunner(false)
 
     expect(result.exitCode).toBe(0)
@@ -361,9 +363,13 @@ describe('Task 17 managed proof runner', () => {
   })
 
   it('runs the same teardown when the canonical proof fails', async () => {
-    const result = await runRunner(true)
+    const result = await runRunner(true, false, {
+      FAKE_CLEANUP_RESPONSE: '{"ok":true,"stable_fixture":true,"fixture_reusable":true,"event_count":1,"organizer_count":1,"auth_user_inert":true,"event_sellable":false,"public_projection_count":0,"active_tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"receipt_count":0,"refund_count":0,"dispute_count":0,"connected_account_closed":false,"connected_account_preserved":true}',
+    })
     expect(result.exitCode).not.toBe(0)
     expect(result.log).toContain('curl ')
+    expect(result.log).toContain('cleanup-close-request false')
+    expect(result.log).not.toContain('cleanup-close-request true')
     expect(result.log).toContain('set checkout_creation_enabled = false')
     expect(result.log).toContain('supabase functions delete task17-transaction-driver')
     expect(result.log).toContain(

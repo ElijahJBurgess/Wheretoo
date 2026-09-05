@@ -11,6 +11,11 @@ const providerIdPattern =
 const prohibitedIdKeyPattern =
   /^(?:id|order_id|order_item_id|ticket_id|refund_id|session_id|payment_intent_id|charge_id|transfer_id|application_fee_id|balance_transaction_id|stripe_event_id|stripe_object_id|stripe_[a-z0-9_]*_id)$/i;
 
+export function createFixtureAuthPassword(randomId: string): string {
+  if (!uuidPattern.test(randomId)) throw new Error("DATABASE");
+  return `${randomId.replaceAll("-", "")}Aa1!`;
+}
+
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -95,7 +100,7 @@ export async function applyDiagnosticAccountCleanup<
     closed?: boolean;
   },
 >(
-  ownershipAccepted: boolean,
+  closeRequested: boolean,
   retrieve: () => Promise<T>,
   close: (account: T) => Promise<T>,
   assertTestMode: (account: T) => void,
@@ -103,7 +108,7 @@ export async function applyDiagnosticAccountCleanup<
   connectedAccountClosed: boolean;
   connectedAccountPreserved: boolean;
 }> {
-  if (!ownershipAccepted) {
+  if (!closeRequested) {
     return {
       connectedAccountClosed: false,
       connectedAccountPreserved: true,
@@ -209,7 +214,6 @@ export function auditTombstoneIsSafe(
 export async function runCleanupWithFailureFinalizers<T>(
   cleanup: () => Promise<T>,
   inertAuth: () => Promise<unknown>,
-  closeOwnedAccount: () => Promise<unknown>,
 ): Promise<T> {
   try {
     return await cleanup();
@@ -217,11 +221,6 @@ export async function runCleanupWithFailureFinalizers<T>(
     let finalizerFailed = false;
     try {
       await inertAuth();
-    } catch {
-      finalizerFailed = true;
-    }
-    try {
-      await closeOwnedAccount();
     } catch {
       finalizerFailed = true;
     }

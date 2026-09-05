@@ -27,6 +27,7 @@ DRIVER_DELETE_REQUIRED=0
 TEMP_SECRETS_SET=0
 CHECKOUT_SWITCH_CAPTURED=0
 ACCOUNT_OWNERSHIP_ACCEPTED=0
+PROOF_COMPLETED=0
 TEARDOWN_FAILURE=0
 
 read_public_env() {
@@ -80,7 +81,7 @@ write_driver_request_config() {
 }
 
 write_cleanup_config() {
-  if [ "$ACCOUNT_OWNERSHIP_ACCEPTED" -eq 1 ]; then
+  if [ "$PROOF_COMPLETED" -eq 1 ]; then
     write_driver_request_config "$CURL_CONFIG" \
       '{\"action\":\"cleanup\",\"close_connected_account\":true}'
   else
@@ -169,7 +170,7 @@ cleanup() {
         }
       ' "$CLEANUP_RESPONSE" 2>/dev/null || true
     fi
-    if [ "$cleanup_status" -ne 0 ] || ! EXPECT_ACCOUNT_CLOSED="$ACCOUNT_OWNERSHIP_ACCEPTED" node -e '
+    if [ "$cleanup_status" -ne 0 ] || ! EXPECT_ACCOUNT_CLOSED="$PROOF_COMPLETED" node -e '
       const fs = require("node:fs");
       const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
       const closeExpected = process.env.EXPECT_ACCOUNT_CLOSED === "1";
@@ -593,3 +594,4 @@ export STRIPE_WEBHOOK_SECRET=managed:signature-verified
 
 pnpm exec vitest run --config vitest.integration.config.ts \
   tests/integration/stripe-ticketing.test.ts
+PROOF_COMPLETED=1

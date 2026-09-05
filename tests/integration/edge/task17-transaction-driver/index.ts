@@ -23,6 +23,7 @@ import {
   applyDiagnosticAccountCleanup,
   assertSafeProofResponse,
   type AuditTombstoneState,
+  createFixtureAuthPassword,
   deleteAndVerifyFixtureAuthUser,
   destinationChargeRelationsMatch,
   establishAuditTombstone,
@@ -415,7 +416,7 @@ function tombstoneEventPayload(event: Record<string, unknown>) {
 async function authenticatedFixtureOwner(
   expectedOrganizerId: string,
 ): Promise<SupabaseClient> {
-  const password = crypto.randomUUID() + "Aa1!" + crypto.randomUUID();
+  const password = createFixtureAuthPassword(crypto.randomUUID());
   const email = fixturePrefix() + "@example.invalid";
   const admin = getServiceClient();
   const updated = await admin.auth.admin.updateUserById(expectedOrganizerId, {
@@ -449,7 +450,7 @@ async function makeFixtureAuthInert(
   const reset = await getServiceClient().auth.admin.updateUserById(
     expectedOrganizerId,
     {
-      password: crypto.randomUUID() + "Aa1!" + crypto.randomUUID(),
+      password: createFixtureAuthPassword(crypto.randomUUID()),
       ban_duration: "876000h",
     },
   );
@@ -1823,7 +1824,6 @@ Deno.serve(async (request) => {
           const authUser = await fixtureAuthUser(organizer?.id);
           if (authUser !== null) await makeFixtureAuthInert(authUser.id);
         },
-        () => finalizeConnectedAccount(closeConnectedAccount),
       );
       return json(result);
     }

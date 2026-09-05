@@ -510,7 +510,7 @@ describe('real Stripe test-mode ticket transaction', () => {
     })
 
     await expect(proof.invoke('cleanup', {
-      close_connected_account: true,
+      close_connected_account: false,
     })).resolves.toMatchObject({
       ok: true,
       stable_fixture: true,
@@ -536,8 +536,8 @@ describe('real Stripe test-mode ticket transaction', () => {
       deleted_item_count: 4,
       archived_price_count: 4,
       archived_product_count: 4,
-      connected_account_closed: true,
-      connected_account_preserved: false,
+      connected_account_closed: false,
+      connected_account_preserved: true,
     })
   }, 180_000)
 })
