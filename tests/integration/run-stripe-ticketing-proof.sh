@@ -19,6 +19,8 @@ CURL_CONFIG=""
 CLEANUP_RESPONSE=""
 DIAGNOSTIC_CURL_CONFIG=""
 DIAGNOSTIC_RESPONSE=""
+FIXTURE_PREFLIGHT_CURL_CONFIG=""
+FIXTURE_PREFLIGHT_RESPONSE=""
 CHECKOUT_SWITCH_STATE_FILE=""
 DRIVER_DEPLOYED=0
 DRIVER_DELETE_REQUIRED=0
@@ -161,7 +163,7 @@ cleanup() {
       node -e '
         const fs = require("node:fs");
         const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-        const allowed = new Set(["CONFIG", "DATABASE", "INPUT", "LIVE_MODE_FORBIDDEN", "STRIPE", "UNKNOWN"]);
+        const allowed = new Set(["CONFIG", "DATABASE", "INPUT", "FIXTURE_CLEANUP_UNSAFE", "FIXTURE_NOT_SELLABLE", "LIVE_MODE_FORBIDDEN", "STRIPE", "UNKNOWN"]);
         if (allowed.has(value.kind) || /^DATABASE_DELETE_[A-Z_]+$/.test(value.kind)) {
           process.stdout.write(`Task 17 cleanup error kind: ${value.kind}\n`);
         }
@@ -170,14 +172,99 @@ cleanup() {
     if [ "$cleanup_status" -ne 0 ] || ! EXPECT_ACCOUNT_CLOSED="$ACCOUNT_OWNERSHIP_ACCEPTED" node -e '
       const fs = require("node:fs");
       const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-      const counts = ["event_count", "organizer_count", "connect_count", "order_count", "tier_count", "receipt_count", "ticket_count", "dispute_count", "refund_count", "item_count"];
       const closeExpected = process.env.EXPECT_ACCOUNT_CLOSED === "1";
       const lifecycleMatches = closeExpected
         ? value.connected_account_closed === true && value.connected_account_preserved === false
         : value.connected_account_closed === false && value.connected_account_preserved === true;
-      if (value.ok !== true || value.auth_user_absent !== true || !lifecycleMatches || !counts.every((name) => value[name] === 0)) process.exit(1);
+      const absent = value.event_count === 0 && value.organizer_count === 0 &&
+        value.auth_user_absent === true &&
+        ["connect_count", "order_count", "tier_count", "receipt_count", "ticket_count", "dispute_count", "refund_count", "item_count"]
+          .every((name) => value[name] === 0);
+      const tombstone = value.stable_fixture === true &&
+        value.fixture_reusable === true &&
+        value.event_count === 1 && value.organizer_count === 1 &&
+        value.auth_user_inert === true &&
+        value.event_sellable === false && value.public_projection_count === 0 &&
+        value.active_tier_count === 0 &&
+        ["connect_count", "order_count", "receipt_count", "ticket_count", "dispute_count", "refund_count", "item_count"]
+          .every((name) => value[name] === 0);
+      if (value.ok !== true || !lifecycleMatches || !(absent || tombstone)) process.exit(1);
     ' "$CLEANUP_RESPONSE"; then
       TEARDOWN_FAILURE=1
+    fi
+    if [ "$cleanup_status" -eq 0 ] && [ "$ACCOUNT_OWNERSHIP_ACCEPTED" -eq 1 ]; then
+      tombstone_audit="$TEMP_DIR/tombstone-audit.json"
+      pnpm exec supabase db query --linked --output-format json "with fixture_namespace as (
+          select organizers.display_name as prefix
+          from public.organizers as organizers
+          where organizers.display_name ~ '^task17_[a-z0-9]{12}$'
+          union
+          select split_part(auth.users.email, '@', 1) as prefix
+          from auth.users
+          where auth.users.email ~ '^task17_[a-z0-9]{12}@example[.]invalid$'
+          union
+          select regexp_replace(events.title, ' transaction$', '') as prefix
+          from public.events as events
+          where events.title ~ '^task17_[a-z0-9]{12} transaction$'
+        ), fixture as (
+          select events.id as event_id, organizers.id as organizer_id,
+            events.status, events.moderation_status,
+            events.publicly_authorized_action_id
+          from public.organizers as organizers
+          join public.events as events on events.organizer_id = organizers.id
+          where organizers.display_name = '$TEST_STRIPE_FIXTURE_PREFIX'
+            and events.title = '$TEST_STRIPE_FIXTURE_PREFIX transaction'
+        )
+        select
+          (select count(*) from fixture_namespace) as namespace_prefix_count,
+          (select count(*) from fixture) as event_count,
+          (select count(*) from public.organizers where display_name = '$TEST_STRIPE_FIXTURE_PREFIX') as organizer_count,
+          (select count(*) = 0 from auth.users where email = '$TEST_STRIPE_FIXTURE_PREFIX@example.invalid') as auth_user_absent,
+          (select count(*) = 1 from auth.users where email = '$TEST_STRIPE_FIXTURE_PREFIX@example.invalid' and banned_until > statement_timestamp()) as auth_user_inert,
+          (select count(*) from private.event_public_eligibility_intervals as intervals join fixture on fixture.event_id = intervals.event_id) as audit_interval_count,
+          (select count(*) from private.event_moderation_actions as actions join fixture on fixture.event_id = actions.event_id) as audit_action_count,
+          (select count(*) from private.event_public_eligibility_intervals as intervals join fixture on fixture.event_id = intervals.event_id where intervals.eligibility_state = 'eligible' and intervals.ended_at is null) as open_eligible_interval_count,
+          (select count(*) from public.ticket_tiers as tiers join fixture on fixture.event_id = tiers.event_id where tiers.status = 'active') as active_tier_count,
+          (select count(*) from public.ticket_tiers as tiers join fixture on fixture.event_id = tiers.event_id) as tier_count,
+          (select count(*) from public.organizer_stripe_accounts as accounts join fixture on fixture.organizer_id = accounts.organizer_id) as connect_count,
+          (select count(*) from public.orders as orders join fixture on fixture.event_id = orders.event_id) as order_count,
+          (select count(*) from public.order_items as items join public.orders as orders on orders.id = items.order_id join fixture on fixture.event_id = orders.event_id) as item_count,
+          (select count(*) from public.tickets as tickets join fixture on fixture.event_id = tickets.event_id) as ticket_count,
+          (select count(*) from public.refunds as refunds join public.orders as orders on orders.id = refunds.order_id join fixture on fixture.event_id = orders.event_id) as refund_count,
+          (select count(*) from fixture cross join lateral public.get_public_event(fixture.event_id)) as public_projection_count,
+          (select coalesce(bool_and(status = 'published' and moderation_status = 'clear' and publicly_authorized_action_id is null), false) from fixture) as event_tombstoned;" \
+        > "$tombstone_audit"
+      tombstone_query_status=$?
+      chmod 600 "$tombstone_audit"
+      TOMBSTONE_AUDIT_FILE="$tombstone_audit" node --input-type=module <<'NODE'
+import fs from 'node:fs'
+const payload = JSON.parse(fs.readFileSync(process.env.TOMBSTONE_AUDIT_FILE, 'utf8'))
+const rows = Array.isArray(payload.rows)
+  ? payload.rows
+  : Array.isArray(payload.result)
+    ? payload.result
+    : null
+const row = rows?.length === 1 ? rows[0] : null
+const runtimeEmpty = row !== null && Number.isSafeInteger(row.namespace_prefix_count) &&
+  row.open_eligible_interval_count === 0 &&
+  row.active_tier_count === 0 && row.tier_count === 0 && row.connect_count === 0 &&
+  row.order_count === 0 && row.item_count === 0 && row.ticket_count === 0 &&
+  row.refund_count === 0 && row.public_projection_count === 0
+const absent = runtimeEmpty && row.namespace_prefix_count === 0 &&
+  row.event_count === 0 && row.organizer_count === 0 &&
+  row.auth_user_absent === true && row.audit_interval_count === 0 &&
+  row.audit_action_count === 0 && row.event_tombstoned === false
+const tombstone = runtimeEmpty && row.namespace_prefix_count === 1 &&
+  row.event_count === 1 && row.organizer_count === 1 &&
+  row.auth_user_inert === true && Number.isSafeInteger(row.audit_interval_count) &&
+  row.audit_interval_count >= 3 && Number.isSafeInteger(row.audit_action_count) &&
+  row.audit_action_count >= 3 && row.event_tombstoned === true
+if (!(absent || tombstone)) process.exit(1)
+NODE
+      tombstone_parse_status=$?
+      if [ "$tombstone_query_status" -ne 0 ] || [ "$tombstone_parse_status" -ne 0 ]; then
+        TEARDOWN_FAILURE=1
+      fi
     fi
   fi
 
@@ -302,14 +389,78 @@ const rows = Array.isArray(payload.rows)
 if (rows?.length !== 1 || rows[0]?.policy_environment !== 'development') process.exit(1)
 NODE
 chmod 600 "$projects_file" "$environment_file"
+stable_fixture_file="$TEMP_DIR/stable-fixture.json"
+pnpm exec supabase db query --linked --output-format json "with fixture_namespace as (
+    select organizers.display_name as prefix
+    from public.organizers as organizers
+    where organizers.display_name ~ '^task17_[a-z0-9]{12}$'
+    union
+    select split_part(auth.users.email, '@', 1) as prefix
+    from auth.users
+    where auth.users.email ~ '^task17_[a-z0-9]{12}@example[.]invalid$'
+    union
+    select regexp_replace(events.title, ' transaction$', '') as prefix
+    from public.events as events
+    where events.title ~ '^task17_[a-z0-9]{12} transaction$'
+  ), candidate as (
+    select fixture_namespace.prefix,
+      (select organizers.id from public.organizers as organizers where organizers.display_name = fixture_namespace.prefix order by organizers.id limit 1) as organizer_id,
+      (select events.id from public.events as events join public.organizers as organizers on organizers.id = events.organizer_id where organizers.display_name = fixture_namespace.prefix and events.title = fixture_namespace.prefix || ' transaction' order by events.id limit 1) as event_id
+    from fixture_namespace
+  ), classified as (
+    select candidate.*,
+      (select count(*) from public.organizers as exact_organizers where exact_organizers.display_name = candidate.prefix) = 1
+      and (select count(*) from auth.users as exact_users where exact_users.email = candidate.prefix || '@example.invalid') = 1
+      and (select count(*) from auth.users as owner_user where owner_user.id = candidate.organizer_id and owner_user.email = candidate.prefix || '@example.invalid') = 1
+      and (select count(*) from public.events as owned where owned.organizer_id = candidate.organizer_id) = 1
+      and (select count(*) from public.events as exact_events where exact_events.title = candidate.prefix || ' transaction') = 1
+      and (select count(*) from public.events as events where events.id = candidate.event_id and events.status = 'published' and events.moderation_status = 'clear' and events.publicly_authorized_action_id is null) = 1
+      and not exists (select 1 from public.ticket_tiers where ticket_tiers.event_id = candidate.event_id)
+      and not exists (select 1 from public.organizer_stripe_accounts where organizer_stripe_accounts.organizer_id = candidate.organizer_id)
+      and not exists (select 1 from public.orders where orders.event_id = candidate.event_id)
+      and not exists (select 1 from private.event_reports where event_reports.event_id = candidate.event_id)
+      and not exists (select 1 from private.moderation_review_requests where moderation_review_requests.event_id = candidate.event_id)
+      and not exists (select 1 from public.get_public_event(candidate.event_id))
+      and exists (select 1 from private.event_public_eligibility_intervals as intervals where intervals.event_id = candidate.event_id)
+      and (select count(*) from private.event_public_eligibility_intervals as intervals where intervals.event_id = candidate.event_id and intervals.eligibility_state = 'eligible' and intervals.ended_at is null) = 0
+      and (select count(*) from private.event_public_eligibility_intervals as intervals where intervals.event_id = candidate.event_id and intervals.eligibility_state = 'ineligible' and intervals.ended_at is null) = 1
+      as stable_fixture_recoverable
+    from candidate
+  )
+  select classified.prefix as stable_fixture_candidate,
+    classified.stable_fixture_recoverable,
+    classified.stable_fixture_recoverable
+      and (select count(*) from auth.users as owner_user where owner_user.id = classified.organizer_id and owner_user.banned_until > statement_timestamp()) = 1
+      and exists (select 1 from private.event_moderation_actions as actions where actions.event_id = classified.event_id)
+      and exists (select 1 from private.event_policy_acceptances as acceptances where acceptances.event_id = classified.event_id)
+      as stable_fixture_safe
+  from classified
+  order by classified.prefix;" > "$stable_fixture_file"
+chmod 600 "$stable_fixture_file"
+TEST_STRIPE_FIXTURE_PREFIX=$(STABLE_FIXTURE_FILE="$stable_fixture_file" node --input-type=module <<'NODE'
+import fs from 'node:fs'
+const payload = JSON.parse(fs.readFileSync(process.env.STABLE_FIXTURE_FILE, 'utf8'))
+const rows = Array.isArray(payload.rows)
+  ? payload.rows
+  : Array.isArray(payload.result)
+    ? payload.result
+    : null
+if (rows === null || rows.length > 1) process.exit(1)
+if (rows.length === 1 && rows[0]?.stable_fixture_safe !== true &&
+  rows[0]?.stable_fixture_recoverable !== true) process.exit(1)
+const prefix = rows.length === 0 ? 'task17_checkout0001' : rows[0]?.stable_fixture_candidate
+if (typeof prefix !== 'string' || !/^task17_[a-z0-9]{12}$/.test(prefix)) process.exit(1)
+process.stdout.write(prefix)
+NODE
+)
 TEMP_SECRET_FILE="$TEMP_DIR/driver-secrets.env"
 CURL_CONFIG="$TEMP_DIR/cleanup.curl"
 CLEANUP_RESPONSE="$TEMP_DIR/cleanup.json"
 DIAGNOSTIC_CURL_CONFIG="$TEMP_DIR/account-diagnostic.curl"
 DIAGNOSTIC_RESPONSE="$TEMP_DIR/account-diagnostic.json"
+FIXTURE_PREFLIGHT_CURL_CONFIG="$TEMP_DIR/fixture-preflight.curl"
+FIXTURE_PREFLIGHT_RESPONSE="$TEMP_DIR/fixture-preflight.json"
 PROOF_TOKEN=$(openssl rand -hex 32)
-FIXTURE_SUFFIX=$(openssl rand -hex 6)
-TEST_STRIPE_FIXTURE_PREFIX="task17_$FIXTURE_SUFFIX"
 TEST_FUNCTION_URL="${TEST_SUPABASE_URL%/}/functions/v1/task17-transaction-driver"
 
 {
@@ -321,6 +472,8 @@ TEST_FUNCTION_URL="${TEST_SUPABASE_URL%/}/functions/v1/task17-transaction-driver
 write_cleanup_config
 write_driver_request_config "$DIAGNOSTIC_CURL_CONFIG" \
   '{\"action\":\"account_diagnostic\"}'
+write_driver_request_config "$FIXTURE_PREFLIGHT_CURL_CONFIG" \
+  '{\"action\":\"fixture_preflight\"}'
 
 [ -d "$MATERIALIZED_DIR" ] || MATERIALIZED_DIR_CREATED=1
 mkdir -p "$MATERIALIZED_DIR"
@@ -404,6 +557,26 @@ if [ "$diagnostic_curl_status" -ne 0 ] || [ "$diagnostic_parse_status" -ne 0 ]; 
   exit 1
 fi
 ACCOUNT_OWNERSHIP_ACCEPTED=1
+
+fixture_preflight_curl_status=0
+curl --silent --show-error --fail-with-body --config "$FIXTURE_PREFLIGHT_CURL_CONFIG" \
+  > "$FIXTURE_PREFLIGHT_RESPONSE" || fixture_preflight_curl_status=$?
+chmod 600 "$FIXTURE_PREFLIGHT_RESPONSE"
+fixture_preflight_parse_status=0
+FIXTURE_PREFLIGHT_RESPONSE_FILE="$FIXTURE_PREFLIGHT_RESPONSE" node --input-type=module <<'NODE' || fixture_preflight_parse_status=$?
+import fs from 'node:fs'
+const value = JSON.parse(fs.readFileSync(process.env.FIXTURE_PREFLIGHT_RESPONSE_FILE, 'utf8'))
+const exact = Object.keys(value).sort().join(',') ===
+  ['cleanup_strategy', 'fixture_purchasable', 'ok', 'stable_fixture'].sort().join(',')
+if (!exact || value.ok !== true || value.fixture_purchasable !== true ||
+  value.cleanup_strategy !== 'audit_tombstone' || value.stable_fixture !== true) {
+  process.stderr.write('Task 17 fixture preflight: NOT_SELLABLE_OR_UNSAFE\n')
+  process.exit(1)
+}
+NODE
+if [ "$fixture_preflight_curl_status" -ne 0 ] || [ "$fixture_preflight_parse_status" -ne 0 ]; then
+  exit 1
+fi
 
 capture_checkout_switch
 enable_checkout_for_fixture

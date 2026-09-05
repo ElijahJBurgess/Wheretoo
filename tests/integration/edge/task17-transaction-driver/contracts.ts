@@ -168,6 +168,154 @@ export async function deleteAndVerifyFixtureAuthUser(
   ) throw new Error("DATABASE_DELETE_AUTH");
 }
 
+export type AuditTombstoneState = {
+  stable_fixture: boolean;
+  fixture_reusable: boolean;
+  event_count: number;
+  organizer_count: number;
+  auth_user_inert: boolean;
+  event_sellable: boolean;
+  public_projection_count: number;
+  active_tier_count: number;
+  connect_count: number;
+  order_count: number;
+  item_count: number;
+  ticket_count: number;
+  receipt_count: number;
+  refund_count: number;
+  dispute_count: number;
+};
+
+export function auditTombstoneIsSafe(
+  value: AuditTombstoneState,
+): boolean {
+  return value.stable_fixture === true &&
+    value.fixture_reusable === true &&
+    value.event_count === 1 &&
+    value.organizer_count === 1 &&
+    value.auth_user_inert === true &&
+    value.event_sellable === false &&
+    value.public_projection_count === 0 &&
+    value.active_tier_count === 0 &&
+    value.connect_count === 0 &&
+    value.order_count === 0 &&
+    value.item_count === 0 &&
+    value.ticket_count === 0 &&
+    value.receipt_count === 0 &&
+    value.refund_count === 0 &&
+    value.dispute_count === 0;
+}
+
+export async function runCleanupWithFailureFinalizers<T>(
+  cleanup: () => Promise<T>,
+  inertAuth: () => Promise<unknown>,
+  closeOwnedAccount: () => Promise<unknown>,
+): Promise<T> {
+  try {
+    return await cleanup();
+  } catch (error) {
+    let finalizerFailed = false;
+    try {
+      await inertAuth();
+    } catch {
+      finalizerFailed = true;
+    }
+    try {
+      await closeOwnedAccount();
+    } catch {
+      finalizerFailed = true;
+    }
+    if (finalizerFailed) {
+      throw new Error("FIXTURE_CLEANUP_UNSAFE", { cause: error });
+    }
+    throw error;
+  }
+}
+
+export async function establishSellableFixture(
+  expectedOrganizerId: string,
+  expectedAccountId: string,
+  dependencies: {
+    saveRequirements: () => Promise<unknown>;
+    acceptPolicies: () => Promise<unknown>;
+    publish: () => Promise<unknown>;
+    preflight: () => Promise<
+      Array<{ organizer_id: string; stripe_account_id: string }>
+    >;
+  },
+): Promise<void> {
+  await dependencies.saveRequirements();
+  await dependencies.acceptPolicies();
+  await dependencies.publish();
+  const rows = await dependencies.preflight();
+  if (
+    rows.length !== 1 ||
+    rows[0].organizer_id !== expectedOrganizerId ||
+    rows[0].stripe_account_id !== expectedAccountId
+  ) throw new Error("FIXTURE_NOT_SELLABLE");
+}
+
+export async function restoreSellableFixture(
+  expectedOrganizerId: string,
+  expectedAccountId: string,
+  dependencies: {
+    saveRequirements: () => Promise<unknown>;
+    acceptPolicies: () => Promise<unknown>;
+    publish: () => Promise<unknown>;
+    preflight: () => Promise<
+      Array<{ organizer_id: string; stripe_account_id: string }>
+    >;
+  },
+): Promise<void> {
+  await dependencies.saveRequirements();
+  await dependencies.acceptPolicies();
+  await dependencies.publish();
+  const rows = await dependencies.preflight();
+  if (
+    rows.length !== 1 ||
+    rows[0].organizer_id !== expectedOrganizerId ||
+    rows[0].stripe_account_id !== expectedAccountId
+  ) throw new Error("FIXTURE_NOT_SELLABLE");
+}
+
+export async function retireSellableFixture(
+  dependencies: {
+    retireRevision: () => Promise<unknown>;
+    verifyUnsellable: () => Promise<unknown>;
+  },
+): Promise<void> {
+  await dependencies.retireRevision();
+  await dependencies.verifyUnsellable();
+}
+
+export async function establishAuditTombstone(
+  dependencies: {
+    retireEvent: () => Promise<unknown>;
+    removeRuntime: () => Promise<unknown>;
+    inertAuth: () => Promise<unknown>;
+    inspect: () => Promise<AuditTombstoneState>;
+  },
+): Promise<AuditTombstoneState> {
+  await dependencies.retireEvent();
+  await dependencies.removeRuntime();
+  await dependencies.inertAuth();
+  const state = await dependencies.inspect();
+  if (!auditTombstoneIsSafe(state)) {
+    throw new Error("FIXTURE_CLEANUP_UNSAFE");
+  }
+  return state;
+}
+
+export function requirePublicApiKey(headers: Headers): string {
+  const apiKey = headers.get("apikey");
+  const authorization = headers.get("authorization");
+  if (
+    apiKey === null || !apiKey.startsWith("sb_publishable_") ||
+    authorization !== `Bearer ${apiKey}`
+  ) throw new Error("INPUT");
+  return apiKey;
+}
+
 export function destinationChargeRelationsMatch(value: {
   paymentIntentId: string;
   chargeId: string;

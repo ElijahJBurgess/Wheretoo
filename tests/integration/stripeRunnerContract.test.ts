@@ -61,6 +61,8 @@ case "$*" in
     [ "$FAKE_POLICY_QUERY_FAILURE" = 0 ] || exit 1
     printf '%s\\n' "$FAKE_POLICY_RESPONSE"
     ;;
+  *"db query"*"stable_fixture_candidate"*) printf '%s\\n' "$FAKE_STABLE_FIXTURE_RESPONSE" ;;
+  *"db query"*"event_public_eligibility_intervals"*) printf '%s\\n' "$FAKE_TOMBSTONE_AUDIT_RESPONSE" ;;
   *"db query"*"with restored as"*) printf '%s\\n' '{"rows":[{"restored":true}]}' ;;
   *"db query"*"with enabled as"*) printf '%s\\n' '{"rows":[{"enabled":true}]}' ;;
   *"db query"*"select checkout_creation_enabled"*) printf '{"rows":[{"enabled":%s}]}\\n' "$FAKE_PRIOR_SWITCH" ;;
@@ -80,7 +82,10 @@ case "$*" in
     [ "$FAKE_SECRET_SET_FAILURE" = 0 ]
     ;;
   *"deno check"*) [ -f "$PWD/supabase/functions/task17-transaction-driver/contracts.ts" ] ;;
-  *"vitest run"*) [ "$FAKE_TEST_FAILURE" = 0 ] ;;
+  *"vitest run"*)
+    printf 'fixture-prefix %s\\n' "$TEST_STRIPE_FIXTURE_PREFIX" >> "$FAKE_COMMAND_LOG"
+    [ "$FAKE_TEST_FAILURE" = 0 ]
+    ;;
 esac
 `
   const fakeCurl = `#!/bin/sh
@@ -98,6 +103,9 @@ done
 if grep -q 'account_diagnostic' "$config_file"; then
   printf '%s\\n' 'curl-action account_diagnostic' >> "$FAKE_COMMAND_LOG"
   printf '%s\\n' "$FAKE_DIAGNOSTIC_RESPONSE"
+elif grep -q 'fixture_preflight' "$config_file"; then
+  printf '%s\\n' 'curl-action fixture_preflight' >> "$FAKE_COMMAND_LOG"
+  printf '%s\\n' "$FAKE_FIXTURE_PREFLIGHT_RESPONSE"
 else
   if grep -q 'close_connected_account.*true' "$config_file"; then
     printf '%s\\n' 'cleanup-close-request true' >> "$FAKE_COMMAND_LOG"
@@ -125,8 +133,11 @@ fi
       FAKE_PROJECTS_RESPONSE: '[{"id":"abcdefghijklmnopqrst","linked":true,"status":"ACTIVE_HEALTHY"}]',
       FAKE_POLICY_QUERY_FAILURE: '0',
       FAKE_POLICY_RESPONSE: '{"rows":[{"policy_environment":"development"}]}',
+      FAKE_STABLE_FIXTURE_RESPONSE: '{"rows":[]}',
+      FAKE_TOMBSTONE_AUDIT_RESPONSE: '{"rows":[{"namespace_prefix_count":1,"event_count":1,"organizer_count":1,"auth_user_inert":true,"audit_interval_count":3,"audit_action_count":3,"open_eligible_interval_count":0,"active_tier_count":0,"tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"refund_count":0,"public_projection_count":0,"event_tombstoned":true}]}',
       FAKE_DIAGNOSTIC_RESPONSE: '{"ok":true,"restricted_key_authenticated":true,"webhook_signature_verified":true,"livemode":false,"connected_account_matches":true,"transfers_status":"active","payouts_status":"active","requirements_status":"clear"}',
-      FAKE_CLEANUP_RESPONSE: '{"ok":true,"event_count":0,"organizer_count":0,"connect_count":0,"order_count":0,"tier_count":0,"receipt_count":0,"ticket_count":0,"dispute_count":0,"refund_count":0,"item_count":0,"auth_user_absent":true,"connected_account_closed":true,"connected_account_preserved":false}',
+      FAKE_FIXTURE_PREFLIGHT_RESPONSE: '{"ok":true,"fixture_purchasable":true,"cleanup_strategy":"audit_tombstone","stable_fixture":true}',
+      FAKE_CLEANUP_RESPONSE: '{"ok":true,"stable_fixture":true,"fixture_reusable":true,"event_count":1,"organizer_count":1,"auth_user_inert":true,"event_sellable":false,"public_projection_count":0,"active_tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"receipt_count":0,"refund_count":0,"dispute_count":0,"connected_account_closed":true,"connected_account_preserved":false}',
       TEST_SUPABASE_URL: 'https://abcdefghijklmnopqrst.supabase.co',
       TEST_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_contract',
       VITE_STRIPE_PUBLISHABLE_KEY: 'pk_test_contract',
@@ -156,6 +167,117 @@ fi
 }
 
 describe('Task 17 managed proof runner', () => {
+  it('adopts the one exact protected legacy fixture instead of creating a second shell', async () => {
+    const result = await runRunner(false, false, {
+      FAKE_STABLE_FIXTURE_RESPONSE: '{"rows":[{"stable_fixture_candidate":"task17_oldfixture01","stable_fixture_recoverable":true,"stable_fixture_safe":true}]}',
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.log).toContain('stable_fixture_candidate')
+    expect(result.log).toContain('fixture-prefix task17_oldfixture01')
+    expect(result.log).not.toContain('fixture-prefix task17_checkout0001')
+  })
+
+  it('adopts one exact unsellable legacy shell for authenticated owner recovery', async () => {
+    const result = await runRunner(false, false, {
+      FAKE_STABLE_FIXTURE_RESPONSE: '{"rows":[{"stable_fixture_candidate":"task17_oldfixture01","stable_fixture_recoverable":true,"stable_fixture_safe":false}]}',
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.log).toContain('fixture-prefix task17_oldfixture01')
+    expect(result.log).not.toContain('fixture-prefix task17_checkout0001')
+  })
+
+  it('fails closed when the Task 17 namespace contains one unsafe partial shell', async () => {
+    const result = await runRunner(false, false, {
+      FAKE_STABLE_FIXTURE_RESPONSE: '{"rows":[{"stable_fixture_candidate":"task17_partial00001","stable_fixture_recoverable":false,"stable_fixture_safe":false}]}',
+    })
+
+    expect(result.exitCode).not.toBe(0)
+    expect(result.log).toContain('stable_fixture_candidate')
+    expect(result.log).not.toContain('curl-action account_diagnostic')
+    expect(result.log).not.toContain('set checkout_creation_enabled = true')
+    expect(result.log).not.toContain('vitest run')
+  })
+
+  it('fails closed when one safe shell and one unsafe shell coexist', async () => {
+    const result = await runRunner(false, false, {
+      FAKE_STABLE_FIXTURE_RESPONSE: '{"rows":[{"stable_fixture_candidate":"task17_oldfixture01","stable_fixture_recoverable":true,"stable_fixture_safe":true},{"stable_fixture_candidate":"task17_partial00001","stable_fixture_recoverable":false,"stable_fixture_safe":false}]}',
+    })
+
+    expect(result.exitCode).not.toBe(0)
+    expect(result.log).not.toContain('curl-action account_diagnostic')
+    expect(result.log).not.toContain('set checkout_creation_enabled = true')
+    expect(result.log).not.toContain('vitest run')
+  })
+
+  it('accepts exact absent cleanup after ownership when setup never created a shell', async () => {
+    const result = await runRunner(false, false, {
+      FAKE_CLEANUP_RESPONSE: '{"ok":true,"event_count":0,"organizer_count":0,"connect_count":0,"order_count":0,"tier_count":0,"receipt_count":0,"ticket_count":0,"dispute_count":0,"refund_count":0,"item_count":0,"auth_user_absent":true,"connected_account_closed":true,"connected_account_preserved":false}',
+      FAKE_TOMBSTONE_AUDIT_RESPONSE: '{"rows":[{"namespace_prefix_count":0,"event_count":0,"organizer_count":0,"auth_user_absent":true,"auth_user_inert":false,"audit_interval_count":0,"audit_action_count":0,"open_eligible_interval_count":0,"active_tier_count":0,"tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"refund_count":0,"public_projection_count":0,"event_tombstoned":false}]}',
+    })
+
+    expect(result.exitCode).toBe(0)
+  })
+
+  it('proves the stable fixture sellable before enabling checkout or starting Stripe proof', async () => {
+    const result = await runRunner(false)
+
+    expect(result.exitCode).toBe(0)
+    expect(result.log).toContain('curl-action fixture_preflight')
+    expect(result.log.indexOf('curl-action account_diagnostic')).toBeLessThan(
+      result.log.indexOf('curl-action fixture_preflight'),
+    )
+    expect(result.log.indexOf('curl-action fixture_preflight')).toBeLessThan(
+      result.log.indexOf('set checkout_creation_enabled = true'),
+    )
+    expect(result.log.indexOf('curl-action fixture_preflight')).toBeLessThan(
+      result.log.indexOf('vitest run'),
+    )
+    expect(result.log).toContain('fixture-prefix task17_checkout0001')
+  })
+
+  it('fails closed before checkout enablement when the fixture is not sellable', async () => {
+    const result = await runRunner(false, false, {
+      FAKE_FIXTURE_PREFLIGHT_RESPONSE: '{"ok":false,"kind":"FIXTURE_NOT_SELLABLE"}',
+    })
+
+    expect(result.exitCode).not.toBe(0)
+    expect(result.log).toContain('curl-action fixture_preflight')
+    expect(result.log).not.toContain('set checkout_creation_enabled = true')
+    expect(result.log).not.toContain('vitest run')
+    expect(result.log).toContain('cleanup-close-request true')
+  })
+
+  it('accepts only the inert reusable audit tombstone cleanup contract', async () => {
+    const result = await runRunner(false, false, {
+      FAKE_CLEANUP_RESPONSE: '{"ok":true,"stable_fixture":true,"fixture_reusable":true,"event_count":1,"organizer_count":1,"auth_user_inert":true,"event_sellable":false,"public_projection_count":0,"active_tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"receipt_count":0,"refund_count":0,"dispute_count":0,"connected_account_closed":true,"connected_account_preserved":false}',
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.log).toContain('event_public_eligibility_intervals')
+    expect(result.log).toContain('event_moderation_actions')
+    expect(result.log.indexOf('event_public_eligibility_intervals')).toBeLessThan(
+      result.log.indexOf('supabase functions delete task17-transaction-driver'),
+    )
+  })
+
+  it('fails teardown when the linked audit tombstone verification is unsafe', async () => {
+    const result = await runRunner(false, false, {
+      FAKE_TOMBSTONE_AUDIT_RESPONSE: '{"rows":[{"namespace_prefix_count":1,"event_count":1,"organizer_count":1,"auth_user_inert":true,"audit_interval_count":3,"audit_action_count":3,"open_eligible_interval_count":1,"active_tier_count":0,"tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"refund_count":0,"public_projection_count":0,"event_tombstoned":true}]}',
+    })
+
+    expect(result.exitCode).not.toBe(0)
+  })
+
+  it('fails teardown when another Task 17 namespace shell remains', async () => {
+    const result = await runRunner(false, false, {
+      FAKE_TOMBSTONE_AUDIT_RESPONSE: '{"rows":[{"namespace_prefix_count":2,"event_count":1,"organizer_count":1,"auth_user_inert":true,"audit_interval_count":3,"audit_action_count":3,"open_eligible_interval_count":0,"active_tier_count":0,"tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"refund_count":0,"public_projection_count":0,"event_tombstoned":true}]}',
+    })
+
+    expect(result.exitCode).not.toBe(0)
+  })
+
   it('diagnoses before ownership and preserves the account when the contract mismatches', async () => {
     const result = await runRunner(false, false, {
       FAKE_DIAGNOSTIC_RESPONSE: '{"ok":false,"kind":"ACCOUNT_CONTRACT_MISMATCH","account_contract":{"dashboard_is_express":false,"recipient_configuration_only":false,"default_currency_is_usd":true,"fees_collector_is_application":true,"losses_collector_is_application":true,"requirements_collector_is_stripe":true}}',
@@ -290,9 +412,9 @@ describe('Task 17 managed proof runner', () => {
     expect(result.log).not.toContain('inherited-secret-visible')
   })
 
-  it('fails teardown when the fixture Auth identity is not proven absent', async () => {
+  it('fails teardown when the retained fixture Auth identity is not proven inert', async () => {
     const result = await runRunner(false, false, {
-      FAKE_CLEANUP_RESPONSE: '{"ok":true,"event_count":0,"organizer_count":0,"connect_count":0,"order_count":0,"tier_count":0,"receipt_count":0,"ticket_count":0,"dispute_count":0,"refund_count":0,"item_count":0,"auth_user_absent":false,"connected_account_closed":true}',
+      FAKE_CLEANUP_RESPONSE: '{"ok":true,"stable_fixture":true,"fixture_reusable":true,"event_count":1,"organizer_count":1,"auth_user_inert":false,"event_sellable":false,"public_projection_count":0,"active_tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"receipt_count":0,"refund_count":0,"dispute_count":0,"connected_account_closed":true,"connected_account_preserved":false}',
     })
     expect(result.exitCode).not.toBe(0)
   })

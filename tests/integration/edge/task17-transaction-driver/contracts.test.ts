@@ -294,6 +294,304 @@ Deno.test("Auth cleanup deletes the exact fixture identity and proves ID and ema
   );
 });
 
+Deno.test("audit tombstone accepts only directly observed inert reusable state", () => {
+  const auditTombstoneIsSafe = Reflect.get(
+    contracts,
+    "auditTombstoneIsSafe",
+  );
+  assertEquals(typeof auditTombstoneIsSafe, "function");
+  if (typeof auditTombstoneIsSafe !== "function") return;
+
+  const safe = {
+    stable_fixture: true,
+    fixture_reusable: true,
+    event_count: 1,
+    organizer_count: 1,
+    auth_user_inert: true,
+    event_sellable: false,
+    public_projection_count: 0,
+    active_tier_count: 0,
+    connect_count: 0,
+    order_count: 0,
+    item_count: 0,
+    ticket_count: 0,
+    receipt_count: 0,
+    refund_count: 0,
+    dispute_count: 0,
+  };
+
+  assertEquals(auditTombstoneIsSafe(safe), true);
+  for (
+    const key of [
+      "stable_fixture",
+      "fixture_reusable",
+      "auth_user_inert",
+    ]
+  ) {
+    assertEquals(auditTombstoneIsSafe({ ...safe, [key]: false }), false);
+  }
+  for (
+    const key of [
+      "event_sellable",
+      "public_projection_count",
+      "active_tier_count",
+      "connect_count",
+      "order_count",
+      "item_count",
+      "ticket_count",
+      "receipt_count",
+      "refund_count",
+      "dispute_count",
+    ]
+  ) {
+    assertEquals(auditTombstoneIsSafe({ ...safe, [key]: 1 }), false);
+  }
+  assertEquals(auditTombstoneIsSafe({ ...safe, event_count: 0 }), false);
+  assertEquals(auditTombstoneIsSafe({ ...safe, organizer_count: 0 }), false);
+});
+
+Deno.test("driver tombstone safety trusts only facts the driver directly observes", () => {
+  const auditTombstoneIsSafe = Reflect.get(
+    contracts,
+    "auditTombstoneIsSafe",
+  );
+  assertEquals(typeof auditTombstoneIsSafe, "function");
+  if (typeof auditTombstoneIsSafe !== "function") return;
+
+  assertEquals(
+    auditTombstoneIsSafe({
+      stable_fixture: true,
+      fixture_reusable: true,
+      event_count: 1,
+      organizer_count: 1,
+      auth_user_inert: true,
+      event_sellable: false,
+      public_projection_count: 0,
+      active_tier_count: 0,
+      connect_count: 0,
+      order_count: 0,
+      item_count: 0,
+      ticket_count: 0,
+      receipt_count: 0,
+      refund_count: 0,
+      dispute_count: 0,
+    }),
+    true,
+  );
+});
+
+Deno.test("failed fixture cleanup independently attempts Auth inerting and account closure", async () => {
+  const runCleanupWithFailureFinalizers = Reflect.get(
+    contracts,
+    "runCleanupWithFailureFinalizers",
+  );
+  assertEquals(typeof runCleanupWithFailureFinalizers, "function");
+  if (typeof runCleanupWithFailureFinalizers !== "function") return;
+
+  const calls: string[] = [];
+  await assertRejects(
+    () =>
+      runCleanupWithFailureFinalizers(
+        async () => {
+          calls.push("cleanup");
+          throw new Error("DATABASE");
+        },
+        async () => {
+          calls.push("auth");
+          throw new Error("auth finalizer failed");
+        },
+        async () => calls.push("account"),
+      ),
+    Error,
+    "FIXTURE_CLEANUP_UNSAFE",
+  );
+  assertEquals(calls, ["cleanup", "auth", "account"]);
+});
+
+Deno.test("fixture publication uses the authenticated owner flow before checkout preflight", async () => {
+  const establishSellableFixture = Reflect.get(
+    contracts,
+    "establishSellableFixture",
+  );
+  assertEquals(typeof establishSellableFixture, "function");
+  if (typeof establishSellableFixture !== "function") return;
+
+  const calls: string[] = [];
+  await establishSellableFixture(
+    "organizer",
+    "account",
+    {
+      saveRequirements: async () => calls.push("requirements"),
+      acceptPolicies: async () => calls.push("acceptance"),
+      publish: async () => calls.push("publication"),
+      preflight: async () => {
+        calls.push("preflight");
+        return [{ organizer_id: "organizer", stripe_account_id: "account" }];
+      },
+    },
+  );
+  assertEquals(calls, [
+    "requirements",
+    "acceptance",
+    "publication",
+    "preflight",
+  ]);
+});
+
+Deno.test("fixture publication fails closed on a non-bijective checkout preflight", async () => {
+  const establishSellableFixture = Reflect.get(
+    contracts,
+    "establishSellableFixture",
+  );
+  assertEquals(typeof establishSellableFixture, "function");
+  if (typeof establishSellableFixture !== "function") return;
+
+  for (
+    const preflight of [
+      [],
+      [{ organizer_id: "other", stripe_account_id: "account" }],
+      [{ organizer_id: "organizer", stripe_account_id: "other" }],
+      [
+        { organizer_id: "organizer", stripe_account_id: "account" },
+        { organizer_id: "organizer", stripe_account_id: "account" },
+      ],
+    ]
+  ) {
+    await assertRejects(
+      () =>
+        establishSellableFixture(
+          "organizer",
+          "account",
+          {
+            saveRequirements: async () => undefined,
+            acceptPolicies: async () => undefined,
+            publish: async () => undefined,
+            preflight: async () => preflight,
+          },
+        ),
+      Error,
+      "FIXTURE_NOT_SELLABLE",
+    );
+  }
+});
+
+Deno.test("audit tombstone reuse is re-authorized only through the authenticated owner flow", async () => {
+  const restoreSellableFixture = Reflect.get(
+    contracts,
+    "restoreSellableFixture",
+  );
+  assertEquals(typeof restoreSellableFixture, "function");
+  if (typeof restoreSellableFixture !== "function") return;
+
+  const calls: string[] = [];
+  await restoreSellableFixture(
+    "organizer",
+    "account",
+    {
+      saveRequirements: async () => calls.push("requirements"),
+      acceptPolicies: async () => calls.push("acceptance"),
+      publish: async () => calls.push("publication"),
+      preflight: async () => {
+        calls.push("preflight");
+        return [{ organizer_id: "organizer", stripe_account_id: "account" }];
+      },
+    },
+  );
+  assertEquals(calls, [
+    "requirements",
+    "acceptance",
+    "publication",
+    "preflight",
+  ]);
+});
+
+Deno.test("fixture tombstoning invalidates authorization before proving it unsellable", async () => {
+  const retireSellableFixture = Reflect.get(
+    contracts,
+    "retireSellableFixture",
+  );
+  assertEquals(typeof retireSellableFixture, "function");
+  if (typeof retireSellableFixture !== "function") return;
+
+  const calls: string[] = [];
+  await retireSellableFixture({
+    retireRevision: async () => calls.push("revision"),
+    verifyUnsellable: async () => calls.push("unsellable"),
+  });
+  assertEquals(calls, ["revision", "unsellable"]);
+});
+
+Deno.test("fixture retirement verifies the audit tombstone after every inerting step", async () => {
+  const establishAuditTombstone = Reflect.get(
+    contracts,
+    "establishAuditTombstone",
+  );
+  assertEquals(typeof establishAuditTombstone, "function");
+  if (typeof establishAuditTombstone !== "function") return;
+
+  const calls: string[] = [];
+  const state = {
+    stable_fixture: true,
+    fixture_reusable: true,
+    event_count: 1,
+    organizer_count: 1,
+    auth_user_inert: true,
+    event_sellable: false,
+    public_projection_count: 0,
+    active_tier_count: 0,
+    connect_count: 0,
+    order_count: 0,
+    item_count: 0,
+    ticket_count: 0,
+    receipt_count: 0,
+    refund_count: 0,
+    dispute_count: 0,
+  };
+  await assertEquals(
+    await establishAuditTombstone({
+      retireEvent: async () => calls.push("event"),
+      removeRuntime: async () => calls.push("runtime"),
+      inertAuth: async () => calls.push("auth"),
+      inspect: async () => {
+        calls.push("inspect");
+        return state;
+      },
+    }),
+    state,
+  );
+  assertEquals(calls, ["event", "runtime", "auth", "inspect"]);
+});
+
+Deno.test("public projection verification accepts only the exact inbound publishable credential", () => {
+  const requirePublicApiKey = Reflect.get(contracts, "requirePublicApiKey");
+  assertEquals(typeof requirePublicApiKey, "function");
+  if (typeof requirePublicApiKey !== "function") return;
+
+  const key = "sb_publishable_fixture";
+  assertEquals(
+    requirePublicApiKey(
+      new Headers({
+        apikey: key,
+        authorization: `Bearer ${key}`,
+      }),
+    ),
+    key,
+  );
+  for (
+    const headers of [
+      new Headers(),
+      new Headers({ apikey: key }),
+      new Headers({ apikey: key, authorization: "Bearer different" }),
+      new Headers({
+        apikey: "service_role_fixture",
+        authorization: "Bearer service_role_fixture",
+      }),
+    ]
+  ) {
+    assertThrows(() => requirePublicApiKey(headers), Error, "INPUT");
+  }
+});
+
 Deno.test("destination-charge relations fail closed on every cross-wire", () => {
   const relationsMatch = Reflect.get(
     contracts,

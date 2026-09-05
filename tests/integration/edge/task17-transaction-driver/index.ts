@@ -2,6 +2,7 @@
 // while materializing it under supabase/functions, then removes the function,
 // source, and secrets from its EXIT trap.
 import type Stripe from "stripe";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { getServiceClient } from "../../../../supabase/functions/_shared/database.ts";
 import {
   getStripeWebhookSecret,
@@ -21,15 +22,23 @@ import {
 import {
   applyDiagnosticAccountCleanup,
   assertSafeProofResponse,
+  type AuditTombstoneState,
   deleteAndVerifyFixtureAuthUser,
   destinationChargeRelationsMatch,
+  establishAuditTombstone,
+  establishSellableFixture,
   findExactFixtureAuthUser,
+  requirePublicApiKey,
+  restoreSellableFixture,
+  retireSellableFixture,
   retrieveAccountForDiagnostic,
+  runCleanupWithFailureFinalizers,
   validateAccountForDiagnostic,
 } from "./contracts.ts";
 
 const actions = new Set([
   "account_diagnostic",
+  "fixture_preflight",
   "server_proof",
   "setup",
   "inspect",
@@ -354,6 +363,177 @@ async function fixtureAuthUser(
   return { id: found.id, email: expectedEmail };
 }
 
+function activeEventPayload() {
+  const startsAt = new Date(Date.now() + 7 * 86_400_000);
+  return {
+    title: fixturePrefix() + " transaction",
+    description: "Reusable real Stripe test-mode transaction fixture.",
+    category: "music",
+    starts_at: startsAt.toISOString(),
+    ends_at: new Date(startsAt.getTime() + 14_400_000).toISOString(),
+    timezone: "America/Los_Angeles",
+    venue_name: "Task 17 Test Venue",
+    address_line1: "123 Test Street",
+    address_line2: null,
+    city: "San Francisco",
+    region: "CA",
+    postal_code: "94103",
+    country_code: "US",
+    mapbox_feature_id: "task17.checkout-integrity-fixture",
+    latitude: 37.7749,
+    longitude: -122.4194,
+    admission_type: "paid",
+    capacity: 10,
+  };
+}
+
+function tombstoneEventPayload(event: Record<string, unknown>) {
+  const startsAt = new Date(Date.now() + 30 * 86_400_000);
+  const endsAt = new Date(startsAt.getTime() + 14_400_000);
+  return {
+    title: event.title,
+    description: event.description,
+    category: event.category,
+    starts_at: startsAt.toISOString(),
+    ends_at: endsAt.toISOString(),
+    timezone: event.timezone,
+    venue_name: event.venue_name,
+    address_line1: event.address_line1,
+    address_line2: event.address_line2,
+    city: event.city,
+    region: event.region,
+    postal_code: event.postal_code,
+    country_code: event.country_code,
+    mapbox_feature_id: event.mapbox_feature_id,
+    latitude: event.latitude,
+    longitude: event.longitude,
+    admission_type: event.admission_type,
+    capacity: event.capacity,
+  };
+}
+
+async function authenticatedFixtureOwner(
+  expectedOrganizerId: string,
+): Promise<SupabaseClient> {
+  const password = crypto.randomUUID() + "Aa1!" + crypto.randomUUID();
+  const email = fixturePrefix() + "@example.invalid";
+  const admin = getServiceClient();
+  const updated = await admin.auth.admin.updateUserById(expectedOrganizerId, {
+    password,
+    ban_duration: "none",
+  });
+  if (
+    updated.error !== null || updated.data.user.id !== expectedOrganizerId ||
+    updated.data.user.email !== email
+  ) throw new Error("DATABASE");
+  const { url, serviceRoleKey } = getSupabaseServiceConfig();
+  const owner = createClient(url, serviceRoleKey, {
+    auth: {
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+      persistSession: false,
+    },
+  });
+  const signedIn = await owner.auth.signInWithPassword({ email, password });
+  if (
+    signedIn.error !== null ||
+    signedIn.data.user?.id !== expectedOrganizerId ||
+    signedIn.data.session?.user.id !== expectedOrganizerId
+  ) throw new Error("DATABASE");
+  return owner;
+}
+
+async function makeFixtureAuthInert(
+  expectedOrganizerId: string,
+): Promise<void> {
+  const reset = await getServiceClient().auth.admin.updateUserById(
+    expectedOrganizerId,
+    {
+      password: crypto.randomUUID() + "Aa1!" + crypto.randomUUID(),
+      ban_duration: "876000h",
+    },
+  );
+  const bannedUntil = reset.data.user?.banned_until;
+  if (
+    reset.error !== null || reset.data.user?.id !== expectedOrganizerId ||
+    typeof bannedUntil !== "string" ||
+    new Date(bannedUntil).getTime() <= Date.now()
+  ) throw new Error("DATABASE_DELETE_AUTH");
+}
+
+async function finalizeConnectedAccount(
+  closeConnectedAccount: boolean,
+): Promise<{
+  connectedAccountClosed: boolean;
+  connectedAccountPreserved: boolean;
+}> {
+  if (closeConnectedAccount) mustCloseConnectedAccount();
+  return await applyDiagnosticAccountCleanup(
+    closeConnectedAccount,
+    () =>
+      getStripe().v2.core.accounts.retrieve(connectedAccountId(), {
+        include: ACCOUNT_INCLUDE,
+      }),
+    (connectedAccount) =>
+      getStripe().v2.core.accounts.close(connectedAccount.id, {
+        applied_configurations: connectedAccount.applied_configurations,
+      }),
+    (connectedAccount) => {
+      if (connectedAccount.livemode !== false) {
+        throw new Error("LIVE_MODE_FORBIDDEN");
+      }
+    },
+  );
+}
+
+async function checkoutPreflight(
+  eventId: string,
+  organizerId: string,
+  tierIds: string[],
+): Promise<Array<{ organizer_id: string; stripe_account_id: string }>> {
+  const result = await getServiceClient().rpc("server_get_checkout_preflight", {
+    p_event_id: eventId,
+    p_tier_ids: tierIds,
+  });
+  if (result.error !== null || !Array.isArray(result.data)) {
+    throw new Error("FIXTURE_NOT_SELLABLE");
+  }
+  return result.data.map((row) => ({
+    organizer_id: row.organizer_id,
+    stripe_account_id: row.stripe_account_id,
+  })).filter((row) =>
+    typeof row.organizer_id === "string" &&
+    typeof row.stripe_account_id === "string" &&
+    row.organizer_id === organizerId
+  );
+}
+
+async function requireOwnerRpc(
+  owner: SupabaseClient,
+  name:
+    | "save_owned_event_revision"
+    | "save_owned_event_requirements"
+    | "accept_current_event_policies"
+    | "publish_event",
+  args: Record<string, unknown>,
+): Promise<unknown> {
+  const result = await owner.rpc(name, args);
+  if (result.error !== null) throw new Error("DATABASE");
+  return result.data;
+}
+
+function requirementsPayload() {
+  return {
+    minimum_age: "all_ages",
+    alcohol_present: false,
+    cannabis_present: false,
+    explicit_adult_content: false,
+    gambling_present: false,
+    weapons_present: false,
+    high_risk_activity: false,
+  };
+}
+
 async function setup(): Promise<Record<string, unknown>> {
   const proof = await serverProof();
   if (proof.ok !== true) throw new Error("STRIPE");
@@ -377,63 +557,158 @@ async function setup(): Promise<Record<string, unknown>> {
       display_name: fixturePrefix(),
     });
     if (organizerError !== null) throw new Error("DATABASE");
-    const projection = validateApprovedConnectAccount(
-      await getStripe().v2.core.accounts.retrieve(connectedAccountId(), {
-        include: ACCOUNT_INCLUDE,
-      }),
-    );
-    const { error: connectError } = await client.from(
-      "organizer_stripe_accounts",
-    ).insert({
-      organizer_id: organizer.id,
-      stripe_account_id: connectedAccountId(),
-      transfers_status: projection.transfersStatus,
-      payouts_status: projection.payoutsStatus,
-      requirements_status: projection.requirementsStatus,
-      requirements_currently_due_count:
-        projection.requirementsCurrentlyDueCount,
-      requirements_past_due_count: projection.requirementsPastDueCount,
-      last_status_code: projection.lastStatusCode,
-    });
-    if (connectError !== null) throw new Error("DATABASE");
   } else if (await fixtureAuthUser(organizer.id) === null) {
     throw new Error("DATABASE");
   }
 
+  const account = await getStripe().v2.core.accounts.retrieve(
+    connectedAccountId(),
+    { include: ACCOUNT_INCLUDE },
+  );
+  if (account.livemode !== false || account.id !== connectedAccountId()) {
+    throw new Error("LIVE_MODE_FORBIDDEN");
+  }
+  const projection = validateApprovedConnectAccount(account);
+  const syncedAt = new Date().toISOString();
+  const { error: connectError } = await client.from(
+    "organizer_stripe_accounts",
+  ).upsert({
+    organizer_id: organizer.id,
+    stripe_account_id: connectedAccountId(),
+    transfers_status: projection.transfersStatus,
+    payouts_status: projection.payoutsStatus,
+    requirements_status: projection.requirementsStatus,
+    requirements_currently_due_count: projection.requirementsCurrentlyDueCount,
+    requirements_past_due_count: projection.requirementsPastDueCount,
+    last_status_code: projection.lastStatusCode,
+    last_synced_at: syncedAt,
+    livemode: false,
+  }, { onConflict: "organizer_id" });
+  if (connectError !== null) throw new Error("DATABASE");
+
   const title = `${fixturePrefix()} transaction`;
   const eventRead = await client.from("events")
-    .select("id")
+    .select(
+      "id,status,moderation_status,starts_at,ends_at,publicly_authorized_action_id",
+    )
     .eq("organizer_id", organizer.id).eq("title", title).maybeSingle();
   if (eventRead.error !== null) throw new Error("DATABASE");
   let event = eventRead.data;
   if (event === null) {
     const eventId = crypto.randomUUID();
-    const startsAt = new Date(Date.now() + 7 * 86_400_000);
+    const payload = activeEventPayload();
     const { error } = await client.from("events").insert({
       id: eventId,
       organizer_id: organizer.id,
-      status: "published",
-      moderation_status: "clear",
-      title,
-      description: "Disposable real Stripe test-mode transaction fixture.",
-      category: "music",
-      starts_at: startsAt.toISOString(),
-      ends_at: new Date(startsAt.getTime() + 14_400_000).toISOString(),
-      timezone: "America/Los_Angeles",
-      venue_name: "Task 17 Test Venue",
-      address_line1: "123 Test Street",
-      city: "San Francisco",
-      region: "CA",
-      postal_code: "94103",
-      country_code: "US",
-      latitude: 37.7749,
-      longitude: -122.4194,
-      admission_type: "paid",
-      capacity: 10,
-      published_at: new Date().toISOString(),
+      status: "draft",
+      moderation_status: "not_evaluated",
+      ...payload,
     });
     if (error !== null) throw new Error("DATABASE");
-    event = { id: eventId };
+    event = {
+      id: eventId,
+      status: "draft",
+      moderation_status: "not_evaluated",
+      starts_at: payload.starts_at,
+      ends_at: payload.ends_at,
+      publicly_authorized_action_id: null,
+    };
+  }
+
+  const owner = await authenticatedFixtureOwner(organizer.id);
+  const existingTiers = await client.from("ticket_tiers").select(
+    "id,name,unit_amount_minor,currency,quantity_total,status,sort_order",
+  ).eq("event_id", event.id).neq("status", "archived")
+    .order("sort_order", { ascending: true });
+  if (existingTiers.error !== null) throw new Error("DATABASE");
+
+  const existingTierIds = existingTiers.data.map((tier) => tier.id);
+  const alreadyPrepared = existingTiers.data.length === fixtureTiers.length &&
+    existingTiers.data.every((tier, index) => {
+      const expected = fixtureTiers[index];
+      return tier.name === expected.name &&
+        tier.unit_amount_minor === expected.unitAmountMinor &&
+        tier.currency === "usd" &&
+        tier.quantity_total === expected.quantityTotal &&
+        tier.status === "active" && tier.sort_order === expected.sortOrder;
+    });
+  if (alreadyPrepared) {
+    const rows = await checkoutPreflight(
+      event.id,
+      organizer.id,
+      existingTierIds,
+    );
+    if (
+      rows.length !== 1 || rows[0].organizer_id !== organizer.id ||
+      rows[0].stripe_account_id !== connectedAccountId()
+    ) throw new Error("FIXTURE_NOT_SELLABLE");
+  } else {
+    if (existingTiers.data.length !== 0) throw new Error("DATABASE");
+    const createdTiers: string[] = [];
+    for (const tier of fixtureTiers) {
+      const tierId = crypto.randomUUID();
+      const created = await client.from("ticket_tiers").insert({
+        id: tierId,
+        event_id: event.id,
+        name: tier.name,
+        description: null,
+        unit_amount_minor: tier.unitAmountMinor,
+        currency: "usd",
+        quantity_total: tier.quantityTotal,
+        status: "draft",
+        sort_order: tier.sortOrder,
+      });
+      if (created.error !== null) throw new Error("DATABASE");
+      createdTiers.push(tierId);
+    }
+    const dependencies = {
+      acceptPolicies: () =>
+        requireOwnerRpc(owner, "accept_current_event_policies", {
+          p_event_id: event.id,
+        }),
+      publish: () =>
+        requireOwnerRpc(owner, "publish_event", { p_event_id: event.id }),
+      preflight: () => checkoutPreflight(event.id, organizer.id, createdTiers),
+    };
+    const restoringTombstone = event.status === "published" &&
+      event.moderation_status === "clear" &&
+      event.publicly_authorized_action_id === null;
+    if (restoringTombstone) {
+      await restoreSellableFixture(
+        organizer.id,
+        connectedAccountId(),
+        {
+          saveRequirements: () =>
+            requireOwnerRpc(owner, "save_owned_event_requirements", {
+              p_event_id: event.id,
+              p_requirements: requirementsPayload(),
+            }),
+          ...dependencies,
+        },
+      );
+    } else {
+      if (event.status !== "draft") throw new Error("FIXTURE_NOT_SELLABLE");
+      await establishSellableFixture(
+        organizer.id,
+        connectedAccountId(),
+        {
+          saveRequirements: () =>
+            requireOwnerRpc(owner, "save_owned_event_requirements", {
+              p_event_id: event.id,
+              p_requirements: requirementsPayload(),
+            }),
+          ...dependencies,
+        },
+      );
+    }
+  }
+
+  const tierRead = await client.from("ticket_tiers").select(
+    "id,name,unit_amount_minor,currency,quantity_total,status,sort_order",
+  ).eq("event_id", event.id).eq("status", "active")
+    .order("sort_order", { ascending: true });
+  if (tierRead.error !== null || tierRead.data.length !== fixtureTiers.length) {
+    throw new Error("DATABASE");
   }
   const tiers: Array<{
     label: "ga" | "vip";
@@ -443,38 +718,8 @@ async function setup(): Promise<Record<string, unknown>> {
     quantity: number;
     subtotalMinor: number;
   }> = [];
-  for (const definition of fixtureTiers) {
-    const tierRead = await client.from("ticket_tiers")
-      .select(
-        "id,name,unit_amount_minor,currency,quantity_total,status,sort_order",
-      )
-      .eq("event_id", event.id).eq("sort_order", definition.sortOrder)
-      .maybeSingle();
-    if (tierRead.error !== null) throw new Error("DATABASE");
-    let tier = tierRead.data;
-    if (tier === null) {
-      const tierId = crypto.randomUUID();
-      const { error } = await client.from("ticket_tiers").insert({
-        id: tierId,
-        event_id: event.id,
-        name: definition.name,
-        unit_amount_minor: definition.unitAmountMinor,
-        currency: "usd",
-        quantity_total: definition.quantityTotal,
-        status: "active",
-        sort_order: definition.sortOrder,
-      });
-      if (error !== null) throw new Error("DATABASE");
-      tier = {
-        id: tierId,
-        name: definition.name,
-        unit_amount_minor: definition.unitAmountMinor,
-        currency: "usd",
-        quantity_total: definition.quantityTotal,
-        status: "active",
-        sort_order: definition.sortOrder,
-      };
-    }
+  for (const [index, definition] of fixtureTiers.entries()) {
+    const tier = tierRead.data[index];
     if (
       tier.name !== definition.name ||
       tier.unit_amount_minor !== definition.unitAmountMinor ||
@@ -515,6 +760,16 @@ async function setup(): Promise<Record<string, unknown>> {
     total_minor: fixtureSubtotalMinor,
     application_fee_minor: fixtureApplicationFeeMinor,
     organizer_proceeds_minor: fixtureOrganizerProceedsMinor,
+  };
+}
+
+async function fixturePreflight(): Promise<Record<string, unknown>> {
+  await setup();
+  return {
+    ok: true,
+    fixture_purchasable: true,
+    cleanup_strategy: "audit_tombstone",
+    stable_fixture: true,
   };
 }
 
@@ -1124,11 +1379,54 @@ async function createRefund(
 
 async function cleanup(
   closeConnectedAccount: unknown,
+  publicClient: SupabaseClient,
 ): Promise<Record<string, unknown>> {
   if (typeof closeConnectedAccount !== "boolean") throw new Error("INPUT");
   const client = getServiceClient();
   const organizer = await fixtureOrganizer();
   const authUser = await fixtureAuthUser(organizer?.id);
+  if (organizer === null) {
+    if (authUser !== null) {
+      await deleteAndVerifyFixtureAuthUser(
+        authUser,
+        async (id) => {
+          const result = await client.auth.admin.deleteUser(id);
+          if (result.error !== null) throw new Error("DATABASE_DELETE_AUTH");
+        },
+        loadFixtureAuthUserById,
+        loadFixtureAuthPage,
+      );
+    }
+    const accountLifecycle = await finalizeConnectedAccount(
+      closeConnectedAccount,
+    );
+    return {
+      ok: true,
+      event_count: 0,
+      organizer_count: 0,
+      connect_count: 0,
+      order_count: 0,
+      tier_count: 0,
+      receipt_count: 0,
+      ticket_count: 0,
+      dispute_count: 0,
+      refund_count: 0,
+      item_count: 0,
+      auth_user_absent: true,
+      connected_account_closed: accountLifecycle.connectedAccountClosed,
+      connected_account_preserved: accountLifecycle.connectedAccountPreserved,
+    };
+  }
+  if (authUser === null) throw new Error("DATABASE_DELETE_AUTH");
+
+  const eventRead = await client.from("events").select(
+    "id,title,description,category,starts_at,ends_at,timezone,venue_name,address_line1,address_line2,city,region,postal_code,country_code,mapbox_feature_id,latitude,longitude,admission_type,capacity,status,publicly_authorized_action_id",
+  ).eq("organizer_id", organizer.id)
+    .eq("title", fixturePrefix() + " transaction").maybeSingle();
+  if (eventRead.error !== null || eventRead.data === null) {
+    throw new Error("FIXTURE_CLEANUP_UNSAFE");
+  }
+  const fixtureEvent = eventRead.data;
   const eventIds: string[] = [];
   const orderIds: string[] = [];
   const objectIds: string[] = [];
@@ -1139,281 +1437,315 @@ async function cleanup(
   let deletedTicketCount = 0;
   let deletedRefundCount = 0;
   let deletedTierCount = 0;
-  if (organizer !== null) {
-    const { data: events, error: eventReadError } = await client.from("events")
-      .select("id")
-      .eq("organizer_id", organizer.id);
-    if (eventReadError !== null) throw new Error("DATABASE");
-    eventIds.push(...(events ?? []).map((event) => event.id));
-    if (eventIds.length > 0) {
-      const { data: tierRows, error: tierReadError } = await client.from(
-        "ticket_tiers",
-      ).select("id").in("event_id", eventIds);
-      if (tierReadError !== null) throw new Error("DATABASE");
-      deletedTierCount = tierRows.length;
-      const { data: orders, error: orderReadError } = await client.from(
-        "orders",
-      ).select(
-        "id,stripe_checkout_session_id,stripe_payment_intent_id,stripe_charge_id,last_stripe_event_id",
-      ).in("event_id", eventIds);
-      if (orderReadError !== null) throw new Error("DATABASE");
-      for (const order of orders ?? []) {
-        orderIds.push(order.id);
-        if (order.last_stripe_event_id) {
-          receiptIds.add(order.last_stripe_event_id);
-        }
-        for (
-          const value of [
-            order.stripe_checkout_session_id,
-            order.stripe_payment_intent_id,
-            order.stripe_charge_id,
-          ]
-        ) if (value) objectIds.push(value);
-        if (order.stripe_checkout_session_id) {
-          const session = await getStripe().checkout.sessions.retrieve(
-            stripeId(order.stripe_checkout_session_id, "cs_test_"),
-            { expand: ["line_items.data.price.product"] },
-          );
-          assertTestMode(session);
-          if (session.status === "open") {
-            const expired = await getStripe().checkout.sessions.expire(
-              session.id,
-            );
-            assertTestMode(expired);
-            if (expired.status !== "expired") throw new Error("STRIPE");
-          }
-          const lineItems = session.line_items as unknown;
+  const tombstoneState: AuditTombstoneState = await establishAuditTombstone({
+    retireEvent: async () => {
+      const alreadyRetired =
+        fixtureEvent.publicly_authorized_action_id === null;
+      const owner = await authenticatedFixtureOwner(organizer.id);
+      await retireSellableFixture({
+        retireRevision: () =>
+          alreadyRetired
+            ? Promise.resolve()
+            : requireOwnerRpc(owner, "save_owned_event_revision", {
+              p_event_id: fixtureEvent.id,
+              p_event: tombstoneEventPayload(fixtureEvent),
+            }),
+        verifyUnsellable: async () => {
+          const [projection, tiers] = await Promise.all([
+            publicClient.rpc("get_public_event", {
+              p_event_id: fixtureEvent.id,
+            }),
+            client.from("ticket_tiers").select("id").eq(
+              "event_id",
+              fixtureEvent.id,
+            ).neq("status", "archived"),
+          ]);
           if (
-            !isRecord(lineItems) || lineItems.has_more !== false ||
-            !Array.isArray(lineItems.data)
-          ) throw new Error("STRIPE");
-          for (const line of lineItems.data) {
-            if (!isRecord(line) || !isRecord(line.price)) {
-              throw new Error("STRIPE");
+            projection.error !== null || !Array.isArray(projection.data) ||
+            projection.data.length !== 0 || tiers.error !== null
+          ) throw new Error("FIXTURE_CLEANUP_UNSAFE");
+          if (tiers.data.length === 0) return;
+          const preflight = await client.rpc("server_get_checkout_preflight", {
+            p_event_id: fixtureEvent.id,
+            p_tier_ids: tiers.data.map((tier) => tier.id),
+          });
+          if (
+            preflight.error === null && Array.isArray(preflight.data) &&
+            preflight.data.length > 0
+          ) {
+            throw new Error("FIXTURE_CLEANUP_UNSAFE");
+          }
+        },
+      });
+    },
+    removeRuntime: async () => {
+      const { data: events, error: eventReadError } = await client.from(
+        "events",
+      ).select("id").eq("organizer_id", organizer.id);
+      if (
+        eventReadError !== null || events.length !== 1 ||
+        events[0].id !== fixtureEvent.id
+      ) throw new Error("FIXTURE_CLEANUP_UNSAFE");
+      eventIds.push(fixtureEvent.id);
+      if (eventIds.length > 0) {
+        const { data: tierRows, error: tierReadError } = await client.from(
+          "ticket_tiers",
+        ).select("id").in("event_id", eventIds);
+        if (tierReadError !== null) throw new Error("DATABASE");
+        deletedTierCount = tierRows.length;
+        const { data: orders, error: orderReadError } = await client.from(
+          "orders",
+        ).select(
+          "id,stripe_checkout_session_id,stripe_payment_intent_id,stripe_charge_id,last_stripe_event_id",
+        ).in("event_id", eventIds);
+        if (orderReadError !== null) throw new Error("DATABASE");
+        for (const order of orders ?? []) {
+          orderIds.push(order.id);
+          if (order.last_stripe_event_id) {
+            receiptIds.add(order.last_stripe_event_id);
+          }
+          for (
+            const value of [
+              order.stripe_checkout_session_id,
+              order.stripe_payment_intent_id,
+              order.stripe_charge_id,
+            ]
+          ) if (value) objectIds.push(value);
+          if (order.stripe_checkout_session_id) {
+            const session = await getStripe().checkout.sessions.retrieve(
+              stripeId(order.stripe_checkout_session_id, "cs_test_"),
+              { expand: ["line_items.data.price.product"] },
+            );
+            assertTestMode(session);
+            if (session.status === "open") {
+              const expired = await getStripe().checkout.sessions.expire(
+                session.id,
+              );
+              assertTestMode(expired);
+              if (expired.status !== "expired") throw new Error("STRIPE");
             }
-            assertTestMode(line.price);
-            const product = line.price.product;
-            assertTestMode(product);
+            const lineItems = session.line_items as unknown;
             if (
-              typeof line.price.id !== "string" ||
-              !line.price.id.startsWith("price_") ||
-              typeof product.id !== "string" || !product.id.startsWith("prod_")
+              !isRecord(lineItems) || lineItems.has_more !== false ||
+              !Array.isArray(lineItems.data)
             ) throw new Error("STRIPE");
-            priceIds.add(line.price.id);
-            productIds.add(product.id);
+            for (const line of lineItems.data) {
+              if (!isRecord(line) || !isRecord(line.price)) {
+                throw new Error("STRIPE");
+              }
+              assertTestMode(line.price);
+              const product = line.price.product;
+              assertTestMode(product);
+              if (
+                typeof line.price.id !== "string" ||
+                !line.price.id.startsWith("price_") ||
+                typeof product.id !== "string" ||
+                !product.id.startsWith("prod_")
+              ) throw new Error("STRIPE");
+              priceIds.add(line.price.id);
+              productIds.add(product.id);
+            }
           }
         }
       }
-    }
-    if (orderIds.length > 0) {
-      const { data: refunds, error: refundReadError } = await client.from(
-        "refunds",
-      ).select(
-        "stripe_refund_id,stripe_event_id",
-      ).in("order_id", orderIds);
-      if (refundReadError !== null) throw new Error("DATABASE");
-      deletedRefundCount = (refunds ?? []).length;
-      for (const refund of refunds ?? []) {
-        objectIds.push(refund.stripe_refund_id);
-        if (refund.stripe_event_id) receiptIds.add(refund.stripe_event_id);
+      if (orderIds.length > 0) {
+        const { data: refunds, error: refundReadError } = await client.from(
+          "refunds",
+        ).select(
+          "stripe_refund_id,stripe_event_id",
+        ).in("order_id", orderIds);
+        if (refundReadError !== null) throw new Error("DATABASE");
+        deletedRefundCount = (refunds ?? []).length;
+        for (const refund of refunds ?? []) {
+          objectIds.push(refund.stripe_refund_id);
+          if (refund.stripe_event_id) receiptIds.add(refund.stripe_event_id);
+        }
+        const [trackedItems, trackedTickets] = await Promise.all([
+          client.from("order_items").select("id").in("order_id", orderIds),
+          client.from("tickets").select("id").in("order_id", orderIds),
+        ]);
+        if (trackedItems.error !== null || trackedTickets.error !== null) {
+          throw new Error("DATABASE");
+        }
+        deletedItemCount = trackedItems.data.length;
+        deletedTicketCount = trackedTickets.data.length;
       }
-      const [trackedItems, trackedTickets] = await Promise.all([
-        client.from("order_items").select("id").in("order_id", orderIds),
-        client.from("tickets").select("id").in("order_id", orderIds),
-      ]);
-      if (trackedItems.error !== null || trackedTickets.error !== null) {
-        throw new Error("DATABASE");
+      if (objectIds.length > 0) {
+        const { data: receipts, error: receiptReadError } = await client.from(
+          "stripe_webhook_events",
+        ).select(
+          "stripe_event_id",
+        ).in("stripe_object_id", objectIds);
+        if (receiptReadError !== null) throw new Error("DATABASE");
+        for (const value of receipts ?? []) {
+          receiptIds.add(value.stripe_event_id);
+        }
       }
-      deletedItemCount = trackedItems.data.length;
-      deletedTicketCount = trackedTickets.data.length;
-    }
-    if (objectIds.length > 0) {
-      const { data: receipts, error: receiptReadError } = await client.from(
-        "stripe_webhook_events",
-      ).select(
-        "stripe_event_id",
-      ).in("stripe_object_id", objectIds);
-      if (receiptReadError !== null) throw new Error("DATABASE");
-      for (const value of receipts ?? []) receiptIds.add(value.stripe_event_id);
-    }
-    for (const priceId of priceIds) {
-      const price = await getStripe().prices.update(priceId, { active: false });
-      assertTestMode(price);
-      if (price.active !== false) throw new Error("STRIPE");
-    }
-    for (const productId of productIds) {
-      const product = await getStripe().products.update(productId, {
-        active: false,
-      });
-      assertTestMode(product);
-      if (product.active !== false) throw new Error("STRIPE");
-    }
-    const ensureDelete = (error: unknown, stage: string) => {
-      if (error !== null) throw new Error(`DATABASE_DELETE_${stage}`);
-    };
-    if (orderIds.length > 0) {
-      ensureDelete(
-        (await client.from("tickets").delete().in("order_id", orderIds)).error,
-        "TICKETS",
-      );
-      // The Task 17 fixture never creates a dispute. That table intentionally
-      // denies the service_role direct access; the restrictive order foreign
-      // key makes the successful order delete the exact zero-dispute proof.
-      ensureDelete(
-        (await client.from("refunds").delete().in("order_id", orderIds)).error,
-        "REFUNDS",
-      );
-      ensureDelete(
-        (await client.from("order_items").delete().in("order_id", orderIds))
-          .error,
-        "ORDER_ITEMS",
-      );
-      ensureDelete(
-        (await client.from("orders").delete().in("id", orderIds)).error,
-        "ORDERS",
-      );
-    }
-    if (eventIds.length > 0) {
-      ensureDelete(
-        (await client.from("ticket_tiers").delete().in("event_id", eventIds))
-          .error,
-        "TIERS",
-      );
-      ensureDelete(
-        (await client.from("events").delete().in("id", eventIds)).error,
-        "EVENTS",
-      );
-    }
-    if (receiptIds.size > 0) {
-      ensureDelete(
-        (await client.from("stripe_webhook_events").delete()
-          .in("stripe_event_id", [...receiptIds])).error,
-        "RECEIPTS",
-      );
-    }
-    ensureDelete(
-      (await client.from("organizer_stripe_accounts").delete()
-        .eq("organizer_id", organizer.id)).error,
-      "CONNECT",
-    );
-    ensureDelete(
-      (await client.from("organizers").delete().eq("id", organizer.id)).error,
-      "ORGANIZER",
-    );
-  }
-  if (authUser !== null) {
-    await deleteAndVerifyFixtureAuthUser(
-      authUser,
-      async (id) => {
-        const result = await client.auth.admin.deleteUser(id);
-        if (result.error !== null) throw new Error("DATABASE_DELETE_AUTH");
-      },
-      loadFixtureAuthUserById,
-      loadFixtureAuthPage,
-    );
-  }
-  if (await fixtureAuthUser() !== null) throw new Error("DATABASE_DELETE_AUTH");
-  const count = async (table: string, column: string, value: string) => {
-    const result = await client.from(table).select(column, {
-      count: "exact",
-      head: true,
-    })
-      .eq(column, value);
-    if (result.error !== null) throw new Error("DATABASE");
-    return result.count ?? 0;
-  };
-  const eventCount = organizer === null
-    ? 0
-    : await count("events", "organizer_id", organizer.id);
-  const organizerCount = organizer === null
-    ? 0
-    : await count("organizers", "id", organizer.id);
-  const connectCount = organizer === null
-    ? 0
-    : await count("organizer_stripe_accounts", "organizer_id", organizer.id);
-  const orderCount = eventIds.length === 0
-    ? 0
-    : (await Promise.all(eventIds.map((id) => count("orders", "event_id", id))))
-      .reduce((sum, value) => sum + value, 0);
-  const tierCount = eventIds.length === 0 ? 0 : (await Promise.all(
-    eventIds.map((id) => count("ticket_tiers", "event_id", id)),
-  ))
-    .reduce((sum, value) => sum + value, 0);
-  const receiptCount = receiptIds.size === 0 ? 0 : await (async () => {
-    const result = await client.from("stripe_webhook_events").select(
-      "stripe_event_id",
-      {
-        count: "exact",
-        head: true,
-      },
-    ).in("stripe_event_id", [...receiptIds]);
-    if (result.error !== null) throw new Error("DATABASE");
-    return result.count ?? 0;
-  })();
-  const childCount = async (
-    table: "tickets" | "refunds" | "order_items",
-  ) => {
-    if (orderIds.length === 0) return 0;
-    const result = await client.from(table).select("id", {
-      count: "exact",
-      head: true,
-    })
-      .in("order_id", orderIds);
-    if (result.error !== null) throw new Error("DATABASE");
-    return result.count ?? 0;
-  };
-  const [ticketCount, refundCount, itemCount] = await Promise.all(
-    [
-      childCount("tickets"),
-      childCount("refunds"),
-      childCount("order_items"),
-    ],
-  );
-  const disputeCount = 0; // A dispute row would have blocked the order delete.
-  if (closeConnectedAccount) mustCloseConnectedAccount();
-  const accountLifecycle = await applyDiagnosticAccountCleanup(
-    closeConnectedAccount,
-    () =>
-      getStripe().v2.core.accounts.retrieve(connectedAccountId(), {
-        include: ACCOUNT_INCLUDE,
-      }),
-    (connectedAccount) =>
-      getStripe().v2.core.accounts.close(connectedAccount.id, {
-        applied_configurations: connectedAccount.applied_configurations,
-      }),
-    (connectedAccount) => {
-      if (connectedAccount.livemode !== false) {
-        throw new Error("LIVE_MODE_FORBIDDEN");
+      for (const priceId of priceIds) {
+        const price = await getStripe().prices.update(priceId, {
+          active: false,
+        });
+        assertTestMode(price);
+        if (price.active !== false) throw new Error("STRIPE");
       }
+      for (const productId of productIds) {
+        const product = await getStripe().products.update(productId, {
+          active: false,
+        });
+        assertTestMode(product);
+        if (product.active !== false) throw new Error("STRIPE");
+      }
+      const ensureDelete = (error: unknown, stage: string) => {
+        if (error !== null) throw new Error(`DATABASE_DELETE_${stage}`);
+      };
+      if (orderIds.length > 0) {
+        ensureDelete(
+          (await client.from("tickets").delete().in("order_id", orderIds))
+            .error,
+          "TICKETS",
+        );
+        // The Task 17 fixture never creates a dispute. That table intentionally
+        // denies the service_role direct access; the restrictive order foreign
+        // key makes the successful order delete the exact zero-dispute proof.
+        ensureDelete(
+          (await client.from("refunds").delete().in("order_id", orderIds))
+            .error,
+          "REFUNDS",
+        );
+        ensureDelete(
+          (await client.from("order_items").delete().in("order_id", orderIds))
+            .error,
+          "ORDER_ITEMS",
+        );
+        ensureDelete(
+          (await client.from("orders").delete().in("id", orderIds)).error,
+          "ORDERS",
+        );
+      }
+      if (eventIds.length > 0) {
+        ensureDelete(
+          (await client.from("ticket_tiers").delete().in("event_id", eventIds))
+            .error,
+          "TIERS",
+        );
+      }
+      if (receiptIds.size > 0) {
+        ensureDelete(
+          (await client.from("stripe_webhook_events").delete()
+            .in("stripe_event_id", [...receiptIds])).error,
+          "RECEIPTS",
+        );
+      }
+      ensureDelete(
+        (await client.from("organizer_stripe_accounts").delete()
+          .eq("organizer_id", organizer.id)).error,
+        "CONNECT",
+      );
     },
+    inertAuth: () => makeFixtureAuthInert(organizer.id),
+    inspect: async () => {
+      const count = async (table: string, column: string, value: string) => {
+        const result = await client.from(table).select(column, {
+          count: "exact",
+          head: true,
+        })
+          .eq(column, value);
+        if (result.error !== null) throw new Error("DATABASE");
+        return result.count ?? 0;
+      };
+      const eventCount = await count("events", "organizer_id", organizer.id);
+      const organizerCount = await count("organizers", "id", organizer.id);
+      const connectCount = await count(
+        "organizer_stripe_accounts",
+        "organizer_id",
+        organizer.id,
+      );
+      const orderCount = eventIds.length === 0 ? 0 : (await Promise.all(
+        eventIds.map((id) => count("orders", "event_id", id)),
+      ))
+        .reduce((sum, value) => sum + value, 0);
+      const tierCount = eventIds.length === 0 ? 0 : (await Promise.all(
+        eventIds.map((id) => count("ticket_tiers", "event_id", id)),
+      ))
+        .reduce((sum, value) => sum + value, 0);
+      const receiptCount = receiptIds.size === 0 ? 0 : await (async () => {
+        const result = await client.from("stripe_webhook_events").select(
+          "stripe_event_id",
+          {
+            count: "exact",
+            head: true,
+          },
+        ).in("stripe_event_id", [...receiptIds]);
+        if (result.error !== null) throw new Error("DATABASE");
+        return result.count ?? 0;
+      })();
+      const childCount = async (
+        table: "tickets" | "refunds" | "order_items",
+      ) => {
+        if (orderIds.length === 0) return 0;
+        const result = await client.from(table).select("id", {
+          count: "exact",
+          head: true,
+        })
+          .in("order_id", orderIds);
+        if (result.error !== null) throw new Error("DATABASE");
+        return result.count ?? 0;
+      };
+      const [ticketCount, refundCount, itemCount] = await Promise.all(
+        [
+          childCount("tickets"),
+          childCount("refunds"),
+          childCount("order_items"),
+        ],
+      );
+      const disputeCount = 0; // A dispute row would have blocked the order delete.
+      const [eventAfter, publicProjection, authAfter] = await Promise.all([
+        client.from("events").select(
+          "id,status,moderation_status,publicly_authorized_action_id",
+        ).eq("id", fixtureEvent.id).single(),
+        publicClient.rpc("get_public_event", { p_event_id: fixtureEvent.id }),
+        client.auth.admin.getUserById(organizer.id),
+      ]);
+      if (
+        eventAfter.error !== null || publicProjection.error !== null ||
+        !Array.isArray(publicProjection.data) || authAfter.error !== null
+      ) throw new Error("FIXTURE_CLEANUP_UNSAFE");
+      const bannedUntil = authAfter.data.user.banned_until;
+      const authUserInert = typeof bannedUntil === "string" &&
+        Date.parse(bannedUntil) > Date.now();
+      const eventSellable = publicProjection.data.length > 0 ||
+        eventAfter.data.publicly_authorized_action_id !== null;
+      return {
+        stable_fixture: eventAfter.data.id === fixtureEvent.id,
+        fixture_reusable: eventAfter.data.status === "published" &&
+          eventAfter.data.moderation_status === "clear",
+        event_count: eventCount,
+        organizer_count: organizerCount,
+        auth_user_inert: authUserInert,
+        event_sellable: eventSellable,
+        public_projection_count: publicProjection.data.length,
+        active_tier_count: tierCount,
+        connect_count: connectCount,
+        order_count: orderCount,
+        item_count: itemCount,
+        ticket_count: ticketCount,
+        receipt_count: receiptCount,
+        refund_count: refundCount,
+        dispute_count: disputeCount,
+      };
+    },
+  });
+
+  const accountLifecycle = await finalizeConnectedAccount(
+    closeConnectedAccount,
   );
   const accountLifecycleVerified = closeConnectedAccount
     ? accountLifecycle.connectedAccountClosed
     : accountLifecycle.connectedAccountPreserved;
   return {
-    ok: accountLifecycleVerified && [
-      eventCount,
-      organizerCount,
-      connectCount,
-      orderCount,
-      tierCount,
-      receiptCount,
-      ticketCount,
-      disputeCount,
-      refundCount,
-      itemCount,
-    ]
-      .every((value) => value === 0),
-    event_count: eventCount,
-    organizer_count: organizerCount,
-    connect_count: connectCount,
-    order_count: orderCount,
-    tier_count: tierCount,
-    receipt_count: receiptCount,
-    ticket_count: ticketCount,
-    dispute_count: disputeCount,
-    refund_count: refundCount,
-    item_count: itemCount,
+    ok: accountLifecycleVerified,
+    ...tombstoneState,
+    tier_count: tombstoneState.active_tier_count,
     deleted_order_count: orderIds.length,
     deleted_tier_count: deletedTierCount,
     deleted_receipt_count: receiptIds.size,
@@ -1422,7 +1754,6 @@ async function cleanup(
     deleted_item_count: deletedItemCount,
     archived_price_count: priceIds.size,
     archived_product_count: productIds.size,
-    auth_user_absent: true,
     connected_account_closed: accountLifecycle.connectedAccountClosed,
     connected_account_preserved: accountLifecycle.connectedAccountPreserved,
   };
@@ -1442,6 +1773,7 @@ Deno.serve(async (request) => {
     }
     const input = body as Record<string, unknown>;
     if (action === "account_diagnostic") return json(await serverProof());
+    if (action === "fixture_preflight") return json(await fixturePreflight());
     if (action === "server_proof") return json(await serverProof());
     if (action === "setup") return json(await setup());
     if (action === "inspect") return json(await inspect(input.event_id));
@@ -1466,7 +1798,34 @@ Deno.serve(async (request) => {
       return json(await createRefund(input.order_handle));
     }
     if (action === "cleanup") {
-      return json(await cleanup(input.close_connected_account));
+      const closeConnectedAccount = input.close_connected_account;
+      if (typeof closeConnectedAccount !== "boolean") {
+        throw new Error("INPUT");
+      }
+      const result = await runCleanupWithFailureFinalizers(
+        async () => {
+          const { url } = getSupabaseServiceConfig();
+          const publicClient = createClient(
+            url,
+            requirePublicApiKey(request.headers),
+            {
+              auth: {
+                autoRefreshToken: false,
+                detectSessionInUrl: false,
+                persistSession: false,
+              },
+            },
+          );
+          return await cleanup(closeConnectedAccount, publicClient);
+        },
+        async () => {
+          const organizer = await fixtureOrganizer();
+          const authUser = await fixtureAuthUser(organizer?.id);
+          if (authUser !== null) await makeFixtureAuthInert(authUser.id);
+        },
+        () => finalizeConnectedAccount(closeConnectedAccount),
+      );
+      return json(result);
     }
     return json({ ok: false }, 400);
   } catch (error) {
@@ -1474,6 +1833,8 @@ Deno.serve(async (request) => {
         "CONFIG",
         "DATABASE",
         "INPUT",
+        "FIXTURE_CLEANUP_UNSAFE",
+        "FIXTURE_NOT_SELLABLE",
         "LIVE_MODE_FORBIDDEN",
         "STRIPE",
       ].includes(error.message) ||
