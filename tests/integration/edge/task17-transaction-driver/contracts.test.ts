@@ -130,6 +130,175 @@ Deno.test("account diagnostic requires the authoritative validator before report
   );
 });
 
+Deno.test("checkout diagnostic reports a fixed non-sensitive response bitmap", () => {
+  const diagnose = Reflect.get(contracts, "checkoutSessionContractBitmap");
+  assertEquals(typeof diagnose, "function");
+  if (typeof diagnose !== "function") return;
+
+  const orderId = "11111111-1111-4111-8111-111111111111";
+  const eventId = "22222222-2222-4222-8222-222222222222";
+  const session = {
+    id: "cs_test_MustNotEscape",
+    object: "checkout.session",
+    livemode: false,
+    mode: "payment",
+    status: "expired",
+    payment_status: "unpaid",
+    currency: "usd",
+    amount_subtotal: 5_500,
+    amount_total: 5_500,
+    customer_email: "task17_a1b2c3d4e5f6-paid@example.invalid",
+    client_reference_id: orderId,
+    integration_identifier: "whereto_checkout_abcdefgh",
+    metadata: {
+      contract_version: "checkout_integrity_v1",
+      event_id: eventId,
+      order_id: orderId,
+    },
+    automatic_tax: { enabled: false },
+    url: null,
+    line_items: {
+      has_more: false,
+      data: [
+        {
+          quantity: 2,
+          currency: "usd",
+          amount_subtotal: 3_000,
+          amount_total: 3_000,
+          price: {
+            livemode: false,
+            currency: "usd",
+            type: "one_time",
+            unit_amount: 1_500,
+            product: {
+              livemode: false,
+              metadata: {
+                whereto_order_item_id: "33333333-3333-4333-8333-333333333333",
+              },
+            },
+          },
+        },
+        {
+          quantity: 1,
+          currency: "usd",
+          amount_subtotal: 2_500,
+          amount_total: 2_500,
+          price: {
+            livemode: false,
+            currency: "usd",
+            type: "one_time",
+            unit_amount: 2_500,
+            product: {
+              livemode: false,
+              metadata: {
+                whereto_order_item_id: "44444444-4444-4444-8444-444444444444",
+              },
+            },
+          },
+        },
+      ],
+    },
+    payment_intent: null,
+    arbitrary_provider_field: "must not escape",
+  };
+
+  const bitmap = diagnose(
+    session,
+    "task17_a1b2c3d4e5f6",
+    "acct_MustNotEscape",
+  );
+
+  assertEquals(bitmap, {
+    session_object_valid: true,
+    test_mode: true,
+    payment_mode: true,
+    currency_usd: true,
+    subtotal_exact: true,
+    total_exact: true,
+    payment_status_unpaid: true,
+    fixture_buyer_bound: true,
+    client_reference_bound: true,
+    metadata_bound: true,
+    integration_identifier_bound: true,
+    automatic_tax_disabled: true,
+    line_items_complete: true,
+    line_count_exact: true,
+    admission_count_exact: true,
+    line_amounts_exact: true,
+    line_bindings_unique: true,
+    payment_intent_present: false,
+    payment_intent_expanded: false,
+    payment_intent_test_mode: false,
+    payment_intent_amount_exact: false,
+    application_fee_exact: false,
+    destination_bound: false,
+    payment_intent_metadata_bound: false,
+    failure_cleanup_expired: true,
+  });
+  const serialized = JSON.stringify(bitmap);
+  assertEquals(serialized.includes("cs_test_"), false);
+  assertEquals(serialized.includes("acct_"), false);
+  assertEquals(serialized.includes("@example.invalid"), false);
+  assertEquals(serialized.includes(orderId), false);
+  assertEquals(serialized.includes("arbitrary_provider_field"), false);
+});
+
+Deno.test("checkout diagnostic candidate is exact and has no age cutoff", () => {
+  const isCandidate = Reflect.get(
+    contracts,
+    "isCheckoutDiagnosticCandidate",
+  );
+  assertEquals(typeof isCandidate, "function");
+  if (typeof isCandidate !== "function") return;
+
+  const prefix = "task17_a1b2c3d4e5f6";
+  const eventId = "22222222-2222-4222-8222-222222222222";
+  const orderId = "11111111-1111-4111-8111-111111111111";
+  const candidate = {
+    id: "cs_test_ExactOldSession",
+    object: "checkout.session",
+    created: 1,
+    livemode: false,
+    mode: "payment",
+    payment_status: "unpaid",
+    currency: "usd",
+    amount_subtotal: 5_500,
+    amount_total: 5_500,
+    customer_email: `${prefix}-paid@example.invalid`,
+    client_reference_id: orderId,
+    integration_identifier: "whereto_checkout_abcdefgh",
+    metadata: {
+      contract_version: "checkout_integrity_v1",
+      event_id: eventId,
+      order_id: orderId,
+    },
+    automatic_tax: { enabled: false },
+  };
+
+  assertEquals(isCandidate(candidate, prefix, eventId), true);
+  for (
+    const collision of [
+      { ...candidate, amount_total: 5_499 },
+      { ...candidate, customer_email: `${prefix}-declined@example.invalid` },
+      { ...candidate, integration_identifier: "whereto_checkout_wrong123" },
+      {
+        ...candidate,
+        client_reference_id: "33333333-3333-4333-8333-333333333333",
+      },
+      {
+        ...candidate,
+        metadata: { ...candidate.metadata, event_id: orderId },
+      },
+      {
+        ...candidate,
+        metadata: { ...candidate.metadata, unexpected: "must reject" },
+      },
+    ]
+  ) {
+    assertEquals(isCandidate(collision, prefix, eventId), false);
+  }
+});
+
 Deno.test("diagnostic cleanup preserves unless account retirement is explicitly requested", async () => {
   const cleanupAccount = Reflect.get(
     contracts,

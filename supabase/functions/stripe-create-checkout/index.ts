@@ -5,6 +5,8 @@ import { getServiceClient } from "../_shared/database.ts";
 import { getAppBaseUrl } from "../_shared/env.ts";
 import { jsonResponse } from "../_shared/http.ts";
 import {
+  type CheckoutCreateFailureStage,
+  type CheckoutCreateProviderResult,
   emitOperationalEvent,
   type OperationalEventSink,
 } from "../_shared/operationalLog.ts";
@@ -577,6 +579,9 @@ function validatePaymentIntent(
   value: unknown,
   expected: ExpectedSession,
 ): boolean {
+  // Stripe may not create the PaymentIntent until the hosted payment flow starts.
+  // If it is already present, its destination and money must still match exactly.
+  if (value === null) return true;
   if (!isRecord(value)) return false;
   const transferData = value.transfer_data;
   return value.livemode === false &&
@@ -927,6 +932,31 @@ function isDefinitiveStripeNonCreation(error: unknown): boolean {
       error.rawType === "invalid_request_error");
 }
 
+function providerResultForStripeFailure(
+  error: unknown,
+): CheckoutCreateProviderResult {
+  if (!isRecord(error) || typeof error.type !== "string") {
+    return "runtime_failure";
+  }
+  if (
+    error.type === "StripeConnectionError" ||
+    error.type === "StripeConnectionClosedError"
+  ) return "network_failure";
+  if (
+    [
+      "StripeAPIError",
+      "StripeAuthenticationError",
+      "StripeCardError",
+      "StripeIdempotencyError",
+      "StripeInvalidGrantError",
+      "StripeInvalidRequestError",
+      "StripePermissionError",
+      "StripeRateLimitError",
+    ].includes(error.type)
+  ) return "provider_error_response";
+  return "runtime_failure";
+}
+
 async function releaseAfterFailure(
   dependencies: StripeCreateCheckoutDependencies,
   reservation: ReservationSnapshot,
@@ -998,6 +1028,8 @@ export function createStripeCreateCheckoutHandler(
     let failureReleaseOrigin: FailureReleaseOrigin | undefined;
     let eventId: string | undefined;
     let stripeCreateOutcomeUnknown = false;
+    let failureStage: CheckoutCreateFailureStage = "request_validation";
+    let providerResult: CheckoutCreateProviderResult = "not_attempted";
     try {
       if (!headers.has("access-control-allow-origin")) {
         throw new CheckoutHttpError(403, "CORS_ORIGIN_DENIED");
@@ -1017,6 +1049,7 @@ export function createStripeCreateCheckoutHandler(
       const confirmationTokenHash = await hashConfirmationBearer(
         confirmationBearer,
       );
+      failureStage = "connect_validation";
       try {
         await dependencies.refreshConnect(
           input.eventId,
@@ -1026,6 +1059,7 @@ export function createStripeCreateCheckoutHandler(
         if (error instanceof CheckoutHttpError) throw error;
         throw new CheckoutHttpError(409, "CONNECT_NOT_READY");
       }
+      failureStage = "reservation";
       try {
         const reserved = await dependencies.reserveCheckout(
           input,
@@ -1044,6 +1078,7 @@ export function createStripeCreateCheckoutHandler(
       }
       eventId = input.eventId;
 
+      failureStage = "request_integrity";
       if (
         await canonicalRequestDigest(
           reservation,
@@ -1064,6 +1099,7 @@ export function createStripeCreateCheckoutHandler(
       };
       let validated: ValidatedSession;
       if (reservation.existingCheckoutSessionId !== null) {
+        failureStage = "stripe_session_retrieval";
         try {
           sessionValue = await dependencies.retrieveSession(
             reservation.existingCheckoutSessionId,
@@ -1074,9 +1110,12 @@ export function createStripeCreateCheckoutHandler(
               ],
             },
           );
-        } catch {
+          providerResult = "session_returned";
+        } catch (error) {
+          providerResult = providerResultForStripeFailure(error);
           throw new CheckoutHttpError(502, "STRIPE_REQUEST_FAILED");
         }
+        failureStage = "stripe_session_response";
         try {
           validated = validateSession(sessionValue, expected);
         } catch (error) {
@@ -1111,12 +1150,15 @@ export function createStripeCreateCheckoutHandler(
       }
 
       const params = createParams(expected);
+      failureStage = "stripe_session_creation";
       try {
         sessionValue = await dependencies.createSession(params, {
           idempotencyKey:
             `whereto-checkout-integrity-v1:${reservation.orderId}`,
         });
+        providerResult = "session_returned";
       } catch (error) {
+        providerResult = providerResultForStripeFailure(error);
         if (isDefinitiveStripeNonCreation(error)) {
           failureReleaseOrigin = "definitive-create-noncreation";
         } else {
@@ -1124,6 +1166,7 @@ export function createStripeCreateCheckoutHandler(
         }
         throw new CheckoutHttpError(502, "STRIPE_REQUEST_FAILED");
       }
+      failureStage = "stripe_session_response";
       try {
         validated = validateSession(sessionValue, expected);
       } catch (error) {
@@ -1134,6 +1177,7 @@ export function createStripeCreateCheckoutHandler(
         failureReleaseOrigin = "created-session";
         throw new CheckoutHttpError(502, "INVALID_STRIPE_SESSION");
       }
+      failureStage = "session_attachment";
       try {
         await dependencies.attachSession(
           reservation.orderId,
@@ -1199,6 +1243,8 @@ export function createStripeCreateCheckoutHandler(
           totalMinor: reservation?.totalMinor,
           applicationFeeAmountMinor: reservation?.applicationFeeAmountMinor,
           errorCode: uncertainErrorCode,
+          failureStage,
+          providerResult,
         }, dependencies.operationalSink);
       } else {
         emitOperationalEvent({
@@ -1215,6 +1261,8 @@ export function createStripeCreateCheckoutHandler(
           totalMinor: reservation?.totalMinor,
           applicationFeeAmountMinor: reservation?.applicationFeeAmountMinor,
           errorCode: responseError.code,
+          failureStage,
+          providerResult,
         }, dependencies.operationalSink);
       }
       return checkoutErrorResponse(responseError, headers);
@@ -1222,8 +1270,25 @@ export function createStripeCreateCheckoutHandler(
   };
 }
 
-export function handler(request: Request): Promise<Response> {
-  return createStripeCreateCheckoutHandler(defaultDependencies())(request);
+export async function handler(request: Request): Promise<Response> {
+  try {
+    return await createStripeCreateCheckoutHandler(defaultDependencies())(
+      request,
+    );
+  } catch {
+    emitOperationalEvent({
+      contractVersion: "checkout_integrity_v1",
+      operation: "checkout.create",
+      outcome: "failed",
+      errorCode: "INTERNAL_ERROR",
+      failureStage: "runtime_bootstrap",
+      providerResult: "not_attempted",
+    });
+    return checkoutErrorResponse(
+      new CheckoutHttpError(500, "INTERNAL_ERROR"),
+      new Headers({ "cache-control": "no-store" }),
+    );
+  }
 }
 
 if (import.meta.main) Deno.serve(handler);

@@ -109,6 +109,9 @@ done
 if grep -q 'account_diagnostic' "$config_file"; then
   printf '%s\\n' 'curl-action account_diagnostic' >> "$FAKE_COMMAND_LOG"
   printf '%s\\n' "$FAKE_DIAGNOSTIC_RESPONSE"
+elif grep -q 'checkout_diagnostic' "$config_file"; then
+  printf '%s\\n' 'curl-action checkout_diagnostic' >> "$FAKE_COMMAND_LOG"
+  printf '%s\\n' "$FAKE_CHECKOUT_DIAGNOSTIC_RESPONSE"
 elif grep -q 'fixture_preflight' "$config_file"; then
   printf '%s\\n' 'curl-action fixture_preflight' >> "$FAKE_COMMAND_LOG"
   printf '%s\\n' "$FAKE_FIXTURE_PREFLIGHT_RESPONSE"
@@ -145,6 +148,7 @@ fi
       FAKE_STABLE_FIXTURE_RESPONSE: '{"rows":[]}',
       FAKE_TOMBSTONE_AUDIT_RESPONSE: '{"rows":[{"namespace_prefix_count":1,"event_count":1,"organizer_count":1,"auth_user_inert":true,"audit_interval_count":3,"audit_action_count":3,"open_eligible_interval_count":0,"active_tier_count":0,"tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"refund_count":0,"staff_role_count":0,"public_projection_count":0,"event_tombstoned":true}]}',
       FAKE_DIAGNOSTIC_RESPONSE: '{"ok":true,"restricted_key_authenticated":true,"webhook_signature_verified":true,"livemode":false,"connected_account_matches":true,"transfers_status":"active","payouts_status":"active","requirements_status":"clear"}',
+      FAKE_CHECKOUT_DIAGNOSTIC_RESPONSE: '{"ok":true,"candidate_count":1,"session_contract":{"session_object_valid":true,"test_mode":true,"payment_mode":true,"currency_usd":true,"subtotal_exact":true,"total_exact":true,"payment_status_unpaid":true,"fixture_buyer_bound":true,"client_reference_bound":true,"metadata_bound":true,"integration_identifier_bound":true,"automatic_tax_disabled":true,"line_items_complete":true,"line_count_exact":true,"admission_count_exact":true,"line_amounts_exact":true,"line_bindings_unique":true,"payment_intent_present":false,"payment_intent_expanded":false,"payment_intent_test_mode":false,"payment_intent_amount_exact":false,"application_fee_exact":false,"destination_bound":false,"payment_intent_metadata_bound":false,"failure_cleanup_expired":true}}',
       FAKE_FIXTURE_PREFLIGHT_RESPONSE: '{"ok":true,"fixture_purchasable":true,"cleanup_strategy":"audit_tombstone","stable_fixture":true}',
       FAKE_CLEANUP_RESPONSE: '{"ok":true,"stable_fixture":true,"fixture_reusable":true,"event_count":1,"organizer_count":1,"auth_user_inert":true,"event_sellable":false,"public_projection_count":0,"active_tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"receipt_count":0,"refund_count":0,"dispute_count":0,"connected_account_closed":false,"connected_account_preserved":true}',
       FAKE_RETIREMENT_RESPONSE: '{"ok":true,"connected_account_closed":true,"connected_account_preserved":false}',
@@ -445,6 +449,31 @@ describe('Task 17 managed proof runner', () => {
     expect(result.log).not.toContain('set checkout_creation_enabled = true')
     expect(result.log).not.toContain('vitest run')
     expect(result.log).not.toContain('curl-action retire_connected_account')
+  })
+
+  it('diagnoses the prior Checkout response without enabling checkout or retiring the account', async () => {
+    const result = await runRunner(false, false, {
+      TASK13_CHECKOUT_DIAGNOSTIC_ONLY: '1',
+      FAKE_TOMBSTONE_AUDIT_RESPONSE: '{"rows":[{"namespace_prefix_count":1,"event_count":1,"organizer_count":1,"auth_user_inert":true,"audit_interval_count":3,"audit_action_count":3,"open_eligible_interval_count":0,"active_tier_count":0,"tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"refund_count":0,"staff_role_count":0,"public_projection_count":0,"event_tombstoned":true}]}',
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.log).toContain('curl-action account_diagnostic')
+    expect(result.log).toContain('curl-action checkout_diagnostic')
+    expect(result.log.indexOf('curl-action account_diagnostic')).toBeLessThan(
+      result.log.indexOf('curl-action checkout_diagnostic'),
+    )
+    expect(result.log).not.toContain('curl-action fixture_preflight')
+    expect(result.log).not.toContain('set checkout_creation_enabled = true')
+    expect(result.log).not.toContain('vitest run')
+    expect(result.log).toContain('cleanup-close-request false')
+    expect(result.log).not.toContain('curl-action retire_connected_account')
+    expect(result.stdout).toContain(
+      'Task 13 checkout diagnostic: payment_intent_present=false',
+    )
+    expect(result.stdout).not.toContain('cs_test_')
+    expect(result.stdout).not.toContain('acct_')
+    expect(result.stdout).not.toContain('@example.invalid')
   })
 
   it('deploys the committed driver and tears down the endpoint and temporary secrets', async () => {

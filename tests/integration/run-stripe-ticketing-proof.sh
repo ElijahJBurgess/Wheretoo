@@ -20,6 +20,8 @@ CURL_CONFIG=""
 CLEANUP_RESPONSE=""
 DIAGNOSTIC_CURL_CONFIG=""
 DIAGNOSTIC_RESPONSE=""
+CHECKOUT_DIAGNOSTIC_CURL_CONFIG=""
+CHECKOUT_DIAGNOSTIC_RESPONSE=""
 FIXTURE_PREFLIGHT_CURL_CONFIG=""
 FIXTURE_PREFLIGHT_RESPONSE=""
 RETIREMENT_CURL_CONFIG=""
@@ -413,6 +415,7 @@ VITE_STRIPE_PUBLISHABLE_KEY=$(read_public_env VITE_STRIPE_PUBLISHABLE_KEY VITE_S
 TEST_CONNECTED_ACCOUNT_ID=$(read_public_env TEST_CONNECTED_ACCOUNT_ID TEST_CONNECTED_ACCOUNT_ID)
 TEST_CONNECTED_ACCOUNT_DISPOSABLE=${TEST_CONNECTED_ACCOUNT_DISPOSABLE-}
 TASK13_FIXTURE_PREFLIGHT_ONLY=${TASK13_FIXTURE_PREFLIGHT_ONLY-0}
+TASK13_CHECKOUT_DIAGNOSTIC_ONLY=${TASK13_CHECKOUT_DIAGNOSTIC_ONLY-0}
 
 case "$TEST_SUPABASE_URL" in https://*.supabase.co) ;; *) printf '%s\n' 'Invalid TEST_SUPABASE_URL.' >&2; exit 1 ;; esac
 [ "$TEST_SUPABASE_URL" = "https://${PROJECT_REF}.supabase.co" ] || {
@@ -430,6 +433,15 @@ case "$TASK13_FIXTURE_PREFLIGHT_ONLY" in
   0|1) ;;
   *) printf '%s\n' 'Invalid TASK13_FIXTURE_PREFLIGHT_ONLY value.' >&2; exit 1 ;;
 esac
+case "$TASK13_CHECKOUT_DIAGNOSTIC_ONLY" in
+  0|1) ;;
+  *) printf '%s\n' 'Invalid TASK13_CHECKOUT_DIAGNOSTIC_ONLY value.' >&2; exit 1 ;;
+esac
+[ "$TASK13_FIXTURE_PREFLIGHT_ONLY" -eq 0 ] || \
+  [ "$TASK13_CHECKOUT_DIAGNOSTIC_ONLY" -eq 0 ] || {
+    printf '%s\n' 'Task 13 diagnostic modes are mutually exclusive.' >&2
+    exit 1
+  }
 
 TEMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/whereto-task17-run.XXXXXX")
 chmod 700 "$TEMP_DIR"
@@ -547,6 +559,8 @@ CURL_CONFIG="$TEMP_DIR/cleanup.curl"
 CLEANUP_RESPONSE="$TEMP_DIR/cleanup.json"
 DIAGNOSTIC_CURL_CONFIG="$TEMP_DIR/account-diagnostic.curl"
 DIAGNOSTIC_RESPONSE="$TEMP_DIR/account-diagnostic.json"
+CHECKOUT_DIAGNOSTIC_CURL_CONFIG="$TEMP_DIR/checkout-diagnostic.curl"
+CHECKOUT_DIAGNOSTIC_RESPONSE="$TEMP_DIR/checkout-diagnostic.json"
 FIXTURE_PREFLIGHT_CURL_CONFIG="$TEMP_DIR/fixture-preflight.curl"
 FIXTURE_PREFLIGHT_RESPONSE="$TEMP_DIR/fixture-preflight.json"
 RETIREMENT_CURL_CONFIG="$TEMP_DIR/retirement.curl"
@@ -564,6 +578,8 @@ TEST_FUNCTION_URL="${TEST_SUPABASE_URL%/}/functions/v1/task17-transaction-driver
 write_cleanup_config
 write_driver_request_config "$DIAGNOSTIC_CURL_CONFIG" \
   '{\"action\":\"account_diagnostic\"}'
+write_driver_request_config "$CHECKOUT_DIAGNOSTIC_CURL_CONFIG" \
+  '{\"action\":\"checkout_diagnostic\"}'
 write_driver_request_config "$FIXTURE_PREFLIGHT_CURL_CONFIG" \
   '{\"action\":\"fixture_preflight\"}'
 
@@ -649,6 +665,83 @@ if [ "$diagnostic_curl_status" -ne 0 ] || [ "$diagnostic_parse_status" -ne 0 ]; 
   exit 1
 fi
 ACCOUNT_OWNERSHIP_ACCEPTED=1
+
+if [ "$TASK13_CHECKOUT_DIAGNOSTIC_ONLY" -eq 1 ]; then
+  checkout_diagnostic_curl_status=0
+  curl --silent --show-error --fail-with-body \
+    --config "$CHECKOUT_DIAGNOSTIC_CURL_CONFIG" \
+    > "$CHECKOUT_DIAGNOSTIC_RESPONSE" || checkout_diagnostic_curl_status=$?
+  chmod 600 "$CHECKOUT_DIAGNOSTIC_RESPONSE"
+  checkout_diagnostic_parse_status=0
+  CHECKOUT_DIAGNOSTIC_RESPONSE_FILE="$CHECKOUT_DIAGNOSTIC_RESPONSE" \
+    node --input-type=module <<'NODE' || checkout_diagnostic_parse_status=$?
+import fs from 'node:fs'
+const value = JSON.parse(fs.readFileSync(process.env.CHECKOUT_DIAGNOSTIC_RESPONSE_FILE, 'utf8'))
+const record = (candidate) => typeof candidate === 'object' && candidate !== null && !Array.isArray(candidate)
+const exactKeys = (candidate, keys) => Object.keys(candidate).sort().join(',') === [...keys].sort().join(',')
+const predicateKeys = [
+  'session_object_valid',
+  'test_mode',
+  'payment_mode',
+  'currency_usd',
+  'subtotal_exact',
+  'total_exact',
+  'payment_status_unpaid',
+  'fixture_buyer_bound',
+  'client_reference_bound',
+  'metadata_bound',
+  'integration_identifier_bound',
+  'automatic_tax_disabled',
+  'line_items_complete',
+  'line_count_exact',
+  'admission_count_exact',
+  'line_amounts_exact',
+  'line_bindings_unique',
+  'payment_intent_present',
+  'payment_intent_expanded',
+  'payment_intent_test_mode',
+  'payment_intent_amount_exact',
+  'application_fee_exact',
+  'destination_bound',
+  'payment_intent_metadata_bound',
+  'failure_cleanup_expired',
+]
+if (record(value) && value.ok === false &&
+  (value.kind === 'CHECKOUT_SESSION_LIST_FAILED' ||
+    value.kind === 'CHECKOUT_SESSION_RETRIEVE_FAILED' ||
+    value.kind === 'CHECKOUT_FIXTURE_BINDING_FAILED') &&
+  exactKeys(value, ['kind', 'ok'])) {
+  process.stderr.write(`Task 13 checkout diagnostic: ${value.kind}\n`)
+  process.exit(1)
+}
+if (record(value) && value.ok === false &&
+  value.kind === 'CHECKOUT_SESSION_CANDIDATE_MISMATCH' &&
+  exactKeys(value, ['candidate_count', 'kind', 'ok']) &&
+  Number.isSafeInteger(value.candidate_count) && value.candidate_count >= 0 &&
+  value.candidate_count <= 100) {
+  process.stderr.write(
+    `Task 13 checkout diagnostic: CHECKOUT_SESSION_CANDIDATE_MISMATCH candidate_count=${value.candidate_count}\n`,
+  )
+  process.exit(1)
+}
+if (!record(value) || value.ok !== true || value.candidate_count !== 1 ||
+  !exactKeys(value, ['candidate_count', 'ok', 'session_contract']) ||
+  !record(value.session_contract) ||
+  !exactKeys(value.session_contract, predicateKeys) ||
+  !predicateKeys.every((key) => typeof value.session_contract[key] === 'boolean')) {
+  process.stderr.write('Task 13 checkout diagnostic: INVALID_RESPONSE\n')
+  process.exit(1)
+}
+for (const key of predicateKeys) {
+  process.stdout.write(`Task 13 checkout diagnostic: ${key}=${value.session_contract[key]}\n`)
+}
+NODE
+  if [ "$checkout_diagnostic_curl_status" -ne 0 ] || \
+    [ "$checkout_diagnostic_parse_status" -ne 0 ]; then
+    exit 1
+  fi
+  exit 0
+fi
 
 fixture_preflight_curl_status=0
 curl --silent --show-error --fail-with-body --config "$FIXTURE_PREFLIGHT_CURL_CONFIG" \

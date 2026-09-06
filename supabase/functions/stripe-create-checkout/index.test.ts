@@ -871,6 +871,20 @@ Deno.test("checkout creates deterministic Product-bound persisted Stripe lines",
   }
 });
 
+Deno.test("checkout accepts Stripe's documented pre-payment null PaymentIntent", async () => {
+  let attached = 0;
+  const response = await createStripeCreateCheckoutHandler(dependencies({
+    createSession: async () => sessionFixture({ payment_intent: null }),
+    attachSession: async () => {
+      attached += 1;
+    },
+  }))(request());
+
+  assertEquals(response.status, 200);
+  assertEquals(await responseHasCheckoutUrl(response), true);
+  assertEquals(attached, 1);
+});
+
 // Mutation caught: truncating a valid ten-line cart during construction or
 // validating its returned Stripe lines by position instead of the exact bound set.
 Deno.test("checkout constructs and validates ten deterministic bound Stripe lines", async () => {
@@ -1148,7 +1162,6 @@ Deno.test("checkout rejects conflicting Session and PaymentIntent aggregates", a
     sessionFixture({ currency: "eur" }),
     sessionFixture({ metadata: { event_id: EVENT_ID, order_id: ORDER_ID } }),
     sessionFixture({ metadata: { ...metadata(), tier_id: GA_TIER_ID } }),
-    sessionFixture({ payment_intent: null }),
     sessionFixture({ payment_intent: paymentIntentFixture({ amount: 5_499 }) }),
     sessionFixture({
       payment_intent: paymentIntentFixture({ application_fee_amount: 449 }),
@@ -1462,7 +1475,7 @@ Deno.test("checkout suppresses buyer and upstream details", async () => {
   assertStringIncludes(response.headers.get("cache-control") ?? "", "no-store");
 });
 
-Deno.test("checkout emits one sanitized created, reused, failed, or uncertain operational outcome", async () => {
+Deno.test("checkout emits stage-specific sanitized provider outcomes", async () => {
   const records: Array<Record<string, unknown>> = [];
   const operationalSink = (serialized: string) => {
     records.push(JSON.parse(serialized));
@@ -1488,10 +1501,27 @@ Deno.test("checkout emits one sanitized created, reused, failed, or uncertain op
       throw new TypeError("fixture connection closed");
     },
   }))(request());
+  const network = await createStripeCreateCheckoutHandler(dependencies({
+    operationalSink,
+    createSession: async () => {
+      throw { type: "StripeConnectionError" };
+    },
+  }))(request());
+  const invalidResponse = await createStripeCreateCheckoutHandler(dependencies({
+    operationalSink,
+    createSession: async () => sessionFixture({ amount_total: 5_499 }),
+  }))(request());
 
   assertEquals(
-    [created.status, reused.status, failed.status, uncertain.status],
-    [200, 200, 502, 502],
+    [
+      created.status,
+      reused.status,
+      failed.status,
+      uncertain.status,
+      network.status,
+      invalidResponse.status,
+    ],
+    [200, 200, 502, 502, 502, 502],
   );
   assertEquals(records, [
     {
@@ -1538,6 +1568,8 @@ Deno.test("checkout emits one sanitized created, reused, failed, or uncertain op
       totalMinor: 5_500,
       applicationFeeAmountMinor: 450,
       errorCode: "STRIPE_REQUEST_FAILED",
+      failureStage: "stripe_session_creation",
+      providerResult: "provider_error_response",
     },
     {
       contractVersion: "checkout_integrity_v1",
@@ -1552,6 +1584,41 @@ Deno.test("checkout emits one sanitized created, reused, failed, or uncertain op
       totalMinor: 5_500,
       applicationFeeAmountMinor: 450,
       errorCode: "STRIPE_REQUEST_FAILED",
+      failureStage: "stripe_session_creation",
+      providerResult: "runtime_failure",
+    },
+    {
+      contractVersion: "checkout_integrity_v1",
+      operation: "checkout.create",
+      outcome: "uncertain",
+      orderId: ORDER_ID,
+      eventId: EVENT_ID,
+      itemCount: 2,
+      aggregateQuantity: 3,
+      currency: "usd",
+      subtotalMinor: 5_500,
+      totalMinor: 5_500,
+      applicationFeeAmountMinor: 450,
+      errorCode: "STRIPE_REQUEST_FAILED",
+      failureStage: "stripe_session_creation",
+      providerResult: "network_failure",
+    },
+    {
+      contractVersion: "checkout_integrity_v1",
+      operation: "checkout.create",
+      outcome: "failed",
+      orderId: ORDER_ID,
+      eventId: EVENT_ID,
+      providerObjectId: SESSION_ID,
+      itemCount: 2,
+      aggregateQuantity: 3,
+      currency: "usd",
+      subtotalMinor: 5_500,
+      totalMinor: 5_500,
+      applicationFeeAmountMinor: 450,
+      errorCode: "INVALID_STRIPE_SESSION",
+      failureStage: "stripe_session_response",
+      providerResult: "session_returned",
     },
   ]);
 });

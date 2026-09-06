@@ -23,6 +23,7 @@ import {
   applyDiagnosticAccountCleanup,
   assertSafeProofResponse,
   type AuditTombstoneState,
+  checkoutSessionContractBitmap,
   CONNECT_ACCOUNT_CONFLICT_TARGET,
   createFixtureAuthPassword,
   deleteAndVerifyFixtureAuthUser,
@@ -31,6 +32,7 @@ import {
   establishSellableFixture,
   exactFixtureModerationTarget,
   findExactFixtureAuthUser,
+  isCheckoutDiagnosticCandidate,
   requirePublicApiKey,
   restoreSellableFixture,
   retireCertifiedConnectedAccount,
@@ -43,6 +45,7 @@ import {
 
 const actions = new Set([
   "account_diagnostic",
+  "checkout_diagnostic",
   "fixture_preflight",
   "server_proof",
   "setup",
@@ -306,6 +309,81 @@ async function serverProof(): Promise<Record<string, unknown>> {
     transfers_status: projection.transfersStatus,
     payouts_status: projection.payoutsStatus,
     requirements_status: projection.requirementsStatus,
+  };
+}
+
+async function checkoutDiagnostic(): Promise<Record<string, unknown>> {
+  const stripe = getStripe();
+  let expectedEventId: string;
+  try {
+    const organizer = await fixtureOrganizer();
+    if (organizer === null) {
+      return { ok: false, kind: "CHECKOUT_FIXTURE_BINDING_FAILED" };
+    }
+    const event = await getServiceClient().from("events").select("id")
+      .eq("organizer_id", organizer.id)
+      .eq("title", `${fixturePrefix()} transaction`).maybeSingle();
+    if (
+      event.error !== null || event.data === null ||
+      !uuidPattern.test(event.data.id)
+    ) {
+      return { ok: false, kind: "CHECKOUT_FIXTURE_BINDING_FAILED" };
+    }
+    expectedEventId = event.data.id;
+  } catch {
+    return { ok: false, kind: "CHECKOUT_FIXTURE_BINDING_FAILED" };
+  }
+
+  const candidates: Stripe.Checkout.Session[] = [];
+  let startingAfter: string | undefined;
+  try {
+    while (true) {
+      const page = await stripe.checkout.sessions.list({
+        limit: 100,
+        ...(startingAfter === undefined
+          ? {}
+          : { starting_after: startingAfter }),
+      });
+      candidates.push(...page.data.filter((session) =>
+        isCheckoutDiagnosticCandidate(
+          session,
+          fixturePrefix(),
+          expectedEventId,
+        )
+      ));
+      if (!page.has_more) break;
+      const last = page.data.at(-1);
+      if (last === undefined) {
+        return { ok: false, kind: "CHECKOUT_SESSION_LIST_FAILED" };
+      }
+      startingAfter = last.id;
+    }
+  } catch {
+    return { ok: false, kind: "CHECKOUT_SESSION_LIST_FAILED" };
+  }
+  if (candidates.length !== 1) {
+    return {
+      ok: false,
+      kind: "CHECKOUT_SESSION_CANDIDATE_MISMATCH",
+      candidate_count: candidates.length,
+    };
+  }
+  let session: Stripe.Checkout.Session;
+  try {
+    session = await stripe.checkout.sessions.retrieve(candidates[0].id, {
+      expand: ["line_items.data.price.product", "payment_intent"],
+    });
+  } catch {
+    return { ok: false, kind: "CHECKOUT_SESSION_RETRIEVE_FAILED" };
+  }
+  return {
+    ok: true,
+    candidate_count: 1,
+    session_contract: checkoutSessionContractBitmap(
+      session,
+      fixturePrefix(),
+      connectedAccountId(),
+    ),
   };
 }
 
@@ -1970,6 +2048,9 @@ Deno.serve(async (request) => {
     }
     const input = body as Record<string, unknown>;
     if (action === "account_diagnostic") return json(await serverProof());
+    if (action === "checkout_diagnostic") {
+      return json(await checkoutDiagnostic());
+    }
     if (action === "fixture_preflight") {
       return json(await fixturePreflight(publicClientFromRequest(request)));
     }
@@ -2042,6 +2123,9 @@ Deno.serve(async (request) => {
         "FIXTURE_CERTIFICATION_FAILED",
         "FIXTURE_CLEANUP_UNSAFE",
         "FIXTURE_NOT_SELLABLE",
+        "CHECKOUT_SESSION_LIST_FAILED",
+        "CHECKOUT_SESSION_CANDIDATE_MISMATCH",
+        "CHECKOUT_SESSION_RETRIEVE_FAILED",
         "LIVE_MODE_FORBIDDEN",
         "STRIPE",
       ].includes(error.message) ||

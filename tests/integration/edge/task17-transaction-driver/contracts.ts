@@ -97,6 +97,202 @@ export function validateAccountForDiagnostic<TAccount, TProjection>(
   };
 }
 
+export type CheckoutSessionContractBitmap = {
+  session_object_valid: boolean;
+  test_mode: boolean;
+  payment_mode: boolean;
+  currency_usd: boolean;
+  subtotal_exact: boolean;
+  total_exact: boolean;
+  payment_status_unpaid: boolean;
+  fixture_buyer_bound: boolean;
+  client_reference_bound: boolean;
+  metadata_bound: boolean;
+  integration_identifier_bound: boolean;
+  automatic_tax_disabled: boolean;
+  line_items_complete: boolean;
+  line_count_exact: boolean;
+  admission_count_exact: boolean;
+  line_amounts_exact: boolean;
+  line_bindings_unique: boolean;
+  payment_intent_present: boolean;
+  payment_intent_expanded: boolean;
+  payment_intent_test_mode: boolean;
+  payment_intent_amount_exact: boolean;
+  application_fee_exact: boolean;
+  destination_bound: boolean;
+  payment_intent_metadata_bound: boolean;
+  failure_cleanup_expired: boolean;
+};
+
+function exactKeys(value: Record<string, unknown>, keys: string[]): boolean {
+  return Object.keys(value).sort().join(",") === [...keys].sort().join(",");
+}
+
+export function isCheckoutDiagnosticCandidate(
+  value: unknown,
+  expectedFixturePrefix: string,
+  expectedEventId: string,
+): boolean {
+  if (
+    !/^task17_[a-z0-9]{12}$/.test(expectedFixturePrefix) ||
+    !uuidPattern.test(expectedEventId) || !record(value)
+  ) {
+    return false;
+  }
+  const metadata = record(value.metadata) ? value.metadata : {};
+  const clientReference = typeof value.client_reference_id === "string"
+    ? value.client_reference_id
+    : "";
+  return typeof value.id === "string" &&
+    /^cs_test_[A-Za-z0-9]+$/.test(value.id) &&
+    value.object === "checkout.session" &&
+    value.livemode === false &&
+    value.mode === "payment" &&
+    value.payment_status === "unpaid" &&
+    value.currency === "usd" &&
+    value.amount_subtotal === 5_500 &&
+    value.amount_total === 5_500 &&
+    value.customer_email === `${expectedFixturePrefix}-paid@example.invalid` &&
+    uuidPattern.test(clientReference) &&
+    typeof value.integration_identifier === "string" &&
+    /^whereto_checkout_[a-z]{8}$/.test(value.integration_identifier) &&
+    exactKeys(metadata, ["contract_version", "event_id", "order_id"]) &&
+    metadata.contract_version === "checkout_integrity_v1" &&
+    metadata.event_id === expectedEventId &&
+    metadata.order_id === clientReference &&
+    record(value.automatic_tax) && value.automatic_tax.enabled === false;
+}
+
+export function checkoutSessionContractBitmap(
+  value: unknown,
+  expectedFixturePrefix: string,
+  expectedConnectedAccountId: string,
+): CheckoutSessionContractBitmap {
+  if (
+    !/^task17_[a-z0-9]{12}$/.test(expectedFixturePrefix) ||
+    !/^acct_[A-Za-z0-9]+$/.test(expectedConnectedAccountId)
+  ) throw new Error("CONFIG");
+
+  const session = record(value) ? value : {};
+  const metadata = record(session.metadata) ? session.metadata : {};
+  const clientReference = typeof session.client_reference_id === "string"
+    ? session.client_reference_id
+    : "";
+  const metadataBound = exactKeys(metadata, [
+    "contract_version",
+    "event_id",
+    "order_id",
+  ]) && metadata.contract_version === "checkout_integrity_v1" &&
+    metadata.order_id === clientReference &&
+    typeof metadata.event_id === "string" &&
+    uuidPattern.test(metadata.event_id);
+  const lineItems = record(session.line_items) ? session.line_items : {};
+  const lines = Array.isArray(lineItems.data) ? lineItems.data : [];
+  const lineItemsComplete = Array.isArray(lineItems.data) &&
+    lineItems.has_more === false;
+  const expectedLines = new Set(["1500:2:3000", "2500:1:2500"]);
+  const observedLines = new Set<string>();
+  const seenBindings = new Set<string>();
+  let admissionCount = 0;
+  let lineAmountsValid = lineItemsComplete;
+  let lineBindingsValid = lineItemsComplete;
+  for (const lineValue of lines) {
+    if (!record(lineValue) || !record(lineValue.price)) {
+      lineAmountsValid = false;
+      lineBindingsValid = false;
+      continue;
+    }
+    const price = lineValue.price;
+    const product = record(price.product) ? price.product : {};
+    const productMetadata = record(product.metadata) ? product.metadata : {};
+    const quantity = lineValue.quantity;
+    if (Number.isSafeInteger(quantity)) admissionCount += quantity as number;
+    const signature = `${String(price.unit_amount)}:${String(quantity)}:${
+      String(lineValue.amount_total)
+    }`;
+    if (
+      lineValue.currency !== "usd" || price.currency !== "usd" ||
+      price.type !== "one_time" ||
+      lineValue.amount_subtotal !== lineValue.amount_total ||
+      !expectedLines.has(signature) || observedLines.has(signature)
+    ) {
+      lineAmountsValid = false;
+    }
+    observedLines.add(signature);
+    const orderItemId = productMetadata.whereto_order_item_id;
+    if (
+      price.livemode !== false || product.livemode !== false ||
+      !exactKeys(productMetadata, ["whereto_order_item_id"]) ||
+      typeof orderItemId !== "string" || !uuidPattern.test(orderItemId) ||
+      seenBindings.has(orderItemId)
+    ) {
+      lineBindingsValid = false;
+    } else {
+      seenBindings.add(orderItemId);
+    }
+  }
+  lineAmountsValid = lineAmountsValid &&
+    observedLines.size === expectedLines.size &&
+    [...expectedLines].every((signature) => observedLines.has(signature));
+  lineBindingsValid = lineBindingsValid && seenBindings.size === lines.length;
+
+  const paymentIntentPresent = session.payment_intent !== null &&
+    session.payment_intent !== undefined;
+  const paymentIntent = record(session.payment_intent)
+    ? session.payment_intent
+    : {};
+  const transferData = record(paymentIntent.transfer_data)
+    ? paymentIntent.transfer_data
+    : {};
+  const paymentMetadata = record(paymentIntent.metadata)
+    ? paymentIntent.metadata
+    : {};
+
+  return {
+    session_object_valid: session.object === "checkout.session" &&
+      typeof session.id === "string" &&
+      /^cs_test_[A-Za-z0-9]+$/.test(session.id),
+    test_mode: session.livemode === false,
+    payment_mode: session.mode === "payment",
+    currency_usd: session.currency === "usd",
+    subtotal_exact: session.amount_subtotal === 5_500,
+    total_exact: session.amount_total === 5_500,
+    payment_status_unpaid: session.payment_status === "unpaid",
+    fixture_buyer_bound: session.customer_email ===
+      `${expectedFixturePrefix}-paid@example.invalid`,
+    client_reference_bound: uuidPattern.test(clientReference) &&
+      metadata.order_id === clientReference,
+    metadata_bound: metadataBound,
+    integration_identifier_bound:
+      typeof session.integration_identifier === "string" &&
+      /^whereto_checkout_[a-z]{8}$/.test(session.integration_identifier),
+    automatic_tax_disabled: record(session.automatic_tax) &&
+      session.automatic_tax.enabled === false,
+    line_items_complete: lineItemsComplete,
+    line_count_exact: lines.length === 2,
+    admission_count_exact: admissionCount === 3,
+    line_amounts_exact: lineAmountsValid,
+    line_bindings_unique: lineBindingsValid,
+    payment_intent_present: paymentIntentPresent,
+    payment_intent_expanded: record(session.payment_intent),
+    payment_intent_test_mode: paymentIntent.livemode === false,
+    payment_intent_amount_exact: paymentIntent.currency === "usd" &&
+      paymentIntent.amount === 5_500,
+    application_fee_exact: paymentIntent.application_fee_amount === 425,
+    destination_bound: transferData.destination === expectedConnectedAccountId,
+    payment_intent_metadata_bound: exactKeys(paymentMetadata, [
+      "contract_version",
+      "event_id",
+      "order_id",
+    ]) && paymentMetadata.contract_version === "checkout_integrity_v1" &&
+      paymentMetadata.event_id === metadata.event_id &&
+      paymentMetadata.order_id === clientReference,
+    failure_cleanup_expired: session.status === "expired" &&
+      session.url === null,
+  };
+}
+
 export async function applyDiagnosticAccountCleanup<
   T extends {
     closed?: boolean;

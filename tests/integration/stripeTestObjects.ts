@@ -52,6 +52,49 @@ export function toSafeHostedCheckoutBrowserError(error: unknown): Error {
   return new Error(`Hosted Checkout browser failure: ${category}`)
 }
 
+const checkoutCreationErrorCodes = new Set([
+  'CHECKOUT_ALREADY_EXISTS',
+  'CHECKOUT_DISABLED',
+  'CHECKOUT_EXPIRED',
+  'CHECKOUT_NOT_FOUND',
+  'CHECKOUT_UNAVAILABLE',
+  'CONNECT_ACTION_REQUIRED',
+  'CONNECT_NOT_READY',
+  'CORS_ORIGIN_DENIED',
+  'EVENT_NOT_SELLABLE',
+  'IDEMPOTENCY_CONFLICT',
+  'INTERNAL_ERROR',
+  'INVALID_REQUEST',
+  'INVALID_STRIPE_SESSION',
+  'METHOD_NOT_ALLOWED',
+  'RATE_LIMITED',
+  'STRIPE_REQUEST_FAILED',
+  'TIER_NOT_ACTIVE',
+  'TIER_NOT_FOUND',
+  'TIER_SOLD_OUT',
+])
+
+export async function toSafeCheckoutCreationError(
+  response: Response,
+): Promise<Error> {
+  let code = 'UNKNOWN'
+  try {
+    const value: unknown = await response.json()
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      const error = Reflect.get(value, 'error')
+      if (typeof error === 'object' && error !== null && !Array.isArray(error)) {
+        const candidate = Reflect.get(error, 'code')
+        if (typeof candidate === 'string' && checkoutCreationErrorCodes.has(candidate)) {
+          code = candidate
+        }
+      }
+    }
+  } catch {
+    // The fixed UNKNOWN label is the only fallback; response bodies never escape.
+  }
+  return new Error(`Checkout creation failed: HTTP ${response.status} ${code}`)
+}
+
 export type ConnectProof = {
   ok: boolean
   livemode: boolean

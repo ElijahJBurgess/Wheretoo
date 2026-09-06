@@ -274,6 +274,29 @@ describe('managed proof client boundary', () => {
     expect(safe).not.toHaveProperty('cause')
   })
 
+  it('reports only the allowlisted checkout error code and status', async () => {
+    const toSafeError = Reflect.get(
+      stripeTestObjects,
+      'toSafeCheckoutCreationError',
+    )
+    expect(typeof toSafeError).toBe('function')
+    if (typeof toSafeError !== 'function') return
+
+    const response = Response.json({
+      error: {
+        code: 'INVALID_STRIPE_SESSION',
+        raw: 'customer@example.invalid sk_test_must_not_escape',
+      },
+    }, { status: 502 })
+    const safe = await toSafeError(response) as Error
+
+    expect(safe.message).toBe(
+      'Checkout creation failed: HTTP 502 INVALID_STRIPE_SESSION',
+    )
+    expect(safe.message).not.toContain('customer@example.invalid')
+    expect(safe.message).not.toContain('sk_test_')
+  })
+
   it('defines the exact two-line three-admission cart and per-admission fee', () => {
     expect(stripeTestObjects.applicationFeeMinor(5_500, 3)).toBe(425)
     expect(Reflect.get(stripeTestObjects, 'TASK17_CART')).toEqual([

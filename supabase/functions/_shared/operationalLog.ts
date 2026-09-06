@@ -55,6 +55,24 @@ type CheckoutUncertainOperationalErrorCode =
   | "INVALID_STRIPE_SESSION"
   | "STRIPE_REQUEST_FAILED";
 
+export type CheckoutCreateFailureStage =
+  | "runtime_bootstrap"
+  | "request_validation"
+  | "connect_validation"
+  | "reservation"
+  | "request_integrity"
+  | "stripe_session_retrieval"
+  | "stripe_session_creation"
+  | "stripe_session_response"
+  | "session_attachment";
+
+export type CheckoutCreateProviderResult =
+  | "not_attempted"
+  | "provider_error_response"
+  | "network_failure"
+  | "runtime_failure"
+  | "session_returned";
+
 export type CancellationBlockedOperationalErrorCode =
   | "CHECKOUT_UNAVAILABLE"
   | "INVALID_STRIPE_SESSION";
@@ -114,6 +132,8 @@ type CheckoutFailedEvent = OperationalBase & CheckoutSummaryFields & {
   operation: "checkout.create";
   outcome: "failed";
   errorCode: CheckoutCreateOperationalErrorCode;
+  failureStage: CheckoutCreateFailureStage;
+  providerResult: CheckoutCreateProviderResult;
   priorStatus?: never;
   resultStatus?: never;
 };
@@ -122,6 +142,8 @@ type CheckoutUncertainEvent = OperationalBase & CheckoutSummaryFields & {
   operation: "checkout.create";
   outcome: "uncertain";
   errorCode: CheckoutUncertainOperationalErrorCode;
+  failureStage: CheckoutCreateFailureStage;
+  providerResult: CheckoutCreateProviderResult;
   priorStatus?: never;
   resultStatus?: never;
 };
@@ -576,6 +598,28 @@ const CHECKOUT_UNCERTAIN_ERROR_CODES = new Set<
   "STRIPE_REQUEST_FAILED",
 ]);
 
+const CHECKOUT_CREATE_FAILURE_STAGES = new Set<CheckoutCreateFailureStage>([
+  "runtime_bootstrap",
+  "request_validation",
+  "connect_validation",
+  "reservation",
+  "request_integrity",
+  "stripe_session_retrieval",
+  "stripe_session_creation",
+  "stripe_session_response",
+  "session_attachment",
+]);
+
+const CHECKOUT_CREATE_PROVIDER_RESULTS = new Set<
+  CheckoutCreateProviderResult
+>([
+  "not_attempted",
+  "provider_error_response",
+  "network_failure",
+  "runtime_failure",
+  "session_returned",
+]);
+
 const CANCELLATION_BLOCKED_ERROR_CODES = new Set<
   CancellationBlockedOperationalErrorCode
 >([
@@ -648,6 +692,8 @@ const KNOWN_FIELDS = new Set([
   "resultStatus",
   "ticketStatus",
   "errorCode",
+  "failureStage",
+  "providerResult",
 ]);
 
 function plainOwnRecord(value: unknown): Record<string, unknown> | null {
@@ -704,7 +750,12 @@ function schemaFields(
       return [...CHECKOUT_SUMMARY_FIELDS, "priorStatus", "resultStatus"];
     }
     if (outcome === "failed" || outcome === "uncertain") {
-      return [...CHECKOUT_SUMMARY_FIELDS, "errorCode"];
+      return [
+        ...CHECKOUT_SUMMARY_FIELDS,
+        "errorCode",
+        "failureStage",
+        "providerResult",
+      ];
     }
   }
   if (operation === "checkout.cancel") {
@@ -795,6 +846,9 @@ function validCombination(
   outcome: string,
 ): boolean {
   if (operation === "checkout.create") {
+    const hasFailureStage = typeof source.failureStage === "string";
+    const hasProviderResult = typeof source.providerResult === "string";
+    const diagnosticPairValid = hasFailureStage && hasProviderResult;
     if (outcome === "created") {
       return source.resultStatus === "checkout_open";
     }
@@ -804,11 +858,13 @@ function validCombination(
     }
     if (outcome === "failed") {
       return typeof source.errorCode === "string" &&
+        diagnosticPairValid &&
         CHECKOUT_CREATE_ERROR_CODES.has(
           source.errorCode as CheckoutCreateOperationalErrorCode,
         );
     }
     return outcome === "uncertain" && typeof source.errorCode === "string" &&
+      diagnosticPairValid &&
       CHECKOUT_UNCERTAIN_ERROR_CODES.has(
         source.errorCode as CheckoutUncertainOperationalErrorCode,
       );
@@ -1028,6 +1084,22 @@ function validatedRecord(value: unknown): Record<string, unknown> | null {
       (status) =>
         status === "valid" || status === "cancelled" ||
         status === "refunded" || status === "mixed" || status === "none",
+    ) ||
+    !optionalString(
+      source,
+      record,
+      "failureStage",
+      (stage) =>
+        CHECKOUT_CREATE_FAILURE_STAGES.has(stage as CheckoutCreateFailureStage),
+    ) ||
+    !optionalString(
+      source,
+      record,
+      "providerResult",
+      (result) =>
+        CHECKOUT_CREATE_PROVIDER_RESULTS.has(
+          result as CheckoutCreateProviderResult,
+        ),
     )
   ) return null;
   return validCombination(source, operation, outcome) ? record : null;

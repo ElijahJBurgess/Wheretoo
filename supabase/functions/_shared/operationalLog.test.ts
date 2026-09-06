@@ -58,6 +58,8 @@ const invalidCheckoutUncertainty: CheckoutOperationalEvent = {
   operation: "checkout.create",
   outcome: "uncertain",
   errorCode: "INVALID_REQUEST",
+  failureStage: "request_validation",
+  providerResult: "not_attempted",
 };
 
 // @ts-expect-error A Stripe request failure makes cancellation state ambiguous, not blocked.
@@ -164,6 +166,8 @@ const invalidCheckoutError: CheckoutOperationalEvent = {
   operation: "checkout.create",
   outcome: "failed",
   errorCode: "INVALID_WEBHOOK",
+  failureStage: "request_validation",
+  providerResult: "not_attempted",
 };
 
 void invalidCheckoutSuccess;
@@ -252,6 +256,8 @@ Deno.test("operational events serialize only the bounded fields for each discrim
         outcome: "failed",
         orderId: ORDER_ID,
         errorCode: "STRIPE_REQUEST_FAILED",
+        failureStage: "stripe_session_creation",
+        providerResult: "provider_error_response",
       },
       expected: {
         contractVersion: "checkout_integrity_v1",
@@ -259,6 +265,8 @@ Deno.test("operational events serialize only the bounded fields for each discrim
         outcome: "failed",
         orderId: ORDER_ID,
         errorCode: "STRIPE_REQUEST_FAILED",
+        failureStage: "stripe_session_creation",
+        providerResult: "provider_error_response",
       },
     },
     {
@@ -410,6 +418,40 @@ Deno.test("operational events serialize only the bounded fields for each discrim
   }
 });
 
+Deno.test("checkout failure diagnostics allow only fixed stage and provider-result labels", () => {
+  const records: string[] = [];
+  const base = {
+    contractVersion: "checkout_integrity_v1",
+    operation: "checkout.create",
+    outcome: "failed",
+    errorCode: "INVALID_STRIPE_SESSION",
+    failureStage: "stripe_session_response",
+    providerResult: "session_returned",
+  };
+
+  emitOperationalEvent(base as never, (serialized) => records.push(serialized));
+  emitOperationalEvent(
+    { ...base, failureStage: "buyer@example.invalid" } as never,
+    (serialized) => records.push(serialized),
+  );
+  emitOperationalEvent(
+    { ...base, providerResult: "raw Stripe payload" } as never,
+    (serialized) => records.push(serialized),
+  );
+  const bare = {
+    contractVersion: base.contractVersion,
+    operation: base.operation,
+    outcome: base.outcome,
+    errorCode: base.errorCode,
+  };
+  emitOperationalEvent(
+    bare as never,
+    (serialized) => records.push(serialized),
+  );
+
+  assertEquals(records, [JSON.stringify(base)]);
+});
+
 Deno.test("runtime rebuilding drops request, buyer, bearer, provider, payment, URL, IP, and secret-shaped extras", () => {
   const unsafe = {
     contractVersion: "checkout_integrity_v1",
@@ -447,6 +489,8 @@ Deno.test("invalid bounded identifiers, enums, counters, money, duration, attemp
     operation: "checkout.create",
     outcome: "failed",
     errorCode: "INTERNAL_ERROR",
+    failureStage: "runtime_bootstrap",
+    providerResult: "not_attempted",
   };
   const invalid: unknown[] = [
     { ...checkoutFailure, orderId: "not-an-order" },
@@ -516,6 +560,8 @@ Deno.test("a failing operational sink cannot change the caller outcome", () => {
     operation: "checkout.create",
     outcome: "failed",
     errorCode: "INTERNAL_ERROR",
+    failureStage: "runtime_bootstrap",
+    providerResult: "not_attempted",
   }, () => {
     throw new Error("fixture sink unavailable");
   });
@@ -568,6 +614,8 @@ Deno.test("operational logger rejects inherited and accessor-backed contract fie
         operation: "checkout.create",
         outcome: "failed",
         errorCode: "INTERNAL_ERROR",
+        failureStage: "runtime_bootstrap",
+        providerResult: "not_attempted",
       },
     ) as CheckoutOperationalEvent,
     sink,
@@ -578,6 +626,8 @@ Deno.test("operational logger rejects inherited and accessor-backed contract fie
     operation: "checkout.create",
     outcome: "failed",
     errorCode: "INTERNAL_ERROR",
+    failureStage: "runtime_bootstrap",
+    providerResult: "not_attempted",
   } as Record<string, unknown>;
   Object.defineProperty(accessorBacked, "orderId", {
     enumerable: true,
@@ -644,6 +694,8 @@ Deno.test("operational logger rejects misleading discriminator combinations at r
     operation: "checkout.create",
     outcome: "failed",
     errorCode: "INVALID_WEBHOOK",
+    failureStage: "request_validation",
+    providerResult: "not_attempted",
   } as unknown as CheckoutOperationalEvent, sink);
 
   emitOperationalEvent({
@@ -660,6 +712,8 @@ Deno.test("operational logger rejects misleading discriminator combinations at r
     operation: "checkout.create",
     outcome: "uncertain",
     errorCode: "INVALID_REQUEST",
+    failureStage: "request_validation",
+    providerResult: "not_attempted",
   } as unknown as CheckoutOperationalEvent, sink);
 
   emitOperationalEvent({
@@ -747,6 +801,9 @@ if (import.meta.main) {
     contractVersion: "checkout_integrity_v1",
     operation: "checkout.create",
     outcome: "failed",
+    errorCode: "INTERNAL_ERROR",
+    failureStage: "request_validation",
+    providerResult: "not_attempted",
     // @ts-expect-error buyer identity is not an operational event field.
     buyerEmail: "avery@example.com",
   });

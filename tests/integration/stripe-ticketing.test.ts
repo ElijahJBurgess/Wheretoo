@@ -8,6 +8,7 @@ import {
   TASK17_CART,
   TASK17_ORGANIZER_PROCEEDS_MINOR,
   TASK17_SUBTOTAL_MINOR,
+  toSafeCheckoutCreationError,
   toSafeHostedCheckoutBrowserError,
 } from './stripeTestObjects'
 import { createManagedStripeProofClient } from './stripeWebhookHarness'
@@ -154,7 +155,7 @@ async function createCheckout(
       ],
     }),
   })
-  expect(response.status).toBe(200)
+  if (!response.ok) throw await toSafeCheckoutCreationError(response)
   const value: unknown = await response.json()
   if (!isRecord(value) || Object.keys(value).length !== 1 || !isHostedTestCheckoutUrl(value.checkoutUrl)) {
     throw new Error('Checkout creation returned an unsafe response')
