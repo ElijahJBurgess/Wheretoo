@@ -10,9 +10,12 @@ TASK17_CLEANUP_SQL_TEMPLATE="$repository_root/tests/integration/sql/task17-clean
 temporary_directory="$(mktemp -d "${TMPDIR:-/tmp}/task13-cleanup-lock.XXXXXX")"
 run_id="$(openssl rand -hex 6)"
 fixture_prefix="task17_${run_id}"
+drift_run_id="$(openssl rand -hex 6)"
+drift_prefix="task17_${drift_run_id}"
 account_id="acct_task13${run_id}"
 session_id="cs_test_task13${run_id}"
 owner_id="$(node -e "console.log(require('node:crypto').randomUUID())")"
+drift_owner_id="$(node -e "console.log(require('node:crypto').randomUUID())")"
 event_id="$(node -e "console.log(require('node:crypto').randomUUID())")"
 evaluation_id="$(node -e "console.log(require('node:crypto').randomUUID())")"
 acceptance_id="$(node -e "console.log(require('node:crypto').randomUUID())")"
@@ -23,7 +26,10 @@ order_id="$(node -e "console.log(require('node:crypto').randomUUID())")"
 client_request_id="$(node -e "console.log(require('node:crypto').randomUUID())")"
 ga_item_id="$(node -e "console.log(require('node:crypto').randomUUID())")"
 vip_item_id="$(node -e "console.log(require('node:crypto').randomUUID())")"
-ticket_id="$(node -e "console.log(require('node:crypto').randomUUID())")"
+ticket_id_1="$(node -e "console.log(require('node:crypto').randomUUID())")"
+ticket_id_2="$(node -e "console.log(require('node:crypto').randomUUID())")"
+ticket_id_3="$(node -e "console.log(require('node:crypto').randomUUID())")"
+ticket_id_4="$(node -e "console.log(require('node:crypto').randomUUID())")"
 base_receipt_id="evt_task13base${run_id}"
 race_receipt_id="evt_task13race${run_id}"
 dispute_receipt_id="evt_task13dispute${run_id}"
@@ -74,7 +80,10 @@ cleanup_test_fixture() {
   "$supabase_cli" db query --linked "begin;
     set local session_replication_role = replica;
     delete from public.disputes where id = '$dispute_id'::uuid;
-    delete from public.tickets where id = '$ticket_id'::uuid;
+    delete from public.tickets where id in (
+      '$ticket_id_1'::uuid, '$ticket_id_2'::uuid,
+      '$ticket_id_3'::uuid, '$ticket_id_4'::uuid
+    );
     delete from public.order_items where id in ('$ga_item_id'::uuid, '$vip_item_id'::uuid);
     delete from public.orders where id = '$order_id'::uuid;
     delete from public.stripe_webhook_events where stripe_event_id in (
@@ -91,11 +100,12 @@ cleanup_test_fixture() {
     delete from public.events where id = '$event_id'::uuid;
     delete from public.organizers where id = '$owner_id'::uuid;
     delete from auth.users where id = '$owner_id'::uuid;
+    delete from auth.users where id = '$drift_owner_id'::uuid;
     commit;" >"$temporary_directory/cleanup.log" 2>&1
   local teardown_status=$?
   if [[ $teardown_status -eq 0 ]]; then
     "$supabase_cli" db query --linked "do \$assert\$ begin
-      if exists (select 1 from auth.users where id = '$owner_id'::uuid)
+      if exists (select 1 from auth.users where id in ('$owner_id'::uuid, '$drift_owner_id'::uuid))
         or exists (select 1 from public.organizers where id = '$owner_id'::uuid)
         or exists (select 1 from public.events where id = '$event_id'::uuid)
         or exists (select 1 from public.stripe_webhook_events where stripe_event_id in ('$base_receipt_id', '$race_receipt_id', '$dispute_receipt_id')) then
@@ -234,6 +244,26 @@ run_query exact_baseline "do \$assert\$ begin
   end if;
 end \$assert\$;"
 
+# This row models a second Task 17 namespace appearing after the runner's
+# initial single-namespace gate and before deletion-time admission.
+run_query namespace_drift_setup "insert into auth.users (id, email, banned_until)
+  values ('$drift_owner_id', '$drift_prefix@example.invalid',
+    statement_timestamp() + interval '100 years');"
+namespace_cleanup_sql="$temporary_directory/namespace-cleanup.sql"
+render_cleanup 1 "$namespace_cleanup_sql"
+if "$supabase_cli" db query --linked --file "$namespace_cleanup_sql" \
+  >"$temporary_directory/namespace-cleanup.log" 2>&1; then
+  exit 1
+fi
+run_query namespace_drift_preserved "do \$assert\$ begin
+  if not exists (select 1 from auth.users where id = '$drift_owner_id'::uuid)
+    or not exists (select 1 from public.orders where id = '$order_id'::uuid)
+    or not exists (select 1 from public.stripe_webhook_events where stripe_event_id = '$base_receipt_id') then
+    raise exception using errcode = 'P0001', message = 'ASSERT_TASK13_NAMESPACE_DRIFT_DELETED';
+  end if;
+end \$assert\$;
+delete from auth.users where id = '$drift_owner_id'::uuid;"
+
 "$supabase_cli" db query --linked "begin;
   insert into public.stripe_webhook_events (
     stripe_event_id, event_type, stripe_object_id, stripe_created_at,
@@ -251,10 +281,11 @@ end \$assert\$;"
   insert into public.tickets (
     id, order_id, order_item_id, event_id, organizer_id, ticket_tier_id,
     unit_sequence, status
-  ) values (
-    '$ticket_id', '$order_id', '$ga_item_id', '$event_id', '$owner_id',
-    '$ga_tier_id', 1, 'valid'
-  );
+  ) values
+    ('$ticket_id_1', '$order_id', '$ga_item_id', '$event_id', '$owner_id', '$ga_tier_id', 1, 'valid'),
+    ('$ticket_id_2', '$order_id', '$ga_item_id', '$event_id', '$owner_id', '$ga_tier_id', 2, 'valid'),
+    ('$ticket_id_3', '$order_id', '$ga_item_id', '$event_id', '$owner_id', '$ga_tier_id', 3, 'valid'),
+    ('$ticket_id_4', '$order_id', '$ga_item_id', '$event_id', '$owner_id', '$ga_tier_id', 4, 'valid');
   select pg_catalog.pg_advisory_xact_lock($marker);
   select pg_catalog.pg_sleep(4);
   commit;" >"$temporary_directory/mutation.log" 2>&1 &
@@ -278,7 +309,7 @@ done
 (( SECONDS < marker_deadline )) || exit 1
 
 race_cleanup_sql="$temporary_directory/race-cleanup.sql"
-render_cleanup 1 "$race_cleanup_sql"
+render_cleanup 0 "$race_cleanup_sql"
 set +e
 "$supabase_cli" db query --linked --file "$race_cleanup_sql" \
   >"$temporary_directory/race-cleanup.log" 2>&1 &
@@ -300,14 +331,20 @@ set -e
 
 run_query concurrent_preserved "do \$assert\$ begin
   if (select count(*) from public.orders where id = '$order_id'::uuid and status = 'requires_review' and last_stripe_event_id = '$race_receipt_id') <> 1
-    or (select count(*) from public.tickets where id = '$ticket_id'::uuid) <> 1
+    or (select count(*) from public.tickets where id in (
+      '$ticket_id_1'::uuid, '$ticket_id_2'::uuid,
+      '$ticket_id_3'::uuid, '$ticket_id_4'::uuid
+    )) <> 4
     or (select count(*) from public.stripe_webhook_events where stripe_object_id = '$session_id') <> 2 then
     raise exception using errcode = 'P0001', message = 'ASSERT_TASK13_CONCURRENT_MUTATION_LOST';
   end if;
 end \$assert\$;"
 
 run_query reset_exact "begin;
-  delete from public.tickets where id = '$ticket_id'::uuid;
+  delete from public.tickets where id in (
+    '$ticket_id_1'::uuid, '$ticket_id_2'::uuid,
+    '$ticket_id_3'::uuid, '$ticket_id_4'::uuid
+  );
   update public.orders set status = 'checkout_open', reconciliation_status = 'pending',
     failure_code = null, last_stripe_event_id = null where id = '$order_id'::uuid;
   delete from public.stripe_webhook_events where stripe_event_id = '$race_receipt_id';
@@ -316,7 +353,7 @@ run_query reset_exact "begin;
 run_query staff_guard_setup "insert into private.staff_roles (user_id, role, active, granted_by)
   values ('$owner_id', 'moderator', true, '$owner_id');"
 staff_cleanup_sql="$temporary_directory/staff-cleanup.sql"
-render_cleanup 1 "$staff_cleanup_sql"
+render_cleanup 0 "$staff_cleanup_sql"
 if "$supabase_cli" db query --linked --file "$staff_cleanup_sql" >"$temporary_directory/staff-cleanup.log" 2>&1; then
   exit 1
 fi
@@ -330,7 +367,7 @@ end \$assert\$; delete from private.staff_roles where user_id = '$owner_id'::uui
 run_query contextual_guard_setup "update private.event_moderation_evaluations
   set status = 'processing' where id = '$evaluation_id'::uuid;"
 context_cleanup_sql="$temporary_directory/context-cleanup.sql"
-render_cleanup 1 "$context_cleanup_sql"
+render_cleanup 0 "$context_cleanup_sql"
 if "$supabase_cli" db query --linked --file "$context_cleanup_sql" >"$temporary_directory/context-cleanup.log" 2>&1; then
   exit 1
 fi
@@ -374,7 +411,7 @@ end \$assert\$; delete from public.disputes where id = '$dispute_id'::uuid;
 delete from public.stripe_webhook_events where stripe_event_id = '$dispute_receipt_id';"
 
 success_cleanup_sql="$temporary_directory/success-cleanup.sql"
-render_cleanup 1 "$success_cleanup_sql"
+render_cleanup 0 "$success_cleanup_sql"
 if ! "$supabase_cli" db query --linked --file "$success_cleanup_sql" \
   >"$temporary_directory/final-cleanup.log" 2>&1; then
   sanitize_log "$temporary_directory/final-cleanup.log"

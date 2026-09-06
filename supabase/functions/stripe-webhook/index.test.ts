@@ -1151,7 +1151,6 @@ Deno.test("known-order malformed Charge references enter review without fulfillm
   const cases: Array<[string, Record<string, unknown>]> = [
     ["missing payment intent", sessionWithoutChargeField("payment_intent")],
     ["malformed payment intent", sessionWithCharge({ payment_intent: {} })],
-    ["missing customer", sessionWithoutChargeField("customer")],
     ["malformed customer", sessionWithCharge({ customer: {} })],
     ["missing transfer", sessionWithoutChargeField("transfer")],
     ["malformed transfer", sessionWithCharge({ transfer: {} })],
@@ -1201,6 +1200,45 @@ Deno.test("known-order malformed Charge references enter review without fulfillm
       failureCode: "PAYMENT_SNAPSHOT_MISMATCH",
     }], name);
     assertEquals(finalizations, [], name);
+  }
+});
+
+// Mutation caught: requiring a Customer reference would send valid guest
+// payments to reconciliation review instead of fulfilling them.
+Deno.test("guest paid completion with an absent Charge customer fulfills with a null customer ID", async () => {
+  const cases: Array<[string, Record<string, unknown>]> = [
+    ["explicit null", sessionWithCharge({ customer: null })],
+    ["omitted", sessionWithoutChargeField("customer")],
+  ];
+
+  for (const [name, session] of cases) {
+    const fulfillments: unknown[] = [];
+    let reviews = 0;
+    const response = await createStripeWebhookHandler(dependencies({
+      retrieveSession: async () => session,
+      fulfillPaidOrder: async (snapshot) => {
+        fulfillments.push(snapshot);
+        return FULFILLMENT_APPLY_RESULT;
+      },
+      markCheckoutReconciliationReview: async () => {
+        reviews += 1;
+      },
+    }))(request(snapshotEvent(
+      "checkout.session.completed",
+      { id: SESSION_ID },
+      { id: `evt_Task13Guest${name.replaceAll(/[^A-Za-z0-9]/g, "")}` },
+    )));
+
+    assertEquals(
+      [response.status, reviews, fulfillments.length],
+      [200, 0, 1],
+      name,
+    );
+    assertEquals(
+      (fulfillments[0] as { customerId: string | null }).customerId,
+      null,
+      name,
+    );
   }
 });
 

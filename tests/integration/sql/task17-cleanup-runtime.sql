@@ -97,8 +97,7 @@ begin
   end if;
 
   if '__TASK13_CLEANUP_ONLY__' = '1' and (
-    (select count(*) from task17_cleanup_namespace
-      where prefix = '__TASK17_FIXTURE_PREFIX__') <> 1
+    (select count(*) from task17_cleanup_namespace) <> 1
     or (select count(*) from task17_cleanup_fixture) <> 1
     or (select count(*) from task17_cleanup_orders) <> 1
     or (select count(*) from public.organizers

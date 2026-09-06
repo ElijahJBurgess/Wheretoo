@@ -979,7 +979,9 @@ function validateCharge(
       paymentIntentId
   ) permanent("PAYMENT_SNAPSHOT_MISMATCH");
   validateMetadata(value.metadata, order);
-  const customerId = expandedId(value.customer, CUSTOMER_PATTERN, "customer");
+  const customerId = value.customer === null || value.customer === undefined
+    ? null
+    : expandedId(value.customer, CUSTOMER_PATTERN, "customer");
   if (
     !Number.isSafeInteger(value.amount_refunded) ||
     (value.amount_refunded as number) < 0 ||
