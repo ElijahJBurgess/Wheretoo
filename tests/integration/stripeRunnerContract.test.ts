@@ -23,6 +23,7 @@ async function runRunner(
   const root = await mkdtemp(path.join(tmpdir(), 'task17-runner-'))
   temporaryDirectories.push(root)
   await mkdir(path.join(root, 'tests/integration/edge/task17-transaction-driver'), { recursive: true })
+  await mkdir(path.join(root, 'tests/integration/sql'), { recursive: true })
   await mkdir(path.join(root, 'supabase/functions'), { recursive: true })
   await mkdir(path.join(root, 'supabase/.temp'), { recursive: true })
   await mkdir(path.join(root, 'fake-bin'), { recursive: true })
@@ -38,6 +39,14 @@ async function runRunner(
     new URL('./edge/task17-transaction-driver/contracts.ts', import.meta.url),
     path.join(root, 'tests/integration/edge/task17-transaction-driver/contracts.ts'),
   )
+  await cp(
+    new URL('./task17CleanupSql.sh', import.meta.url),
+    path.join(root, 'tests/integration/task17CleanupSql.sh'),
+  )
+  await cp(
+    new URL('./sql/task17-cleanup-runtime.sql', import.meta.url),
+    path.join(root, 'tests/integration/sql/task17-cleanup-runtime.sql'),
+  )
   if (preexistingMaterialized) {
     await mkdir(path.join(root, 'supabase/functions/task17-transaction-driver'), { recursive: true })
     await writeFile(
@@ -47,9 +56,22 @@ async function runRunner(
   }
   await writeFile(path.join(root, 'supabase/.temp/project-ref'), 'abcdefghijklmnopqrst\n')
   const log = path.join(root, 'commands.log')
-  const fakePnpm = `#!/bin/sh
+const fakePnpm = `#!/bin/sh
 printf '%s\\n' "$*" >> "$FAKE_COMMAND_LOG"
 [ -z "\${STRIPE_SECRET_KEY-}" ] || printf '%s\\n' 'inherited-secret-visible' >> "$FAKE_COMMAND_LOG"
+previous=''
+query_file=''
+for argument in "$@"; do
+  if [ "$previous" = '--file' ]; then query_file="$argument"; fi
+  previous="$argument"
+done
+if [ -n "$query_file" ] && grep -q 'task17_cleanup_receipts' "$query_file"; then
+  sed -n '1,520p' "$query_file" >> "$FAKE_COMMAND_LOG"
+  if [ "$FAKE_DATABASE_CLEANUP_FAILURE" != 0 ]; then
+    printf '%s\\n' 'unsafe database detail' >&2
+    exit 1
+  fi
+fi
 case "$*" in
   *"projects list"*)
     [ "$FAKE_PROJECT_LIST_FAILURE" = 0 ] || exit 1
@@ -63,7 +85,12 @@ case "$*" in
     ;;
   *"db query"*"residual_fixture_candidate"*) printf '%s\\n' "$FAKE_RESIDUAL_FIXTURE_RESPONSE" ;;
   *"db query"*"stable_fixture_candidate"*) printf '%s\\n' "$FAKE_STABLE_FIXTURE_RESPONSE" ;;
-  *"db query"*"task17_cleanup_receipts"*) [ "$FAKE_DATABASE_CLEANUP_FAILURE" = 0 ] || exit 1 ;;
+  *"db query"*"task17_cleanup_receipts"*)
+    if [ "$FAKE_DATABASE_CLEANUP_FAILURE" != 0 ]; then
+      printf '%s\n' 'unsafe database detail' >&2
+      exit 1
+    fi
+    ;;
   *"db query"*"event_public_eligibility_intervals"*) printf '%s\\n' "$FAKE_TOMBSTONE_AUDIT_RESPONSE" ;;
   *"db query"*"with restored as"*) printf '%s\\n' '{"rows":[{"restored":true}]}' ;;
   *"db query"*"with enabled as"*) printf '%s\\n' '{"rows":[{"enabled":true}]}' ;;
@@ -275,6 +302,7 @@ describe('Task 17 managed proof runner', () => {
     'CLEANUP_CATALOG_DISCOVERY_FAILED',
     'CLEANUP_PRICE_ARCHIVE_FAILED',
     'CLEANUP_PRODUCT_ARCHIVE_FAILED',
+    'DATABASE_DELETE_AUTH',
   ])('cleanup-only reports fixed stage %s without leaking provider detail', async (kind) => {
     const result = await runRunner(false, false, {
       TASK13_CLEANUP_ONLY: '1',
@@ -306,13 +334,21 @@ describe('Task 17 managed proof runner', () => {
     })
 
     expect(first.exitCode).not.toBe(0)
+    expect(first.stdout).toContain('Task 17 cleanup error kind: DATABASE_DELETE_RUNTIME')
+    expect(first.stdout).not.toContain('unsafe database detail')
+    expect(first.stderr).not.toContain('unsafe database detail')
     expect(retried.exitCode).toBe(0)
     for (const result of [first, retried]) {
-      const transaction = result.log.match(/db query --linked --output-format json begin;[\s\S]*?commit;/)?.[0] ?? ''
+      const transaction = result.log.match(/begin;[\s\S]*?create temporary table task17_cleanup_receipts[\s\S]*?commit;/)?.[0] ?? ''
       expect(transaction).toContain('create temporary table task17_cleanup_receipts')
       expect(transaction).toContain('delete from public.refunds')
       expect(transaction).toContain('delete from public.orders')
       expect(transaction).toContain('delete from public.stripe_webhook_events')
+      expect(transaction).toMatch(/exists \(\s*select 1 from private\.staff_roles/)
+      expect(transaction).toContain("evaluations.status = 'queued'")
+      expect(transaction).toContain("evaluations.source = 'contextual'")
+      expect(transaction).toMatch(/exists \(\s*select 1 from public\.disputes/)
+      expect(transaction).not.toContain('delete from public.disputes')
       expect(transaction.indexOf('create temporary table task17_cleanup_receipts')).toBeLessThan(
         transaction.indexOf('delete from public.refunds'),
       )

@@ -6,6 +6,17 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
 DRIVER_SOURCE="$SCRIPT_DIR/edge/task17-transaction-driver/index.ts"
 DRIVER_CONTRACTS_SOURCE="$SCRIPT_DIR/edge/task17-transaction-driver/contracts.ts"
+CLEANUP_SQL_RENDERER="$SCRIPT_DIR/task17CleanupSql.sh"
+TASK17_CLEANUP_SQL_TEMPLATE="$SCRIPT_DIR/sql/task17-cleanup-runtime.sql"
+[ -f "$CLEANUP_SQL_RENDERER" ] || {
+  printf '%s\n' 'Missing committed Task 17 cleanup SQL renderer.' >&2
+  exit 1
+}
+[ -f "$TASK17_CLEANUP_SQL_TEMPLATE" ] || {
+  printf '%s\n' 'Missing committed Task 17 cleanup SQL template.' >&2
+  exit 1
+}
+. "$CLEANUP_SQL_RENDERER"
 MATERIALIZED_DIR="$REPO_ROOT/supabase/functions/task17-transaction-driver"
 MATERIALIZED_SOURCE="$MATERIALIZED_DIR/index.ts"
 MATERIALIZED_CONTRACTS_SOURCE="$MATERIALIZED_DIR/contracts.ts"
@@ -189,114 +200,15 @@ NODE
 }
 
 delete_fixture_runtime() {
-  database_cleanup="$TEMP_DIR/database-cleanup.json"
-  pnpm exec supabase db query --linked --output-format json "begin;
-    create temporary table task17_cleanup_fixture on commit drop as
-      select events.id as event_id, organizers.id as organizer_id
-      from public.organizers as organizers
-      join public.events as events on events.organizer_id = organizers.id
-      where organizers.display_name = '$TEST_STRIPE_FIXTURE_PREFIX'
-        and events.title = '$TEST_STRIPE_FIXTURE_PREFIX transaction';
-    create temporary table task17_cleanup_orders on commit drop as
-      select orders.id, orders.stripe_checkout_session_id,
-        orders.stripe_payment_intent_id, orders.stripe_charge_id,
-        orders.last_stripe_event_id
-      from public.orders as orders
-      join task17_cleanup_fixture as fixture on fixture.event_id = orders.event_id;
-    create temporary table task17_cleanup_refunds on commit drop as
-      select refunds.id, refunds.stripe_refund_id, refunds.stripe_event_id
-      from public.refunds as refunds
-      where refunds.order_id in (select id from task17_cleanup_orders);
-    create temporary table task17_cleanup_receipts on commit drop as
-      select receipts.stripe_event_id
-      from public.stripe_webhook_events as receipts
-      where receipts.stripe_event_id in (
-          select last_stripe_event_id from task17_cleanup_orders
-          union select stripe_event_id from task17_cleanup_refunds
-        )
-        or receipts.stripe_object_id in (
-          select stripe_checkout_session_id from task17_cleanup_orders
-          union select stripe_payment_intent_id from task17_cleanup_orders
-          union select stripe_charge_id from task17_cleanup_orders
-          union select stripe_refund_id from task17_cleanup_refunds
-        );
-    do \$\$ begin
-      if '$TASK13_CLEANUP_ONLY' = '1' and (
-        (select count(*) from task17_cleanup_fixture) <> 1
-        or (select count(*) from task17_cleanup_orders) <> 1
-        or exists (
-          select 1 from task17_cleanup_fixture as fixture
-          join public.events as events on events.id = fixture.event_id
-          where events.status <> 'published'
-            or events.moderation_status not in ('clear', 'under_review')
-            or events.publicly_authorized_action_id is not null
-        )
-        or (select count(*) from auth.users as owner join task17_cleanup_fixture as fixture on fixture.organizer_id = owner.id where owner.email = '$TEST_STRIPE_FIXTURE_PREFIX@example.invalid' and owner.banned_until > statement_timestamp()) <> 1
-        or exists (select 1 from task17_cleanup_fixture as fixture cross join lateral public.get_public_event(fixture.event_id))
-        or exists (select 1 from private.event_public_eligibility_intervals as intervals join task17_cleanup_fixture as fixture on fixture.event_id = intervals.event_id where intervals.eligibility_state = 'eligible' and intervals.ended_at is null)
-        or not exists (select 1 from private.event_moderation_actions as actions join task17_cleanup_fixture as fixture on fixture.event_id = actions.event_id)
-        or exists (select 1 from private.event_reports as reports join task17_cleanup_fixture as fixture on fixture.event_id = reports.event_id)
-        or exists (select 1 from private.moderation_review_requests as reviews join task17_cleanup_fixture as fixture on fixture.event_id = reviews.event_id)
-        or (select count(*) from public.ticket_tiers as tiers join task17_cleanup_fixture as fixture on fixture.event_id = tiers.event_id) <> 2
-        or (select count(*) from public.ticket_tiers as tiers join task17_cleanup_fixture as fixture on fixture.event_id = tiers.event_id where tiers.name = 'General Admission' and tiers.unit_amount_minor = 1500 and tiers.currency = 'usd' and tiers.quantity_total = 10 and tiers.status = 'active' and tiers.sort_order = 1) <> 1
-        or (select count(*) from public.ticket_tiers as tiers join task17_cleanup_fixture as fixture on fixture.event_id = tiers.event_id where tiers.name = 'VIP' and tiers.unit_amount_minor = 2500 and tiers.currency = 'usd' and tiers.quantity_total = 10 and tiers.status = 'active' and tiers.sort_order = 2) <> 1
-        or (select count(*) from public.organizer_stripe_accounts as accounts join task17_cleanup_fixture as fixture on fixture.organizer_id = accounts.organizer_id where accounts.livemode = false and accounts.stripe_account_id = '$TEST_CONNECTED_ACCOUNT_ID') <> 1
-        or exists (
-          select 1 from public.orders as orders
-          join task17_cleanup_orders as cleanup_orders on cleanup_orders.id = orders.id
-          where orders.livemode <> false or orders.status <> 'checkout_open'
-            or orders.reconciliation_status <> 'pending' or orders.quantity <> 3
-            or orders.currency <> 'usd' or orders.subtotal_minor <> 5500
-            or orders.tax_amount_minor <> 0 or orders.total_minor <> 5500
-            or orders.application_fee_amount_minor <> 425
-            or orders.stripe_destination_account_id <> '$TEST_CONNECTED_ACCOUNT_ID'
-            or orders.stripe_payment_intent_id is not null
-            or orders.stripe_charge_id is not null or orders.stripe_transfer_id is not null
-            or orders.stripe_application_fee_id is not null
-            or orders.stripe_balance_transaction_id is not null
-            or orders.stripe_customer_id is not null or orders.last_stripe_event_id is not null
-            or orders.paid_at is not null or orders.failed_at is not null
-            or orders.expired_at is not null or orders.refunded_at is not null
-        )
-        or (select count(*) from public.order_items where order_id in (select id from task17_cleanup_orders)) <> 2
-        or (select count(*) from public.order_items as items join public.ticket_tiers as tiers on tiers.id = items.ticket_tier_id where items.order_id in (select id from task17_cleanup_orders) and tiers.name = 'General Admission' and items.tier_name = tiers.name and items.tier_version = tiers.version and items.quantity = 2 and items.unit_amount_minor = 1500 and items.subtotal_minor = 3000 and items.currency = 'usd') <> 1
-        or (select count(*) from public.order_items as items join public.ticket_tiers as tiers on tiers.id = items.ticket_tier_id where items.order_id in (select id from task17_cleanup_orders) and tiers.name = 'VIP' and items.tier_name = tiers.name and items.tier_version = tiers.version and items.quantity = 1 and items.unit_amount_minor = 2500 and items.subtotal_minor = 2500 and items.currency = 'usd') <> 1
-        or exists (select 1 from public.tickets where order_id in (select id from task17_cleanup_orders))
-        or exists (select 1 from public.refunds where order_id in (select id from task17_cleanup_orders))
-        or exists (select 1 from public.disputes where order_id in (select id from task17_cleanup_orders))
-        or (select count(*) from task17_cleanup_receipts) <> 1
-        or not exists (select 1 from public.stripe_webhook_events as receipts join task17_cleanup_receipts as cleanup_receipts using (stripe_event_id) where receipts.event_type = 'checkout.session.completed' and receipts.livemode = false and receipts.processing_status = 'processed' and receipts.error_code = 'STRIPE_OBJECT_INVALID')
-        or exists (select 1 from private.checkout_runtime_control where singleton and checkout_creation_enabled)
-      ) then
-        raise exception 'TASK17_CLEANUP_SCOPE';
-      end if;
-    end \$\$;
-    delete from public.disputes
-      where order_id in (select id from task17_cleanup_orders);
-    delete from public.tickets
-      where order_id in (select id from task17_cleanup_orders);
-    delete from public.refunds
-      where id in (select id from task17_cleanup_refunds);
-    delete from public.order_items
-      where order_id in (select id from task17_cleanup_orders);
-    delete from public.orders
-      where id in (select id from task17_cleanup_orders);
-    delete from public.stripe_webhook_events
-      where stripe_event_id in (select stripe_event_id from task17_cleanup_receipts);
-    delete from public.ticket_tiers
-      where event_id in (select event_id from task17_cleanup_fixture);
-    delete from public.organizer_stripe_accounts
-      where organizer_id in (select organizer_id from task17_cleanup_fixture);
-    do \$\$ begin
-      if exists (select 1 from public.orders where id in (select id from task17_cleanup_orders))
-        or exists (select 1 from public.refunds where id in (select id from task17_cleanup_refunds))
-        or exists (select 1 from public.stripe_webhook_events where stripe_event_id in (select stripe_event_id from task17_cleanup_receipts))
-        or exists (select 1 from public.ticket_tiers where event_id in (select event_id from task17_cleanup_fixture))
-        or exists (select 1 from public.organizer_stripe_accounts where organizer_id in (select organizer_id from task17_cleanup_fixture)) then
-        raise exception 'TASK17_CLEANUP_RESIDUE';
-      end if;
-    end \$\$;
-    commit;" > "$database_cleanup" 2>&1
+  database_cleanup="$TEMP_DIR/database-cleanup.log"
+  database_cleanup_sql="$TEMP_DIR/database-cleanup.sql"
+  TASK17_CLEANUP_FIXTURE_PREFIX="$TEST_STRIPE_FIXTURE_PREFIX" \
+    TASK17_CLEANUP_CONNECTED_ACCOUNT_ID="$TEST_CONNECTED_ACCOUNT_ID" \
+    TASK17_CLEANUP_ONLY="$TASK13_CLEANUP_ONLY" \
+    render_task17_cleanup_sql > "$database_cleanup_sql" || return 1
+  chmod 600 "$database_cleanup_sql"
+  pnpm exec supabase db query --linked --file "$database_cleanup_sql" \
+    > "$database_cleanup" 2>&1
   database_cleanup_status=$?
   chmod 600 "$database_cleanup"
   return "$database_cleanup_status"
@@ -323,7 +235,8 @@ cleanup() {
           "FIXTURE_NOT_SELLABLE", "LIVE_MODE_FORBIDDEN", "STRIPE", "UNKNOWN",
           "CLEANUP_SESSION_RETRIEVE_FAILED", "CLEANUP_SESSION_EXPIRE_FAILED",
           "CLEANUP_CATALOG_DISCOVERY_FAILED", "CLEANUP_PRICE_ARCHIVE_FAILED",
-          "CLEANUP_PRODUCT_ARCHIVE_FAILED",
+          "CLEANUP_PRODUCT_ARCHIVE_FAILED", "DATABASE_DELETE_AUTH",
+          "DATABASE_DELETE_RUNTIME",
         ]);
         if (allowed.has(value.kind)) {
           process.stdout.write(`Task 17 cleanup error kind: ${value.kind}\n`);
@@ -385,7 +298,10 @@ cleanup() {
     fi
     if [ "$cleanup_status" -eq 0 ] && [ "$cleanup_contract_status" -eq 0 ]; then
       delete_fixture_runtime
-      [ $? -eq 0 ] || TEARDOWN_FAILURE=1
+      if [ $? -ne 0 ]; then
+        printf '%s\n' 'Task 17 cleanup error kind: DATABASE_DELETE_RUNTIME'
+        TEARDOWN_FAILURE=1
+      fi
     fi
     if [ "$cleanup_status" -eq 0 ] && [ "$cleanup_contract_status" -eq 0 ] && \
       [ "$TEARDOWN_FAILURE" -eq 0 ] && [ "$ACCOUNT_OWNERSHIP_ACCEPTED" -eq 1 ]; then

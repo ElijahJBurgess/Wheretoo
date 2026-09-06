@@ -979,9 +979,7 @@ function validateCharge(
       paymentIntentId
   ) permanent("PAYMENT_SNAPSHOT_MISMATCH");
   validateMetadata(value.metadata, order);
-  const customerId = value.customer === null || value.customer === undefined
-    ? null
-    : expandedId(value.customer, CUSTOMER_PATTERN, "customer");
+  const customerId = expandedId(value.customer, CUSTOMER_PATTERN, "customer");
   if (
     !Number.isSafeInteger(value.amount_refunded) ||
     (value.amount_refunded as number) < 0 ||
@@ -1161,7 +1159,8 @@ async function reviewKnownCheckoutValidationFailure(
   const failureCode = error instanceof CheckoutReconciliationError
     ? error.checkoutCode
     : error instanceof PermanentWebhookError &&
-        error.code === "PAYMENT_SNAPSHOT_MISMATCH" &&
+        (error.code === "PAYMENT_SNAPSHOT_MISMATCH" ||
+          error.code === "STRIPE_OBJECT_INVALID") &&
         event.type === "checkout.session.completed"
     ? "PAYMENT_SNAPSHOT_MISMATCH"
     : null;

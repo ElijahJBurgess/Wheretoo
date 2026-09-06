@@ -1145,6 +1145,65 @@ Deno.test("known-order non-line Stripe snapshot mismatches enter review without 
   }
 });
 
+// Mutations caught: treating missing or malformed expanded Charge references as
+// an anonymous receipt error after the exact Session/order binding is known.
+Deno.test("known-order malformed Charge references enter review without fulfillment", async () => {
+  const cases: Array<[string, Record<string, unknown>]> = [
+    ["missing payment intent", sessionWithoutChargeField("payment_intent")],
+    ["malformed payment intent", sessionWithCharge({ payment_intent: {} })],
+    ["missing customer", sessionWithoutChargeField("customer")],
+    ["malformed customer", sessionWithCharge({ customer: {} })],
+    ["missing transfer", sessionWithoutChargeField("transfer")],
+    ["malformed transfer", sessionWithCharge({ transfer: {} })],
+    [
+      "missing application fee",
+      sessionWithoutChargeField("application_fee"),
+    ],
+    ["malformed application fee", sessionWithCharge({ application_fee: {} })],
+    [
+      "missing balance transaction",
+      sessionWithoutChargeField("balance_transaction"),
+    ],
+    [
+      "malformed balance transaction",
+      sessionWithCharge({ balance_transaction: {} }),
+    ],
+  ];
+
+  for (const [name, session] of cases) {
+    const reviews: CheckoutReviewInput[] = [];
+    const finalizations: unknown[] = [];
+    let fulfillments = 0;
+    const eventId = `evt_Task13${name.replaceAll(/[^A-Za-z0-9]/g, "")}`;
+    const response = await createStripeWebhookHandler(dependencies({
+      retrieveSession: async () => session,
+      markCheckoutReconciliationReview: async (review) => {
+        reviews.push(review);
+      },
+      fulfillPaidOrder: async () => {
+        fulfillments += 1;
+        return FULFILLMENT_APPLY_RESULT;
+      },
+      finalizeReceipt: async (...args) => {
+        finalizations.push(args);
+      },
+    }))(request(snapshotEvent(
+      "checkout.session.completed",
+      { id: SESSION_ID },
+      { id: eventId },
+    )));
+
+    assertEquals([response.status, fulfillments], [200, 0], name);
+    assertEquals(reviews, [{
+      stripeEventId: eventId,
+      orderId: ORDER_ID,
+      checkoutSessionId: SESSION_ID,
+      failureCode: "PAYMENT_SNAPSHOT_MISMATCH",
+    }], name);
+    assertEquals(finalizations, [], name);
+  }
+});
+
 // Mutations caught: trusting intended payment amounts or `paid` alone would
 // fulfill without proving Stripe actually collected and captured the full total.
 const collectedFundsCases: Array<[string, Record<string, unknown>]> = [
@@ -1256,7 +1315,7 @@ for (const [name, session] of collectedFundsCases) {
   });
 }
 
-Deno.test("a signed known-order mismatch is reviewed once and duplicate delivery is a receipt no-op", async () => {
+Deno.test("a signed known-order malformed Charge reference is reviewed once and duplicate delivery is a receipt no-op", async () => {
   const stripe = new Stripe(["rk", "test", "task13review"].join("_"), {
     apiVersion: "2026-07-29.dahlia",
   });
@@ -1290,9 +1349,7 @@ Deno.test("a signed known-order mismatch is reviewed once and duplicate delivery
     recordReceipt: async () => ({ shouldProcess: !receiptProcessed }),
     retrieveSession: async () => {
       retrievals += 1;
-      return checkoutSessionFixture({
-        payment_intent: paymentIntentFixture({ application_fee_amount: 451 }),
-      });
+      return sessionWithoutChargeField("transfer");
     },
     markCheckoutReconciliationReview: async () => {
       reviews += 1;
