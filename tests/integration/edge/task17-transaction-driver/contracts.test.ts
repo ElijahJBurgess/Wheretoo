@@ -342,7 +342,7 @@ Deno.test("audit tombstone accepts only directly observed inert reusable state",
       "stable_fixture",
       "fixture_reusable",
       "auth_user_inert",
-    ]
+    ] as const
   ) {
     assertEquals(auditTombstoneIsSafe({ ...safe, [key]: false }), false);
   }
@@ -396,6 +396,145 @@ Deno.test("driver tombstone safety trusts only facts the driver directly observe
   );
 });
 
+Deno.test("connected-account retirement requires the certified immutable audit tombstone", async () => {
+  const retireCertifiedConnectedAccount = Reflect.get(
+    contracts,
+    "retireCertifiedConnectedAccount",
+  );
+  assertEquals(typeof retireCertifiedConnectedAccount, "function");
+  if (typeof retireCertifiedConnectedAccount !== "function") return;
+
+  const state = {
+    stable_fixture: true,
+    fixture_reusable: true,
+    event_count: 1,
+    organizer_count: 1,
+    auth_user_inert: true,
+    event_sellable: false,
+    public_projection_count: 0,
+    active_tier_count: 0,
+    connect_count: 0,
+    order_count: 0,
+    item_count: 0,
+    ticket_count: 0,
+    receipt_count: 0,
+    refund_count: 0,
+    dispute_count: 0,
+  };
+  const certification = {
+    namespace_prefix_count: 1,
+    event_count: 1,
+    organizer_count: 1,
+    auth_user_inert: true,
+    audit_interval_count: 3,
+    audit_action_count: 3,
+    open_eligible_interval_count: 0,
+    active_tier_count: 0,
+    tier_count: 0,
+    connect_count: 0,
+    order_count: 0,
+    item_count: 0,
+    ticket_count: 0,
+    refund_count: 0,
+    public_projection_count: 0,
+    staff_role_count: 0,
+    event_tombstoned: true,
+  };
+  const calls: string[] = [];
+  assertEquals(
+    await retireCertifiedConnectedAccount(
+      state,
+      certification,
+      async () => {
+        calls.push("close");
+        return {
+          connectedAccountClosed: true,
+          connectedAccountPreserved: false,
+        };
+      },
+    ),
+    {
+      connectedAccountClosed: true,
+      connectedAccountPreserved: false,
+    },
+  );
+  assertEquals(calls, ["close"]);
+
+  for (
+    const unsafeCertification of [
+      { ...certification, audit_interval_count: 2 },
+      { ...certification, audit_action_count: 2 },
+      { ...certification, open_eligible_interval_count: 1 },
+      { ...certification, namespace_prefix_count: 2 },
+      { ...certification, staff_role_count: 1 },
+      { ...certification, event_tombstoned: false },
+    ]
+  ) {
+    await assertRejects(
+      () =>
+        retireCertifiedConnectedAccount(
+          state,
+          unsafeCertification,
+          async () => {
+            calls.push("unsafe-close");
+            return {
+              connectedAccountClosed: true,
+              connectedAccountPreserved: false,
+            };
+          },
+        ),
+      Error,
+      "FIXTURE_CERTIFICATION_FAILED",
+    );
+  }
+  assertEquals(calls, ["close"]);
+});
+
+Deno.test("fixture moderation targets one exact current case", () => {
+  const exactFixtureModerationTarget = Reflect.get(
+    contracts,
+    "exactFixtureModerationTarget",
+  );
+  assertEquals(typeof exactFixtureModerationTarget, "function");
+  if (typeof exactFixtureModerationTarget !== "function") return;
+
+  const eventId = "00000000-0000-4000-8000-000000000001";
+  const target = exactFixtureModerationTarget(eventId, [{
+    evaluation_id: "00000000-0000-4000-8000-000000000003",
+    event_id: eventId,
+    content_revision: 4,
+    input_sha256: "a".repeat(64),
+    queued_moderation_version: 7,
+  }]);
+  assertEquals(target, {
+    p_evaluation_id: "00000000-0000-4000-8000-000000000003",
+    p_content_revision: 4,
+    p_input_sha256: "a".repeat(64),
+    p_queued_moderation_version: 7,
+    p_outcome: "clear_candidate",
+    p_risk_level: "low",
+    p_reason_codes: ["no_violation"],
+    p_provider_reference: null,
+    p_model_version: null,
+  });
+
+  for (
+    const cases of [
+      [],
+      [target, target],
+      [{ ...target, event_id: "00000000-0000-4000-8000-000000000002" }],
+      [{ ...target, event_id: eventId, evaluation_id: "unsafe" }],
+      [{ ...target, event_id: eventId, input_sha256: "unsafe" }],
+    ]
+  ) {
+    assertThrows(
+      () => exactFixtureModerationTarget(eventId, cases),
+      Error,
+      "FIXTURE_MODERATION_FAILED",
+    );
+  }
+});
+
 Deno.test("failed fixture cleanup retries Auth inerting without retiring the account", async () => {
   const runCleanupWithFailureFinalizers = Reflect.get(
     contracts,
@@ -447,6 +586,45 @@ Deno.test("failed fixture cleanup reports unsafe when Auth inerting also fails",
   assertEquals(calls, ["cleanup", "auth"]);
 });
 
+Deno.test("fixture stage failures sanitize thrown client errors to fixed diagnostics", async () => {
+  const runFixtureStage = Reflect.get(contracts, "runFixtureStage");
+  assertEquals(typeof runFixtureStage, "function");
+  if (typeof runFixtureStage !== "function") return;
+
+  for (
+    const kind of [
+      "FIXTURE_PREPARATION_FAILED",
+      "FIXTURE_ORGANIZER_FAILED",
+      "FIXTURE_ACCOUNT_BINDING_FAILED",
+      "FIXTURE_EVENT_FAILED",
+      "FIXTURE_TIER_SETUP_FAILED",
+      "FIXTURE_MODERATION_FAILED",
+      "FIXTURE_AUTH_FAILED",
+      "FIXTURE_DISCLOSURE_SAVE_FAILED",
+      "FIXTURE_POLICY_ACCEPTANCE_FAILED",
+      "FIXTURE_PUBLISH_FAILED",
+      "FIXTURE_ELIGIBILITY_FAILED",
+      "FIXTURE_CHECKOUT_PREFLIGHT_FAILED",
+    ] as const
+  ) {
+    await assertRejects(
+      () =>
+        runFixtureStage(kind, async () => {
+          throw new Error("raw database/provider details must not escape");
+        }),
+      Error,
+      kind,
+    );
+  }
+});
+
+Deno.test("fixture Connect upsert targets the real composite primary key", () => {
+  assertEquals(
+    Reflect.get(contracts, "CONNECT_ACCOUNT_CONFLICT_TARGET"),
+    "organizer_id,livemode",
+  );
+});
+
 Deno.test("fixture publication uses the authenticated owner flow before checkout preflight", async () => {
   const establishSellableFixture = Reflect.get(
     contracts,
@@ -463,6 +641,7 @@ Deno.test("fixture publication uses the authenticated owner flow before checkout
       saveRequirements: async () => calls.push("requirements"),
       acceptPolicies: async () => calls.push("acceptance"),
       publish: async () => calls.push("publication"),
+      verifyEligibility: async () => calls.push("eligibility"),
       preflight: async () => {
         calls.push("preflight");
         return [{ organizer_id: "organizer", stripe_account_id: "account" }];
@@ -473,6 +652,7 @@ Deno.test("fixture publication uses the authenticated owner flow before checkout
     "requirements",
     "acceptance",
     "publication",
+    "eligibility",
     "preflight",
   ]);
 });
@@ -505,16 +685,17 @@ Deno.test("fixture publication fails closed on a non-bijective checkout prefligh
             saveRequirements: async () => undefined,
             acceptPolicies: async () => undefined,
             publish: async () => undefined,
+            verifyEligibility: async () => undefined,
             preflight: async () => preflight,
           },
         ),
       Error,
-      "FIXTURE_NOT_SELLABLE",
+      "FIXTURE_CHECKOUT_PREFLIGHT_FAILED",
     );
   }
 });
 
-Deno.test("audit tombstone reuse is re-authorized only through the authenticated owner flow", async () => {
+Deno.test("audit tombstone reuse resolves exact moderation before owner reauthorization", async () => {
   const restoreSellableFixture = Reflect.get(
     contracts,
     "restoreSellableFixture",
@@ -527,9 +708,12 @@ Deno.test("audit tombstone reuse is re-authorized only through the authenticated
     "organizer",
     "account",
     {
+      reviseEvent: async () => calls.push("revision"),
       saveRequirements: async () => calls.push("requirements"),
       acceptPolicies: async () => calls.push("acceptance"),
+      resolveModeration: async () => calls.push("moderation"),
       publish: async () => calls.push("publication"),
+      verifyEligibility: async () => calls.push("eligibility"),
       preflight: async () => {
         calls.push("preflight");
         return [{ organizer_id: "organizer", stripe_account_id: "account" }];
@@ -537,9 +721,12 @@ Deno.test("audit tombstone reuse is re-authorized only through the authenticated
     },
   );
   assertEquals(calls, [
+    "moderation",
+    "revision",
     "requirements",
     "acceptance",
     "publication",
+    "eligibility",
     "preflight",
   ]);
 });

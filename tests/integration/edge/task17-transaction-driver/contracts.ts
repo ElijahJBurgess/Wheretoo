@@ -11,6 +11,8 @@ const providerIdPattern =
 const prohibitedIdKeyPattern =
   /^(?:id|order_id|order_item_id|ticket_id|refund_id|session_id|payment_intent_id|charge_id|transfer_id|application_fee_id|balance_transaction_id|stripe_event_id|stripe_object_id|stripe_[a-z0-9_]*_id)$/i;
 
+export const CONNECT_ACCOUNT_CONFLICT_TARGET = "organizer_id,livemode";
+
 export function createFixtureAuthPassword(randomId: string): string {
   if (!uuidPattern.test(randomId)) throw new Error("DATABASE");
   return `${randomId.replaceAll("-", "")}Aa1!`;
@@ -211,6 +213,121 @@ export function auditTombstoneIsSafe(
     value.dispute_count === 0;
 }
 
+export type AuditTombstoneCertification = {
+  namespace_prefix_count: number;
+  event_count: number;
+  organizer_count: number;
+  auth_user_inert: boolean;
+  audit_interval_count: number;
+  audit_action_count: number;
+  open_eligible_interval_count: number;
+  active_tier_count: number;
+  tier_count: number;
+  connect_count: number;
+  order_count: number;
+  item_count: number;
+  ticket_count: number;
+  refund_count: number;
+  public_projection_count: number;
+  staff_role_count: number;
+  event_tombstoned: boolean;
+};
+
+export function auditTombstoneIsCertified(
+  state: AuditTombstoneState,
+  value: unknown,
+): value is AuditTombstoneCertification {
+  if (!auditTombstoneIsSafe(state) || !record(value)) return false;
+  const certification = value as Partial<AuditTombstoneCertification>;
+  return Object.keys(value).length === 17 &&
+    certification.namespace_prefix_count === 1 &&
+    certification.event_count === state.event_count &&
+    certification.organizer_count === state.organizer_count &&
+    certification.auth_user_inert === state.auth_user_inert &&
+    Number.isSafeInteger(certification.audit_interval_count) &&
+    (certification.audit_interval_count ?? 0) >= 3 &&
+    Number.isSafeInteger(certification.audit_action_count) &&
+    (certification.audit_action_count ?? 0) >= 3 &&
+    certification.open_eligible_interval_count === 0 &&
+    certification.active_tier_count === state.active_tier_count &&
+    certification.tier_count === 0 &&
+    certification.connect_count === state.connect_count &&
+    certification.order_count === state.order_count &&
+    certification.item_count === state.item_count &&
+    certification.ticket_count === state.ticket_count &&
+    certification.refund_count === state.refund_count &&
+    certification.public_projection_count === state.public_projection_count &&
+    certification.staff_role_count === 0 &&
+    certification.event_tombstoned === true;
+}
+
+export function exactFixtureModerationTarget(
+  expectedEventId: string,
+  claims: unknown,
+): {
+  p_evaluation_id: string;
+  p_content_revision: number;
+  p_input_sha256: string;
+  p_queued_moderation_version: number;
+  p_outcome: "clear_candidate";
+  p_risk_level: "low";
+  p_reason_codes: ["no_violation"];
+  p_provider_reference: null;
+  p_model_version: null;
+} {
+  if (
+    !uuidPattern.test(expectedEventId) || !Array.isArray(claims) ||
+    claims.length !== 1
+  ) {
+    throw new Error("FIXTURE_MODERATION_FAILED");
+  }
+  const value = claims[0];
+  if (
+    !record(value) || value.event_id !== expectedEventId ||
+    typeof value.evaluation_id !== "string" ||
+    !uuidPattern.test(value.evaluation_id) ||
+    !Number.isSafeInteger(value.content_revision) ||
+    (value.content_revision as number) < 1 ||
+    typeof value.input_sha256 !== "string" ||
+    !/^[a-f0-9]{64}$/.test(value.input_sha256) ||
+    !Number.isSafeInteger(value.queued_moderation_version) ||
+    (value.queued_moderation_version as number) < 0
+  ) throw new Error("FIXTURE_MODERATION_FAILED");
+  return {
+    p_evaluation_id: value.evaluation_id,
+    p_content_revision: value.content_revision as number,
+    p_input_sha256: value.input_sha256,
+    p_queued_moderation_version: value.queued_moderation_version as number,
+    p_outcome: "clear_candidate",
+    p_risk_level: "low",
+    p_reason_codes: ["no_violation"],
+    p_provider_reference: null,
+    p_model_version: null,
+  };
+}
+
+export async function retireCertifiedConnectedAccount(
+  state: AuditTombstoneState,
+  certification: unknown,
+  close: () => Promise<{
+    connectedAccountClosed: boolean;
+    connectedAccountPreserved: boolean;
+  }>,
+): Promise<{
+  connectedAccountClosed: boolean;
+  connectedAccountPreserved: boolean;
+}> {
+  if (!auditTombstoneIsCertified(state, certification)) {
+    throw new Error("FIXTURE_CERTIFICATION_FAILED");
+  }
+  const result = await close();
+  if (
+    result.connectedAccountClosed !== true ||
+    result.connectedAccountPreserved !== false
+  ) throw new Error("STRIPE");
+  return result;
+}
+
 export async function runCleanupWithFailureFinalizers<T>(
   cleanup: () => Promise<T>,
   inertAuth: () => Promise<unknown>,
@@ -231,6 +348,50 @@ export async function runCleanupWithFailureFinalizers<T>(
   }
 }
 
+export type FixtureStageFailure =
+  | "FIXTURE_PREPARATION_FAILED"
+  | "FIXTURE_ORGANIZER_FAILED"
+  | "FIXTURE_ACCOUNT_BINDING_FAILED"
+  | "FIXTURE_EVENT_FAILED"
+  | "FIXTURE_TIER_SETUP_FAILED"
+  | "FIXTURE_MODERATION_FAILED"
+  | "FIXTURE_AUTH_FAILED"
+  | "FIXTURE_DISCLOSURE_SAVE_FAILED"
+  | "FIXTURE_POLICY_ACCEPTANCE_FAILED"
+  | "FIXTURE_PUBLISH_FAILED"
+  | "FIXTURE_ELIGIBILITY_FAILED"
+  | "FIXTURE_CHECKOUT_PREFLIGHT_FAILED";
+
+const fixtureStageFailures = new Set<FixtureStageFailure>([
+  "FIXTURE_PREPARATION_FAILED",
+  "FIXTURE_ORGANIZER_FAILED",
+  "FIXTURE_ACCOUNT_BINDING_FAILED",
+  "FIXTURE_EVENT_FAILED",
+  "FIXTURE_TIER_SETUP_FAILED",
+  "FIXTURE_MODERATION_FAILED",
+  "FIXTURE_AUTH_FAILED",
+  "FIXTURE_DISCLOSURE_SAVE_FAILED",
+  "FIXTURE_POLICY_ACCEPTANCE_FAILED",
+  "FIXTURE_PUBLISH_FAILED",
+  "FIXTURE_ELIGIBILITY_FAILED",
+  "FIXTURE_CHECKOUT_PREFLIGHT_FAILED",
+]);
+
+export async function runFixtureStage<T>(
+  fallback: FixtureStageFailure,
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      fixtureStageFailures.has(error.message as FixtureStageFailure)
+    ) throw error;
+    throw new Error(fallback, { cause: error });
+  }
+}
+
 export async function establishSellableFixture(
   expectedOrganizerId: string,
   expectedAccountId: string,
@@ -238,6 +399,7 @@ export async function establishSellableFixture(
     saveRequirements: () => Promise<unknown>;
     acceptPolicies: () => Promise<unknown>;
     publish: () => Promise<unknown>;
+    verifyEligibility: () => Promise<unknown>;
     preflight: () => Promise<
       Array<{ organizer_id: string; stripe_account_id: string }>
     >;
@@ -246,35 +408,42 @@ export async function establishSellableFixture(
   await dependencies.saveRequirements();
   await dependencies.acceptPolicies();
   await dependencies.publish();
+  await dependencies.verifyEligibility();
   const rows = await dependencies.preflight();
   if (
     rows.length !== 1 ||
     rows[0].organizer_id !== expectedOrganizerId ||
     rows[0].stripe_account_id !== expectedAccountId
-  ) throw new Error("FIXTURE_NOT_SELLABLE");
+  ) throw new Error("FIXTURE_CHECKOUT_PREFLIGHT_FAILED");
 }
 
 export async function restoreSellableFixture(
   expectedOrganizerId: string,
   expectedAccountId: string,
   dependencies: {
+    reviseEvent: () => Promise<unknown>;
     saveRequirements: () => Promise<unknown>;
     acceptPolicies: () => Promise<unknown>;
+    resolveModeration: () => Promise<unknown>;
     publish: () => Promise<unknown>;
+    verifyEligibility: () => Promise<unknown>;
     preflight: () => Promise<
       Array<{ organizer_id: string; stripe_account_id: string }>
     >;
   },
 ): Promise<void> {
+  await dependencies.resolveModeration();
+  await dependencies.reviseEvent();
   await dependencies.saveRequirements();
   await dependencies.acceptPolicies();
   await dependencies.publish();
+  await dependencies.verifyEligibility();
   const rows = await dependencies.preflight();
   if (
     rows.length !== 1 ||
     rows[0].organizer_id !== expectedOrganizerId ||
     rows[0].stripe_account_id !== expectedAccountId
-  ) throw new Error("FIXTURE_NOT_SELLABLE");
+  ) throw new Error("FIXTURE_CHECKOUT_PREFLIGHT_FAILED");
 }
 
 export async function retireSellableFixture(

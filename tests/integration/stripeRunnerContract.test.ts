@@ -76,6 +76,12 @@ case "$*" in
       if [ "$previous" = '--env-file' ]; then
         mode=$(stat -f '%Lp' "$argument")
         printf 'secret-file-mode %s\\n' "$mode" >> "$FAKE_COMMAND_LOG"
+        if grep -q '^TASK17_CLOSE_CONNECTED_ACCOUNT=true$' "$argument"; then
+          printf '%s\\n' 'retirement-authorization true' >> "$FAKE_COMMAND_LOG"
+        fi
+        if grep -q '^TASK17_CLOSE_CONNECTED_ACCOUNT=false$' "$argument"; then
+          printf '%s\\n' 'retirement-authorization false' >> "$FAKE_COMMAND_LOG"
+        fi
       fi
       previous=$argument
     done
@@ -106,6 +112,9 @@ if grep -q 'account_diagnostic' "$config_file"; then
 elif grep -q 'fixture_preflight' "$config_file"; then
   printf '%s\\n' 'curl-action fixture_preflight' >> "$FAKE_COMMAND_LOG"
   printf '%s\\n' "$FAKE_FIXTURE_PREFLIGHT_RESPONSE"
+elif grep -q 'retire_connected_account' "$config_file"; then
+  printf '%s\\n' 'curl-action retire_connected_account' >> "$FAKE_COMMAND_LOG"
+  printf '%s\\n' "$FAKE_RETIREMENT_RESPONSE"
 else
   if grep -q 'close_connected_account.*true' "$config_file"; then
     printf '%s\\n' 'cleanup-close-request true' >> "$FAKE_COMMAND_LOG"
@@ -134,10 +143,11 @@ fi
       FAKE_POLICY_QUERY_FAILURE: '0',
       FAKE_POLICY_RESPONSE: '{"rows":[{"policy_environment":"development"}]}',
       FAKE_STABLE_FIXTURE_RESPONSE: '{"rows":[]}',
-      FAKE_TOMBSTONE_AUDIT_RESPONSE: '{"rows":[{"namespace_prefix_count":1,"event_count":1,"organizer_count":1,"auth_user_inert":true,"audit_interval_count":3,"audit_action_count":3,"open_eligible_interval_count":0,"active_tier_count":0,"tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"refund_count":0,"public_projection_count":0,"event_tombstoned":true}]}',
+      FAKE_TOMBSTONE_AUDIT_RESPONSE: '{"rows":[{"namespace_prefix_count":1,"event_count":1,"organizer_count":1,"auth_user_inert":true,"audit_interval_count":3,"audit_action_count":3,"open_eligible_interval_count":0,"active_tier_count":0,"tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"refund_count":0,"staff_role_count":0,"public_projection_count":0,"event_tombstoned":true}]}',
       FAKE_DIAGNOSTIC_RESPONSE: '{"ok":true,"restricted_key_authenticated":true,"webhook_signature_verified":true,"livemode":false,"connected_account_matches":true,"transfers_status":"active","payouts_status":"active","requirements_status":"clear"}',
       FAKE_FIXTURE_PREFLIGHT_RESPONSE: '{"ok":true,"fixture_purchasable":true,"cleanup_strategy":"audit_tombstone","stable_fixture":true}',
-      FAKE_CLEANUP_RESPONSE: '{"ok":true,"stable_fixture":true,"fixture_reusable":true,"event_count":1,"organizer_count":1,"auth_user_inert":true,"event_sellable":false,"public_projection_count":0,"active_tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"receipt_count":0,"refund_count":0,"dispute_count":0,"connected_account_closed":true,"connected_account_preserved":false}',
+      FAKE_CLEANUP_RESPONSE: '{"ok":true,"stable_fixture":true,"fixture_reusable":true,"event_count":1,"organizer_count":1,"auth_user_inert":true,"event_sellable":false,"public_projection_count":0,"active_tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"receipt_count":0,"refund_count":0,"dispute_count":0,"connected_account_closed":false,"connected_account_preserved":true}',
+      FAKE_RETIREMENT_RESPONSE: '{"ok":true,"connected_account_closed":true,"connected_account_preserved":false}',
       TEST_SUPABASE_URL: 'https://abcdefghijklmnopqrst.supabase.co',
       TEST_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_contract',
       VITE_STRIPE_PUBLISHABLE_KEY: 'pk_test_contract',
@@ -147,6 +157,10 @@ fi
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
+  let stdout = ''
+  let stderr = ''
+  child.stdout.on('data', (chunk) => { stdout += String(chunk) })
+  child.stderr.on('data', (chunk) => { stderr += String(chunk) })
   const [exitCode] = await Promise.all([
     new Promise<number | null>((resolve) => child.on('close', resolve)),
     new Promise<void>((resolve) => child.stdout.on('end', resolve)),
@@ -163,13 +177,15 @@ fi
       path.join(root, 'supabase/functions/task17-transaction-driver/index.ts'),
       'utf8',
     ).catch(() => null),
+    stdout,
+    stderr,
   }
 }
 
 describe('Task 17 managed proof runner', () => {
   it('adopts the one exact protected legacy fixture instead of creating a second shell', async () => {
     const result = await runRunner(false, false, {
-      FAKE_STABLE_FIXTURE_RESPONSE: '{"rows":[{"stable_fixture_candidate":"task17_oldfixture01","stable_fixture_recoverable":true,"stable_fixture_safe":true}]}',
+      FAKE_STABLE_FIXTURE_RESPONSE: '{"rows":[{"stable_fixture_candidate":"task17_oldfixture01","stable_fixture_recoverable":true,"stable_fixture_safe":true,"stable_fixture_needs_moderation":false}]}',
     })
 
     expect(result.exitCode).toBe(0)
@@ -180,7 +196,7 @@ describe('Task 17 managed proof runner', () => {
 
   it('adopts one exact unsellable legacy shell for authenticated owner recovery', async () => {
     const result = await runRunner(false, false, {
-      FAKE_STABLE_FIXTURE_RESPONSE: '{"rows":[{"stable_fixture_candidate":"task17_oldfixture01","stable_fixture_recoverable":true,"stable_fixture_safe":false}]}',
+      FAKE_STABLE_FIXTURE_RESPONSE: '{"rows":[{"stable_fixture_candidate":"task17_oldfixture01","stable_fixture_recoverable":true,"stable_fixture_safe":false,"stable_fixture_needs_moderation":false}]}',
     })
 
     expect(result.exitCode).toBe(0)
@@ -188,9 +204,27 @@ describe('Task 17 managed proof runner', () => {
     expect(result.log).not.toContain('fixture-prefix task17_checkout0001')
   })
 
+  it('uses only the exact service fixture moderation boundary', async () => {
+    const result = await runRunner(false, false, {
+      FAKE_STABLE_FIXTURE_RESPONSE: '{"rows":[{"stable_fixture_candidate":"task17_oldfixture01","stable_fixture_recoverable":true,"stable_fixture_safe":false,"stable_fixture_needs_moderation":true}]}',
+    })
+    const driver = await readFile(
+      new URL('./edge/task17-transaction-driver/index.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(result.exitCode).toBe(0)
+    expect(driver).toContain('server_claim_checkout_integrity_fixture_evaluation')
+    expect(driver).not.toContain('.rpc("list_moderation_queue"')
+    expect(driver).not.toContain('.rpc("get_moderation_case"')
+    expect(driver).not.toContain('.rpc("moderate_event"')
+    expect(result.log).not.toContain('insert into private.staff_roles')
+    expect(result.log).not.toContain('delete from private.staff_roles')
+  })
+
   it('fails closed when the Task 17 namespace contains one unsafe partial shell', async () => {
     const result = await runRunner(false, false, {
-      FAKE_STABLE_FIXTURE_RESPONSE: '{"rows":[{"stable_fixture_candidate":"task17_partial00001","stable_fixture_recoverable":false,"stable_fixture_safe":false}]}',
+      FAKE_STABLE_FIXTURE_RESPONSE: '{"rows":[{"stable_fixture_candidate":"task17_partial00001","stable_fixture_recoverable":false,"stable_fixture_safe":false,"stable_fixture_needs_moderation":false}]}',
     })
 
     expect(result.exitCode).not.toBe(0)
@@ -202,7 +236,7 @@ describe('Task 17 managed proof runner', () => {
 
   it('fails closed when one safe shell and one unsafe shell coexist', async () => {
     const result = await runRunner(false, false, {
-      FAKE_STABLE_FIXTURE_RESPONSE: '{"rows":[{"stable_fixture_candidate":"task17_oldfixture01","stable_fixture_recoverable":true,"stable_fixture_safe":true},{"stable_fixture_candidate":"task17_partial00001","stable_fixture_recoverable":false,"stable_fixture_safe":false}]}',
+      FAKE_STABLE_FIXTURE_RESPONSE: '{"rows":[{"stable_fixture_candidate":"task17_oldfixture01","stable_fixture_recoverable":true,"stable_fixture_safe":true,"stable_fixture_needs_moderation":false},{"stable_fixture_candidate":"task17_partial00001","stable_fixture_recoverable":false,"stable_fixture_safe":false,"stable_fixture_needs_moderation":false}]}',
     })
 
     expect(result.exitCode).not.toBe(0)
@@ -211,13 +245,15 @@ describe('Task 17 managed proof runner', () => {
     expect(result.log).not.toContain('vitest run')
   })
 
-  it('accepts exact absent cleanup after ownership when setup never created a shell', async () => {
+  it('preserves the account after exact absent cleanup when setup never created a shell', async () => {
     const result = await runRunner(false, false, {
-      FAKE_CLEANUP_RESPONSE: '{"ok":true,"event_count":0,"organizer_count":0,"connect_count":0,"order_count":0,"tier_count":0,"receipt_count":0,"ticket_count":0,"dispute_count":0,"refund_count":0,"item_count":0,"auth_user_absent":true,"connected_account_closed":true,"connected_account_preserved":false}',
-      FAKE_TOMBSTONE_AUDIT_RESPONSE: '{"rows":[{"namespace_prefix_count":0,"event_count":0,"organizer_count":0,"auth_user_absent":true,"auth_user_inert":false,"audit_interval_count":0,"audit_action_count":0,"open_eligible_interval_count":0,"active_tier_count":0,"tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"refund_count":0,"public_projection_count":0,"event_tombstoned":false}]}',
+      FAKE_FIXTURE_PREFLIGHT_RESPONSE: '{"ok":false,"kind":"FIXTURE_AUTH_FAILED"}',
+      FAKE_CLEANUP_RESPONSE: '{"ok":true,"event_count":0,"organizer_count":0,"connect_count":0,"order_count":0,"tier_count":0,"receipt_count":0,"ticket_count":0,"dispute_count":0,"refund_count":0,"item_count":0,"auth_user_absent":true,"connected_account_closed":false,"connected_account_preserved":true}',
+      FAKE_TOMBSTONE_AUDIT_RESPONSE: '{"rows":[{"namespace_prefix_count":0,"event_count":0,"organizer_count":0,"auth_user_absent":true,"auth_user_inert":false,"audit_interval_count":0,"audit_action_count":0,"open_eligible_interval_count":0,"active_tier_count":0,"tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"refund_count":0,"staff_role_count":0,"public_projection_count":0,"event_tombstoned":false}]}',
     })
 
-    expect(result.exitCode).toBe(0)
+    expect(result.exitCode).not.toBe(0)
+    expect(result.log).not.toContain('curl-action retire_connected_account')
   })
 
   it('proves the stable fixture sellable before enabling checkout or starting Stripe proof', async () => {
@@ -239,7 +275,7 @@ describe('Task 17 managed proof runner', () => {
 
   it('fails closed before checkout enablement when the fixture is not sellable', async () => {
     const result = await runRunner(false, false, {
-      FAKE_FIXTURE_PREFLIGHT_RESPONSE: '{"ok":false,"kind":"FIXTURE_NOT_SELLABLE"}',
+      FAKE_FIXTURE_PREFLIGHT_RESPONSE: '{"ok":false,"kind":"FIXTURE_ELIGIBILITY_FAILED"}',
       FAKE_CLEANUP_RESPONSE: '{"ok":true,"stable_fixture":true,"fixture_reusable":true,"event_count":1,"organizer_count":1,"auth_user_inert":true,"event_sellable":false,"public_projection_count":0,"active_tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"receipt_count":0,"refund_count":0,"dispute_count":0,"connected_account_closed":false,"connected_account_preserved":true}',
     })
 
@@ -249,12 +285,66 @@ describe('Task 17 managed proof runner', () => {
     expect(result.log).not.toContain('vitest run')
     expect(result.log).toContain('cleanup-close-request false')
     expect(result.log).not.toContain('cleanup-close-request true')
+    expect(result.log).not.toContain('curl-action retire_connected_account')
+  })
+
+  it('preserves the account on scoped fixture moderation failure', async () => {
+    const result = await runRunner(false, false, {
+      FAKE_STABLE_FIXTURE_RESPONSE: '{"rows":[{"stable_fixture_candidate":"task17_oldfixture01","stable_fixture_recoverable":true,"stable_fixture_safe":false,"stable_fixture_needs_moderation":true}]}',
+      FAKE_FIXTURE_PREFLIGHT_RESPONSE: '{"ok":false,"kind":"FIXTURE_MODERATION_FAILED"}',
+      FAKE_CLEANUP_RESPONSE: '{"ok":true,"stable_fixture":true,"fixture_reusable":true,"event_count":1,"organizer_count":1,"auth_user_inert":true,"event_sellable":false,"public_projection_count":0,"active_tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"receipt_count":0,"refund_count":0,"dispute_count":0,"connected_account_closed":false,"connected_account_preserved":true}',
+    })
+
+    expect(result.exitCode).not.toBe(0)
+    expect(result.log).not.toContain('insert into private.staff_roles')
+    expect(result.log).not.toContain('delete from private.staff_roles')
+    expect(result.log).not.toContain('set checkout_creation_enabled = true')
+    expect(result.log).not.toContain('retirement-authorization true')
+    expect(result.log).not.toContain('curl-action retire_connected_account')
+  })
+
+  it.each([
+    'FIXTURE_PREPARATION_FAILED',
+    'FIXTURE_ORGANIZER_FAILED',
+    'FIXTURE_ACCOUNT_BINDING_FAILED',
+    'FIXTURE_EVENT_FAILED',
+    'FIXTURE_TIER_SETUP_FAILED',
+    'FIXTURE_MODERATION_FAILED',
+    'FIXTURE_AUTH_FAILED',
+    'FIXTURE_DISCLOSURE_SAVE_FAILED',
+    'FIXTURE_POLICY_ACCEPTANCE_FAILED',
+    'FIXTURE_PUBLISH_FAILED',
+    'FIXTURE_ELIGIBILITY_FAILED',
+    'FIXTURE_CHECKOUT_PREFLIGHT_FAILED',
+  ])('reports the sanitized fixture stage %s and preserves the account', async (kind) => {
+    const result = await runRunner(false, false, {
+      FAKE_FIXTURE_PREFLIGHT_RESPONSE: JSON.stringify({ ok: false, kind }),
+      FAKE_TOMBSTONE_AUDIT_RESPONSE: '{"rows":[{"namespace_prefix_count":1,"event_count":1,"organizer_count":1,"auth_user_inert":true,"audit_interval_count":1,"audit_action_count":0,"open_eligible_interval_count":0,"active_tier_count":0,"tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"refund_count":0,"staff_role_count":0,"public_projection_count":0,"event_tombstoned":true}]}',
+    })
+
+    expect(result.exitCode).not.toBe(0)
+    expect(result.stderr).toContain(`Task 17 fixture preflight: ${kind}`)
+    expect(result.stderr).not.toContain('NOT_SELLABLE_OR_UNSAFE')
+    expect(result.log).toContain('cleanup-close-request false')
+    expect(result.log).not.toContain('retirement-authorization true')
+    expect(result.log).not.toContain('curl-action retire_connected_account')
+  })
+
+  it('accepts an inert organizer-edit hold after failed legacy recovery without certifying retirement', async () => {
+    const result = await runRunner(false, false, {
+      FAKE_FIXTURE_PREFLIGHT_RESPONSE: '{"ok":false,"kind":"FIXTURE_PUBLISH_FAILED"}',
+      FAKE_TOMBSTONE_AUDIT_RESPONSE: '{"rows":[{"namespace_prefix_count":1,"event_count":1,"organizer_count":1,"auth_user_inert":true,"audit_interval_count":1,"audit_action_count":1,"open_eligible_interval_count":0,"active_tier_count":0,"tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"refund_count":0,"staff_role_count":0,"public_projection_count":0,"event_inert":true,"event_tombstoned":false}]}',
+    })
+
+    expect(result.exitCode).not.toBe(0)
+    expect(result.stderr).toContain('Task 17 fixture preflight: FIXTURE_PUBLISH_FAILED')
+    expect(result.stderr).not.toContain('Task 17 teardown verification: fail')
+    expect(result.log).not.toContain('retirement-authorization true')
+    expect(result.log).not.toContain('curl-action retire_connected_account')
   })
 
   it('accepts only the inert reusable audit tombstone cleanup contract', async () => {
-    const result = await runRunner(false, false, {
-      FAKE_CLEANUP_RESPONSE: '{"ok":true,"stable_fixture":true,"fixture_reusable":true,"event_count":1,"organizer_count":1,"auth_user_inert":true,"event_sellable":false,"public_projection_count":0,"active_tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"receipt_count":0,"refund_count":0,"dispute_count":0,"connected_account_closed":true,"connected_account_preserved":false}',
-    })
+    const result = await runRunner(false)
 
     expect(result.exitCode).toBe(0)
     expect(result.log).toContain('event_public_eligibility_intervals')
@@ -266,15 +356,17 @@ describe('Task 17 managed proof runner', () => {
 
   it('fails teardown when the linked audit tombstone verification is unsafe', async () => {
     const result = await runRunner(false, false, {
-      FAKE_TOMBSTONE_AUDIT_RESPONSE: '{"rows":[{"namespace_prefix_count":1,"event_count":1,"organizer_count":1,"auth_user_inert":true,"audit_interval_count":3,"audit_action_count":3,"open_eligible_interval_count":1,"active_tier_count":0,"tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"refund_count":0,"public_projection_count":0,"event_tombstoned":true}]}',
+      FAKE_TOMBSTONE_AUDIT_RESPONSE: '{"rows":[{"namespace_prefix_count":1,"event_count":1,"organizer_count":1,"auth_user_inert":true,"audit_interval_count":3,"audit_action_count":3,"open_eligible_interval_count":1,"active_tier_count":0,"tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"refund_count":0,"staff_role_count":0,"public_projection_count":0,"event_tombstoned":true}]}',
     })
 
     expect(result.exitCode).not.toBe(0)
+    expect(result.log).not.toContain('curl-action retire_connected_account')
+    expect(result.log).not.toContain('retirement-authorization true')
   })
 
   it('fails teardown when another Task 17 namespace shell remains', async () => {
     const result = await runRunner(false, false, {
-      FAKE_TOMBSTONE_AUDIT_RESPONSE: '{"rows":[{"namespace_prefix_count":2,"event_count":1,"organizer_count":1,"auth_user_inert":true,"audit_interval_count":3,"audit_action_count":3,"open_eligible_interval_count":0,"active_tier_count":0,"tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"refund_count":0,"public_projection_count":0,"event_tombstoned":true}]}',
+      FAKE_TOMBSTONE_AUDIT_RESPONSE: '{"rows":[{"namespace_prefix_count":2,"event_count":1,"organizer_count":1,"auth_user_inert":true,"audit_interval_count":3,"audit_action_count":3,"open_eligible_interval_count":0,"active_tier_count":0,"tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"refund_count":0,"staff_role_count":0,"public_projection_count":0,"event_tombstoned":true}]}',
     })
 
     expect(result.exitCode).not.toBe(0)
@@ -310,7 +402,7 @@ describe('Task 17 managed proof runner', () => {
     expect(result.log).not.toContain('vitest run')
   })
 
-  it('closes the connected account only after a fully successful proof', async () => {
+  it('retires the connected account only after proof, cleanup, and tombstone certification', async () => {
     const result = await runRunner(false)
 
     expect(result.exitCode).toBe(0)
@@ -321,8 +413,38 @@ describe('Task 17 managed proof runner', () => {
     expect(result.log.indexOf('curl-action account_diagnostic')).toBeLessThan(
       result.log.indexOf('vitest run'),
     )
-    expect(result.log.match(/cleanup-close-request true/g)).toHaveLength(1)
-    expect(result.log).not.toContain('cleanup-close-request false')
+    expect(result.log.match(/cleanup-close-request false/g)).toHaveLength(1)
+    expect(result.log).not.toContain('cleanup-close-request true')
+    expect(result.log.match(/curl-action retire_connected_account/g)).toHaveLength(1)
+    expect(result.log.indexOf('vitest run')).toBeLessThan(
+      result.log.indexOf('cleanup-close-request false'),
+    )
+    expect(result.log.indexOf('cleanup-close-request false')).toBeLessThan(
+      result.log.lastIndexOf('event_public_eligibility_intervals'),
+    )
+    expect(result.log.lastIndexOf('event_public_eligibility_intervals')).toBeLessThan(
+      result.log.indexOf('retirement-authorization true'),
+    )
+    expect(result.log.indexOf('retirement-authorization true')).toBeLessThan(
+      result.log.indexOf('curl-action retire_connected_account'),
+    )
+    expect(result.log.indexOf('curl-action retire_connected_account')).toBeLessThan(
+      result.log.indexOf('supabase functions delete task17-transaction-driver'),
+    )
+  })
+
+  it('can run fixture preflight and cleanup without enabling checkout or retiring the account', async () => {
+    const result = await runRunner(false, false, {
+      TASK13_FIXTURE_PREFLIGHT_ONLY: '1',
+      FAKE_TOMBSTONE_AUDIT_RESPONSE: '{"rows":[{"namespace_prefix_count":1,"event_count":1,"organizer_count":1,"auth_user_inert":true,"audit_interval_count":1,"audit_action_count":0,"open_eligible_interval_count":0,"active_tier_count":0,"tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"refund_count":0,"staff_role_count":0,"public_projection_count":0,"event_tombstoned":true}]}',
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.log).toContain('curl-action fixture_preflight')
+    expect(result.log).toContain('cleanup-close-request false')
+    expect(result.log).not.toContain('set checkout_creation_enabled = true')
+    expect(result.log).not.toContain('vitest run')
+    expect(result.log).not.toContain('curl-action retire_connected_account')
   })
 
   it('deploys the committed driver and tears down the endpoint and temporary secrets', async () => {
@@ -370,6 +492,7 @@ describe('Task 17 managed proof runner', () => {
     expect(result.log).toContain('curl ')
     expect(result.log).toContain('cleanup-close-request false')
     expect(result.log).not.toContain('cleanup-close-request true')
+    expect(result.log).not.toContain('curl-action retire_connected_account')
     expect(result.log).toContain('set checkout_creation_enabled = false')
     expect(result.log).toContain('supabase functions delete task17-transaction-driver')
     expect(result.log).toContain(
@@ -420,7 +543,7 @@ describe('Task 17 managed proof runner', () => {
 
   it('fails teardown when the retained fixture Auth identity is not proven inert', async () => {
     const result = await runRunner(false, false, {
-      FAKE_CLEANUP_RESPONSE: '{"ok":true,"stable_fixture":true,"fixture_reusable":true,"event_count":1,"organizer_count":1,"auth_user_inert":false,"event_sellable":false,"public_projection_count":0,"active_tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"receipt_count":0,"refund_count":0,"dispute_count":0,"connected_account_closed":true,"connected_account_preserved":false}',
+      FAKE_CLEANUP_RESPONSE: '{"ok":true,"stable_fixture":true,"fixture_reusable":true,"event_count":1,"organizer_count":1,"auth_user_inert":false,"event_sellable":false,"public_projection_count":0,"active_tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"receipt_count":0,"refund_count":0,"dispute_count":0,"connected_account_closed":false,"connected_account_preserved":true}',
     })
     expect(result.exitCode).not.toBe(0)
   })

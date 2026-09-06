@@ -1549,6 +1549,16 @@ export type Database = {
         Args: { p_order_id: string; p_reason: string }
         Returns: string
       }
+      server_claim_checkout_integrity_fixture_evaluation: {
+        Args: { p_event_id: string; p_fixture_prefix: string }
+        Returns: {
+          content_revision: number
+          evaluation_id: string
+          event_id: string
+          input_sha256: string
+          queued_moderation_version: number
+        }[]
+      }
       server_claim_moderation_evaluation: {
         Args: { p_worker_reference: string }
         Returns: {

@@ -15,12 +15,16 @@ PROJECT_REF_FILE="$REPO_ROOT/supabase/.temp/project-ref"
 ENV_FILE="$REPO_ROOT/.env.local"
 TEMP_DIR=""
 TEMP_SECRET_FILE=""
+RETIREMENT_SECRET_FILE=""
 CURL_CONFIG=""
 CLEANUP_RESPONSE=""
 DIAGNOSTIC_CURL_CONFIG=""
 DIAGNOSTIC_RESPONSE=""
 FIXTURE_PREFLIGHT_CURL_CONFIG=""
 FIXTURE_PREFLIGHT_RESPONSE=""
+RETIREMENT_CURL_CONFIG=""
+RETIREMENT_RESPONSE=""
+TOMBSTONE_CERTIFICATION_FILE=""
 CHECKOUT_SWITCH_STATE_FILE=""
 DRIVER_DEPLOYED=0
 DRIVER_DELETE_REQUIRED=0
@@ -81,13 +85,27 @@ write_driver_request_config() {
 }
 
 write_cleanup_config() {
-  if [ "$PROOF_COMPLETED" -eq 1 ]; then
-    write_driver_request_config "$CURL_CONFIG" \
-      '{\"action\":\"cleanup\",\"close_connected_account\":true}'
-  else
-    write_driver_request_config "$CURL_CONFIG" \
-      '{\"action\":\"cleanup\",\"close_connected_account\":false}'
-  fi
+  write_driver_request_config "$CURL_CONFIG" \
+    '{\"action\":\"cleanup\",\"close_connected_account\":false}'
+}
+
+write_retirement_config() {
+  retirement_body=$(TOMBSTONE_CERTIFICATION_FILE="$TOMBSTONE_CERTIFICATION_FILE" \
+    node --input-type=module <<'NODE'
+import fs from 'node:fs'
+const certification = JSON.parse(fs.readFileSync(process.env.TOMBSTONE_CERTIFICATION_FILE, 'utf8'))
+const body = JSON.stringify({ action: 'retire_connected_account', certification })
+process.stdout.write(body.replaceAll('\\', '\\\\').replaceAll('"', '\\"'))
+NODE
+  )
+  write_driver_request_config "$RETIREMENT_CURL_CONFIG" "$retirement_body"
+}
+
+authorize_account_retirement() {
+  printf '%s\n' 'TASK17_CLOSE_CONNECTED_ACCOUNT=true' > "$RETIREMENT_SECRET_FILE"
+  chmod 600 "$RETIREMENT_SECRET_FILE"
+  pnpm exec supabase secrets set --env-file "$RETIREMENT_SECRET_FILE" \
+    --project-ref "$PROJECT_REF" >/dev/null
 }
 
 capture_checkout_switch() {
@@ -170,13 +188,11 @@ cleanup() {
         }
       ' "$CLEANUP_RESPONSE" 2>/dev/null || true
     fi
-    if [ "$cleanup_status" -ne 0 ] || ! EXPECT_ACCOUNT_CLOSED="$PROOF_COMPLETED" node -e '
+    if [ "$cleanup_status" -ne 0 ] || ! node -e '
       const fs = require("node:fs");
       const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-      const closeExpected = process.env.EXPECT_ACCOUNT_CLOSED === "1";
-      const lifecycleMatches = closeExpected
-        ? value.connected_account_closed === true && value.connected_account_preserved === false
-        : value.connected_account_closed === false && value.connected_account_preserved === true;
+      const lifecycleMatches = value.connected_account_closed === false &&
+        value.connected_account_preserved === true;
       const absent = value.event_count === 0 && value.organizer_count === 0 &&
         value.auth_user_absent === true &&
         ["connect_count", "order_count", "tier_count", "receipt_count", "ticket_count", "dispute_count", "refund_count", "item_count"]
@@ -232,12 +248,16 @@ cleanup() {
           (select count(*) from public.order_items as items join public.orders as orders on orders.id = items.order_id join fixture on fixture.event_id = orders.event_id) as item_count,
           (select count(*) from public.tickets as tickets join fixture on fixture.event_id = tickets.event_id) as ticket_count,
           (select count(*) from public.refunds as refunds join public.orders as orders on orders.id = refunds.order_id join fixture on fixture.event_id = orders.event_id) as refund_count,
+          (select count(*) from private.staff_roles as roles join fixture on fixture.organizer_id = roles.user_id) as staff_role_count,
           (select count(*) from fixture cross join lateral public.get_public_event(fixture.event_id)) as public_projection_count,
+          (select coalesce(bool_and(status = 'published' and moderation_status in ('clear', 'under_review') and publicly_authorized_action_id is null), false) from fixture) as event_inert,
           (select coalesce(bool_and(status = 'published' and moderation_status = 'clear' and publicly_authorized_action_id is null), false) from fixture) as event_tombstoned;" \
         > "$tombstone_audit"
       tombstone_query_status=$?
       chmod 600 "$tombstone_audit"
-      TOMBSTONE_AUDIT_FILE="$tombstone_audit" node --input-type=module <<'NODE'
+      TOMBSTONE_AUDIT_FILE="$tombstone_audit" \
+        TOMBSTONE_CERTIFICATION_FILE="$TOMBSTONE_CERTIFICATION_FILE" \
+        PROOF_COMPLETED="$PROOF_COMPLETED" node --input-type=module <<'NODE'
 import fs from 'node:fs'
 const payload = JSON.parse(fs.readFileSync(process.env.TOMBSTONE_AUDIT_FILE, 'utf8'))
 const rows = Array.isArray(payload.rows)
@@ -250,21 +270,66 @@ const runtimeEmpty = row !== null && Number.isSafeInteger(row.namespace_prefix_c
   row.open_eligible_interval_count === 0 &&
   row.active_tier_count === 0 && row.tier_count === 0 && row.connect_count === 0 &&
   row.order_count === 0 && row.item_count === 0 && row.ticket_count === 0 &&
-  row.refund_count === 0 && row.public_projection_count === 0
+  row.refund_count === 0 && row.staff_role_count === 0 &&
+  row.public_projection_count === 0
 const absent = runtimeEmpty && row.namespace_prefix_count === 0 &&
   row.event_count === 0 && row.organizer_count === 0 &&
   row.auth_user_absent === true && row.audit_interval_count === 0 &&
   row.audit_action_count === 0 && row.event_tombstoned === false
-const tombstone = runtimeEmpty && row.namespace_prefix_count === 1 &&
+const tombstoneSafe = runtimeEmpty && row.namespace_prefix_count === 1 &&
   row.event_count === 1 && row.organizer_count === 1 &&
   row.auth_user_inert === true && Number.isSafeInteger(row.audit_interval_count) &&
-  row.audit_interval_count >= 3 && Number.isSafeInteger(row.audit_action_count) &&
+  row.audit_interval_count >= 1 && Number.isSafeInteger(row.audit_action_count) &&
+  row.audit_action_count >= 0 &&
+  (row.event_inert === true || row.event_tombstoned === true)
+const tombstoneCertified = tombstoneSafe && row.audit_interval_count >= 3 &&
   row.audit_action_count >= 3 && row.event_tombstoned === true
-if (!(absent || tombstone)) process.exit(1)
+const proofCompleted = process.env.PROOF_COMPLETED === '1'
+if (proofCompleted ? !tombstoneCertified : !(absent || tombstoneSafe)) process.exit(1)
+if (proofCompleted) {
+  const fields = [
+    'namespace_prefix_count', 'event_count', 'organizer_count', 'auth_user_inert',
+    'audit_interval_count', 'audit_action_count', 'open_eligible_interval_count',
+    'active_tier_count', 'tier_count', 'connect_count', 'order_count', 'item_count',
+    'ticket_count', 'refund_count', 'public_projection_count', 'event_tombstoned',
+    'staff_role_count',
+  ]
+  const certification = Object.fromEntries(fields.map((field) => [field, row[field]]))
+  fs.writeFileSync(process.env.TOMBSTONE_CERTIFICATION_FILE, JSON.stringify(certification), { mode: 0o600 })
+}
 NODE
       tombstone_parse_status=$?
       if [ "$tombstone_query_status" -ne 0 ] || [ "$tombstone_parse_status" -ne 0 ]; then
         TEARDOWN_FAILURE=1
+      fi
+      if [ "$PROOF_COMPLETED" -eq 1 ] && [ "$TEARDOWN_FAILURE" -eq 0 ]; then
+        authorize_account_retirement
+        retirement_authorization_status=$?
+        retirement_config_status=1
+        if [ "$retirement_authorization_status" -eq 0 ]; then
+          write_retirement_config
+          retirement_config_status=$?
+        fi
+        retirement_status=0
+        if [ "$retirement_authorization_status" -eq 0 ] && \
+          [ "$retirement_config_status" -eq 0 ]; then
+          curl --silent --show-error --fail-with-body \
+            --config "$RETIREMENT_CURL_CONFIG" > "$RETIREMENT_RESPONSE"
+          retirement_status=$?
+          chmod 600 "$RETIREMENT_RESPONSE"
+        else
+          retirement_status=1
+        fi
+        if [ "$retirement_status" -ne 0 ] || ! node -e '
+          const fs = require("node:fs");
+          const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+          const exact = Object.keys(value).sort().join(",") ===
+            ["connected_account_closed", "connected_account_preserved", "ok"].sort().join(",");
+          if (!exact || value.ok !== true || value.connected_account_closed !== true ||
+            value.connected_account_preserved !== false) process.exit(1);
+        ' "$RETIREMENT_RESPONSE"; then
+          TEARDOWN_FAILURE=1
+        fi
       fi
     fi
   fi
@@ -345,8 +410,9 @@ esac
 TEST_SUPABASE_URL=$(read_public_env TEST_SUPABASE_URL VITE_SUPABASE_URL)
 TEST_SUPABASE_PUBLISHABLE_KEY=$(read_public_env TEST_SUPABASE_PUBLISHABLE_KEY VITE_SUPABASE_PUBLISHABLE_KEY)
 VITE_STRIPE_PUBLISHABLE_KEY=$(read_public_env VITE_STRIPE_PUBLISHABLE_KEY VITE_STRIPE_PUBLISHABLE_KEY)
-TEST_CONNECTED_ACCOUNT_ID=${TEST_CONNECTED_ACCOUNT_ID-}
+TEST_CONNECTED_ACCOUNT_ID=$(read_public_env TEST_CONNECTED_ACCOUNT_ID TEST_CONNECTED_ACCOUNT_ID)
 TEST_CONNECTED_ACCOUNT_DISPOSABLE=${TEST_CONNECTED_ACCOUNT_DISPOSABLE-}
+TASK13_FIXTURE_PREFLIGHT_ONLY=${TASK13_FIXTURE_PREFLIGHT_ONLY-0}
 
 case "$TEST_SUPABASE_URL" in https://*.supabase.co) ;; *) printf '%s\n' 'Invalid TEST_SUPABASE_URL.' >&2; exit 1 ;; esac
 [ "$TEST_SUPABASE_URL" = "https://${PROJECT_REF}.supabase.co" ] || {
@@ -360,6 +426,10 @@ case "$TEST_CONNECTED_ACCOUNT_ID" in acct_*) ;; *) printf '%s\n' 'Missing TEST c
   printf '%s\n' 'TEST connected account must be explicitly disposable.' >&2
   exit 1
 }
+case "$TASK13_FIXTURE_PREFLIGHT_ONLY" in
+  0|1) ;;
+  *) printf '%s\n' 'Invalid TASK13_FIXTURE_PREFLIGHT_ONLY value.' >&2; exit 1 ;;
+esac
 
 TEMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/whereto-task17-run.XXXXXX")
 chmod 700 "$TEMP_DIR"
@@ -415,7 +485,24 @@ pnpm exec supabase db query --linked --output-format json "with fixture_namespac
       and (select count(*) from auth.users as owner_user where owner_user.id = candidate.organizer_id and owner_user.email = candidate.prefix || '@example.invalid') = 1
       and (select count(*) from public.events as owned where owned.organizer_id = candidate.organizer_id) = 1
       and (select count(*) from public.events as exact_events where exact_events.title = candidate.prefix || ' transaction') = 1
-      and (select count(*) from public.events as events where events.id = candidate.event_id and events.status = 'published' and events.moderation_status = 'clear' and events.publicly_authorized_action_id is null) = 1
+      and (select count(*) from public.events as events where events.id = candidate.event_id
+        and events.status = 'published'
+        and events.publicly_authorized_action_id is null
+        and (
+          events.moderation_status = 'clear'
+          or (
+            events.moderation_status = 'under_review'
+            and exists (
+              select 1 from private.event_moderation_evaluations as evaluations
+              where evaluations.event_id = events.id
+                and evaluations.content_revision = events.content_revision
+                and evaluations.queued_moderation_version = events.moderation_version
+                and evaluations.status = 'queued'
+                and evaluations.source = 'contextual'
+            )
+          )
+        )) = 1
+      and not exists (select 1 from private.staff_roles where staff_roles.user_id = candidate.organizer_id)
       and not exists (select 1 from public.ticket_tiers where ticket_tiers.event_id = candidate.event_id)
       and not exists (select 1 from public.organizer_stripe_accounts where organizer_stripe_accounts.organizer_id = candidate.organizer_id)
       and not exists (select 1 from public.orders where orders.event_id = candidate.event_id)
@@ -455,12 +542,16 @@ process.stdout.write(prefix)
 NODE
 )
 TEMP_SECRET_FILE="$TEMP_DIR/driver-secrets.env"
+RETIREMENT_SECRET_FILE="$TEMP_DIR/retirement-secret.env"
 CURL_CONFIG="$TEMP_DIR/cleanup.curl"
 CLEANUP_RESPONSE="$TEMP_DIR/cleanup.json"
 DIAGNOSTIC_CURL_CONFIG="$TEMP_DIR/account-diagnostic.curl"
 DIAGNOSTIC_RESPONSE="$TEMP_DIR/account-diagnostic.json"
 FIXTURE_PREFLIGHT_CURL_CONFIG="$TEMP_DIR/fixture-preflight.curl"
 FIXTURE_PREFLIGHT_RESPONSE="$TEMP_DIR/fixture-preflight.json"
+RETIREMENT_CURL_CONFIG="$TEMP_DIR/retirement.curl"
+RETIREMENT_RESPONSE="$TEMP_DIR/retirement.json"
+TOMBSTONE_CERTIFICATION_FILE="$TEMP_DIR/tombstone-certification.json"
 PROOF_TOKEN=$(openssl rand -hex 32)
 TEST_FUNCTION_URL="${TEST_SUPABASE_URL%/}/functions/v1/task17-transaction-driver"
 
@@ -468,7 +559,7 @@ TEST_FUNCTION_URL="${TEST_SUPABASE_URL%/}/functions/v1/task17-transaction-driver
   printf 'TASK17_PROOF_TOKEN=%s\n' "$PROOF_TOKEN"
   printf 'TASK17_FIXTURE_PREFIX=%s\n' "$TEST_STRIPE_FIXTURE_PREFIX"
   printf 'TASK17_CONNECTED_ACCOUNT_ID=%s\n' "$TEST_CONNECTED_ACCOUNT_ID"
-  printf 'TASK17_CLOSE_CONNECTED_ACCOUNT=true\n'
+  printf 'TASK17_CLOSE_CONNECTED_ACCOUNT=false\n'
 } > "$TEMP_SECRET_FILE"
 write_cleanup_config
 write_driver_request_config "$DIAGNOSTIC_CURL_CONFIG" \
@@ -567,6 +658,26 @@ fixture_preflight_parse_status=0
 FIXTURE_PREFLIGHT_RESPONSE_FILE="$FIXTURE_PREFLIGHT_RESPONSE" node --input-type=module <<'NODE' || fixture_preflight_parse_status=$?
 import fs from 'node:fs'
 const value = JSON.parse(fs.readFileSync(process.env.FIXTURE_PREFLIGHT_RESPONSE_FILE, 'utf8'))
+const failureKinds = new Set([
+  'FIXTURE_PREPARATION_FAILED',
+  'FIXTURE_ORGANIZER_FAILED',
+  'FIXTURE_ACCOUNT_BINDING_FAILED',
+  'FIXTURE_EVENT_FAILED',
+  'FIXTURE_TIER_SETUP_FAILED',
+  'FIXTURE_MODERATION_FAILED',
+  'FIXTURE_AUTH_FAILED',
+  'FIXTURE_DISCLOSURE_SAVE_FAILED',
+  'FIXTURE_POLICY_ACCEPTANCE_FAILED',
+  'FIXTURE_PUBLISH_FAILED',
+  'FIXTURE_ELIGIBILITY_FAILED',
+  'FIXTURE_CHECKOUT_PREFLIGHT_FAILED',
+])
+if (value !== null && typeof value === 'object' && !Array.isArray(value) &&
+  Object.keys(value).sort().join(',') === ['kind', 'ok'].join(',') &&
+  value.ok === false && failureKinds.has(value.kind)) {
+  process.stderr.write(`Task 17 fixture preflight: ${value.kind}\n`)
+  process.exit(1)
+}
 const exact = Object.keys(value).sort().join(',') ===
   ['cleanup_strategy', 'fixture_purchasable', 'ok', 'stable_fixture'].sort().join(',')
 if (!exact || value.ok !== true || value.fixture_purchasable !== true ||
@@ -577,6 +688,10 @@ if (!exact || value.ok !== true || value.fixture_purchasable !== true ||
 NODE
 if [ "$fixture_preflight_curl_status" -ne 0 ] || [ "$fixture_preflight_parse_status" -ne 0 ]; then
   exit 1
+fi
+if [ "$TASK13_FIXTURE_PREFLIGHT_ONLY" -eq 1 ]; then
+  printf '%s\n' 'Task 17 fixture preflight-only verification: pass'
+  exit 0
 fi
 
 capture_checkout_switch

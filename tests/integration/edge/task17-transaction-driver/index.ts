@@ -23,17 +23,21 @@ import {
   applyDiagnosticAccountCleanup,
   assertSafeProofResponse,
   type AuditTombstoneState,
+  CONNECT_ACCOUNT_CONFLICT_TARGET,
   createFixtureAuthPassword,
   deleteAndVerifyFixtureAuthUser,
   destinationChargeRelationsMatch,
   establishAuditTombstone,
   establishSellableFixture,
+  exactFixtureModerationTarget,
   findExactFixtureAuthUser,
   requirePublicApiKey,
   restoreSellableFixture,
+  retireCertifiedConnectedAccount,
   retireSellableFixture,
   retrieveAccountForDiagnostic,
   runCleanupWithFailureFinalizers,
+  runFixtureStage,
   validateAccountForDiagnostic,
 } from "./contracts.ts";
 
@@ -52,6 +56,7 @@ const actions = new Set([
   "reconcile_events",
   "create_refund",
   "cleanup",
+  "retire_connected_account",
 ]);
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -413,35 +418,66 @@ function tombstoneEventPayload(event: Record<string, unknown>) {
   };
 }
 
+function recoveryEventPayload(event: Record<string, unknown>) {
+  const startsAt = new Date(Date.now() + 7 * 86_400_000);
+  const endsAt = new Date(startsAt.getTime() + 14_400_000);
+  return {
+    title: event.title,
+    description: event.description,
+    category: event.category,
+    starts_at: startsAt.toISOString(),
+    ends_at: endsAt.toISOString(),
+    timezone: event.timezone,
+    venue_name: event.venue_name,
+    address_line1: event.address_line1,
+    address_line2: event.address_line2,
+    city: event.city,
+    region: event.region,
+    postal_code: event.postal_code,
+    country_code: event.country_code,
+    mapbox_feature_id: event.mapbox_feature_id ??
+      "task17.checkout-integrity-fixture",
+    latitude: event.latitude,
+    longitude: event.longitude,
+    admission_type: event.admission_type,
+    capacity: event.capacity,
+  };
+}
+
 async function authenticatedFixtureOwner(
   expectedOrganizerId: string,
 ): Promise<SupabaseClient> {
-  const password = createFixtureAuthPassword(crypto.randomUUID());
-  const email = fixturePrefix() + "@example.invalid";
-  const admin = getServiceClient();
-  const updated = await admin.auth.admin.updateUserById(expectedOrganizerId, {
-    password,
-    ban_duration: "none",
+  return await runFixtureStage("FIXTURE_AUTH_FAILED", async () => {
+    const password = createFixtureAuthPassword(crypto.randomUUID());
+    const email = fixturePrefix() + "@example.invalid";
+    const admin = getServiceClient();
+    const updated = await admin.auth.admin.updateUserById(
+      expectedOrganizerId,
+      {
+        password,
+        ban_duration: "none",
+      },
+    );
+    if (
+      updated.error !== null || updated.data.user.id !== expectedOrganizerId ||
+      updated.data.user.email !== email
+    ) throw new Error("FIXTURE_AUTH_FAILED");
+    const { url, serviceRoleKey } = getSupabaseServiceConfig();
+    const owner = createClient(url, serviceRoleKey, {
+      auth: {
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+        persistSession: false,
+      },
+    });
+    const signedIn = await owner.auth.signInWithPassword({ email, password });
+    if (
+      signedIn.error !== null ||
+      signedIn.data.user?.id !== expectedOrganizerId ||
+      signedIn.data.session?.user.id !== expectedOrganizerId
+    ) throw new Error("FIXTURE_AUTH_FAILED");
+    return owner;
   });
-  if (
-    updated.error !== null || updated.data.user.id !== expectedOrganizerId ||
-    updated.data.user.email !== email
-  ) throw new Error("DATABASE");
-  const { url, serviceRoleKey } = getSupabaseServiceConfig();
-  const owner = createClient(url, serviceRoleKey, {
-    auth: {
-      autoRefreshToken: false,
-      detectSessionInUrl: false,
-      persistSession: false,
-    },
-  });
-  const signedIn = await owner.auth.signInWithPassword({ email, password });
-  if (
-    signedIn.error !== null ||
-    signedIn.data.user?.id !== expectedOrganizerId ||
-    signedIn.data.session?.user.id !== expectedOrganizerId
-  ) throw new Error("DATABASE");
-  return owner;
 }
 
 async function makeFixtureAuthInert(
@@ -492,20 +528,28 @@ async function checkoutPreflight(
   organizerId: string,
   tierIds: string[],
 ): Promise<Array<{ organizer_id: string; stripe_account_id: string }>> {
-  const result = await getServiceClient().rpc("server_get_checkout_preflight", {
-    p_event_id: eventId,
-    p_tier_ids: tierIds,
-  });
-  if (result.error !== null || !Array.isArray(result.data)) {
-    throw new Error("FIXTURE_NOT_SELLABLE");
-  }
-  return result.data.map((row) => ({
-    organizer_id: row.organizer_id,
-    stripe_account_id: row.stripe_account_id,
-  })).filter((row) =>
-    typeof row.organizer_id === "string" &&
-    typeof row.stripe_account_id === "string" &&
-    row.organizer_id === organizerId
+  return await runFixtureStage(
+    "FIXTURE_CHECKOUT_PREFLIGHT_FAILED",
+    async () => {
+      const result = await getServiceClient().rpc(
+        "server_get_checkout_preflight",
+        {
+          p_event_id: eventId,
+          p_tier_ids: tierIds,
+        },
+      );
+      if (result.error !== null || !Array.isArray(result.data)) {
+        throw new Error("FIXTURE_CHECKOUT_PREFLIGHT_FAILED");
+      }
+      return result.data.map((row) => ({
+        organizer_id: row.organizer_id,
+        stripe_account_id: row.stripe_account_id,
+      })).filter((row) =>
+        typeof row.organizer_id === "string" &&
+        typeof row.stripe_account_id === "string" &&
+        row.organizer_id === organizerId
+      );
+    },
   );
 }
 
@@ -517,10 +561,65 @@ async function requireOwnerRpc(
     | "accept_current_event_policies"
     | "publish_event",
   args: Record<string, unknown>,
+  failureKind:
+    | "FIXTURE_EVENT_FAILED"
+    | "FIXTURE_DISCLOSURE_SAVE_FAILED"
+    | "FIXTURE_POLICY_ACCEPTANCE_FAILED"
+    | "FIXTURE_PUBLISH_FAILED"
+    | "FIXTURE_CLEANUP_UNSAFE",
 ): Promise<unknown> {
-  const result = await owner.rpc(name, args);
-  if (result.error !== null) throw new Error("DATABASE");
-  return result.data;
+  if (failureKind === "FIXTURE_CLEANUP_UNSAFE") {
+    try {
+      const result = await owner.rpc(name, args);
+      if (result.error !== null) throw new Error(failureKind);
+      return result.data;
+    } catch {
+      throw new Error(failureKind);
+    }
+  }
+  return await runFixtureStage(failureKind, async () => {
+    const result = await owner.rpc(name, args);
+    if (result.error !== null) throw new Error(failureKind);
+    return result.data;
+  });
+}
+
+async function verifyFixtureEligibility(
+  publicClient: SupabaseClient,
+  eventId: string,
+): Promise<void> {
+  await runFixtureStage("FIXTURE_ELIGIBILITY_FAILED", async () => {
+    const projection = await publicClient.rpc("get_public_event", {
+      p_event_id: eventId,
+    });
+    if (
+      projection.error !== null || !Array.isArray(projection.data) ||
+      projection.data.length !== 1
+    ) throw new Error("FIXTURE_ELIGIBILITY_FAILED");
+  });
+}
+
+async function resolveFixtureModeration(
+  eventId: string,
+): Promise<void> {
+  await runFixtureStage("FIXTURE_MODERATION_FAILED", async () => {
+    const client = getServiceClient();
+    const claimed = await client.rpc(
+      "server_claim_checkout_integrity_fixture_evaluation",
+      { p_event_id: eventId, p_fixture_prefix: fixturePrefix() },
+    );
+    if (claimed.error !== null) {
+      throw new Error("FIXTURE_MODERATION_FAILED");
+    }
+    const target = exactFixtureModerationTarget(eventId, claimed.data);
+    const result = await client.rpc(
+      "server_apply_moderation_evaluation",
+      target,
+    );
+    if (result.error !== null || result.data !== "applied") {
+      throw new Error("FIXTURE_MODERATION_FAILED");
+    }
+  });
 }
 
 function requirementsPayload() {
@@ -535,67 +634,83 @@ function requirementsPayload() {
   };
 }
 
-async function setup(): Promise<Record<string, unknown>> {
+async function prepareFixture(
+  publicClient: SupabaseClient,
+): Promise<Record<string, unknown>> {
   const proof = await serverProof();
   if (proof.ok !== true) throw new Error("STRIPE");
   const client = getServiceClient();
-  let organizer = await fixtureOrganizer();
-  if (organizer === null) {
-    const existingAuth = await fixtureAuthUser();
-    if (existingAuth === null) {
-      const auth = await client.auth.admin.createUser({
-        email: `${fixturePrefix()}@example.invalid`,
-        password: `${crypto.randomUUID()}Aa1!`,
-        email_confirm: true,
-      });
-      if (auth.error !== null) throw new Error("DATABASE");
-      organizer = { id: auth.data.user.id };
-    } else {
-      organizer = existingAuth;
-    }
-    const { error: organizerError } = await client.from("organizers").insert({
-      id: organizer.id,
-      display_name: fixturePrefix(),
-    });
-    if (organizerError !== null) throw new Error("DATABASE");
-  } else if (await fixtureAuthUser(organizer.id) === null) {
-    throw new Error("DATABASE");
-  }
-
-  const account = await getStripe().v2.core.accounts.retrieve(
-    connectedAccountId(),
-    { include: ACCOUNT_INCLUDE },
+  const organizer = await runFixtureStage(
+    "FIXTURE_ORGANIZER_FAILED",
+    async () => {
+      let current = await fixtureOrganizer();
+      if (current === null) {
+        const existingAuth = await fixtureAuthUser();
+        if (existingAuth === null) {
+          const auth = await client.auth.admin.createUser({
+            email: `${fixturePrefix()}@example.invalid`,
+            password: `${crypto.randomUUID()}Aa1!`,
+            email_confirm: true,
+          });
+          if (auth.error !== null) throw new Error("FIXTURE_ORGANIZER_FAILED");
+          current = { id: auth.data.user.id };
+        } else {
+          current = existingAuth;
+        }
+        const { error: organizerError } = await client.from("organizers")
+          .insert({
+            id: current.id,
+            display_name: fixturePrefix(),
+          });
+        if (organizerError !== null) {
+          throw new Error("FIXTURE_ORGANIZER_FAILED");
+        }
+      } else if (await fixtureAuthUser(current.id) === null) {
+        throw new Error("FIXTURE_ORGANIZER_FAILED");
+      }
+      return current;
+    },
   );
-  if (account.livemode !== false || account.id !== connectedAccountId()) {
-    throw new Error("LIVE_MODE_FORBIDDEN");
-  }
-  const projection = validateApprovedConnectAccount(account);
-  const syncedAt = new Date().toISOString();
-  const { error: connectError } = await client.from(
-    "organizer_stripe_accounts",
-  ).upsert({
-    organizer_id: organizer.id,
-    stripe_account_id: connectedAccountId(),
-    transfers_status: projection.transfersStatus,
-    payouts_status: projection.payoutsStatus,
-    requirements_status: projection.requirementsStatus,
-    requirements_currently_due_count: projection.requirementsCurrentlyDueCount,
-    requirements_past_due_count: projection.requirementsPastDueCount,
-    last_status_code: projection.lastStatusCode,
-    last_synced_at: syncedAt,
-    livemode: false,
-  }, { onConflict: "organizer_id" });
-  if (connectError !== null) throw new Error("DATABASE");
 
-  const title = `${fixturePrefix()} transaction`;
-  const eventRead = await client.from("events")
-    .select(
-      "id,status,moderation_status,starts_at,ends_at,publicly_authorized_action_id",
-    )
-    .eq("organizer_id", organizer.id).eq("title", title).maybeSingle();
-  if (eventRead.error !== null) throw new Error("DATABASE");
-  let event = eventRead.data;
-  if (event === null) {
+  await runFixtureStage("FIXTURE_ACCOUNT_BINDING_FAILED", async () => {
+    const account = await getStripe().v2.core.accounts.retrieve(
+      connectedAccountId(),
+      { include: ACCOUNT_INCLUDE },
+    );
+    if (account.livemode !== false || account.id !== connectedAccountId()) {
+      throw new Error("LIVE_MODE_FORBIDDEN");
+    }
+    const projection = validateApprovedConnectAccount(account);
+    const syncedAt = new Date().toISOString();
+    const { error: connectError } = await client.from(
+      "organizer_stripe_accounts",
+    ).upsert({
+      organizer_id: organizer.id,
+      stripe_account_id: connectedAccountId(),
+      transfers_status: projection.transfersStatus,
+      payouts_status: projection.payoutsStatus,
+      requirements_status: projection.requirementsStatus,
+      requirements_currently_due_count:
+        projection.requirementsCurrentlyDueCount,
+      requirements_past_due_count: projection.requirementsPastDueCount,
+      last_status_code: projection.lastStatusCode,
+      last_synced_at: syncedAt,
+      livemode: false,
+    }, { onConflict: CONNECT_ACCOUNT_CONFLICT_TARGET });
+    if (connectError !== null) {
+      throw new Error("FIXTURE_ACCOUNT_BINDING_FAILED");
+    }
+  });
+
+  const event = await runFixtureStage("FIXTURE_EVENT_FAILED", async () => {
+    const title = `${fixturePrefix()} transaction`;
+    const eventRead = await client.from("events")
+      .select(
+        "id,title,description,category,starts_at,ends_at,timezone,venue_name,address_line1,address_line2,city,region,postal_code,country_code,mapbox_feature_id,latitude,longitude,admission_type,capacity,status,moderation_status,publicly_authorized_action_id",
+      )
+      .eq("organizer_id", organizer.id).eq("title", title).maybeSingle();
+    if (eventRead.error !== null) throw new Error("FIXTURE_EVENT_FAILED");
+    if (eventRead.data !== null) return eventRead.data;
     const eventId = crypto.randomUUID();
     const payload = activeEventPayload();
     const { error } = await client.from("events").insert({
@@ -605,8 +720,8 @@ async function setup(): Promise<Record<string, unknown>> {
       moderation_status: "not_evaluated",
       ...payload,
     });
-    if (error !== null) throw new Error("DATABASE");
-    event = {
+    if (error !== null) throw new Error("FIXTURE_EVENT_FAILED");
+    return {
       id: eventId,
       status: "draft",
       moderation_status: "not_evaluated",
@@ -614,14 +729,20 @@ async function setup(): Promise<Record<string, unknown>> {
       ends_at: payload.ends_at,
       publicly_authorized_action_id: null,
     };
-  }
+  });
 
   const owner = await authenticatedFixtureOwner(organizer.id);
-  const existingTiers = await client.from("ticket_tiers").select(
-    "id,name,unit_amount_minor,currency,quantity_total,status,sort_order",
-  ).eq("event_id", event.id).neq("status", "archived")
-    .order("sort_order", { ascending: true });
-  if (existingTiers.error !== null) throw new Error("DATABASE");
+  const existingTiers = await runFixtureStage(
+    "FIXTURE_TIER_SETUP_FAILED",
+    async () => {
+      const result = await client.from("ticket_tiers").select(
+        "id,name,unit_amount_minor,currency,quantity_total,status,sort_order",
+      ).eq("event_id", event.id).neq("status", "archived")
+        .order("sort_order", { ascending: true });
+      if (result.error !== null) throw new Error("FIXTURE_TIER_SETUP_FAILED");
+      return result;
+    },
+  );
 
   const existingTierIds = existingTiers.data.map((tier) => tier.id);
   const alreadyPrepared = existingTiers.data.length === fixtureTiers.length &&
@@ -634,6 +755,7 @@ async function setup(): Promise<Record<string, unknown>> {
         tier.status === "active" && tier.sort_order === expected.sortOrder;
     });
   if (alreadyPrepared) {
+    await verifyFixtureEligibility(publicClient, event.id);
     const rows = await checkoutPreflight(
       event.id,
       organizer.id,
@@ -642,48 +764,69 @@ async function setup(): Promise<Record<string, unknown>> {
     if (
       rows.length !== 1 || rows[0].organizer_id !== organizer.id ||
       rows[0].stripe_account_id !== connectedAccountId()
-    ) throw new Error("FIXTURE_NOT_SELLABLE");
+    ) throw new Error("FIXTURE_CHECKOUT_PREFLIGHT_FAILED");
   } else {
-    if (existingTiers.data.length !== 0) throw new Error("DATABASE");
+    if (existingTiers.data.length !== 0) {
+      throw new Error("FIXTURE_TIER_SETUP_FAILED");
+    }
     const createdTiers: string[] = [];
     for (const tier of fixtureTiers) {
       const tierId = crypto.randomUUID();
-      const created = await client.from("ticket_tiers").insert({
-        id: tierId,
-        event_id: event.id,
-        name: tier.name,
-        description: null,
-        unit_amount_minor: tier.unitAmountMinor,
-        currency: "usd",
-        quantity_total: tier.quantityTotal,
-        status: "draft",
-        sort_order: tier.sortOrder,
+      await runFixtureStage("FIXTURE_TIER_SETUP_FAILED", async () => {
+        const created = await client.from("ticket_tiers").insert({
+          id: tierId,
+          event_id: event.id,
+          name: tier.name,
+          description: null,
+          unit_amount_minor: tier.unitAmountMinor,
+          currency: "usd",
+          quantity_total: tier.quantityTotal,
+          status: "draft",
+          sort_order: tier.sortOrder,
+        });
+        if (created.error !== null) {
+          throw new Error("FIXTURE_TIER_SETUP_FAILED");
+        }
       });
-      if (created.error !== null) throw new Error("DATABASE");
       createdTiers.push(tierId);
     }
     const dependencies = {
       acceptPolicies: () =>
         requireOwnerRpc(owner, "accept_current_event_policies", {
           p_event_id: event.id,
-        }),
+        }, "FIXTURE_POLICY_ACCEPTANCE_FAILED"),
       publish: () =>
-        requireOwnerRpc(owner, "publish_event", { p_event_id: event.id }),
+        requireOwnerRpc(
+          owner,
+          "publish_event",
+          { p_event_id: event.id },
+          "FIXTURE_PUBLISH_FAILED",
+        ),
+      verifyEligibility: () => verifyFixtureEligibility(publicClient, event.id),
       preflight: () => checkoutPreflight(event.id, organizer.id, createdTiers),
     };
     const restoringTombstone = event.status === "published" &&
-      event.moderation_status === "clear" &&
+      ["clear", "under_review"].includes(event.moderation_status) &&
       event.publicly_authorized_action_id === null;
     if (restoringTombstone) {
       await restoreSellableFixture(
         organizer.id,
         connectedAccountId(),
         {
+          reviseEvent: () =>
+            requireOwnerRpc(owner, "save_owned_event_revision", {
+              p_event_id: event.id,
+              p_event: recoveryEventPayload(event),
+            }, "FIXTURE_EVENT_FAILED"),
           saveRequirements: () =>
             requireOwnerRpc(owner, "save_owned_event_requirements", {
               p_event_id: event.id,
               p_requirements: requirementsPayload(),
-            }),
+            }, "FIXTURE_DISCLOSURE_SAVE_FAILED"),
+          resolveModeration: () =>
+            event.moderation_status === "under_review"
+              ? resolveFixtureModeration(event.id)
+              : Promise.resolve(),
           ...dependencies,
         },
       );
@@ -697,20 +840,26 @@ async function setup(): Promise<Record<string, unknown>> {
             requireOwnerRpc(owner, "save_owned_event_requirements", {
               p_event_id: event.id,
               p_requirements: requirementsPayload(),
-            }),
+            }, "FIXTURE_DISCLOSURE_SAVE_FAILED"),
           ...dependencies,
         },
       );
     }
   }
 
-  const tierRead = await client.from("ticket_tiers").select(
-    "id,name,unit_amount_minor,currency,quantity_total,status,sort_order",
-  ).eq("event_id", event.id).eq("status", "active")
-    .order("sort_order", { ascending: true });
-  if (tierRead.error !== null || tierRead.data.length !== fixtureTiers.length) {
-    throw new Error("DATABASE");
-  }
+  const tierRead = await runFixtureStage(
+    "FIXTURE_TIER_SETUP_FAILED",
+    async () => {
+      const result = await client.from("ticket_tiers").select(
+        "id,name,unit_amount_minor,currency,quantity_total,status,sort_order",
+      ).eq("event_id", event.id).eq("status", "active")
+        .order("sort_order", { ascending: true });
+      if (result.error !== null || result.data.length !== fixtureTiers.length) {
+        throw new Error("FIXTURE_TIER_SETUP_FAILED");
+      }
+      return result;
+    },
+  );
   const tiers: Array<{
     label: "ga" | "vip";
     id: string;
@@ -727,7 +876,7 @@ async function setup(): Promise<Record<string, unknown>> {
       tier.currency !== "usd" ||
       tier.quantity_total !== definition.quantityTotal ||
       tier.status !== "active" || tier.sort_order !== definition.sortOrder
-    ) throw new Error("DATABASE");
+    ) throw new Error("FIXTURE_TIER_SETUP_FAILED");
     tiers.push({
       label: definition.label,
       id: tier.id,
@@ -740,7 +889,7 @@ async function setup(): Promise<Record<string, unknown>> {
   const gaTier = tiers.find((tier) => tier.label === "ga");
   const vipTier = tiers.find((tier) => tier.label === "vip");
   if (gaTier === undefined || vipTier === undefined) {
-    throw new Error("DATABASE");
+    throw new Error("FIXTURE_TIER_SETUP_FAILED");
   }
   return {
     ok: true,
@@ -764,8 +913,19 @@ async function setup(): Promise<Record<string, unknown>> {
   };
 }
 
-async function fixturePreflight(): Promise<Record<string, unknown>> {
-  await setup();
+async function setup(
+  publicClient: SupabaseClient,
+): Promise<Record<string, unknown>> {
+  return await runFixtureStage(
+    "FIXTURE_PREPARATION_FAILED",
+    () => prepareFixture(publicClient),
+  );
+}
+
+async function fixturePreflight(
+  publicClient: SupabaseClient,
+): Promise<Record<string, unknown>> {
+  await setup(publicClient);
   return {
     ok: true,
     fixture_purchasable: true,
@@ -1379,10 +1539,8 @@ async function createRefund(
 }
 
 async function cleanup(
-  closeConnectedAccount: unknown,
   publicClient: SupabaseClient,
 ): Promise<Record<string, unknown>> {
-  if (typeof closeConnectedAccount !== "boolean") throw new Error("INPUT");
   const client = getServiceClient();
   const organizer = await fixtureOrganizer();
   const authUser = await fixtureAuthUser(organizer?.id);
@@ -1398,9 +1556,6 @@ async function cleanup(
         loadFixtureAuthPage,
       );
     }
-    const accountLifecycle = await finalizeConnectedAccount(
-      closeConnectedAccount,
-    );
     return {
       ok: true,
       event_count: 0,
@@ -1414,8 +1569,8 @@ async function cleanup(
       refund_count: 0,
       item_count: 0,
       auth_user_absent: true,
-      connected_account_closed: accountLifecycle.connectedAccountClosed,
-      connected_account_preserved: accountLifecycle.connectedAccountPreserved,
+      connected_account_closed: false,
+      connected_account_preserved: true,
     };
   }
   if (authUser === null) throw new Error("DATABASE_DELETE_AUTH");
@@ -1450,7 +1605,7 @@ async function cleanup(
             : requireOwnerRpc(owner, "save_owned_event_revision", {
               p_event_id: fixtureEvent.id,
               p_event: tombstoneEventPayload(fixtureEvent),
-            }),
+            }, "FIXTURE_CLEANUP_UNSAFE"),
         verifyUnsellable: async () => {
           const [projection, tiers] = await Promise.all([
             publicClient.rpc("get_public_event", {
@@ -1719,7 +1874,9 @@ async function cleanup(
       return {
         stable_fixture: eventAfter.data.id === fixtureEvent.id,
         fixture_reusable: eventAfter.data.status === "published" &&
-          eventAfter.data.moderation_status === "clear",
+          ["clear", "under_review"].includes(
+            eventAfter.data.moderation_status,
+          ) && eventAfter.data.publicly_authorized_action_id === null,
         event_count: eventCount,
         organizer_count: organizerCount,
         auth_user_inert: authUserInert,
@@ -1737,14 +1894,8 @@ async function cleanup(
     },
   });
 
-  const accountLifecycle = await finalizeConnectedAccount(
-    closeConnectedAccount,
-  );
-  const accountLifecycleVerified = closeConnectedAccount
-    ? accountLifecycle.connectedAccountClosed
-    : accountLifecycle.connectedAccountPreserved;
   return {
-    ok: accountLifecycleVerified,
+    ok: true,
     ...tombstoneState,
     tier_count: tombstoneState.active_tier_count,
     deleted_order_count: orderIds.length,
@@ -1755,9 +1906,54 @@ async function cleanup(
     deleted_item_count: deletedItemCount,
     archived_price_count: priceIds.size,
     archived_product_count: productIds.size,
-    connected_account_closed: accountLifecycle.connectedAccountClosed,
-    connected_account_preserved: accountLifecycle.connectedAccountPreserved,
+    connected_account_closed: false,
+    connected_account_preserved: true,
   };
+}
+
+async function retireConnectedAccount(
+  certification: unknown,
+  publicClient: SupabaseClient,
+): Promise<Record<string, unknown>> {
+  const cleaned = await cleanup(publicClient);
+  const state = {
+    stable_fixture: cleaned.stable_fixture,
+    fixture_reusable: cleaned.fixture_reusable,
+    event_count: cleaned.event_count,
+    organizer_count: cleaned.organizer_count,
+    auth_user_inert: cleaned.auth_user_inert,
+    event_sellable: cleaned.event_sellable,
+    public_projection_count: cleaned.public_projection_count,
+    active_tier_count: cleaned.active_tier_count,
+    connect_count: cleaned.connect_count,
+    order_count: cleaned.order_count,
+    item_count: cleaned.item_count,
+    ticket_count: cleaned.ticket_count,
+    receipt_count: cleaned.receipt_count,
+    refund_count: cleaned.refund_count,
+    dispute_count: cleaned.dispute_count,
+  } as AuditTombstoneState;
+  const lifecycle = await retireCertifiedConnectedAccount(
+    state,
+    certification,
+    () => finalizeConnectedAccount(true),
+  );
+  return {
+    ok: true,
+    connected_account_closed: lifecycle.connectedAccountClosed,
+    connected_account_preserved: lifecycle.connectedAccountPreserved,
+  };
+}
+
+function publicClientFromRequest(request: Request): SupabaseClient {
+  const { url } = getSupabaseServiceConfig();
+  return createClient(url, requirePublicApiKey(request.headers), {
+    auth: {
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+      persistSession: false,
+    },
+  });
 }
 
 Deno.serve(async (request) => {
@@ -1774,9 +1970,13 @@ Deno.serve(async (request) => {
     }
     const input = body as Record<string, unknown>;
     if (action === "account_diagnostic") return json(await serverProof());
-    if (action === "fixture_preflight") return json(await fixturePreflight());
+    if (action === "fixture_preflight") {
+      return json(await fixturePreflight(publicClientFromRequest(request)));
+    }
     if (action === "server_proof") return json(await serverProof());
-    if (action === "setup") return json(await setup());
+    if (action === "setup") {
+      return json(await setup(publicClientFromRequest(request)));
+    }
     if (action === "inspect") return json(await inspect(input.event_id));
     if (action === "checkout_status") {
       return json(await checkoutStatus(input.order_handle));
@@ -1800,25 +2000,11 @@ Deno.serve(async (request) => {
     }
     if (action === "cleanup") {
       const closeConnectedAccount = input.close_connected_account;
-      if (typeof closeConnectedAccount !== "boolean") {
+      if (closeConnectedAccount !== false) {
         throw new Error("INPUT");
       }
       const result = await runCleanupWithFailureFinalizers(
-        async () => {
-          const { url } = getSupabaseServiceConfig();
-          const publicClient = createClient(
-            url,
-            requirePublicApiKey(request.headers),
-            {
-              auth: {
-                autoRefreshToken: false,
-                detectSessionInUrl: false,
-                persistSession: false,
-              },
-            },
-          );
-          return await cleanup(closeConnectedAccount, publicClient);
-        },
+        () => cleanup(publicClientFromRequest(request)),
         async () => {
           const organizer = await fixtureOrganizer();
           const authUser = await fixtureAuthUser(organizer?.id);
@@ -1827,12 +2013,33 @@ Deno.serve(async (request) => {
       );
       return json(result);
     }
+    if (action === "retire_connected_account") {
+      return json(
+        await retireConnectedAccount(
+          input.certification,
+          publicClientFromRequest(request),
+        ),
+      );
+    }
     return json({ ok: false }, 400);
   } catch (error) {
     const kind = error instanceof Error && ([
         "CONFIG",
         "DATABASE",
         "INPUT",
+        "FIXTURE_PREPARATION_FAILED",
+        "FIXTURE_ORGANIZER_FAILED",
+        "FIXTURE_ACCOUNT_BINDING_FAILED",
+        "FIXTURE_EVENT_FAILED",
+        "FIXTURE_TIER_SETUP_FAILED",
+        "FIXTURE_MODERATION_FAILED",
+        "FIXTURE_AUTH_FAILED",
+        "FIXTURE_DISCLOSURE_SAVE_FAILED",
+        "FIXTURE_POLICY_ACCEPTANCE_FAILED",
+        "FIXTURE_PUBLISH_FAILED",
+        "FIXTURE_ELIGIBILITY_FAILED",
+        "FIXTURE_CHECKOUT_PREFLIGHT_FAILED",
+        "FIXTURE_CERTIFICATION_FAILED",
         "FIXTURE_CLEANUP_UNSAFE",
         "FIXTURE_NOT_SELLABLE",
         "LIVE_MODE_FORBIDDEN",

@@ -102,15 +102,28 @@ database owner/operator inside a read-only transaction.
 - [ ] The real test-mode proof uses a distinct second checkout attempt for the
   decline/expiry path, creates no tickets for it, and leaves inventory reserved
   only for the paid order.
-- [ ] Proof teardown restores the captured checkout-creation switch, removes
-  all disposable database state and temporary function/secrets/materialization,
-  deactivates inline Prices/Products, and closes the disposable connected
-  account on both success and failure.
+- [ ] Proof teardown restores the captured checkout-creation switch, returns
+  the stable Whereto fixture to its inert audit tombstone, removes runtime
+  residue and temporary function/secrets/materialization, and deactivates
+  inline Prices/Products. Any pre-certification failure preserves the TEST
+  connected account. Retirement is authorized only after the canonical proof,
+  postflight cleanup, immutable-audit verification, and tombstone certification
+  all succeed.
 - [ ] Before any proof mutation, exactly one linked `ACTIVE_HEALTHY` project
   matches the expected reference and canonical URL, and its database policy
   environment is `development`.
-- [ ] Fixture Auth lookup scans every page, deletes only the exact known
-  identity, and proves both its Auth ID and fixture email absent.
+- [ ] Fixture Auth lookup scans every page, selects only the exact known
+  identity, and proves that retained identity is password-rotated and banned
+  while the audit-tombstone fixture is inert.
+- [ ] Fixture preflight distinguishes preparation, organizer, account binding,
+  event, tier setup, Auth, disclosure save, policy acceptance, moderation,
+  publish, public eligibility, and checkout-preflight failures with fixed
+  sanitized codes and no raw provider/database payload.
+- [ ] If stable-fixture recovery requires moderation, a service-only,
+  development-gated claim targets one exact event/revision/digest/version and
+  the existing result RPC records its immutable clearance before any owner
+  schedule revision. The fixture user
+  receives no staff role and cannot access the shared queue or another event.
 - [ ] Browser success/return state never creates tickets or marks an order paid.
 
 ## Logging safety gates
