@@ -83,7 +83,13 @@ case "$*" in
     [ "$FAKE_POLICY_QUERY_FAILURE" = 0 ] || exit 1
     printf '%s\\n' "$FAKE_POLICY_RESPONSE"
     ;;
-  *"db query"*"residual_fixture_candidate"*) printf '%s\\n' "$FAKE_RESIDUAL_FIXTURE_RESPONSE" ;;
+  *"db query"*"residual_fixture_candidate"*)
+    if [ "\${FAKE_RESIDUAL_QUERY_FAILURE:-0}" = 1 ]; then
+      printf '%s\\n' 'unsafe database detail' >&2
+      exit 1
+    fi
+    printf '%s\\n' "$FAKE_RESIDUAL_FIXTURE_RESPONSE"
+    ;;
   *"db query"*"stable_fixture_candidate"*) printf '%s\\n' "$FAKE_STABLE_FIXTURE_RESPONSE" ;;
   *"db query"*"task17_cleanup_receipts"*)
     if [ "$FAKE_DATABASE_CLEANUP_FAILURE" != 0 ]; then
@@ -176,6 +182,7 @@ fi
       FAKE_PROJECTS_RESPONSE: '[{"id":"abcdefghijklmnopqrst","linked":true,"status":"ACTIVE_HEALTHY"}]',
       FAKE_POLICY_QUERY_FAILURE: '0',
       FAKE_POLICY_RESPONSE: '{"rows":[{"policy_environment":"development"}]}',
+      FAKE_RESIDUAL_QUERY_FAILURE: '0',
       FAKE_STABLE_FIXTURE_RESPONSE: '{"rows":[]}',
       FAKE_RESIDUAL_FIXTURE_RESPONSE: '{"rows":[]}',
       FAKE_TOMBSTONE_AUDIT_RESPONSE: '{"rows":[{"namespace_prefix_count":1,"event_count":1,"organizer_count":1,"auth_user_inert":true,"audit_interval_count":3,"audit_action_count":3,"open_eligible_interval_count":0,"active_tier_count":0,"tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"refund_count":0,"staff_role_count":0,"public_projection_count":0,"event_tombstoned":true}]}',
@@ -238,8 +245,16 @@ describe('Task 17 managed proof runner', () => {
     expect(result.log).toContain('orders.quantity = 3')
     expect(result.log).toContain('orders.subtotal_minor = 5500')
     expect(result.log).toContain('orders.application_fee_amount_minor = 425')
+    expect(result.log).toContain("orders.status = 'expired'")
+    expect(result.log).toContain("orders.status <> 'expired'")
+    expect(result.log).toContain('orders.reservation_expires_at <= statement_timestamp()')
+    expect(result.log).toContain('orders.reservation_expires_at is null')
+    expect(result.log).toContain('orders.expired_at is not null')
+    expect(result.log).toContain('orders.expired_at is null')
     expect(result.log).toContain('count(*) from public.ticket_tiers')
     expect(result.log).toContain('count(*) from public.order_items')
+    expect(result.log.match(/tiers\.name = 'Task 17 General Admission'/g)?.length ?? 0).toBeGreaterThanOrEqual(3)
+    expect(result.log.match(/tiers\.name = 'Task 17 VIP'/g)?.length ?? 0).toBeGreaterThanOrEqual(3)
     expect(result.log).toContain("error_code = 'STRIPE_OBJECT_INVALID'")
     expect(result.log).toContain('fixture-prefix task17_oldfixture01')
     expect(result.log).toContain('cleanup-close-request false')
@@ -283,6 +298,7 @@ describe('Task 17 managed proof runner', () => {
     '{"rows":[{"residual_fixture_candidate":"task17_oldfixture01","residual_fixture_exact":false}]}',
     '{"rows":[{"residual_fixture_candidate":"task17_oldfixture01","residual_fixture_exact":true,"unexpected":true}]}',
     '{"rows":[{"residual_fixture_candidate":"task17_oldfixture01","residual_fixture_exact":true},{"residual_fixture_candidate":"task17_otherfix01","residual_fixture_exact":true}]}',
+    'unsafe database detail',
   ])('cleanup-only rejects every non-exact residual candidate set', async (response) => {
     const result = await runRunner(false, false, {
       TASK13_CLEANUP_ONLY: '1',
@@ -290,10 +306,28 @@ describe('Task 17 managed proof runner', () => {
     })
 
     expect(result.exitCode).not.toBe(0)
+    expect(result.stdout).toContain('Task 17 cleanup error kind: CLEANUP_RESIDUAL_ADMISSION_FAILED')
+    expect(result.stdout).not.toContain('unsafe database detail')
+    expect(result.stderr).not.toContain('unsafe database detail')
     expect(result.log).not.toContain('supabase secrets set --env-file')
     expect(result.log).not.toContain('functions deploy task17-transaction-driver')
     expect(result.log).not.toContain('curl ')
     expect(result.log).not.toContain('set checkout_creation_enabled = true')
+  })
+
+  it('cleanup-only reports a sanitized residual-query stage before deployment', async () => {
+    const result = await runRunner(false, false, {
+      TASK13_CLEANUP_ONLY: '1',
+      FAKE_RESIDUAL_QUERY_FAILURE: '1',
+    })
+
+    expect(result.exitCode).not.toBe(0)
+    expect(result.stdout).toContain('Task 17 cleanup error kind: CLEANUP_RESIDUAL_QUERY_FAILED')
+    expect(result.stdout).not.toContain('unsafe database detail')
+    expect(result.stderr).not.toContain('unsafe database detail')
+    expect(result.log).not.toContain('supabase secrets set --env-file')
+    expect(result.log).not.toContain('functions deploy task17-transaction-driver')
+    expect(result.log).not.toContain('curl ')
   })
 
   it.each([

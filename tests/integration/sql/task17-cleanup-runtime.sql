@@ -174,12 +174,12 @@ begin
       join task17_cleanup_fixture as fixture on fixture.event_id = tiers.event_id) <> 2
     or (select count(*) from public.ticket_tiers as tiers
       join task17_cleanup_fixture as fixture on fixture.event_id = tiers.event_id
-      where tiers.name = 'General Admission' and tiers.unit_amount_minor = 1500
+      where tiers.name = 'Task 17 General Admission' and tiers.unit_amount_minor = 1500
         and tiers.currency = 'usd' and tiers.quantity_total = 10
         and tiers.status = 'active' and tiers.sort_order = 1) <> 1
     or (select count(*) from public.ticket_tiers as tiers
       join task17_cleanup_fixture as fixture on fixture.event_id = tiers.event_id
-      where tiers.name = 'VIP' and tiers.unit_amount_minor = 2500
+      where tiers.name = 'Task 17 VIP' and tiers.unit_amount_minor = 2500
         and tiers.currency = 'usd' and tiers.quantity_total = 10
         and tiers.status = 'active' and tiers.sort_order = 2) <> 1
     or (select count(*) from public.organizer_stripe_accounts as accounts
@@ -196,7 +196,7 @@ begin
     or exists (
       select 1 from public.orders as orders
       join task17_cleanup_orders as cleanup_orders on cleanup_orders.id = orders.id
-      where orders.livemode <> false or orders.status <> 'checkout_open'
+      where orders.livemode <> false or orders.status <> 'expired'
         or orders.reconciliation_status <> 'pending' or orders.quantity <> 3
         or orders.currency <> 'usd' or orders.subtotal_minor <> 5500
         or orders.tax_amount_minor <> 0 or orders.total_minor <> 5500
@@ -211,21 +211,23 @@ begin
         or orders.stripe_customer_id is not null
         or orders.last_stripe_event_id is not null
         or orders.paid_at is not null or orders.failed_at is not null
-        or orders.expired_at is not null or orders.refunded_at is not null
+        or orders.expired_at is null or orders.refunded_at is not null
+        or orders.reservation_expires_at is null
+        or orders.reservation_expires_at > statement_timestamp()
     )
     or (select count(*) from public.order_items
       where order_id in (select id from task17_cleanup_orders)) <> 2
     or (select count(*) from public.order_items as items
       join public.ticket_tiers as tiers on tiers.id = items.ticket_tier_id
       where items.order_id in (select id from task17_cleanup_orders)
-        and tiers.name = 'General Admission' and items.tier_name = tiers.name
+        and tiers.name = 'Task 17 General Admission' and items.tier_name = tiers.name
         and items.tier_version = tiers.version and items.quantity = 2
         and items.unit_amount_minor = 1500 and items.subtotal_minor = 3000
         and items.currency = 'usd') <> 1
     or (select count(*) from public.order_items as items
       join public.ticket_tiers as tiers on tiers.id = items.ticket_tier_id
       where items.order_id in (select id from task17_cleanup_orders)
-        and tiers.name = 'VIP' and items.tier_name = tiers.name
+        and tiers.name = 'Task 17 VIP' and items.tier_name = tiers.name
         and items.tier_version = tiers.version and items.quantity = 1
         and items.unit_amount_minor = 2500 and items.subtotal_minor = 2500
         and items.currency = 'usd') <> 1

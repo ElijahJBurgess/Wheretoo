@@ -196,8 +196,8 @@ run_query setup "begin;
   insert into public.ticket_tiers (
     id, event_id, name, unit_amount_minor, currency, quantity_total, status, sort_order
   ) values
-    ('$ga_tier_id', '$event_id', 'General Admission', 1500, 'usd', 10, 'active', 1),
-    ('$vip_tier_id', '$event_id', 'VIP', 2500, 'usd', 10, 'active', 2);
+    ('$ga_tier_id', '$event_id', 'Task 17 General Admission', 1500, 'usd', 10, 'active', 1),
+    ('$vip_tier_id', '$event_id', 'Task 17 VIP', 2500, 'usd', 10, 'active', 2);
   insert into public.organizer_stripe_accounts (
     organizer_id, stripe_account_id, transfers_status, payouts_status,
     requirements_status, requirements_currently_due_count,
@@ -212,7 +212,9 @@ run_query setup "begin;
     'STRIPE_OBJECT_INVALID'
   );
   insert into public.orders (
-    id, order_number, event_id, organizer_id, status, buyer_name, buyer_email,
+    id, order_number, event_id, organizer_id, status,
+    checkout_expires_at, reservation_expires_at, expired_at, created_at,
+    buyer_name, buyer_email,
     client_request_id, confirmation_token_hash, quantity, currency,
     subtotal_minor, tax_amount_minor, total_minor, platform_product_fee_minor,
     stripe_fee_estimate_minor, application_fee_amount_minor,
@@ -221,7 +223,11 @@ run_query setup "begin;
     stripe_destination_account_id, stripe_checkout_integration_identifier,
     stripe_checkout_request_digest, reconciliation_status
   ) values (
-    '$order_id', 'WT-TASK13-$run_id', '$event_id', '$owner_id', 'checkout_open',
+    '$order_id', 'WT-TASK13-$run_id', '$event_id', '$owner_id', 'expired',
+    statement_timestamp() - interval '90 minutes',
+    statement_timestamp() - interval '85 minutes',
+    statement_timestamp() - interval '80 minutes',
+    statement_timestamp() - interval '2 hours',
     'Cleanup Buyer', 'cleanup-$run_id@example.invalid',
     '$client_request_id', repeat('b', 64),
     3, 'usd', 5500, 0, 5500, 425, 0, 425, 5075,
@@ -233,12 +239,15 @@ run_query setup "begin;
     id, order_id, ticket_tier_id, tier_version, tier_name,
     unit_amount_minor, quantity, subtotal_minor, currency
   ) values
-    ('$ga_item_id', '$order_id', '$ga_tier_id', 1, 'General Admission', 1500, 2, 3000, 'usd'),
-    ('$vip_item_id', '$order_id', '$vip_tier_id', 1, 'VIP', 2500, 1, 2500, 'usd');
+    ('$ga_item_id', '$order_id', '$ga_tier_id', 1, 'Task 17 General Admission', 1500, 2, 3000, 'usd'),
+    ('$vip_item_id', '$order_id', '$vip_tier_id', 1, 'Task 17 VIP', 2500, 1, 2500, 'usd');
   commit;"
 
 run_query exact_baseline "do \$assert\$ begin
   if (select count(*) from public.orders where id = '$order_id'::uuid) <> 1
+    or (select count(*) from public.orders where id = '$order_id'::uuid
+      and status = 'expired' and expired_at is not null
+      and reservation_expires_at <= statement_timestamp()) <> 1
     or (select count(*) from public.stripe_webhook_events where stripe_object_id = '$session_id') <> 1 then
     raise exception using errcode = 'P0001', message = 'ASSERT_TASK13_BASELINE_INVALID';
   end if;

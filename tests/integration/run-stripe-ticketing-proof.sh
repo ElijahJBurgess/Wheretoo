@@ -586,7 +586,8 @@ if [ "$TASK13_CLEANUP_ONLY" -eq 1 ]; then
     exit 1
   }
   residual_fixture_file="$TEMP_DIR/residual-fixture.json"
-  pnpm exec supabase db query --linked --output-format json "with fixture_namespace as (
+  residual_fixture_query_log="$TEMP_DIR/residual-fixture-query.log"
+  if pnpm exec supabase db query --linked --output-format json "with fixture_namespace as (
       select organizers.display_name as prefix
       from public.organizers as organizers
       where organizers.display_name ~ '^task17_[a-z0-9]{12}$'
@@ -626,7 +627,7 @@ if [ "$TASK13_CLEANUP_ONLY" -eq 1 ]; then
         and events.publicly_authorized_action_id is null
       join public.orders as orders
         on orders.event_id = events.id and orders.organizer_id = organizers.id
-        and orders.livemode = false and orders.status = 'checkout_open'
+        and orders.livemode = false and orders.status = 'expired'
         and orders.reconciliation_status = 'pending'
         and orders.quantity = 3 and orders.currency = 'usd'
         and orders.subtotal_minor = 5500 and orders.tax_amount_minor = 0
@@ -641,7 +642,8 @@ if [ "$TASK13_CLEANUP_ONLY" -eq 1 ]; then
         and orders.stripe_customer_id is null
         and orders.last_stripe_event_id is null
         and orders.paid_at is null and orders.failed_at is null
-        and orders.expired_at is null and orders.refunded_at is null
+        and orders.expired_at is not null and orders.refunded_at is null
+        and orders.reservation_expires_at <= statement_timestamp()
     ), exact_candidate as (
       select candidate.prefix,
         (select count(*) from fixture_namespace) = 1
@@ -658,14 +660,14 @@ if [ "$TASK13_CLEANUP_ONLY" -eq 1 ]; then
         and not exists (select 1 from private.event_reports where event_id = candidate.event_id)
         and not exists (select 1 from private.moderation_review_requests where event_id = candidate.event_id)
         and (select count(*) from public.ticket_tiers where event_id = candidate.event_id) = 2
-        and (select count(*) from public.ticket_tiers where event_id = candidate.event_id and name = 'General Admission' and unit_amount_minor = 1500 and currency = 'usd' and quantity_total = 10 and status = 'active' and sort_order = 1) = 1
-        and (select count(*) from public.ticket_tiers where event_id = candidate.event_id and name = 'VIP' and unit_amount_minor = 2500 and currency = 'usd' and quantity_total = 10 and status = 'active' and sort_order = 2) = 1
+        and (select count(*) from public.ticket_tiers where event_id = candidate.event_id and name = 'Task 17 General Admission' and unit_amount_minor = 1500 and currency = 'usd' and quantity_total = 10 and status = 'active' and sort_order = 1) = 1
+        and (select count(*) from public.ticket_tiers where event_id = candidate.event_id and name = 'Task 17 VIP' and unit_amount_minor = 2500 and currency = 'usd' and quantity_total = 10 and status = 'active' and sort_order = 2) = 1
         and (select count(*) from public.organizer_stripe_accounts where organizer_id = candidate.organizer_id and livemode = false and stripe_account_id = '$TEST_CONNECTED_ACCOUNT_ID' and transfers_status = 'active' and payouts_status = 'active' and requirements_status = 'clear') = 1
         and (select count(*) from public.organizer_stripe_accounts where organizer_id = candidate.organizer_id) = 1
         and (select count(*) from public.orders where event_id = candidate.event_id) = 1
         and (select count(*) from public.order_items where order_id = candidate.order_id) = 2
-        and (select count(*) from public.order_items as items join public.ticket_tiers as tiers on tiers.id = items.ticket_tier_id where items.order_id = candidate.order_id and tiers.name = 'General Admission' and items.tier_name = tiers.name and items.tier_version = tiers.version and items.quantity = 2 and items.unit_amount_minor = 1500 and items.subtotal_minor = 3000 and items.currency = 'usd') = 1
-        and (select count(*) from public.order_items as items join public.ticket_tiers as tiers on tiers.id = items.ticket_tier_id where items.order_id = candidate.order_id and tiers.name = 'VIP' and items.tier_name = tiers.name and items.tier_version = tiers.version and items.quantity = 1 and items.unit_amount_minor = 2500 and items.subtotal_minor = 2500 and items.currency = 'usd') = 1
+        and (select count(*) from public.order_items as items join public.ticket_tiers as tiers on tiers.id = items.ticket_tier_id where items.order_id = candidate.order_id and tiers.name = 'Task 17 General Admission' and items.tier_name = tiers.name and items.tier_version = tiers.version and items.quantity = 2 and items.unit_amount_minor = 1500 and items.subtotal_minor = 3000 and items.currency = 'usd') = 1
+        and (select count(*) from public.order_items as items join public.ticket_tiers as tiers on tiers.id = items.ticket_tier_id where items.order_id = candidate.order_id and tiers.name = 'Task 17 VIP' and items.tier_name = tiers.name and items.tier_version = tiers.version and items.quantity = 1 and items.unit_amount_minor = 2500 and items.subtotal_minor = 2500 and items.currency = 'usd') = 1
         and not exists (select 1 from public.tickets where order_id = candidate.order_id)
         and not exists (select 1 from public.refunds where order_id = candidate.order_id)
         and not exists (select 1 from public.disputes where order_id = candidate.order_id)
@@ -675,9 +677,15 @@ if [ "$TASK13_CLEANUP_ONLY" -eq 1 ]; then
       from candidate
     )
     select prefix as residual_fixture_candidate, residual_fixture_exact
-    from exact_candidate order by prefix;" > "$residual_fixture_file"
-  chmod 600 "$residual_fixture_file"
-  TEST_STRIPE_FIXTURE_PREFIX=$(RESIDUAL_FIXTURE_FILE="$residual_fixture_file" node --input-type=module <<'NODE'
+    from exact_candidate order by prefix;" > "$residual_fixture_file" 2> "$residual_fixture_query_log"; then
+    chmod 600 "$residual_fixture_file" "$residual_fixture_query_log"
+  else
+    chmod 600 "$residual_fixture_file" "$residual_fixture_query_log" 2>/dev/null || true
+    printf '%s\n' 'Task 17 cleanup error kind: CLEANUP_RESIDUAL_QUERY_FAILED'
+    exit 1
+  fi
+  residual_fixture_parse_log="$TEMP_DIR/residual-fixture-parse.log"
+  if ! TEST_STRIPE_FIXTURE_PREFIX=$(RESIDUAL_FIXTURE_FILE="$residual_fixture_file" node --input-type=module 2> "$residual_fixture_parse_log" <<'NODE'
 import fs from 'node:fs'
 const payload = JSON.parse(fs.readFileSync(process.env.RESIDUAL_FIXTURE_FILE, 'utf8'))
 const rows = Array.isArray(payload.rows)
@@ -693,7 +701,12 @@ if (!exactKeys || row.residual_fixture_exact !== true ||
   !/^task17_[a-z0-9]{12}$/.test(row.residual_fixture_candidate)) process.exit(1)
 process.stdout.write(row.residual_fixture_candidate)
 NODE
-  )
+  ); then
+    chmod 600 "$residual_fixture_parse_log" 2>/dev/null || true
+    printf '%s\n' 'Task 17 cleanup error kind: CLEANUP_RESIDUAL_ADMISSION_FAILED'
+    exit 1
+  fi
+  chmod 600 "$residual_fixture_parse_log"
 else
   stable_fixture_file="$TEMP_DIR/stable-fixture.json"
   pnpm exec supabase db query --linked --output-format json "with fixture_namespace as (
