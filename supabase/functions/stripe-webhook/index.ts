@@ -113,7 +113,10 @@ export interface CheckoutReconciliationReviewSnapshot {
   stripeEventId: string;
   orderId: string;
   checkoutSessionId: string;
-  failureCode: CheckoutReconciliationCode | "PAYMENT_OBJECT_ALREADY_USED";
+  failureCode:
+    | CheckoutReconciliationCode
+    | "PAYMENT_OBJECT_ALREADY_USED"
+    | "PAYMENT_SNAPSHOT_MISMATCH";
 }
 
 export interface PaymentSnapshot {
@@ -1115,6 +1118,58 @@ function validateCheckoutLines(
   ) checkoutMismatch("CHECKOUT_AGGREGATE_MISMATCH");
 }
 
+async function markCheckoutReview(
+  event: NormalizedEvent,
+  order: OrderSnapshot,
+  failureCode:
+    | CheckoutReconciliationCode
+    | "PAYMENT_OBJECT_ALREADY_USED"
+    | "PAYMENT_SNAPSHOT_MISMATCH",
+  dependencies: StripeWebhookDependencies,
+): Promise<void> {
+  await dependencies.markCheckoutReconciliationReview({
+    stripeEventId: event.id,
+    orderId: order.orderId,
+    checkoutSessionId: order.checkoutSessionId,
+    failureCode,
+  });
+  emitOperationalEvent({
+    contractVersion: "checkout_integrity_v1",
+    operation: "webhook.reconciliation",
+    outcome: "mismatch",
+    orderId: order.orderId,
+    stripeEventId: event.id,
+    providerObjectId: order.checkoutSessionId,
+    itemCount: order.items.length,
+    aggregateQuantity: order.items.reduce(
+      (sum, item) => sum + item.quantity,
+      0,
+    ),
+    currency: order.currency,
+    subtotalMinor: order.subtotalMinor,
+    totalMinor: order.totalMinor,
+    errorCode: failureCode,
+  }, dependencies.operationalSink);
+}
+
+async function reviewKnownCheckoutValidationFailure(
+  error: unknown,
+  event: NormalizedEvent,
+  order: OrderSnapshot,
+  dependencies: StripeWebhookDependencies,
+): Promise<boolean> {
+  const failureCode = error instanceof CheckoutReconciliationError
+    ? error.checkoutCode
+    : error instanceof PermanentWebhookError &&
+        error.code === "PAYMENT_SNAPSHOT_MISMATCH" &&
+        event.type === "checkout.session.completed"
+    ? "PAYMENT_SNAPSHOT_MISMATCH"
+    : null;
+  if (failureCode === null) return false;
+  await markCheckoutReview(event, order, failureCode, dependencies);
+  return true;
+}
+
 async function currentSessionSnapshot(
   event: NormalizedEvent,
   dependencies: StripeWebhookDependencies,
@@ -1141,51 +1196,41 @@ async function currentSessionSnapshot(
       "payment_intent.latest_charge",
     ],
   });
-  if (
-    !isRecord(value) || value.object !== "checkout.session" ||
-    value.id !== sessionId || value.livemode !== false ||
-    value.mode !== "payment" ||
-    (value.payment_status !== "paid" && value.payment_status !== "unpaid")
-  ) permanent("PAYMENT_SNAPSHOT_MISMATCH");
+  if (!isRecord(value) || value.id !== sessionId) {
+    permanent("PAYMENT_SNAPSHOT_MISMATCH");
+  }
   const orderId = metadataOrderId(value.metadata);
   const order = await dependencies.getOrderSnapshot(orderId, sessionId);
   if (order === null) permanent("PAYMENT_SNAPSHOT_MISMATCH");
-  validateMetadata(value.metadata, order);
-  if (value.client_reference_id !== order.orderId) {
-    permanent("PAYMENT_SNAPSHOT_MISMATCH");
-  }
+  let paymentIntent: {
+    id: string;
+    status: string;
+    charge: Record<string, unknown> | null;
+  } | null = null;
   try {
+    if (
+      value.object !== "checkout.session" || value.livemode !== false ||
+      value.mode !== "payment" ||
+      (value.payment_status !== "paid" && value.payment_status !== "unpaid")
+    ) permanent("PAYMENT_SNAPSHOT_MISMATCH");
+    validateMetadata(value.metadata, order);
+    if (value.client_reference_id !== order.orderId) {
+      permanent("PAYMENT_SNAPSHOT_MISMATCH");
+    }
     validateCheckoutLines(value, order);
+    if (value.payment_intent !== null && value.payment_intent !== undefined) {
+      paymentIntent = validatePaymentIntent(value.payment_intent, order);
+    }
   } catch (error) {
-    if (!(error instanceof CheckoutReconciliationError)) throw error;
-    await dependencies.markCheckoutReconciliationReview({
-      stripeEventId: event.id,
-      orderId: order.orderId,
-      checkoutSessionId: sessionId,
-      failureCode: error.checkoutCode,
-    });
-    emitOperationalEvent({
-      contractVersion: "checkout_integrity_v1",
-      operation: "webhook.reconciliation",
-      outcome: "mismatch",
-      orderId: order.orderId,
-      stripeEventId: event.id,
-      providerObjectId: sessionId,
-      itemCount: order.items.length,
-      aggregateQuantity: order.items.reduce(
-        (sum, item) => sum + item.quantity,
-        0,
-      ),
-      currency: order.currency,
-      subtotalMinor: order.subtotalMinor,
-      totalMinor: order.totalMinor,
-      errorCode: error.checkoutCode,
-    }, dependencies.operationalSink);
-    return null;
-  }
-  let paymentIntent = null;
-  if (value.payment_intent !== null && value.payment_intent !== undefined) {
-    paymentIntent = validatePaymentIntent(value.payment_intent, order);
+    if (
+      await reviewKnownCheckoutValidationFailure(
+        error,
+        event,
+        order,
+        dependencies,
+      )
+    ) return null;
+    throw error;
   }
   return {
     payment: {
@@ -1214,16 +1259,27 @@ async function dispatchCheckout(
   const current = await currentSessionSnapshot(event, dependencies);
   if (current === null) return;
   if (event.type === "checkout.session.completed") {
-    if (current.raw.status !== "complete") {
-      permanent("PAYMENT_SNAPSHOT_MISMATCH");
-    }
-    if (current.payment.paymentStatus === "unpaid") {
-      if (
-        current.paymentIntent === null ||
-        current.paymentIntent.status !== "processing"
-      ) {
+    try {
+      if (current.raw.status !== "complete") {
         permanent("PAYMENT_SNAPSHOT_MISMATCH");
       }
+      if (
+        current.payment.paymentStatus === "unpaid" &&
+        (current.paymentIntent === null ||
+          current.paymentIntent.status !== "processing")
+      ) permanent("PAYMENT_SNAPSHOT_MISMATCH");
+    } catch (error) {
+      if (
+        await reviewKnownCheckoutValidationFailure(
+          error,
+          event,
+          current.order,
+          dependencies,
+        )
+      ) return;
+      throw error;
+    }
+    if (current.payment.paymentStatus === "unpaid") {
       await dependencies.markPaymentProcessing(current.payment);
       emitOperationalEvent({
         contractVersion: "checkout_integrity_v1",
@@ -1275,17 +1331,32 @@ async function dispatchCheckout(
     }, dependencies.operationalSink);
     return;
   }
-  if (current.paymentIntent === null || current.paymentIntent.charge === null) {
-    permanent("PAYMENT_SNAPSHOT_MISMATCH");
+  let charge: ReturnType<typeof validateCharge>;
+  try {
+    if (
+      current.paymentIntent === null || current.paymentIntent.charge === null
+    ) {
+      permanent("PAYMENT_SNAPSHOT_MISMATCH");
+    }
+    if (current.paymentIntent.status !== "succeeded") {
+      permanent("PAYMENT_SNAPSHOT_MISMATCH");
+    }
+    charge = validateCharge(
+      current.paymentIntent.charge,
+      current.order,
+      current.paymentIntent.id,
+    );
+  } catch (error) {
+    if (
+      await reviewKnownCheckoutValidationFailure(
+        error,
+        event,
+        current.order,
+        dependencies,
+      )
+    ) return;
+    throw error;
   }
-  if (current.paymentIntent.status !== "succeeded") {
-    permanent("PAYMENT_SNAPSHOT_MISMATCH");
-  }
-  const charge = validateCharge(
-    current.paymentIntent.charge,
-    current.order,
-    current.paymentIntent.id,
-  );
   if (charge.amountRefunded > 0 || charge.refunded || charge.disputed) {
     await dependencies.markPaymentRequiresReview({
       ...current.payment,
@@ -1358,21 +1429,12 @@ async function dispatchCheckout(
       ? error.message
       : null;
     if (code !== "PAYMENT_OBJECT_ALREADY_USED") throw error;
-    await dependencies.markCheckoutReconciliationReview({
-      stripeEventId: event.id,
-      orderId: current.order.orderId,
-      checkoutSessionId: current.order.checkoutSessionId,
-      failureCode: "PAYMENT_OBJECT_ALREADY_USED",
-    });
-    emitOperationalEvent({
-      contractVersion: "checkout_integrity_v1",
-      operation: "webhook.reconciliation",
-      outcome: "mismatch",
-      orderId: current.order.orderId,
-      stripeEventId: event.id,
-      providerObjectId: current.order.checkoutSessionId,
-      errorCode: "PAYMENT_OBJECT_ALREADY_USED",
-    }, dependencies.operationalSink);
+    await markCheckoutReview(
+      event,
+      current.order,
+      "PAYMENT_OBJECT_ALREADY_USED",
+      dependencies,
+    );
   }
 }
 

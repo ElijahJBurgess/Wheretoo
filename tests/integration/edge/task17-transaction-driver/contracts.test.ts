@@ -787,6 +787,247 @@ Deno.test("fixture stage failures sanitize thrown client errors to fixed diagnos
   }
 });
 
+Deno.test("cleanup stage failures sanitize provider errors to the exact fixed stage", async () => {
+  const runCleanupStage = Reflect.get(contracts, "runCleanupStage");
+  assertEquals(typeof runCleanupStage, "function");
+  if (typeof runCleanupStage !== "function") return;
+
+  for (
+    const kind of [
+      "CLEANUP_SESSION_RETRIEVE_FAILED",
+      "CLEANUP_SESSION_EXPIRE_FAILED",
+      "CLEANUP_CATALOG_DISCOVERY_FAILED",
+      "CLEANUP_PRICE_ARCHIVE_FAILED",
+      "CLEANUP_PRODUCT_ARCHIVE_FAILED",
+    ] as const
+  ) {
+    await assertRejects(
+      () =>
+        runCleanupStage(kind, async () => {
+          throw new Error("raw provider response must not escape");
+        }),
+      Error,
+      kind,
+    );
+  }
+});
+
+Deno.test("cleanup archives every Price before any Product and resumes a partial Price pass", async () => {
+  const archiveCatalog = Reflect.get(contracts, "archiveCleanupCatalog");
+  assertEquals(typeof archiveCatalog, "function");
+  if (typeof archiveCatalog !== "function") return;
+
+  const activePrices = new Set(["price_one", "price_two"]);
+  const activeProducts = new Set(["prod_one", "prod_two"]);
+  const calls: string[] = [];
+  let failSecondPrice = true;
+  const dependencies = {
+    updatePrice: async (id: string, update: { active: false }) => {
+      calls.push(`price:${id}:${update.active}`);
+      if (id === "price_two" && failSecondPrice) {
+        failSecondPrice = false;
+        throw new Error("provider detail");
+      }
+      activePrices.delete(id);
+      return { active: false, livemode: false };
+    },
+    updateProduct: async (id: string, update: { active: false }) => {
+      calls.push(`product:${id}:${update.active}`);
+      activeProducts.delete(id);
+      return { active: false, livemode: false };
+    },
+    assertPriceArchived: (value: { active: boolean; livemode: boolean }) => {
+      if (value.active || value.livemode) throw new Error("invalid Price");
+    },
+    assertProductArchived: (value: { active: boolean; livemode: boolean }) => {
+      if (value.active || value.livemode) throw new Error("invalid Product");
+    },
+  };
+
+  await assertRejects(
+    () =>
+      archiveCatalog(
+        ["price_one", "price_two"],
+        ["prod_one", "prod_two"],
+        dependencies,
+      ),
+    Error,
+    "CLEANUP_PRICE_ARCHIVE_FAILED",
+  );
+  assertEquals(calls, ["price:price_one:false", "price:price_two:false"]);
+  assertEquals(activeProducts.size, 2);
+
+  await archiveCatalog(
+    ["price_one", "price_two"],
+    ["prod_one", "prod_two"],
+    dependencies,
+  );
+  assertEquals(calls, [
+    "price:price_one:false",
+    "price:price_two:false",
+    "price:price_one:false",
+    "price:price_two:false",
+    "product:prod_one:false",
+    "product:prod_two:false",
+  ]);
+  assertEquals(activePrices.size, 0);
+  assertEquals(activeProducts.size, 0);
+});
+
+Deno.test("cleanup resumes a partial Product pass without skipping the Price barrier", async () => {
+  const archiveCatalog = Reflect.get(contracts, "archiveCleanupCatalog");
+  assertEquals(typeof archiveCatalog, "function");
+  if (typeof archiveCatalog !== "function") return;
+
+  const calls: string[] = [];
+  let failSecondProduct = true;
+  const dependencies = {
+    updatePrice: async (id: string, update: { active: false }) => {
+      calls.push(`price:${id}:${update.active}`);
+      return { active: false };
+    },
+    updateProduct: async (id: string, update: { active: false }) => {
+      calls.push(`product:${id}:${update.active}`);
+      if (id === "prod_two" && failSecondProduct) {
+        failSecondProduct = false;
+        throw new Error("provider detail");
+      }
+      return { active: false };
+    },
+    assertPriceArchived: (value: { active: boolean }) => {
+      if (value.active) throw new Error("invalid Price");
+    },
+    assertProductArchived: (value: { active: boolean }) => {
+      if (value.active) throw new Error("invalid Product");
+    },
+  };
+
+  await assertRejects(
+    () => archiveCatalog(["price_one"], ["prod_one", "prod_two"], dependencies),
+    Error,
+    "CLEANUP_PRODUCT_ARCHIVE_FAILED",
+  );
+  await archiveCatalog(["price_one"], ["prod_one", "prod_two"], dependencies);
+
+  assertEquals(calls, [
+    "price:price_one:false",
+    "product:prod_one:false",
+    "product:prod_two:false",
+    "price:price_one:false",
+    "product:prod_one:false",
+    "product:prod_two:false",
+  ]);
+});
+
+Deno.test("cleanup preparation accepts only the bounded residual or canonical runtime shape", () => {
+  const preparedIsSafe = Reflect.get(contracts, "cleanupPreparedStateIsSafe");
+  assertEquals(typeof preparedIsSafe, "function");
+  if (typeof preparedIsSafe !== "function") return;
+
+  const residual = {
+    stable_fixture: true,
+    fixture_reusable: true,
+    event_count: 1,
+    organizer_count: 1,
+    auth_user_inert: true,
+    event_sellable: false,
+    public_projection_count: 0,
+    active_tier_count: 2,
+    connect_count: 1,
+    order_count: 1,
+    item_count: 2,
+    ticket_count: 0,
+    receipt_count: 1,
+    refund_count: 0,
+    dispute_count: 0,
+  };
+  const canonical = {
+    ...residual,
+    order_count: 2,
+    item_count: 4,
+    ticket_count: 3,
+    refund_count: 1,
+    receipt_count: 6,
+  };
+
+  assertEquals(preparedIsSafe(residual), true);
+  assertEquals(preparedIsSafe(canonical), true);
+  for (
+    const unsafe of [
+      { ...residual, event_sellable: true },
+      { ...residual, auth_user_inert: false },
+      { ...residual, order_count: 2 },
+      { ...canonical, dispute_count: 1 },
+      { ...canonical, receipt_count: 0 },
+      { ...canonical, item_count: 3 },
+    ]
+  ) {
+    assertEquals(preparedIsSafe(unsafe), false);
+  }
+});
+
+Deno.test("normal cleanup can prepare bounded partial setup state without widening cleanup-only admission", () => {
+  const runtimeIsSafe = Reflect.get(contracts, "cleanupRuntimeStateIsSafe");
+  assertEquals(typeof runtimeIsSafe, "function");
+  if (typeof runtimeIsSafe !== "function") return;
+
+  const partial = {
+    stable_fixture: true,
+    fixture_reusable: true,
+    event_count: 1,
+    organizer_count: 1,
+    auth_user_inert: true,
+    event_sellable: false,
+    public_projection_count: 0,
+    active_tier_count: 1,
+    connect_count: 1,
+    order_count: 0,
+    item_count: 0,
+    ticket_count: 0,
+    receipt_count: 0,
+    refund_count: 0,
+    dispute_count: 0,
+  };
+  assertEquals(runtimeIsSafe(partial), true);
+  assertEquals(runtimeIsSafe({ ...partial, active_tier_count: 3 }), false);
+  assertEquals(runtimeIsSafe({ ...partial, order_count: 3 }), false);
+  assertEquals(runtimeIsSafe({ ...partial, dispute_count: 1 }), false);
+});
+
+Deno.test("cleanup authenticates the fixture owner only when retirement is still required", async () => {
+  const retireFixture = Reflect.get(
+    contracts,
+    "retireSellableFixtureWithLazyOwner",
+  );
+  assertEquals(typeof retireFixture, "function");
+  if (typeof retireFixture !== "function") return;
+
+  const alreadyRetiredCalls: string[] = [];
+  await retireFixture(true, {
+    authenticateOwner: async () => {
+      alreadyRetiredCalls.push("auth");
+      return "owner";
+    },
+    retireRevision: async () => alreadyRetiredCalls.push("revision"),
+    verifyUnsellable: async () => alreadyRetiredCalls.push("unsellable"),
+  });
+  assertEquals(alreadyRetiredCalls, ["unsellable"]);
+
+  const activeCalls: string[] = [];
+  await retireFixture(false, {
+    authenticateOwner: async () => {
+      activeCalls.push("auth");
+      return "owner";
+    },
+    retireRevision: async (owner: string) => {
+      assertEquals(owner, "owner");
+      activeCalls.push("revision");
+    },
+    verifyUnsellable: async () => activeCalls.push("unsellable"),
+  });
+  assertEquals(activeCalls, ["auth", "revision", "unsellable"]);
+});
+
 Deno.test("fixture Connect upsert targets the real composite primary key", () => {
   assertEquals(
     Reflect.get(contracts, "CONNECT_ACCOUNT_CONFLICT_TARGET"),

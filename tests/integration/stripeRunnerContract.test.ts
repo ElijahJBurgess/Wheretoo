@@ -61,7 +61,9 @@ case "$*" in
     [ "$FAKE_POLICY_QUERY_FAILURE" = 0 ] || exit 1
     printf '%s\\n' "$FAKE_POLICY_RESPONSE"
     ;;
+  *"db query"*"residual_fixture_candidate"*) printf '%s\\n' "$FAKE_RESIDUAL_FIXTURE_RESPONSE" ;;
   *"db query"*"stable_fixture_candidate"*) printf '%s\\n' "$FAKE_STABLE_FIXTURE_RESPONSE" ;;
+  *"db query"*"task17_cleanup_receipts"*) [ "$FAKE_DATABASE_CLEANUP_FAILURE" = 0 ] || exit 1 ;;
   *"db query"*"event_public_eligibility_intervals"*) printf '%s\\n' "$FAKE_TOMBSTONE_AUDIT_RESPONSE" ;;
   *"db query"*"with restored as"*) printf '%s\\n' '{"rows":[{"restored":true}]}' ;;
   *"db query"*"with enabled as"*) printf '%s\\n' '{"rows":[{"enabled":true}]}' ;;
@@ -76,6 +78,7 @@ case "$*" in
       if [ "$previous" = '--env-file' ]; then
         mode=$(stat -f '%Lp' "$argument")
         printf 'secret-file-mode %s\\n' "$mode" >> "$FAKE_COMMAND_LOG"
+        sed -n 's/^TASK17_FIXTURE_PREFIX=/fixture-prefix /p' "$argument" >> "$FAKE_COMMAND_LOG"
         if grep -q '^TASK17_CLOSE_CONNECTED_ACCOUNT=true$' "$argument"; then
           printf '%s\\n' 'retirement-authorization true' >> "$FAKE_COMMAND_LOG"
         fi
@@ -125,6 +128,7 @@ else
     printf '%s\\n' 'cleanup-close-request false' >> "$FAKE_COMMAND_LOG"
   fi
   printf '%s\\n' "$FAKE_CLEANUP_RESPONSE"
+  [ "$FAKE_CLEANUP_FAILURE" = 0 ]
 fi
 `
   await writeFile(path.join(root, 'fake-bin/pnpm'), fakePnpm)
@@ -146,11 +150,14 @@ fi
       FAKE_POLICY_QUERY_FAILURE: '0',
       FAKE_POLICY_RESPONSE: '{"rows":[{"policy_environment":"development"}]}',
       FAKE_STABLE_FIXTURE_RESPONSE: '{"rows":[]}',
+      FAKE_RESIDUAL_FIXTURE_RESPONSE: '{"rows":[]}',
       FAKE_TOMBSTONE_AUDIT_RESPONSE: '{"rows":[{"namespace_prefix_count":1,"event_count":1,"organizer_count":1,"auth_user_inert":true,"audit_interval_count":3,"audit_action_count":3,"open_eligible_interval_count":0,"active_tier_count":0,"tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"refund_count":0,"staff_role_count":0,"public_projection_count":0,"event_tombstoned":true}]}',
       FAKE_DIAGNOSTIC_RESPONSE: '{"ok":true,"restricted_key_authenticated":true,"webhook_signature_verified":true,"livemode":false,"connected_account_matches":true,"transfers_status":"active","payouts_status":"active","requirements_status":"clear"}',
       FAKE_CHECKOUT_DIAGNOSTIC_RESPONSE: '{"ok":true,"candidate_count":1,"session_contract":{"session_object_valid":true,"test_mode":true,"payment_mode":true,"currency_usd":true,"subtotal_exact":true,"total_exact":true,"payment_status_unpaid":true,"fixture_buyer_bound":true,"client_reference_bound":true,"metadata_bound":true,"integration_identifier_bound":true,"automatic_tax_disabled":true,"line_items_complete":true,"line_count_exact":true,"admission_count_exact":true,"line_amounts_exact":true,"line_bindings_unique":true,"payment_intent_present":false,"payment_intent_expanded":false,"payment_intent_test_mode":false,"payment_intent_amount_exact":false,"application_fee_exact":false,"destination_bound":false,"payment_intent_metadata_bound":false,"failure_cleanup_expired":true}}',
       FAKE_FIXTURE_PREFLIGHT_RESPONSE: '{"ok":true,"fixture_purchasable":true,"cleanup_strategy":"audit_tombstone","stable_fixture":true}',
       FAKE_CLEANUP_RESPONSE: '{"ok":true,"stable_fixture":true,"fixture_reusable":true,"event_count":1,"organizer_count":1,"auth_user_inert":true,"event_sellable":false,"public_projection_count":0,"active_tier_count":0,"connect_count":0,"order_count":0,"item_count":0,"ticket_count":0,"receipt_count":0,"refund_count":0,"dispute_count":0,"connected_account_closed":false,"connected_account_preserved":true}',
+      FAKE_CLEANUP_FAILURE: '0',
+      FAKE_DATABASE_CLEANUP_FAILURE: '0',
       FAKE_RETIREMENT_RESPONSE: '{"ok":true,"connected_account_closed":true,"connected_account_preserved":false}',
       TEST_SUPABASE_URL: 'https://abcdefghijklmnopqrst.supabase.co',
       TEST_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_contract',
@@ -187,6 +194,173 @@ fi
 }
 
 describe('Task 17 managed proof runner', () => {
+  const exactResidual = '{"rows":[{"residual_fixture_candidate":"task17_oldfixture01","residual_fixture_exact":true}]}'
+  const exactResidualCleanup = '{"ok":true,"stable_fixture":true,"fixture_reusable":true,"event_count":1,"organizer_count":1,"auth_user_inert":true,"event_sellable":false,"public_projection_count":0,"active_tier_count":2,"tier_count":2,"connect_count":1,"order_count":1,"item_count":2,"ticket_count":0,"receipt_count":1,"refund_count":0,"dispute_count":0,"database_cleanup_required":true,"connected_account_closed":false,"connected_account_preserved":true}'
+
+  it('cleanup-only accepts the exact inert residual and invokes only cleanup before audit teardown', async () => {
+    const result = await runRunner(false, false, {
+      TASK13_CLEANUP_ONLY: '1',
+      FAKE_RESIDUAL_FIXTURE_RESPONSE: exactResidual,
+      FAKE_CLEANUP_RESPONSE: exactResidualCleanup,
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.log).toContain('residual_fixture_candidate')
+    expect(result.log).toContain('owner.banned_until > statement_timestamp()')
+    expect(result.log).toContain('not exists (select 1 from public.get_public_event')
+    expect(result.log).toContain('orders.quantity = 3')
+    expect(result.log).toContain('orders.subtotal_minor = 5500')
+    expect(result.log).toContain('orders.application_fee_amount_minor = 425')
+    expect(result.log).toContain('count(*) from public.ticket_tiers')
+    expect(result.log).toContain('count(*) from public.order_items')
+    expect(result.log).toContain("error_code = 'STRIPE_OBJECT_INVALID'")
+    expect(result.log).toContain('fixture-prefix task17_oldfixture01')
+    expect(result.log).toContain('cleanup-close-request false')
+    expect(result.log).toContain('task17_cleanup_receipts')
+    expect(result.log).toContain('event_public_eligibility_intervals')
+    expect(result.log.indexOf('cleanup-close-request false')).toBeLessThan(
+      result.log.lastIndexOf('event_public_eligibility_intervals'),
+    )
+    expect(result.log).not.toContain('curl-action account_diagnostic')
+    expect(result.log).not.toContain('curl-action checkout_diagnostic')
+    expect(result.log).not.toContain('curl-action fixture_preflight')
+    expect(result.log).not.toContain('set checkout_creation_enabled = true')
+    expect(result.log).not.toContain('vitest run')
+    expect(result.log).not.toContain('retirement-authorization true')
+    expect(result.log).not.toContain('curl-action retire_connected_account')
+    expect(result.log.match(/select checkout_creation_enabled as enabled/g)).toHaveLength(2)
+    expect(result.log).toContain('supabase functions delete task17-transaction-driver')
+    expect(result.log).toContain(
+      'supabase secrets unset TASK17_PROOF_TOKEN TASK17_FIXTURE_PREFIX TASK17_CONNECTED_ACCOUNT_ID TASK17_CLOSE_CONNECTED_ACCOUNT',
+    )
+    expect(result.materializedExists).toBe(false)
+    expect(result.materializedContractsExist).toBe(false)
+  })
+
+  it('cleanup-only requires checkout to be disabled before temporary deployment', async () => {
+    const result = await runRunner(false, true, {
+      TASK13_CLEANUP_ONLY: '1',
+      FAKE_RESIDUAL_FIXTURE_RESPONSE: exactResidual,
+    })
+
+    expect(result.exitCode).not.toBe(0)
+    expect(result.log).toContain('select checkout_creation_enabled')
+    expect(result.log).not.toContain('supabase secrets set --env-file')
+    expect(result.log).not.toContain('functions deploy task17-transaction-driver')
+    expect(result.log).not.toContain('curl ')
+    expect(result.log).not.toContain('set checkout_creation_enabled = true')
+  })
+
+  it.each([
+    '{"rows":[]}',
+    '{"rows":[{"residual_fixture_candidate":"task17_oldfixture01","residual_fixture_exact":false}]}',
+    '{"rows":[{"residual_fixture_candidate":"task17_oldfixture01","residual_fixture_exact":true,"unexpected":true}]}',
+    '{"rows":[{"residual_fixture_candidate":"task17_oldfixture01","residual_fixture_exact":true},{"residual_fixture_candidate":"task17_otherfix01","residual_fixture_exact":true}]}',
+  ])('cleanup-only rejects every non-exact residual candidate set', async (response) => {
+    const result = await runRunner(false, false, {
+      TASK13_CLEANUP_ONLY: '1',
+      FAKE_RESIDUAL_FIXTURE_RESPONSE: response,
+    })
+
+    expect(result.exitCode).not.toBe(0)
+    expect(result.log).not.toContain('supabase secrets set --env-file')
+    expect(result.log).not.toContain('functions deploy task17-transaction-driver')
+    expect(result.log).not.toContain('curl ')
+    expect(result.log).not.toContain('set checkout_creation_enabled = true')
+  })
+
+  it.each([
+    'CLEANUP_SESSION_RETRIEVE_FAILED',
+    'CLEANUP_SESSION_EXPIRE_FAILED',
+    'CLEANUP_CATALOG_DISCOVERY_FAILED',
+    'CLEANUP_PRICE_ARCHIVE_FAILED',
+    'CLEANUP_PRODUCT_ARCHIVE_FAILED',
+  ])('cleanup-only reports fixed stage %s without leaking provider detail', async (kind) => {
+    const result = await runRunner(false, false, {
+      TASK13_CLEANUP_ONLY: '1',
+      FAKE_RESIDUAL_FIXTURE_RESPONSE: exactResidual,
+      FAKE_CLEANUP_FAILURE: '1',
+      FAKE_CLEANUP_RESPONSE: JSON.stringify({ ok: false, kind }),
+    })
+
+    expect(result.exitCode).not.toBe(0)
+    expect(result.stdout).toContain(`Task 17 cleanup error kind: ${kind}`)
+    expect(result.stdout).not.toContain('provider detail')
+    expect(result.log).not.toContain('set checkout_creation_enabled = true')
+    expect(result.log).not.toContain('vitest run')
+    expect(result.log).not.toContain('curl-action retire_connected_account')
+    expect(result.log).toContain('supabase functions delete task17-transaction-driver')
+  })
+
+  it('cleanup-only database deletion is one rollback-safe transaction and can be retried', async () => {
+    const first = await runRunner(false, false, {
+      TASK13_CLEANUP_ONLY: '1',
+      FAKE_RESIDUAL_FIXTURE_RESPONSE: exactResidual,
+      FAKE_DATABASE_CLEANUP_FAILURE: '1',
+      FAKE_CLEANUP_RESPONSE: exactResidualCleanup,
+    })
+    const retried = await runRunner(false, false, {
+      TASK13_CLEANUP_ONLY: '1',
+      FAKE_RESIDUAL_FIXTURE_RESPONSE: exactResidual,
+      FAKE_CLEANUP_RESPONSE: exactResidualCleanup,
+    })
+
+    expect(first.exitCode).not.toBe(0)
+    expect(retried.exitCode).toBe(0)
+    for (const result of [first, retried]) {
+      const transaction = result.log.match(/db query --linked --output-format json begin;[\s\S]*?commit;/)?.[0] ?? ''
+      expect(transaction).toContain('create temporary table task17_cleanup_receipts')
+      expect(transaction).toContain('delete from public.refunds')
+      expect(transaction).toContain('delete from public.orders')
+      expect(transaction).toContain('delete from public.stripe_webhook_events')
+      expect(transaction.indexOf('create temporary table task17_cleanup_receipts')).toBeLessThan(
+        transaction.indexOf('delete from public.refunds'),
+      )
+      expect(transaction.indexOf('delete from public.refunds')).toBeLessThan(
+        transaction.indexOf('delete from public.stripe_webhook_events'),
+      )
+      expect(result.log).not.toContain('set checkout_creation_enabled = true')
+      expect(result.log).not.toContain('curl-action retire_connected_account')
+    }
+  })
+
+  it('cleanup-only can be rerun in a new process after a provider stage failure', async () => {
+    const failed = await runRunner(false, false, {
+      TASK13_CLEANUP_ONLY: '1',
+      FAKE_RESIDUAL_FIXTURE_RESPONSE: exactResidual,
+      FAKE_CLEANUP_FAILURE: '1',
+      FAKE_CLEANUP_RESPONSE: JSON.stringify({
+        ok: false,
+        kind: 'CLEANUP_PRODUCT_ARCHIVE_FAILED',
+      }),
+    })
+    const retried = await runRunner(false, false, {
+      TASK13_CLEANUP_ONLY: '1',
+      FAKE_RESIDUAL_FIXTURE_RESPONSE: exactResidual,
+      FAKE_CLEANUP_RESPONSE: exactResidualCleanup,
+    })
+
+    expect(failed.exitCode).not.toBe(0)
+    expect(failed.log).not.toContain('task17_cleanup_receipts')
+    expect(retried.exitCode).toBe(0)
+    expect(retried.log).toContain('task17_cleanup_receipts')
+  })
+
+  const invalidCleanupModes: Array<Record<string, string>> = [
+    { TASK13_CLEANUP_ONLY: '2' },
+    { TASK13_CLEANUP_ONLY: '1', TASK13_FIXTURE_PREFLIGHT_ONLY: '1' },
+    { TASK13_CLEANUP_ONLY: '1', TASK13_CHECKOUT_DIAGNOSTIC_ONLY: '1' },
+  ]
+
+  it.each(invalidCleanupModes)('rejects invalid or overlapping cleanup-only modes before mutation', async (overrides) => {
+    const result = await runRunner(false, false, overrides)
+
+    expect(result.exitCode).not.toBe(0)
+    expect(result.log).not.toContain('supabase secrets set --env-file')
+    expect(result.log).not.toContain('functions deploy task17-transaction-driver')
+    expect(result.log).not.toContain('curl ')
+  })
+
   it('adopts the one exact protected legacy fixture instead of creating a second shell', async () => {
     const result = await runRunner(false, false, {
       FAKE_STABLE_FIXTURE_RESPONSE: '{"rows":[{"stable_fixture_candidate":"task17_oldfixture01","stable_fixture_recoverable":true,"stable_fixture_safe":true,"stable_fixture_needs_moderation":false}]}',

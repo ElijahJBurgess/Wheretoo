@@ -409,6 +409,57 @@ export function auditTombstoneIsSafe(
     value.dispute_count === 0;
 }
 
+export function cleanupPreparedStateIsSafe(
+  value: AuditTombstoneState,
+): boolean {
+  const inertShell = value.stable_fixture === true &&
+    value.fixture_reusable === true &&
+    value.event_count === 1 &&
+    value.organizer_count === 1 &&
+    value.auth_user_inert === true &&
+    value.event_sellable === false &&
+    value.public_projection_count === 0 &&
+    value.active_tier_count === 2 &&
+    value.connect_count === 1 &&
+    value.dispute_count === 0;
+  const exactResidual = value.order_count === 1 &&
+    value.item_count === 2 &&
+    value.ticket_count === 0 &&
+    value.receipt_count === 1 &&
+    value.refund_count === 0;
+  const boundedCanonical = value.order_count === 2 &&
+    value.item_count === 4 &&
+    value.ticket_count === 3 &&
+    value.receipt_count >= 1 && value.receipt_count <= 100 &&
+    value.refund_count === 1;
+  return inertShell && (exactResidual || boundedCanonical);
+}
+
+export function cleanupRuntimeStateIsSafe(
+  value: AuditTombstoneState,
+): boolean {
+  const bounded = (
+    candidate: number,
+    maximum: number,
+  ) =>
+    Number.isSafeInteger(candidate) && candidate >= 0 && candidate <= maximum;
+  return value.stable_fixture === true &&
+    value.fixture_reusable === true &&
+    value.event_count === 1 &&
+    value.organizer_count === 1 &&
+    value.auth_user_inert === true &&
+    value.event_sellable === false &&
+    value.public_projection_count === 0 &&
+    bounded(value.active_tier_count, 2) &&
+    bounded(value.connect_count, 1) &&
+    bounded(value.order_count, 2) &&
+    bounded(value.item_count, 4) &&
+    bounded(value.ticket_count, 3) &&
+    bounded(value.receipt_count, 100) &&
+    bounded(value.refund_count, 1) &&
+    value.dispute_count === 0;
+}
+
 export type AuditTombstoneCertification = {
   namespace_prefix_count: number;
   event_count: number;
@@ -588,6 +639,78 @@ export async function runFixtureStage<T>(
   }
 }
 
+export type CleanupStageFailure =
+  | "CLEANUP_SESSION_RETRIEVE_FAILED"
+  | "CLEANUP_SESSION_EXPIRE_FAILED"
+  | "CLEANUP_CATALOG_DISCOVERY_FAILED"
+  | "CLEANUP_PRICE_ARCHIVE_FAILED"
+  | "CLEANUP_PRODUCT_ARCHIVE_FAILED";
+
+const cleanupStageFailures = new Set<CleanupStageFailure>([
+  "CLEANUP_SESSION_RETRIEVE_FAILED",
+  "CLEANUP_SESSION_EXPIRE_FAILED",
+  "CLEANUP_CATALOG_DISCOVERY_FAILED",
+  "CLEANUP_PRICE_ARCHIVE_FAILED",
+  "CLEANUP_PRODUCT_ARCHIVE_FAILED",
+]);
+
+export async function runCleanupStage<T>(
+  fallback: CleanupStageFailure,
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      (cleanupStageFailures.has(error.message as CleanupStageFailure) ||
+        error.message === "LIVE_MODE_FORBIDDEN")
+    ) throw error;
+    throw new Error(fallback, { cause: error });
+  }
+}
+
+export async function archiveCleanupCatalog<TPrice, TProduct>(
+  priceIds: Iterable<string>,
+  productIds: Iterable<string>,
+  dependencies: {
+    updatePrice: (id: string, update: { active: false }) => Promise<TPrice>;
+    updateProduct: (id: string, update: { active: false }) => Promise<TProduct>;
+    assertPriceArchived: (value: TPrice) => void;
+    assertProductArchived: (value: TProduct) => void;
+  },
+): Promise<void> {
+  for (const priceId of priceIds) {
+    await runCleanupStage("CLEANUP_PRICE_ARCHIVE_FAILED", async () => {
+      const price = await dependencies.updatePrice(priceId, { active: false });
+      dependencies.assertPriceArchived(price);
+    });
+  }
+  for (const productId of productIds) {
+    await runCleanupStage("CLEANUP_PRODUCT_ARCHIVE_FAILED", async () => {
+      const product = await dependencies.updateProduct(productId, {
+        active: false,
+      });
+      dependencies.assertProductArchived(product);
+    });
+  }
+}
+
+export async function retireSellableFixtureWithLazyOwner<T>(
+  alreadyRetired: boolean,
+  dependencies: {
+    authenticateOwner: () => Promise<T>;
+    retireRevision: (owner: T) => Promise<unknown>;
+    verifyUnsellable: () => Promise<unknown>;
+  },
+): Promise<void> {
+  if (!alreadyRetired) {
+    const owner = await dependencies.authenticateOwner();
+    await dependencies.retireRevision(owner);
+  }
+  await dependencies.verifyUnsellable();
+}
+
 export async function establishSellableFixture(
   expectedOrganizerId: string,
   expectedAccountId: string,
@@ -658,13 +781,14 @@ export async function establishAuditTombstone(
     removeRuntime: () => Promise<unknown>;
     inertAuth: () => Promise<unknown>;
     inspect: () => Promise<AuditTombstoneState>;
+    stateIsSafe?: (state: AuditTombstoneState) => boolean;
   },
 ): Promise<AuditTombstoneState> {
   await dependencies.retireEvent();
   await dependencies.removeRuntime();
   await dependencies.inertAuth();
   const state = await dependencies.inspect();
-  if (!auditTombstoneIsSafe(state)) {
+  if (!(dependencies.stateIsSafe ?? auditTombstoneIsSafe)(state)) {
     throw new Error("FIXTURE_CLEANUP_UNSAFE");
   }
   return state;

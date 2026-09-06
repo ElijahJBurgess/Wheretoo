@@ -21,9 +21,13 @@ import {
 } from "../../../../supabase/functions/stripe-webhook/index.ts";
 import {
   applyDiagnosticAccountCleanup,
+  archiveCleanupCatalog,
   assertSafeProofResponse,
+  auditTombstoneIsSafe,
   type AuditTombstoneState,
   checkoutSessionContractBitmap,
+  cleanupPreparedStateIsSafe,
+  cleanupRuntimeStateIsSafe,
   CONNECT_ACCOUNT_CONFLICT_TARGET,
   createFixtureAuthPassword,
   deleteAndVerifyFixtureAuthUser,
@@ -36,8 +40,9 @@ import {
   requirePublicApiKey,
   restoreSellableFixture,
   retireCertifiedConnectedAccount,
-  retireSellableFixture,
+  retireSellableFixtureWithLazyOwner,
   retrieveAccountForDiagnostic,
+  runCleanupStage,
   runCleanupWithFailureFinalizers,
   runFixtureStage,
   validateAccountForDiagnostic,
@@ -344,13 +349,15 @@ async function checkoutDiagnostic(): Promise<Record<string, unknown>> {
           ? {}
           : { starting_after: startingAfter }),
       });
-      candidates.push(...page.data.filter((session) =>
-        isCheckoutDiagnosticCandidate(
-          session,
-          fixturePrefix(),
-          expectedEventId,
-        )
-      ));
+      candidates.push(
+        ...page.data.filter((session) =>
+          isCheckoutDiagnosticCandidate(
+            session,
+            fixturePrefix(),
+            expectedEventId,
+          )
+        ),
+      );
       if (!page.has_more) break;
       const last = page.data.at(-1);
       if (last === undefined) {
@@ -1675,15 +1682,13 @@ async function cleanup(
     retireEvent: async () => {
       const alreadyRetired =
         fixtureEvent.publicly_authorized_action_id === null;
-      const owner = await authenticatedFixtureOwner(organizer.id);
-      await retireSellableFixture({
-        retireRevision: () =>
-          alreadyRetired
-            ? Promise.resolve()
-            : requireOwnerRpc(owner, "save_owned_event_revision", {
-              p_event_id: fixtureEvent.id,
-              p_event: tombstoneEventPayload(fixtureEvent),
-            }, "FIXTURE_CLEANUP_UNSAFE"),
+      await retireSellableFixtureWithLazyOwner(alreadyRetired, {
+        authenticateOwner: () => authenticatedFixtureOwner(organizer.id),
+        retireRevision: (owner) =>
+          requireOwnerRpc(owner, "save_owned_event_revision", {
+            p_event_id: fixtureEvent.id,
+            p_event: tombstoneEventPayload(fixtureEvent),
+          }, "FIXTURE_CLEANUP_UNSAFE"),
         verifyUnsellable: async () => {
           const [projection, tiers] = await Promise.all([
             publicClient.rpc("get_public_event", {
@@ -1699,10 +1704,13 @@ async function cleanup(
             projection.data.length !== 0 || tiers.error !== null
           ) throw new Error("FIXTURE_CLEANUP_UNSAFE");
           if (tiers.data.length === 0) return;
-          const preflight = await client.rpc("server_get_checkout_preflight", {
-            p_event_id: fixtureEvent.id,
-            p_tier_ids: tiers.data.map((tier) => tier.id),
-          });
+          const preflight = await client.rpc(
+            "server_get_checkout_preflight",
+            {
+              p_event_id: fixtureEvent.id,
+              p_tier_ids: tiers.data.map((tier) => tier.id),
+            },
+          );
           if (
             preflight.error === null && Array.isArray(preflight.data) &&
             preflight.data.length > 0
@@ -1746,39 +1754,55 @@ async function cleanup(
             ]
           ) if (value) objectIds.push(value);
           if (order.stripe_checkout_session_id) {
-            const session = await getStripe().checkout.sessions.retrieve(
-              stripeId(order.stripe_checkout_session_id, "cs_test_"),
-              { expand: ["line_items.data.price.product"] },
+            const session = await runCleanupStage(
+              "CLEANUP_SESSION_RETRIEVE_FAILED",
+              async () => {
+                const value = await getStripe().checkout.sessions.retrieve(
+                  stripeId(order.stripe_checkout_session_id, "cs_test_"),
+                  { expand: ["line_items.data.price.product"] },
+                );
+                assertTestMode(value);
+                return value;
+              },
             );
-            assertTestMode(session);
             if (session.status === "open") {
-              const expired = await getStripe().checkout.sessions.expire(
-                session.id,
+              await runCleanupStage(
+                "CLEANUP_SESSION_EXPIRE_FAILED",
+                async () => {
+                  const expired = await getStripe().checkout.sessions.expire(
+                    session.id as string,
+                  );
+                  assertTestMode(expired);
+                  if (expired.status !== "expired") throw new Error("STRIPE");
+                },
               );
-              assertTestMode(expired);
-              if (expired.status !== "expired") throw new Error("STRIPE");
             }
-            const lineItems = session.line_items as unknown;
-            if (
-              !isRecord(lineItems) || lineItems.has_more !== false ||
-              !Array.isArray(lineItems.data)
-            ) throw new Error("STRIPE");
-            for (const line of lineItems.data) {
-              if (!isRecord(line) || !isRecord(line.price)) {
-                throw new Error("STRIPE");
-              }
-              assertTestMode(line.price);
-              const product = line.price.product;
-              assertTestMode(product);
-              if (
-                typeof line.price.id !== "string" ||
-                !line.price.id.startsWith("price_") ||
-                typeof product.id !== "string" ||
-                !product.id.startsWith("prod_")
-              ) throw new Error("STRIPE");
-              priceIds.add(line.price.id);
-              productIds.add(product.id);
-            }
+            await runCleanupStage(
+              "CLEANUP_CATALOG_DISCOVERY_FAILED",
+              async () => {
+                const lineItems = session.line_items as unknown;
+                if (
+                  !isRecord(lineItems) || lineItems.has_more !== false ||
+                  !Array.isArray(lineItems.data)
+                ) throw new Error("STRIPE");
+                for (const line of lineItems.data) {
+                  if (!isRecord(line) || !isRecord(line.price)) {
+                    throw new Error("STRIPE");
+                  }
+                  assertTestMode(line.price);
+                  const product = line.price.product;
+                  assertTestMode(product);
+                  if (
+                    typeof line.price.id !== "string" ||
+                    !line.price.id.startsWith("price_") ||
+                    typeof product.id !== "string" ||
+                    !product.id.startsWith("prod_")
+                  ) throw new Error("STRIPE");
+                  priceIds.add(line.price.id);
+                  productIds.add(product.id);
+                }
+              },
+            );
           }
         }
       }
@@ -1815,66 +1839,18 @@ async function cleanup(
           receiptIds.add(value.stripe_event_id);
         }
       }
-      for (const priceId of priceIds) {
-        const price = await getStripe().prices.update(priceId, {
-          active: false,
-        });
-        assertTestMode(price);
-        if (price.active !== false) throw new Error("STRIPE");
-      }
-      for (const productId of productIds) {
-        const product = await getStripe().products.update(productId, {
-          active: false,
-        });
-        assertTestMode(product);
-        if (product.active !== false) throw new Error("STRIPE");
-      }
-      const ensureDelete = (error: unknown, stage: string) => {
-        if (error !== null) throw new Error(`DATABASE_DELETE_${stage}`);
-      };
-      if (orderIds.length > 0) {
-        ensureDelete(
-          (await client.from("tickets").delete().in("order_id", orderIds))
-            .error,
-          "TICKETS",
-        );
-        // The Task 17 fixture never creates a dispute. That table intentionally
-        // denies the service_role direct access; the restrictive order foreign
-        // key makes the successful order delete the exact zero-dispute proof.
-        ensureDelete(
-          (await client.from("refunds").delete().in("order_id", orderIds))
-            .error,
-          "REFUNDS",
-        );
-        ensureDelete(
-          (await client.from("order_items").delete().in("order_id", orderIds))
-            .error,
-          "ORDER_ITEMS",
-        );
-        ensureDelete(
-          (await client.from("orders").delete().in("id", orderIds)).error,
-          "ORDERS",
-        );
-      }
-      if (eventIds.length > 0) {
-        ensureDelete(
-          (await client.from("ticket_tiers").delete().in("event_id", eventIds))
-            .error,
-          "TIERS",
-        );
-      }
-      if (receiptIds.size > 0) {
-        ensureDelete(
-          (await client.from("stripe_webhook_events").delete()
-            .in("stripe_event_id", [...receiptIds])).error,
-          "RECEIPTS",
-        );
-      }
-      ensureDelete(
-        (await client.from("organizer_stripe_accounts").delete()
-          .eq("organizer_id", organizer.id)).error,
-        "CONNECT",
-      );
+      await archiveCleanupCatalog(priceIds, productIds, {
+        updatePrice: (id, update) => getStripe().prices.update(id, update),
+        updateProduct: (id, update) => getStripe().products.update(id, update),
+        assertPriceArchived: (price) => {
+          assertTestMode(price);
+          if (price.active !== false) throw new Error("STRIPE");
+        },
+        assertProductArchived: (product) => {
+          assertTestMode(product);
+          if (product.active !== false) throw new Error("STRIPE");
+        },
+      });
     },
     inertAuth: () => makeFixtureAuthInert(organizer.id),
     inspect: async () => {
@@ -1932,7 +1908,9 @@ async function cleanup(
           childCount("order_items"),
         ],
       );
-      const disputeCount = 0; // A dispute row would have blocked the order delete.
+      // The linked runner owns dispute cleanup and proves zero residue in the
+      // same transaction; service_role cannot read this table directly.
+      const disputeCount = 0;
       const [eventAfter, publicProjection, authAfter] = await Promise.all([
         client.from("events").select(
           "id,status,moderation_status,publicly_authorized_action_id",
@@ -1970,18 +1948,22 @@ async function cleanup(
         dispute_count: disputeCount,
       };
     },
+    stateIsSafe: (state) =>
+      auditTombstoneIsSafe(state) || cleanupPreparedStateIsSafe(state) ||
+      cleanupRuntimeStateIsSafe(state),
   });
 
   return {
     ok: true,
     ...tombstoneState,
     tier_count: tombstoneState.active_tier_count,
-    deleted_order_count: orderIds.length,
-    deleted_tier_count: deletedTierCount,
-    deleted_receipt_count: receiptIds.size,
-    deleted_ticket_count: deletedTicketCount,
-    deleted_refund_count: deletedRefundCount,
-    deleted_item_count: deletedItemCount,
+    database_cleanup_required: !auditTombstoneIsSafe(tombstoneState),
+    targeted_order_count: orderIds.length,
+    targeted_tier_count: deletedTierCount,
+    targeted_receipt_count: receiptIds.size,
+    targeted_ticket_count: deletedTicketCount,
+    targeted_refund_count: deletedRefundCount,
+    targeted_item_count: deletedItemCount,
     archived_price_count: priceIds.size,
     archived_product_count: productIds.size,
     connected_account_closed: false,
@@ -2123,13 +2105,18 @@ Deno.serve(async (request) => {
         "FIXTURE_CERTIFICATION_FAILED",
         "FIXTURE_CLEANUP_UNSAFE",
         "FIXTURE_NOT_SELLABLE",
+        "DATABASE_DELETE_AUTH",
         "CHECKOUT_SESSION_LIST_FAILED",
         "CHECKOUT_SESSION_CANDIDATE_MISMATCH",
         "CHECKOUT_SESSION_RETRIEVE_FAILED",
+        "CLEANUP_SESSION_RETRIEVE_FAILED",
+        "CLEANUP_SESSION_EXPIRE_FAILED",
+        "CLEANUP_CATALOG_DISCOVERY_FAILED",
+        "CLEANUP_PRICE_ARCHIVE_FAILED",
+        "CLEANUP_PRODUCT_ARCHIVE_FAILED",
         "LIVE_MODE_FORBIDDEN",
         "STRIPE",
-      ].includes(error.message) ||
-        /^DATABASE_DELETE_[A-Z_]+$/.test(error.message))
+      ].includes(error.message))
       ? error.message
       : "UNKNOWN";
     return json({ ok: false, kind }, 500);

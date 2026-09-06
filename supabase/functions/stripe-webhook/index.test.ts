@@ -60,6 +60,7 @@ type CheckoutMismatchCode =
   | "CHECKOUT_LINE_AMOUNT_MISMATCH"
   | "CHECKOUT_LINE_CURRENCY_MISMATCH"
   | "CHECKOUT_AGGREGATE_MISMATCH"
+  | "PAYMENT_SNAPSHOT_MISMATCH"
   | "PAYMENT_OBJECT_ALREADY_USED";
 
 interface CheckoutReviewInput {
@@ -1020,7 +1021,7 @@ Deno.test("every known-order line mismatch enters review with its exact safe cod
 
 // Mutations caught: old tier metadata, forged Session references, destination or
 // fee drift, invalid PaymentIntent state, and forged current Charge truth.
-Deno.test("non-line Stripe snapshot mismatches fail closed without fulfillment", async () => {
+Deno.test("known-order non-line Stripe snapshot mismatches enter review without fulfillment", async () => {
   const cases: Array<[string, Record<string, unknown>]> = [
     [
       "Session metadata",
@@ -1112,7 +1113,7 @@ Deno.test("non-line Stripe snapshot mismatches fail closed without fulfillment",
 
   for (const [name, session] of cases) {
     let fulfilled = 0;
-    let reviewed = 0;
+    const reviews: CheckoutReviewInput[] = [];
     const finalizations: unknown[] = [];
     const eventId = `evt_Task7${name.replaceAll(/[^A-Za-z0-9]/g, "")}`;
     const response = await createStripeWebhookHandler(dependencies({
@@ -1121,8 +1122,8 @@ Deno.test("non-line Stripe snapshot mismatches fail closed without fulfillment",
         fulfilled += 1;
         return FULFILLMENT_APPLY_RESULT;
       },
-      markCheckoutReconciliationReview: async () => {
-        reviewed += 1;
+      markCheckoutReconciliationReview: async (review) => {
+        reviews.push(review);
       },
       finalizeReceipt: async (...args) => {
         finalizations.push(args);
@@ -1133,12 +1134,14 @@ Deno.test("non-line Stripe snapshot mismatches fail closed without fulfillment",
       { id: eventId },
     )));
 
-    assertEquals([response.status, fulfilled, reviewed], [200, 0, 0], name);
-    assertEquals(finalizations, [[
-      eventId,
-      "processed",
-      "PAYMENT_SNAPSHOT_MISMATCH",
-    ]], name);
+    assertEquals([response.status, fulfilled], [200, 0], name);
+    assertEquals(reviews, [{
+      stripeEventId: eventId,
+      orderId: ORDER_ID,
+      checkoutSessionId: SESSION_ID,
+      failureCode: "PAYMENT_SNAPSHOT_MISMATCH",
+    }], name);
+    assertEquals(finalizations, [], name);
   }
 });
 
@@ -1222,7 +1225,7 @@ for (const [name, session] of collectedFundsCases) {
   Deno.test(`${name} is a safe permanent mismatch without fulfillment`, async () => {
     const finalizations: unknown[] = [];
     let fulfilled = 0;
-    let reviewed = 0;
+    const reviews: CheckoutReviewInput[] = [];
     const eventId = `evt_Task7${name.replaceAll(/[^A-Za-z0-9]/g, "")}`;
     const response = await createStripeWebhookHandler(dependencies({
       retrieveSession: async () => session,
@@ -1230,8 +1233,8 @@ for (const [name, session] of collectedFundsCases) {
         fulfilled += 1;
         return FULFILLMENT_APPLY_RESULT;
       },
-      markCheckoutReconciliationReview: async () => {
-        reviewed += 1;
+      markCheckoutReconciliationReview: async (review) => {
+        reviews.push(review);
       },
       finalizeReceipt: async (...args) => {
         finalizations.push(args);
@@ -1242,14 +1245,80 @@ for (const [name, session] of collectedFundsCases) {
       { id: eventId },
     )));
 
-    assertEquals([response.status, fulfilled, reviewed], [200, 0, 0]);
-    assertEquals(finalizations, [[
-      eventId,
-      "processed",
-      "PAYMENT_SNAPSHOT_MISMATCH",
-    ]]);
+    assertEquals([response.status, fulfilled], [200, 0]);
+    assertEquals(reviews, [{
+      stripeEventId: eventId,
+      orderId: ORDER_ID,
+      checkoutSessionId: SESSION_ID,
+      failureCode: "PAYMENT_SNAPSHOT_MISMATCH",
+    }]);
+    assertEquals(finalizations, []);
   });
 }
+
+Deno.test("a signed known-order mismatch is reviewed once and duplicate delivery is a receipt no-op", async () => {
+  const stripe = new Stripe(["rk", "test", "task13review"].join("_"), {
+    apiVersion: "2026-07-29.dahlia",
+  });
+  const event = snapshotEvent(
+    "checkout.session.completed",
+    { id: SESSION_ID },
+    { id: "evt_Task13KnownOrderReview" },
+  );
+  const raw = JSON.stringify(event);
+  const signature = await Stripe.webhooks.generateTestHeaderStringAsync({
+    payload: raw,
+    secret: WEBHOOK_SECRET,
+    timestamp: NOW_EPOCH_SECONDS,
+  });
+  let receiptProcessed = false;
+  let retrievals = 0;
+  let reviews = 0;
+  let fulfillments = 0;
+  let finalizations = 0;
+  const handler = createStripeWebhookHandler(dependencies({
+    verifyEvent: async (body, header) => {
+      await verifyStripeSignature(
+        stripe,
+        body,
+        header,
+        WEBHOOK_SECRET,
+        NOW_EPOCH_SECONDS,
+      );
+      return JSON.parse(body);
+    },
+    recordReceipt: async () => ({ shouldProcess: !receiptProcessed }),
+    retrieveSession: async () => {
+      retrievals += 1;
+      return checkoutSessionFixture({
+        payment_intent: paymentIntentFixture({ application_fee_amount: 451 }),
+      });
+    },
+    markCheckoutReconciliationReview: async () => {
+      reviews += 1;
+      receiptProcessed = true;
+    },
+    fulfillPaidOrder: async () => {
+      fulfillments += 1;
+      return FULFILLMENT_APPLY_RESULT;
+    },
+    finalizeReceipt: async () => {
+      finalizations += 1;
+      receiptProcessed = true;
+    },
+  }));
+
+  const first = await handler(request(event, signature));
+  const duplicate = await handler(request(event, signature));
+
+  assertEquals([first.status, duplicate.status], [200, 200]);
+  assertEquals({ retrievals, reviews, fulfillments, finalizations }, {
+    retrievals: 1,
+    reviews: 1,
+    fulfillments: 0,
+    finalizations: 0,
+  });
+});
 
 // Mutation caught: attempting review from untrusted event payload identity can
 // mutate an unrelated order before the Session/order RPC proves the binding.
