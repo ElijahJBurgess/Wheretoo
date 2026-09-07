@@ -354,6 +354,34 @@ describe('Task 17 managed proof runner', () => {
     expect(result.log).toContain('supabase functions delete task17-transaction-driver')
   })
 
+  it('cleanup-only reports only the bounded Price failure diagnostic', async () => {
+    const result = await runRunner(false, false, {
+      TASK13_CLEANUP_ONLY: '1',
+      FAKE_RESIDUAL_FIXTURE_RESPONSE: exactResidual,
+      FAKE_CLEANUP_FAILURE: '1',
+      FAKE_CLEANUP_RESPONSE: JSON.stringify({
+        ok: false,
+        kind: 'CLEANUP_PRICE_ARCHIVE_FAILED',
+        cleanup_diagnostic: {
+          request_reached_stripe: true,
+          failure_class: 'PERMISSION',
+          http_status: 403,
+          provider_message: 'raw provider detail must not escape',
+        },
+      }),
+    })
+
+    expect(result.exitCode).not.toBe(0)
+    expect(result.stdout).toContain(
+      'Task 17 cleanup diagnostic: request_reached_stripe=true failure_class=PERMISSION http_status=403',
+    )
+    expect(result.stdout).not.toContain('raw provider detail')
+    expect(result.stderr).not.toContain('raw provider detail')
+    expect(result.log).not.toContain('set checkout_creation_enabled = true')
+    expect(result.log).not.toContain('vitest run')
+    expect(result.log).not.toContain('curl-action retire_connected_account')
+  })
+
   it('cleanup-only database deletion is one rollback-safe transaction and can be retried', async () => {
     const first = await runRunner(false, false, {
       TASK13_CLEANUP_ONLY: '1',

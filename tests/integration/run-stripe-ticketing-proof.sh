@@ -241,6 +241,25 @@ cleanup() {
         if (allowed.has(value.kind)) {
           process.stdout.write(`Task 17 cleanup error kind: ${value.kind}\n`);
         }
+        const diagnostic = value.cleanup_diagnostic;
+        const classes = new Set([
+          "AUTHENTICATION", "PERMISSION", "RESOURCE_MISSING_OR_SCOPE",
+          "INVALID_REQUEST_OR_OBJECT_STATE", "RATE_LIMIT", "NETWORK",
+          "PROVIDER_5XX", "RESPONSE_CONTRACT", "UNKNOWN",
+        ]);
+        const reached = diagnostic?.request_reached_stripe;
+        const status = diagnostic?.http_status;
+        if (
+          diagnostic !== null && typeof diagnostic === "object" &&
+          [true, false, null].includes(reached) &&
+          classes.has(diagnostic.failure_class) &&
+          (status === null || (Number.isInteger(status) && status >= 400 && status <= 599))
+        ) {
+          process.stdout.write(
+            `Task 17 cleanup diagnostic: request_reached_stripe=${String(reached)} ` +
+              `failure_class=${diagnostic.failure_class} http_status=${String(status)}\n`,
+          );
+        }
       ' "$CLEANUP_RESPONSE" 2>/dev/null || true
     fi
     cleanup_contract_status=0

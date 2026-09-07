@@ -26,6 +26,7 @@ import {
   auditTombstoneIsSafe,
   type AuditTombstoneState,
   checkoutSessionContractBitmap,
+  cleanupFailureDiagnostic,
   cleanupPreparedStateIsSafe,
   cleanupRuntimeStateIsSafe,
   CONNECT_ACCOUNT_CONFLICT_TARGET,
@@ -1672,8 +1673,8 @@ async function cleanup(
   const orderIds: string[] = [];
   const objectIds: string[] = [];
   const receiptIds = new Set<string>();
-  const priceIds = new Set<string>();
-  const productIds = new Set<string>();
+  const priceTargets = new Map<string, boolean>();
+  const productTargets = new Map<string, boolean>();
   let deletedItemCount = 0;
   let deletedTicketCount = 0;
   let deletedRefundCount = 0;
@@ -1795,11 +1796,21 @@ async function cleanup(
                   if (
                     typeof line.price.id !== "string" ||
                     !line.price.id.startsWith("price_") ||
+                    typeof line.price.active !== "boolean" ||
                     typeof product.id !== "string" ||
-                    !product.id.startsWith("prod_")
+                    !product.id.startsWith("prod_") ||
+                    typeof product.active !== "boolean"
                   ) throw new Error("STRIPE");
-                  priceIds.add(line.price.id);
-                  productIds.add(product.id);
+                  const priorPriceState = priceTargets.get(line.price.id);
+                  const priorProductState = productTargets.get(product.id);
+                  if (
+                    (priceTargets.has(line.price.id) &&
+                      priorPriceState !== line.price.active) ||
+                    (productTargets.has(product.id) &&
+                      priorProductState !== product.active)
+                  ) throw new Error("STRIPE");
+                  priceTargets.set(line.price.id, line.price.active);
+                  productTargets.set(product.id, product.active);
                 }
               },
             );
@@ -1839,18 +1850,23 @@ async function cleanup(
           receiptIds.add(value.stripe_event_id);
         }
       }
-      await archiveCleanupCatalog(priceIds, productIds, {
-        updatePrice: (id, update) => getStripe().prices.update(id, update),
-        updateProduct: (id, update) => getStripe().products.update(id, update),
-        assertPriceArchived: (price) => {
-          assertTestMode(price);
-          if (price.active !== false) throw new Error("STRIPE");
+      await archiveCleanupCatalog(
+        Array.from(priceTargets, ([id, active]) => ({ id, active })),
+        Array.from(productTargets, ([id, active]) => ({ id, active })),
+        {
+          updatePrice: (id, update) => getStripe().prices.update(id, update),
+          updateProduct: (id, update) =>
+            getStripe().products.update(id, update),
+          assertPriceArchived: (price) => {
+            assertTestMode(price);
+            if (price.active !== false) throw new Error("STRIPE");
+          },
+          assertProductArchived: (product) => {
+            assertTestMode(product);
+            if (product.active !== false) throw new Error("STRIPE");
+          },
         },
-        assertProductArchived: (product) => {
-          assertTestMode(product);
-          if (product.active !== false) throw new Error("STRIPE");
-        },
-      });
+      );
     },
     inertAuth: () => makeFixtureAuthInert(organizer.id),
     inspect: async () => {
@@ -1964,8 +1980,8 @@ async function cleanup(
     targeted_ticket_count: deletedTicketCount,
     targeted_refund_count: deletedRefundCount,
     targeted_item_count: deletedItemCount,
-    archived_price_count: priceIds.size,
-    archived_product_count: productIds.size,
+    archived_price_count: priceTargets.size,
+    archived_product_count: productTargets.size,
     connected_account_closed: false,
     connected_account_preserved: true,
   };
@@ -2119,6 +2135,15 @@ Deno.serve(async (request) => {
       ].includes(error.message))
       ? error.message
       : "UNKNOWN";
-    return json({ ok: false, kind }, 500);
+    const cleanupDiagnostic = kind.startsWith("CLEANUP_")
+      ? cleanupFailureDiagnostic(error)
+      : null;
+    return json({
+      ok: false,
+      kind,
+      ...(cleanupDiagnostic === null
+        ? {}
+        : { cleanup_diagnostic: cleanupDiagnostic }),
+    }, 500);
   }
 });

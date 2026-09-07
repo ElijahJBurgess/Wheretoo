@@ -812,6 +812,99 @@ Deno.test("cleanup stage failures sanitize provider errors to the exact fixed st
   }
 });
 
+Deno.test("cleanup diagnostics classify Stripe rejection without exposing provider detail", () => {
+  const diagnostic = Reflect.get(contracts, "cleanupFailureDiagnostic");
+  assertEquals(typeof diagnostic, "function");
+  if (typeof diagnostic !== "function") return;
+
+  const result = diagnostic(
+    new Error("CLEANUP_PRICE_ARCHIVE_FAILED", {
+      cause: {
+        type: "StripePermissionError",
+        statusCode: 403,
+        requestId: "req_must_not_escape",
+        message: "raw provider detail must not escape",
+        raw: { object: "price_must_not_escape" },
+      },
+    }),
+  );
+
+  assertEquals(result, {
+    request_reached_stripe: true,
+    failure_class: "PERMISSION",
+    http_status: 403,
+  });
+  const serialized = JSON.stringify(result);
+  assertEquals(serialized.includes("req_must_not_escape"), false);
+  assertEquals(serialized.includes("price_must_not_escape"), false);
+  assertEquals(serialized.includes("provider detail"), false);
+});
+
+Deno.test("cleanup diagnostics distinguish provider, network, and response-contract failures", () => {
+  const diagnostic = Reflect.get(contracts, "cleanupFailureDiagnostic");
+  assertEquals(typeof diagnostic, "function");
+  if (typeof diagnostic !== "function") return;
+
+  const wrapped = (cause: unknown) =>
+    new Error("CLEANUP_PRICE_ARCHIVE_FAILED", { cause });
+  assertEquals(
+    diagnostic(wrapped({
+      type: "StripeInvalidRequestError",
+      statusCode: 404,
+      code: "resource_missing",
+    })),
+    {
+      request_reached_stripe: true,
+      failure_class: "RESOURCE_MISSING_OR_SCOPE",
+      http_status: 404,
+    },
+  );
+  assertEquals(
+    diagnostic(wrapped({
+      type: "StripeInvalidRequestError",
+      statusCode: 400,
+      code: "parameter_unknown",
+    })),
+    {
+      request_reached_stripe: true,
+      failure_class: "INVALID_REQUEST_OR_OBJECT_STATE",
+      http_status: 400,
+    },
+  );
+  assertEquals(
+    diagnostic(wrapped({ type: "StripeConnectionError" })),
+    {
+      request_reached_stripe: null,
+      failure_class: "NETWORK",
+      http_status: null,
+    },
+  );
+  assertEquals(
+    diagnostic(wrapped({ type: "StripeAPIError", statusCode: 503 })),
+    {
+      request_reached_stripe: true,
+      failure_class: "PROVIDER_5XX",
+      http_status: 503,
+    },
+  );
+  assertEquals(
+    diagnostic(wrapped({ type: "StripeAPIError" })),
+    {
+      request_reached_stripe: null,
+      failure_class: "UNKNOWN",
+      http_status: null,
+    },
+  );
+  assertEquals(
+    diagnostic(wrapped(new Error("STRIPE"))),
+    {
+      request_reached_stripe: true,
+      failure_class: "RESPONSE_CONTRACT",
+      http_status: null,
+    },
+  );
+});
+
 Deno.test("cleanup archives every Price before any Product and resumes a partial Price pass", async () => {
   const archiveCatalog = Reflect.get(contracts, "archiveCleanupCatalog");
   assertEquals(typeof archiveCatalog, "function");
@@ -847,8 +940,14 @@ Deno.test("cleanup archives every Price before any Product and resumes a partial
   await assertRejects(
     () =>
       archiveCatalog(
-        ["price_one", "price_two"],
-        ["prod_one", "prod_two"],
+        [
+          { id: "price_one", active: true },
+          { id: "price_two", active: true },
+        ],
+        [
+          { id: "prod_one", active: true },
+          { id: "prod_two", active: true },
+        ],
         dependencies,
       ),
     Error,
@@ -858,8 +957,14 @@ Deno.test("cleanup archives every Price before any Product and resumes a partial
   assertEquals(activeProducts.size, 2);
 
   await archiveCatalog(
-    ["price_one", "price_two"],
-    ["prod_one", "prod_two"],
+    [
+      { id: "price_one", active: true },
+      { id: "price_two", active: true },
+    ],
+    [
+      { id: "prod_one", active: true },
+      { id: "prod_two", active: true },
+    ],
     dependencies,
   );
   assertEquals(calls, [
@@ -872,6 +977,32 @@ Deno.test("cleanup archives every Price before any Product and resumes a partial
   ]);
   assertEquals(activePrices.size, 0);
   assertEquals(activeProducts.size, 0);
+});
+
+Deno.test("cleanup does not update already-inactive inline Prices before archiving Products", async () => {
+  const archiveCatalog = Reflect.get(contracts, "archiveCleanupCatalog");
+  assertEquals(typeof archiveCatalog, "function");
+  if (typeof archiveCatalog !== "function") return;
+
+  const calls: string[] = [];
+  await archiveCatalog(
+    [{ id: "price_inline", active: false }],
+    [{ id: "prod_inline", active: true }],
+    {
+      updatePrice: async (id: string) => {
+        calls.push(`price:${id}`);
+        return { active: false };
+      },
+      updateProduct: async (id: string) => {
+        calls.push(`product:${id}`);
+        return { active: false };
+      },
+      assertPriceArchived: () => undefined,
+      assertProductArchived: () => undefined,
+    },
+  );
+
+  assertEquals(calls, ["product:prod_inline"]);
 });
 
 Deno.test("cleanup resumes a partial Product pass without skipping the Price barrier", async () => {
@@ -903,11 +1034,26 @@ Deno.test("cleanup resumes a partial Product pass without skipping the Price bar
   };
 
   await assertRejects(
-    () => archiveCatalog(["price_one"], ["prod_one", "prod_two"], dependencies),
+    () =>
+      archiveCatalog(
+        [{ id: "price_one", active: true }],
+        [
+          { id: "prod_one", active: true },
+          { id: "prod_two", active: true },
+        ],
+        dependencies,
+      ),
     Error,
     "CLEANUP_PRODUCT_ARCHIVE_FAILED",
   );
-  await archiveCatalog(["price_one"], ["prod_one", "prod_two"], dependencies);
+  await archiveCatalog(
+    [{ id: "price_one", active: true }],
+    [
+      { id: "prod_one", active: true },
+      { id: "prod_two", active: true },
+    ],
+    dependencies,
+  );
 
   assertEquals(calls, [
     "price:price_one:false",

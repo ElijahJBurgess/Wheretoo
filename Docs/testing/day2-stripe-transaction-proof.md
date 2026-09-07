@@ -34,10 +34,11 @@ Whereto fixture to its inert state and preserves the connected account for an ow
 retry. The retained organizer and Auth identity are inert; active tiers, Connect binding, public
 projection, open eligibility, orders, tickets, refunds, receipts, and fulfillment residue must be
 absent. Stripe payment, refund, and event records are immutable test records and are reconciled
-without writing their identifiers to a report. Inline test Prices and Products are deactivated
-during cleanup. Only then does the runner install the temporary close authorization and retire the
-account. An invalid or restricted account is not retired automatically; that requires a separate
-explicit owner decision.
+without writing their identifiers to a report. Stripe creates Checkout `price_data` Prices already
+inactive and forbids updating or reusing them, so cleanup verifies and retains that inactive state;
+active inline Products are deactivated. Only then does the runner install the temporary close
+authorization and retire the account. An invalid or restricted account is not retired
+automatically; that requires a separate explicit owner decision.
 
 ## Exact transaction contract
 

@@ -670,9 +670,108 @@ export async function runCleanupStage<T>(
   }
 }
 
+export type CleanupFailureDiagnostic = {
+  request_reached_stripe: boolean | null;
+  failure_class:
+    | "AUTHENTICATION"
+    | "PERMISSION"
+    | "RESOURCE_MISSING_OR_SCOPE"
+    | "INVALID_REQUEST_OR_OBJECT_STATE"
+    | "RATE_LIMIT"
+    | "NETWORK"
+    | "PROVIDER_5XX"
+    | "RESPONSE_CONTRACT"
+    | "UNKNOWN";
+  http_status: number | null;
+};
+
+export type CleanupCatalogTarget = {
+  id: string;
+  active: boolean;
+};
+
+export function cleanupFailureDiagnostic(
+  error: unknown,
+): CleanupFailureDiagnostic {
+  const cause = record(error) && "cause" in error ? error.cause : error;
+  if (cause instanceof Error && cause.message === "STRIPE") {
+    return {
+      request_reached_stripe: true,
+      failure_class: "RESPONSE_CONTRACT",
+      http_status: null,
+    };
+  }
+
+  const provider = record(cause) ? cause : {};
+  const type = typeof provider.type === "string" ? provider.type : null;
+  const code = typeof provider.code === "string" ? provider.code : null;
+  const status = typeof provider.statusCode === "number" &&
+      Number.isInteger(provider.statusCode) && provider.statusCode >= 400 &&
+      provider.statusCode <= 599
+    ? provider.statusCode
+    : null;
+
+  if (type === "StripeConnectionError") {
+    return {
+      request_reached_stripe: null,
+      failure_class: "NETWORK",
+      http_status: null,
+    };
+  }
+  if (type === "StripeAuthenticationError" || status === 401) {
+    return {
+      request_reached_stripe: true,
+      failure_class: "AUTHENTICATION",
+      http_status: status,
+    };
+  }
+  if (type === "StripePermissionError" || status === 403) {
+    return {
+      request_reached_stripe: true,
+      failure_class: "PERMISSION",
+      http_status: status,
+    };
+  }
+  if (type === "StripeRateLimitError" || status === 429) {
+    return {
+      request_reached_stripe: true,
+      failure_class: "RATE_LIMIT",
+      http_status: status,
+    };
+  }
+  if (code === "resource_missing" || status === 404) {
+    return {
+      request_reached_stripe: true,
+      failure_class: "RESOURCE_MISSING_OR_SCOPE",
+      http_status: status,
+    };
+  }
+  if (
+    type === "StripeInvalidRequestError" || status === 400 || status === 409
+  ) {
+    return {
+      request_reached_stripe: true,
+      failure_class: "INVALID_REQUEST_OR_OBJECT_STATE",
+      http_status: status,
+    };
+  }
+  if (status !== null && status >= 500) {
+    return {
+      request_reached_stripe: true,
+      failure_class: "PROVIDER_5XX",
+      http_status: status,
+    };
+  }
+  return {
+    request_reached_stripe: null,
+    failure_class: "UNKNOWN",
+    http_status: status,
+  };
+}
+
 export async function archiveCleanupCatalog<TPrice, TProduct>(
-  priceIds: Iterable<string>,
-  productIds: Iterable<string>,
+  priceTargets: Iterable<CleanupCatalogTarget>,
+  productTargets: Iterable<CleanupCatalogTarget>,
   dependencies: {
     updatePrice: (id: string, update: { active: false }) => Promise<TPrice>;
     updateProduct: (id: string, update: { active: false }) => Promise<TProduct>;
@@ -680,15 +779,19 @@ export async function archiveCleanupCatalog<TPrice, TProduct>(
     assertProductArchived: (value: TProduct) => void;
   },
 ): Promise<void> {
-  for (const priceId of priceIds) {
+  for (const target of priceTargets) {
+    if (!target.active) continue;
     await runCleanupStage("CLEANUP_PRICE_ARCHIVE_FAILED", async () => {
-      const price = await dependencies.updatePrice(priceId, { active: false });
+      const price = await dependencies.updatePrice(target.id, {
+        active: false,
+      });
       dependencies.assertPriceArchived(price);
     });
   }
-  for (const productId of productIds) {
+  for (const target of productTargets) {
+    if (!target.active) continue;
     await runCleanupStage("CLEANUP_PRODUCT_ARCHIVE_FAILED", async () => {
-      const product = await dependencies.updateProduct(productId, {
+      const product = await dependencies.updateProduct(target.id, {
         active: false,
       });
       dependencies.assertProductArchived(product);
