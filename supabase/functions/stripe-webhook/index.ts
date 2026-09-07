@@ -326,6 +326,10 @@ function permanent(code: string): never {
   throw new PermanentWebhookError(code);
 }
 
+function retryableProviderSnapshot(): never {
+  throw new Error("STRIPE_OBJECT_GRAPH_INCOMPLETE");
+}
+
 function checkoutMismatch(code: CheckoutReconciliationCode): never {
   throw new CheckoutReconciliationError(code);
 }
@@ -378,6 +382,15 @@ function expandedId(
     permanent("STRIPE_OBJECT_INVALID");
   }
   return requireId(value.id, pattern);
+}
+
+function requiredMaterializedId(
+  value: unknown,
+  pattern: RegExp,
+  expectedObject?: string,
+): string {
+  if (value === null || value === undefined) retryableProviderSnapshot();
+  return expandedId(value, pattern, expectedObject);
 }
 
 function metadataOrderId(value: unknown): string {
@@ -904,6 +917,10 @@ function validatePaymentIntent(
   value: unknown,
   order: OrderSnapshot,
 ): { id: string; status: string; charge: Record<string, unknown> | null } {
+  if (typeof value === "string") {
+    requireId(value, PAYMENT_INTENT_PATTERN, "PAYMENT_SNAPSHOT_MISMATCH");
+    retryableProviderSnapshot();
+  }
   if (
     !isRecord(value) || value.object !== "payment_intent" ||
     value.livemode !== false
@@ -946,6 +963,14 @@ function validatePaymentIntent(
   if (value.latest_charge === null || value.latest_charge === undefined) {
     return { id, status: value.status, charge: null };
   }
+  if (typeof value.latest_charge === "string") {
+    requireId(
+      value.latest_charge,
+      CHARGE_PATTERN,
+      "PAYMENT_SNAPSHOT_MISMATCH",
+    );
+    retryableProviderSnapshot();
+  }
   if (!isRecord(value.latest_charge)) permanent("PAYMENT_SNAPSHOT_MISMATCH");
   return { id, status: value.status, charge: value.latest_charge };
 }
@@ -971,7 +996,7 @@ function validateCharge(
     value.amount_captured !== order.totalMinor || value.captured !== true ||
     value.status !== "succeeded" ||
     value.currency !== order.currency ||
-    expandedId(
+    requiredMaterializedId(
         value.payment_intent,
         PAYMENT_INTENT_PATTERN,
         "payment_intent",
@@ -990,13 +1015,17 @@ function validateCharge(
   ) permanent("PAYMENT_SNAPSHOT_MISMATCH");
   return {
     id: requireId(value.id, CHARGE_PATTERN, "PAYMENT_SNAPSHOT_MISMATCH"),
-    transferId: expandedId(value.transfer, TRANSFER_PATTERN, "transfer"),
-    applicationFeeId: expandedId(
+    transferId: requiredMaterializedId(
+      value.transfer,
+      TRANSFER_PATTERN,
+      "transfer",
+    ),
+    applicationFeeId: requiredMaterializedId(
       value.application_fee,
       APPLICATION_FEE_PATTERN,
       "application_fee",
     ),
-    balanceTransactionId: expandedId(
+    balanceTransactionId: requiredMaterializedId(
       value.balance_transaction,
       BALANCE_TRANSACTION_PATTERN,
       "balance_transaction",
@@ -1264,10 +1293,10 @@ async function dispatchCheckout(
       if (current.raw.status !== "complete") {
         permanent("PAYMENT_SNAPSHOT_MISMATCH");
       }
+      if (current.paymentIntent === null) retryableProviderSnapshot();
       if (
         current.payment.paymentStatus === "unpaid" &&
-        (current.paymentIntent === null ||
-          current.paymentIntent.status !== "processing")
+        current.paymentIntent.status !== "processing"
       ) permanent("PAYMENT_SNAPSHOT_MISMATCH");
     } catch (error) {
       if (
@@ -1297,9 +1326,12 @@ async function dispatchCheckout(
   } else if (event.type === "checkout.session.async_payment_succeeded") {
     if (
       current.raw.status !== "complete" ||
-      current.payment.paymentStatus !== "paid" ||
-      current.paymentIntent?.status !== "succeeded"
+      current.payment.paymentStatus !== "paid"
     ) permanent("PAYMENT_SNAPSHOT_MISMATCH");
+    if (current.paymentIntent === null) retryableProviderSnapshot();
+    if (current.paymentIntent.status !== "succeeded") {
+      permanent("PAYMENT_SNAPSHOT_MISMATCH");
+    }
   } else {
     if (current.payment.paymentStatus !== "unpaid") {
       permanent("PAYMENT_SNAPSHOT_MISMATCH");
@@ -1337,7 +1369,7 @@ async function dispatchCheckout(
     if (
       current.paymentIntent === null || current.paymentIntent.charge === null
     ) {
-      permanent("PAYMENT_SNAPSHOT_MISMATCH");
+      retryableProviderSnapshot();
     }
     if (current.paymentIntent.status !== "succeeded") {
       permanent("PAYMENT_SNAPSHOT_MISMATCH");

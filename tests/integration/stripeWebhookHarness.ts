@@ -7,6 +7,7 @@ export const managedStripeProofActions = [
   'inspect',
   'checkout_status',
   'deliver',
+  'deliver_paid_materialization_retry',
   'deliver_transient_retry',
   'expire_checkout',
   'invalid_signature',

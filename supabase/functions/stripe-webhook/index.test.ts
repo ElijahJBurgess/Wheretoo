@@ -1145,24 +1145,255 @@ Deno.test("known-order non-line Stripe snapshot mismatches enter review without 
   }
 });
 
-// Mutations caught: treating missing or malformed expanded Charge references as
-// an anonymous receipt error after the exact Session/order binding is known.
-Deno.test("known-order malformed Charge references enter review without fulfillment", async () => {
+// Mutations caught: treating a temporarily incomplete provider object graph as
+// a permanent contradiction would strand a valid paid order in review before
+// Stripe can retry the same delivery with fully materialized references.
+Deno.test("paid completion with unavailable Stripe graph references stays retryable without review", async () => {
   const cases: Array<[string, Record<string, unknown>]> = [
-    ["missing payment intent", sessionWithoutChargeField("payment_intent")],
-    ["malformed payment intent", sessionWithCharge({ payment_intent: {} })],
-    ["malformed customer", sessionWithCharge({ customer: {} })],
-    ["missing transfer", sessionWithoutChargeField("transfer")],
-    ["malformed transfer", sessionWithCharge({ transfer: {} })],
     [
-      "missing application fee",
+      "missing PaymentIntent",
+      withoutField(checkoutSessionFixture(), "payment_intent"),
+    ],
+    [
+      "null PaymentIntent",
+      checkoutSessionFixture({ payment_intent: null }),
+    ],
+    [
+      "unexpanded PaymentIntent",
+      checkoutSessionFixture({ payment_intent: PAYMENT_INTENT_ID }),
+    ],
+    [
+      "missing latest Charge",
+      sessionWithoutPaymentIntentField("latest_charge"),
+    ],
+    [
+      "null latest Charge",
+      sessionWithPaymentIntent({ latest_charge: null }),
+    ],
+    [
+      "unexpanded latest Charge",
+      sessionWithPaymentIntent({ latest_charge: CHARGE_ID }),
+    ],
+    [
+      "missing Charge PaymentIntent binding",
+      sessionWithoutChargeField("payment_intent"),
+    ],
+    [
+      "null Charge PaymentIntent binding",
+      sessionWithCharge({ payment_intent: null }),
+    ],
+    ["missing Transfer", sessionWithoutChargeField("transfer")],
+    ["null Transfer", sessionWithCharge({ transfer: null })],
+    [
+      "missing Application Fee",
       sessionWithoutChargeField("application_fee"),
     ],
-    ["malformed application fee", sessionWithCharge({ application_fee: {} })],
+    ["null Application Fee", sessionWithCharge({ application_fee: null })],
     [
-      "missing balance transaction",
+      "missing Balance Transaction",
       sessionWithoutChargeField("balance_transaction"),
     ],
+    [
+      "null Balance Transaction",
+      sessionWithCharge({ balance_transaction: null }),
+    ],
+  ];
+
+  for (const [name, session] of cases) {
+    const reviews: CheckoutReviewInput[] = [];
+    const finalizations: unknown[] = [];
+    let fulfillments = 0;
+    const eventId = `evt_Task13Transient${
+      name.replaceAll(/[^A-Za-z0-9]/g, "")
+    }`;
+    const response = await createStripeWebhookHandler(dependencies({
+      retrieveSession: async () => session,
+      markCheckoutReconciliationReview: async (review) => {
+        reviews.push(review);
+      },
+      fulfillPaidOrder: async () => {
+        fulfillments += 1;
+        return FULFILLMENT_APPLY_RESULT;
+      },
+      finalizeReceipt: async (...args) => {
+        finalizations.push(args);
+      },
+    }))(request(snapshotEvent(
+      "checkout.session.completed",
+      { id: SESSION_ID },
+      { id: eventId },
+    )));
+
+    assertEquals([response.status, fulfillments], [503, 0], name);
+    assertEquals(reviews, [], name);
+    assertEquals(finalizations, [[
+      eventId,
+      "failed",
+      "TRANSIENT_PROCESSING_FAILURE",
+    ]], name);
+  }
+});
+
+// Mutations caught: treating a transient graph failure as processed, or
+// bypassing receipt/fulfillment idempotency on retry, would either strand the
+// paid order or create more than the exact 2 GA + 1 VIP ticket set.
+Deno.test("same paid event retries after graph materialization and fulfills exactly three tickets once", async () => {
+  let receiptStatus: "new" | "failed" | "processed" = "new";
+  let orderStatus: "checkout_open" | "requires_review" | "paid" =
+    "checkout_open";
+  let retrievals = 0;
+  let fulfillmentAttempts = 0;
+  let reviews = 0;
+  const tickets = new Set<string>();
+  const finalizations: unknown[] = [];
+  const event = snapshotEvent(
+    "checkout.session.completed",
+    { id: SESSION_ID },
+    { id: "evt_Task13TransientGraphRecovery" },
+  );
+  const handler = createStripeWebhookHandler(dependencies({
+    recordReceipt: async () => ({
+      shouldProcess: receiptStatus !== "processed",
+    }),
+    retrieveSession: async () => {
+      retrievals += 1;
+      return retrievals === 1
+        ? sessionWithoutChargeField("transfer")
+        : checkoutSessionFixture();
+    },
+    markCheckoutReconciliationReview: async () => {
+      reviews += 1;
+      orderStatus = "requires_review";
+      receiptStatus = "processed";
+    },
+    fulfillPaidOrder: async () => {
+      fulfillmentAttempts += 1;
+      for (const item of ORDER_ITEMS) {
+        for (let sequence = 1; sequence <= item.quantity; sequence += 1) {
+          tickets.add(`${item.orderItemId}:${sequence}`);
+        }
+      }
+      orderStatus = "paid";
+      receiptStatus = "processed";
+      return FULFILLMENT_APPLY_RESULT;
+    },
+    finalizeReceipt: async (...args) => {
+      finalizations.push(args);
+      if (args[1] === "failed") receiptStatus = "failed";
+    },
+  }));
+
+  const incomplete = await handler(request(event));
+  assertEquals([
+    incomplete.status,
+    orderStatus,
+    tickets.size,
+    receiptStatus,
+  ], [503, "checkout_open", 0, "failed"]);
+
+  const materialized = await handler(request(event));
+  const duplicate = await handler(request(event));
+
+  assertEquals([materialized.status, duplicate.status], [200, 200]);
+  assertEquals({
+    orderStatus,
+    ticketCount: tickets.size,
+    retrievals,
+    fulfillmentAttempts,
+    reviews,
+  }, {
+    orderStatus: "paid",
+    ticketCount: 3,
+    retrievals: 2,
+    fulfillmentAttempts: 1,
+    reviews: 0,
+  });
+  assertEquals(finalizations, [[
+    "evt_Task13TransientGraphRecovery",
+    "failed",
+    "TRANSIENT_PROCESSING_FAILURE",
+  ]]);
+});
+
+// Mutations caught: completed-unpaid and async-success deliveries must not
+// consume the event permanently when their required PaymentIntent has not yet
+// materialized; the same event must be able to fulfill from later paid truth.
+Deno.test("payment lifecycle events retry an absent PaymentIntent and fulfill after materialization", async () => {
+  const cases: Array<[string, string, Record<string, unknown>]> = [
+    [
+      "completed unpaid",
+      "checkout.session.completed",
+      checkoutSessionFixture({
+        payment_status: "unpaid",
+        payment_intent: null,
+      }),
+    ],
+    [
+      "async success",
+      "checkout.session.async_payment_succeeded",
+      withoutField(checkoutSessionFixture(), "payment_intent"),
+    ],
+  ];
+
+  for (const [name, eventType, incompleteSession] of cases) {
+    let retrievals = 0;
+    let fulfillments = 0;
+    let processingTransitions = 0;
+    let reviews = 0;
+    const finalizations: unknown[] = [];
+    const eventId = `evt_Task13Lifecycle${
+      name.replaceAll(/[^A-Za-z0-9]/g, "")
+    }`;
+    const event = snapshotEvent(
+      eventType,
+      { id: SESSION_ID },
+      { id: eventId },
+    );
+    const handler = createStripeWebhookHandler(dependencies({
+      retrieveSession: async () => {
+        retrievals += 1;
+        return retrievals === 1 ? incompleteSession : checkoutSessionFixture();
+      },
+      markPaymentProcessing: async () => {
+        processingTransitions += 1;
+      },
+      markCheckoutReconciliationReview: async () => {
+        reviews += 1;
+      },
+      fulfillPaidOrder: async () => {
+        fulfillments += 1;
+        return FULFILLMENT_APPLY_RESULT;
+      },
+      finalizeReceipt: async (...args) => {
+        finalizations.push(args);
+      },
+    }));
+
+    const incomplete = await handler(request(event));
+    const materialized = await handler(request(event));
+
+    assertEquals([incomplete.status, materialized.status], [503, 200], name);
+    assertEquals(
+      { retrievals, fulfillments, processingTransitions, reviews },
+      { retrievals: 2, fulfillments: 1, processingTransitions: 0, reviews: 0 },
+      name,
+    );
+    assertEquals(finalizations, [[
+      eventId,
+      "failed",
+      "TRANSIENT_PROCESSING_FAILURE",
+    ]], name);
+  }
+});
+
+// Mutations caught: treating malformed expanded Charge references as an
+// anonymous receipt error after the exact Session/order binding is known.
+Deno.test("known-order malformed Charge references enter review without fulfillment", async () => {
+  const cases: Array<[string, Record<string, unknown>]> = [
+    ["malformed payment intent", sessionWithCharge({ payment_intent: {} })],
+    ["malformed customer", sessionWithCharge({ customer: {} })],
+    ["malformed transfer", sessionWithCharge({ transfer: {} })],
+    ["malformed application fee", sessionWithCharge({ application_fee: {} })],
     [
       "malformed balance transaction",
       sessionWithCharge({ balance_transaction: {} }),
@@ -1387,7 +1618,7 @@ Deno.test("a signed known-order malformed Charge reference is reviewed once and 
     recordReceipt: async () => ({ shouldProcess: !receiptProcessed }),
     retrieveSession: async () => {
       retrievals += 1;
-      return sessionWithoutChargeField("transfer");
+      return sessionWithCharge({ transfer: {} });
     },
     markCheckoutReconciliationReview: async () => {
       reviews += 1;

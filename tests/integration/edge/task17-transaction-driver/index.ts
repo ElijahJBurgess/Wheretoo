@@ -58,6 +58,7 @@ const actions = new Set([
   "inspect",
   "checkout_status",
   "deliver",
+  "deliver_paid_materialization_retry",
   "deliver_transient_retry",
   "expire_checkout",
   "invalid_signature",
@@ -1326,6 +1327,48 @@ async function deliver(value: unknown): Promise<Record<string, unknown>> {
   return { status: response.status, receipt: await receipt(event.event_id) };
 }
 
+async function deliverPaidMaterializationRetry(
+  value: unknown,
+): Promise<Record<string, unknown>> {
+  const event = await eventDescriptor(value);
+  if (
+    event.type !== "checkout.session.completed" ||
+    event.object !== "checkout.session"
+  ) throw new Error("INPUT");
+  const dependencies = createDefaultStripeWebhookDependencies();
+  const first = await createStripeWebhookHandler({
+    ...dependencies,
+    retrieveSession: async (sessionId, params) => {
+      const session = await dependencies.retrieveSession(sessionId, params);
+      assertTestMode(session);
+      const intent = session.payment_intent;
+      assertTestMode(intent);
+      const charge = intent.latest_charge;
+      assertTestMode(charge);
+      if (charge.transfer === null || charge.transfer === undefined) {
+        throw new Error("STRIPE");
+      }
+      return {
+        ...session,
+        payment_intent: {
+          ...intent,
+          latest_charge: { ...charge, transfer: null },
+        },
+      };
+    },
+  })(await signedRequest(event));
+  const second = await createStripeWebhookHandler(
+    createDefaultStripeWebhookDependencies(),
+  )(await signedRequest(event));
+  const third = await createStripeWebhookHandler(
+    createDefaultStripeWebhookDependencies(),
+  )(await signedRequest(event));
+  return {
+    statuses: [first.status, second.status, third.status],
+    receipt: await receipt(event.event_id),
+  };
+}
+
 async function deliverTransientRetry(
   value: unknown,
 ): Promise<Record<string, unknown>> {
@@ -2061,6 +2104,9 @@ Deno.serve(async (request) => {
       return json(await checkoutStatus(input.order_handle));
     }
     if (action === "deliver") return json(await deliver(input.event));
+    if (action === "deliver_paid_materialization_retry") {
+      return json(await deliverPaidMaterializationRetry(input.event));
+    }
     if (action === "deliver_transient_retry") {
       return json(await deliverTransientRetry(input.event));
     }

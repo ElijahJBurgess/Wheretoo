@@ -397,12 +397,32 @@ describe('real Stripe test-mode ticket transaction', () => {
       'checkout.session',
       'paid',
     )
-    const paidFirst = await proof.invoke<{ status: number }>('deliver', { event: paidEvent })
+    const paidDelivery = await proof.invoke<{
+      statuses: [number, number, number]
+      receipt: {
+        event_type: string
+        delivery_attempt_count: number
+        processing_status: string
+        error_code: string | null
+      }
+    }>('deliver_paid_materialization_retry', { event: paidEvent })
     let state = await inspect(fixture.event_id)
     const paidItems = state.items.filter((item) => item.order_handle === 'paid')
     const paidTickets = state.tickets.find((tickets) => tickets.order_handle === 'paid')
-    expect(paidFirst.status).toBe(200)
-    expect(state.orders.find((order) => order.order_handle === 'paid')?.status).toBe('paid')
+    expect(paidDelivery).toMatchObject({
+      statuses: [503, 200, 200],
+      receipt: {
+        event_type: 'checkout.session.completed',
+        delivery_attempt_count: 3,
+        processing_status: 'processed',
+        error_code: null,
+      },
+    })
+    expect(state.orders.find((order) => order.order_handle === 'paid')).toMatchObject({
+      status: 'paid',
+      reconciliation_status: 'reconciled',
+      failure_code: null,
+    })
     expect(paidItems).toHaveLength(2)
     expect(paidItems.map((item) => item.quantity).sort()).toEqual([1, 2])
     expect(paidTickets).toMatchObject({
@@ -413,24 +433,6 @@ describe('real Stripe test-mode ticket transaction', () => {
       bindings_valid: true,
       sequences_valid: true,
       refunded_timestamps_valid: true,
-    })
-
-    const paidDuplicate = await proof.invoke<{
-      status: number
-      receipt: { delivery_attempt_count: number; processing_status: string }
-    }>('deliver', { event: paidEvent })
-    state = await inspect(fixture.event_id)
-    const duplicateTickets = state.tickets.find((tickets) => tickets.order_handle === 'paid')
-    expect(paidDuplicate).toMatchObject({
-      status: 200,
-      receipt: { delivery_attempt_count: 2, processing_status: 'processed' },
-    })
-    expect(duplicateTickets).toMatchObject({
-      ticket_count: 3,
-      unique_ticket_count: 3,
-      valid_count: 3,
-      bindings_valid: true,
-      sequences_valid: true,
     })
 
     const safeConfirmation = await confirmation(paidCheckout.confirmationBearer)
