@@ -533,6 +533,7 @@ TEST_CONNECTED_ACCOUNT_ID=$(read_public_env TEST_CONNECTED_ACCOUNT_ID TEST_CONNE
 TEST_CONNECTED_ACCOUNT_DISPOSABLE=${TEST_CONNECTED_ACCOUNT_DISPOSABLE-}
 TASK13_FIXTURE_PREFLIGHT_ONLY=${TASK13_FIXTURE_PREFLIGHT_ONLY-0}
 TASK13_CHECKOUT_DIAGNOSTIC_ONLY=${TASK13_CHECKOUT_DIAGNOSTIC_ONLY-0}
+TASK13_BROWSER_DIAGNOSTIC_ONLY=${TASK13_BROWSER_DIAGNOSTIC_ONLY-0}
 TASK13_CLEANUP_ONLY=${TASK13_CLEANUP_ONLY-0}
 
 case "$TEST_SUPABASE_URL" in https://*.supabase.co) ;; *) printf '%s\n' 'Invalid TEST_SUPABASE_URL.' >&2; exit 1 ;; esac
@@ -559,11 +560,15 @@ case "$TASK13_CHECKOUT_DIAGNOSTIC_ONLY" in
   0|1) ;;
   *) printf '%s\n' 'Invalid TASK13_CHECKOUT_DIAGNOSTIC_ONLY value.' >&2; exit 1 ;;
 esac
+case "$TASK13_BROWSER_DIAGNOSTIC_ONLY" in
+  0|1) ;;
+  *) printf '%s\n' 'Invalid TASK13_BROWSER_DIAGNOSTIC_ONLY value.' >&2; exit 1 ;;
+esac
 case "$TASK13_CLEANUP_ONLY" in
   0|1) ;;
   *) printf '%s\n' 'Invalid TASK13_CLEANUP_ONLY value.' >&2; exit 1 ;;
 esac
-[ "$((TASK13_FIXTURE_PREFLIGHT_ONLY + TASK13_CHECKOUT_DIAGNOSTIC_ONLY + TASK13_CLEANUP_ONLY))" -le 1 ] || {
+[ "$((TASK13_FIXTURE_PREFLIGHT_ONLY + TASK13_CHECKOUT_DIAGNOSTIC_ONLY + TASK13_BROWSER_DIAGNOSTIC_ONLY + TASK13_CLEANUP_ONLY))" -le 1 ] || {
   printf '%s\n' 'Task 13 diagnostic modes are mutually exclusive.' >&2
   exit 1
 }
@@ -1049,9 +1054,16 @@ if [ "$TASK13_FIXTURE_PREFLIGHT_ONLY" -eq 1 ]; then
 fi
 
 capture_checkout_switch
+if [ "$TASK13_BROWSER_DIAGNOSTIC_ONLY" -eq 1 ] && \
+  [ "$(tr -d '\r\n' < "$CHECKOUT_SWITCH_STATE_FILE")" != false ]; then
+  CHECKOUT_SWITCH_CAPTURED=0
+  printf '%s\n' 'Browser diagnostic requires checkout disabled.' >&2
+  exit 1
+fi
 enable_checkout_for_fixture
 
 export RUN_STRIPE_TRANSACTION_PROOF=1
+export TASK13_BROWSER_DIAGNOSTIC_ONLY
 export TEST_STRIPE_CREDENTIAL_MODE=managed_edge
 export TEST_SUPABASE_URL TEST_SUPABASE_PUBLISHABLE_KEY VITE_STRIPE_PUBLISHABLE_KEY
 export TEST_FUNCTION_URL
@@ -1060,6 +1072,13 @@ export TEST_STRIPE_FIXTURE_PREFIX TEST_CONNECTED_ACCOUNT_ID
 export TEST_CONNECTED_ACCOUNT_DISPOSABLE
 export STRIPE_RESTRICTED_KEY=managed:test-mode-authenticated
 export STRIPE_WEBHOOK_SECRET=managed:signature-verified
+
+if [ "$TASK13_BROWSER_DIAGNOSTIC_ONLY" -eq 1 ]; then
+  pnpm exec vitest run --config vitest.integration.config.ts \
+    tests/integration/stripe-ticketing.test.ts \
+    -t 'runs one guaranteed-decline hosted browser diagnostic'
+  exit 0
+fi
 
 pnpm exec vitest run --config vitest.integration.config.ts \
   tests/integration/stripe-ticketing.test.ts

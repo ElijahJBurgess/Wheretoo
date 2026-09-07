@@ -446,8 +446,12 @@ describe('Task 17 managed proof runner', () => {
 
   const invalidCleanupModes: Array<Record<string, string>> = [
     { TASK13_CLEANUP_ONLY: '2' },
+    { TASK13_BROWSER_DIAGNOSTIC_ONLY: '2' },
     { TASK13_CLEANUP_ONLY: '1', TASK13_FIXTURE_PREFLIGHT_ONLY: '1' },
     { TASK13_CLEANUP_ONLY: '1', TASK13_CHECKOUT_DIAGNOSTIC_ONLY: '1' },
+    { TASK13_BROWSER_DIAGNOSTIC_ONLY: '1', TASK13_FIXTURE_PREFLIGHT_ONLY: '1' },
+    { TASK13_BROWSER_DIAGNOSTIC_ONLY: '1', TASK13_CHECKOUT_DIAGNOSTIC_ONLY: '1' },
+    { TASK13_BROWSER_DIAGNOSTIC_ONLY: '1', TASK13_CLEANUP_ONLY: '1' },
   ]
 
   it.each(invalidCleanupModes)('rejects invalid or overlapping cleanup-only modes before mutation', async (overrides) => {
@@ -746,6 +750,67 @@ describe('Task 17 managed proof runner', () => {
     expect(result.stdout).not.toContain('cs_test_')
     expect(result.stdout).not.toContain('acct_')
     expect(result.stdout).not.toContain('@example.invalid')
+  })
+
+  it('runs one guaranteed-decline browser diagnostic after complete preflight and never retires', async () => {
+    const result = await runRunner(false, false, {
+      TASK13_BROWSER_DIAGNOSTIC_ONLY: '1',
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.log).toContain('curl-action account_diagnostic')
+    expect(result.log).toContain('curl-action fixture_preflight')
+    expect(result.log.indexOf('curl-action account_diagnostic')).toBeLessThan(
+      result.log.indexOf('curl-action fixture_preflight'),
+    )
+    expect(result.log.indexOf('curl-action fixture_preflight')).toBeLessThan(
+      result.log.indexOf('set checkout_creation_enabled = true'),
+    )
+    expect(result.log).toContain(
+      'vitest run --config vitest.integration.config.ts tests/integration/stripe-ticketing.test.ts -t runs one guaranteed-decline hosted browser diagnostic',
+    )
+    expect(result.log.match(/vitest run/g)).toHaveLength(1)
+    expect(result.log).toContain('set checkout_creation_enabled = false')
+    expect(result.log).toContain('cleanup-close-request false')
+    expect(result.log).toContain('task17_cleanup_receipts')
+    expect(result.log).toContain('event_public_eligibility_intervals')
+    expect(result.log).not.toContain('retirement-authorization true')
+    expect(result.log).not.toContain('curl-action retire_connected_account')
+  })
+
+  it('cleans the diagnostic fixture and preserves the account when browser automation fails', async () => {
+    const result = await runRunner(true, false, {
+      TASK13_BROWSER_DIAGNOSTIC_ONLY: '1',
+    })
+
+    expect(result.exitCode).not.toBe(0)
+    expect(result.log).toContain('curl-action account_diagnostic')
+    expect(result.log).toContain('curl-action fixture_preflight')
+    expect(result.log).toContain(
+      'vitest run --config vitest.integration.config.ts tests/integration/stripe-ticketing.test.ts -t runs one guaranteed-decline hosted browser diagnostic',
+    )
+    expect(result.log).toContain('set checkout_creation_enabled = false')
+    expect(result.log).toContain('cleanup-close-request false')
+    expect(result.log).toContain('task17_cleanup_receipts')
+    expect(result.log).toContain('event_public_eligibility_intervals')
+    expect(result.log).not.toContain('retirement-authorization true')
+    expect(result.log).not.toContain('curl-action retire_connected_account')
+  })
+
+  it('requires checkout disabled before opening the guarded browser diagnostic window', async () => {
+    const result = await runRunner(false, true, {
+      TASK13_BROWSER_DIAGNOSTIC_ONLY: '1',
+    })
+
+    expect(result.exitCode).not.toBe(0)
+    expect(result.log).toContain('curl-action account_diagnostic')
+    expect(result.log).toContain('curl-action fixture_preflight')
+    expect(result.log).toContain('select checkout_creation_enabled')
+    expect(result.log).not.toContain('set checkout_creation_enabled = true')
+    expect(result.log).not.toContain('vitest run')
+    expect(result.log).toContain('cleanup-close-request false')
+    expect(result.log).not.toContain('retirement-authorization true')
+    expect(result.log).not.toContain('curl-action retire_connected_account')
   })
 
   it('deploys the committed driver and tears down the endpoint and temporary secrets', async () => {

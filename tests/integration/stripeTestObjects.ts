@@ -43,13 +43,116 @@ export function createStripeProofCheckoutAttempt(): {
   }
 }
 
-export function toSafeHostedCheckoutBrowserError(error: unknown): Error {
-  const category = error instanceof Error && (
-      error.name === 'TimeoutError' || /(?:timed?\s*out|timeout)/i.test(error.message)
-    )
-    ? 'TIMEOUT'
-    : 'BROWSER'
-  return new Error(`Hosted Checkout browser failure: ${category}`)
+export type HostedCheckoutBrowserCheckpoint =
+  | 'BROWSER_LAUNCH'
+  | 'CHECKOUT_URL_OPEN'
+  | 'HOSTED_DOCUMENT_LOAD'
+  | 'PAYMENT_METHOD_FORM'
+  | 'CARD_NUMBER'
+  | 'CARD_EXPIRATION'
+  | 'CARD_CVC'
+  | 'CARDHOLDER_NAME'
+  | 'POSTAL_CODE'
+  | 'OPTIONAL_SAVE_CONTROL'
+  | 'AUXILIARY_DISCLOSURE_CONTROL'
+  | 'PAYMENT_SUBMISSION'
+  | 'PROVIDER_DISPOSITION'
+  | 'PROVIDER_ACCEPTED'
+  | 'PROVIDER_REJECTED'
+  | 'LOCAL_RETURN_REDIRECT'
+  | 'LOCAL_RETURN_REDIRECT_OBSERVED'
+
+export type HostedCheckoutBrowserDiagnostic = {
+  stage: Exclude<
+    HostedCheckoutBrowserCheckpoint,
+    'PROVIDER_ACCEPTED' | 'PROVIDER_REJECTED' | 'LOCAL_RETURN_REDIRECT_OBSERVED'
+  >
+  failure: 'NONE' | 'TIMEOUT' | 'BROWSER'
+  submission: 'NOT_ATTEMPTED' | 'ATTEMPTED'
+  provider: 'NOT_OBSERVED' | 'ACCEPTED' | 'REJECTED'
+  redirect: 'NOT_OBSERVED' | 'OBSERVED'
+}
+
+const hostedCheckoutBrowserCheckpoints = new Set<HostedCheckoutBrowserCheckpoint>([
+  'BROWSER_LAUNCH',
+  'CHECKOUT_URL_OPEN',
+  'HOSTED_DOCUMENT_LOAD',
+  'PAYMENT_METHOD_FORM',
+  'CARD_NUMBER',
+  'CARD_EXPIRATION',
+  'CARD_CVC',
+  'CARDHOLDER_NAME',
+  'POSTAL_CODE',
+  'OPTIONAL_SAVE_CONTROL',
+  'AUXILIARY_DISCLOSURE_CONTROL',
+  'PAYMENT_SUBMISSION',
+  'PROVIDER_DISPOSITION',
+  'PROVIDER_ACCEPTED',
+  'PROVIDER_REJECTED',
+  'LOCAL_RETURN_REDIRECT',
+  'LOCAL_RETURN_REDIRECT_OBSERVED',
+])
+
+export function hostedCheckoutBrowserDiagnostic(
+  candidate: HostedCheckoutBrowserCheckpoint | string,
+  error?: unknown,
+): HostedCheckoutBrowserDiagnostic {
+  const checkpoint = hostedCheckoutBrowserCheckpoints.has(candidate as HostedCheckoutBrowserCheckpoint)
+    ? candidate as HostedCheckoutBrowserCheckpoint
+    : 'BROWSER_LAUNCH'
+  const submission = new Set<HostedCheckoutBrowserCheckpoint>([
+    'PROVIDER_DISPOSITION',
+    'PROVIDER_ACCEPTED',
+    'PROVIDER_REJECTED',
+    'LOCAL_RETURN_REDIRECT',
+    'LOCAL_RETURN_REDIRECT_OBSERVED',
+  ]).has(checkpoint)
+    ? 'ATTEMPTED'
+    : 'NOT_ATTEMPTED'
+  const provider = checkpoint === 'PROVIDER_ACCEPTED' ||
+      checkpoint === 'LOCAL_RETURN_REDIRECT_OBSERVED'
+    ? 'ACCEPTED'
+    : checkpoint === 'PROVIDER_REJECTED'
+      ? 'REJECTED'
+      : 'NOT_OBSERVED'
+  const stage = checkpoint === 'PROVIDER_ACCEPTED' || checkpoint === 'PROVIDER_REJECTED'
+    ? 'PROVIDER_DISPOSITION'
+    : checkpoint === 'LOCAL_RETURN_REDIRECT_OBSERVED'
+      ? 'LOCAL_RETURN_REDIRECT'
+      : checkpoint
+  const failure = error === undefined
+    ? 'NONE'
+    : error instanceof Error && (
+        error.name === 'TimeoutError' || /(?:timed?\s*out|timeout)/i.test(error.message)
+      )
+      ? 'TIMEOUT'
+      : 'BROWSER'
+
+  return {
+    stage,
+    failure,
+    submission,
+    provider,
+    redirect: checkpoint === 'LOCAL_RETURN_REDIRECT_OBSERVED' ? 'OBSERVED' : 'NOT_OBSERVED',
+  }
+}
+
+export function formatHostedCheckoutBrowserDiagnostic(
+  diagnostic: HostedCheckoutBrowserDiagnostic,
+): string {
+  return `stage=${diagnostic.stage} failure=${diagnostic.failure} ` +
+    `submission=${diagnostic.submission} provider=${diagnostic.provider} ` +
+    `redirect=${diagnostic.redirect}`
+}
+
+export function toSafeHostedCheckoutBrowserError(
+  error: unknown,
+  checkpoint: HostedCheckoutBrowserCheckpoint = 'BROWSER_LAUNCH',
+): Error {
+  const diagnostic = hostedCheckoutBrowserDiagnostic(checkpoint, error)
+  return new Error(
+    `Hosted Checkout browser diagnostic: ${formatHostedCheckoutBrowserDiagnostic(diagnostic)}`,
+  )
 }
 
 const checkoutCreationErrorCodes = new Set([

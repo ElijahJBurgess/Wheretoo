@@ -262,15 +262,127 @@ describe('managed proof client boundary', () => {
     }
   })
 
-  it('sanitizes URL-bearing hosted Checkout browser errors', () => {
+  it('maps each hosted Checkout boundary to a fixed diagnostic stage', () => {
+    const diagnose = Reflect.get(stripeTestObjects, 'hostedCheckoutBrowserDiagnostic')
+    expect(typeof diagnose).toBe('function')
+    if (typeof diagnose !== 'function') return
+
+    const mappings = [
+      ['BROWSER_LAUNCH', 'BROWSER_LAUNCH'],
+      ['CHECKOUT_URL_OPEN', 'CHECKOUT_URL_OPEN'],
+      ['HOSTED_DOCUMENT_LOAD', 'HOSTED_DOCUMENT_LOAD'],
+      ['PAYMENT_METHOD_FORM', 'PAYMENT_METHOD_FORM'],
+      ['CARD_NUMBER', 'CARD_NUMBER'],
+      ['CARD_EXPIRATION', 'CARD_EXPIRATION'],
+      ['CARD_CVC', 'CARD_CVC'],
+      ['CARDHOLDER_NAME', 'CARDHOLDER_NAME'],
+      ['POSTAL_CODE', 'POSTAL_CODE'],
+      ['OPTIONAL_SAVE_CONTROL', 'OPTIONAL_SAVE_CONTROL'],
+      ['AUXILIARY_DISCLOSURE_CONTROL', 'AUXILIARY_DISCLOSURE_CONTROL'],
+      ['PAYMENT_SUBMISSION', 'PAYMENT_SUBMISSION'],
+      ['PROVIDER_DISPOSITION', 'PROVIDER_DISPOSITION'],
+      ['PROVIDER_ACCEPTED', 'PROVIDER_DISPOSITION'],
+      ['PROVIDER_REJECTED', 'PROVIDER_DISPOSITION'],
+      ['LOCAL_RETURN_REDIRECT', 'LOCAL_RETURN_REDIRECT'],
+      ['LOCAL_RETURN_REDIRECT_OBSERVED', 'LOCAL_RETURN_REDIRECT'],
+    ] as const
+
+    for (const [checkpoint, stage] of mappings) {
+      expect(diagnose(checkpoint)).toMatchObject({ stage })
+    }
+  })
+
+  it('distinguishes pre-submission automation failure from post-submission observation', () => {
+    const diagnose = Reflect.get(stripeTestObjects, 'hostedCheckoutBrowserDiagnostic')
+    expect(typeof diagnose).toBe('function')
+    if (typeof diagnose !== 'function') return
+
+    expect(diagnose('CARD_CVC', new Error('timeout'))).toEqual({
+      stage: 'CARD_CVC',
+      failure: 'TIMEOUT',
+      submission: 'NOT_ATTEMPTED',
+      provider: 'NOT_OBSERVED',
+      redirect: 'NOT_OBSERVED',
+    })
+    expect(diagnose('PROVIDER_DISPOSITION', new Error('browser failed'))).toEqual({
+      stage: 'PROVIDER_DISPOSITION',
+      failure: 'BROWSER',
+      submission: 'ATTEMPTED',
+      provider: 'NOT_OBSERVED',
+      redirect: 'NOT_OBSERVED',
+    })
+  })
+
+  it('reports only fixed provider disposition and local redirect observations', () => {
+    const diagnose = Reflect.get(stripeTestObjects, 'hostedCheckoutBrowserDiagnostic')
+    expect(typeof diagnose).toBe('function')
+    if (typeof diagnose !== 'function') return
+
+    expect(diagnose('PROVIDER_ACCEPTED')).toEqual({
+      stage: 'PROVIDER_DISPOSITION',
+      failure: 'NONE',
+      submission: 'ATTEMPTED',
+      provider: 'ACCEPTED',
+      redirect: 'NOT_OBSERVED',
+    })
+    expect(diagnose('PROVIDER_REJECTED')).toEqual({
+      stage: 'PROVIDER_DISPOSITION',
+      failure: 'NONE',
+      submission: 'ATTEMPTED',
+      provider: 'REJECTED',
+      redirect: 'NOT_OBSERVED',
+    })
+    expect(diagnose('LOCAL_RETURN_REDIRECT_OBSERVED')).toEqual({
+      stage: 'LOCAL_RETURN_REDIRECT',
+      failure: 'NONE',
+      submission: 'ATTEMPTED',
+      provider: 'ACCEPTED',
+      redirect: 'OBSERVED',
+    })
+  })
+
+  it('sanitizes hosted Checkout diagnostics to exact keys and allowlisted values', () => {
+    const diagnose = Reflect.get(stripeTestObjects, 'hostedCheckoutBrowserDiagnostic')
     const sanitize = Reflect.get(stripeTestObjects, 'toSafeHostedCheckoutBrowserError')
+    expect(typeof diagnose).toBe('function')
     expect(typeof sanitize).toBe('function')
-    if (typeof sanitize !== 'function') return
+    if (typeof diagnose !== 'function' || typeof sanitize !== 'function') return
 
     const sensitiveUrl = ['https://checkout.stripe.com', '/c/pay/', 'cs_test_forbidden'].join('')
-    const safe = sanitize(new Error(`page navigation timed out at ${sensitiveUrl}`)) as Error
-    expect(safe.message).toBe('Hosted Checkout browser failure: TIMEOUT')
+    const raw = `${sensitiveUrl} buyer@example.invalid sk_test_forbidden 4242424242424242`
+    const diagnostic = diagnose('CARD_NUMBER', new Error(`page navigation timed out at ${raw}`))
+    const safe = sanitize(
+      new Error(`page navigation timed out at ${raw}`),
+      'CARD_NUMBER',
+    ) as Error
+    expect(Object.keys(diagnostic)).toEqual([
+      'stage',
+      'failure',
+      'submission',
+      'provider',
+      'redirect',
+    ])
+    expect(diagnostic).toEqual({
+      stage: 'CARD_NUMBER',
+      failure: 'TIMEOUT',
+      submission: 'NOT_ATTEMPTED',
+      provider: 'NOT_OBSERVED',
+      redirect: 'NOT_OBSERVED',
+    })
+    expect(diagnose(raw, new Error(raw))).toEqual({
+      stage: 'BROWSER_LAUNCH',
+      failure: 'BROWSER',
+      submission: 'NOT_ATTEMPTED',
+      provider: 'NOT_OBSERVED',
+      redirect: 'NOT_OBSERVED',
+    })
+    expect(safe.message).toBe(
+      'Hosted Checkout browser diagnostic: stage=CARD_NUMBER failure=TIMEOUT submission=NOT_ATTEMPTED provider=NOT_OBSERVED redirect=NOT_OBSERVED',
+    )
     expect(safe.message).not.toContain(sensitiveUrl)
+    expect(safe.message).not.toContain('buyer@example.invalid')
+    expect(safe.message).not.toContain('sk_test_')
+    expect(safe.message).not.toContain('4242424242424242')
     expect(safe).not.toHaveProperty('cause')
   })
 

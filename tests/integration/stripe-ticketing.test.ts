@@ -3,6 +3,10 @@ import { chromium, type Locator, type Page } from '@playwright/test'
 import { describe, expect, it } from 'vitest'
 import {
   createStripeProofCheckoutAttempt,
+  formatHostedCheckoutBrowserDiagnostic,
+  hostedCheckoutBrowserDiagnostic,
+  type HostedCheckoutBrowserCheckpoint,
+  type HostedCheckoutBrowserDiagnostic,
   TASK17_ADMISSION_QUANTITY,
   TASK17_APPLICATION_FEE_MINOR,
   TASK17_CART,
@@ -174,38 +178,59 @@ async function visibleTextbox(page: Page, name: string): Promise<Locator> {
   throw new Error(`Timed out waiting for hosted Checkout field: ${name}`)
 }
 
-async function exerciseHostedCheckout(url: string, cardNumber: string, outcome: 'paid' | 'declined') {
+async function exerciseHostedCheckout(
+  url: string,
+  cardNumber: string,
+  outcome: 'paid' | 'declined',
+): Promise<HostedCheckoutBrowserDiagnostic> {
+  let checkpoint: HostedCheckoutBrowserCheckpoint = 'BROWSER_LAUNCH'
   try {
     const browser = await chromium.launch({ headless: true })
     try {
       const page = await browser.newPage()
+      checkpoint = 'CHECKOUT_URL_OPEN'
       await page.goto(url)
+      checkpoint = 'HOSTED_DOCUMENT_LOAD'
+      checkpoint = 'PAYMENT_METHOD_FORM'
       const card = page.getByRole('radio', { name: 'Card' })
       if (!(await card.isChecked())) await card.check({ force: true })
+      checkpoint = 'CARD_NUMBER'
       const cardNumberInput = await visibleTextbox(page, 'Card number')
       await cardNumberInput.fill(cardNumber)
+      checkpoint = 'CARD_EXPIRATION'
       await (await visibleTextbox(page, 'Expiration')).fill('1234')
+      checkpoint = 'CARD_CVC'
       await (await visibleTextbox(page, 'CVC')).fill('123')
+      checkpoint = 'CARDHOLDER_NAME'
       await (await visibleTextbox(page, 'Cardholder name')).fill('Task Seventeen')
+      checkpoint = 'POSTAL_CODE'
       await (await visibleTextbox(page, 'ZIP')).fill('94103')
+      checkpoint = 'OPTIONAL_SAVE_CONTROL'
       const save = page.getByRole('checkbox', { name: 'Save my information for faster checkout' }).filter({ visible: true }).first()
       if (await save.isChecked()) await save.uncheck()
+      checkpoint = 'AUXILIARY_DISCLOSURE_CONTROL'
       const disclosure = page.getByRole('checkbox', { name: 'I am an AI agent acting on behalf of someone else' }).filter({ visible: true }).first()
       await disclosure.evaluate((element: HTMLInputElement) => element.click())
       expect(await disclosure.isChecked()).toBe(true)
+      checkpoint = 'PAYMENT_SUBMISSION'
       await page.getByRole('button', { name: 'Pay', exact: true }).filter({ visible: true }).first().click()
+      checkpoint = 'PROVIDER_DISPOSITION'
       if (outcome === 'paid') {
+        checkpoint = 'LOCAL_RETURN_REDIRECT'
         await page.waitForURL((value) => value.origin === 'http://127.0.0.1:3000', { timeout: 30_000 })
+        checkpoint = 'LOCAL_RETURN_REDIRECT_OBSERVED'
       } else {
         const alert = page.getByRole('alert')
         await alert.waitFor({ timeout: 30_000 })
         expect((await alert.textContent())?.toLowerCase()).toContain('declined')
+        checkpoint = 'PROVIDER_REJECTED'
       }
+      return hostedCheckoutBrowserDiagnostic(checkpoint)
     } finally {
       await browser.close()
     }
   } catch (error) {
-    throw toSafeHostedCheckoutBrowserError(error)
+    throw toSafeHostedCheckoutBrowserError(error, checkpoint)
   }
 }
 
@@ -241,7 +266,8 @@ async function confirmation(confirmationBearer: string): Promise<Record<string, 
 }
 
 describe('real Stripe test-mode ticket transaction', () => {
-  it('drives every signed delivery and reconciles exact Stripe and Supabase truth', async () => {
+  it.skipIf(process.env.TASK13_BROWSER_DIAGNOSTIC_ONLY === '1')(
+    'drives every signed delivery and reconciles exact Stripe and Supabase truth', async () => {
     const server = await proof.invoke<Record<string, unknown>>('server_proof')
     expect(server).toMatchObject({
       ok: true,
@@ -542,5 +568,42 @@ describe('real Stripe test-mode ticket transaction', () => {
       connected_account_closed: false,
       connected_account_preserved: true,
     })
-  }, 180_000)
+    }, 180_000,
+  )
+
+  it.skipIf(process.env.TASK13_BROWSER_DIAGNOSTIC_ONLY !== '1')(
+    'runs one guaranteed-decline hosted browser diagnostic',
+    async () => {
+      await expect(proof.invoke('server_proof')).resolves.toMatchObject({
+        ok: true,
+        livemode: false,
+        connected_account_matches: true,
+      })
+      const fixture = await proof.invoke<Setup>('setup')
+      expect(fixture).toMatchObject({
+        ok: true,
+        quantity: TASK17_ADMISSION_QUANTITY,
+        subtotal_minor: TASK17_SUBTOTAL_MINOR,
+      })
+
+      const checkout = await createCheckout(fixture, 'declined')
+      await waitForOrder(fixture.event_id, 'declined')
+      const diagnostic = await exerciseHostedCheckout(
+        checkout.checkoutUrl,
+        '4000000000000002',
+        'declined',
+      )
+      expect(diagnostic).toEqual({
+        stage: 'PROVIDER_DISPOSITION',
+        failure: 'NONE',
+        submission: 'ATTEMPTED',
+        provider: 'REJECTED',
+        redirect: 'NOT_OBSERVED',
+      })
+      console.info(
+        `Task 13 hosted browser diagnostic: ${formatHostedCheckoutBrowserDiagnostic(diagnostic)}`,
+      )
+    },
+    90_000,
+  )
 })
