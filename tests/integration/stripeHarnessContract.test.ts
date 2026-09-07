@@ -295,12 +295,18 @@ describe('managed proof client boundary', () => {
 
   function hostedBrowserActions(options: {
     failAt?: string
-    provider?: 'ACCEPTED' | 'REJECTED'
+    providerAcceptance?: boolean | boolean[]
+    hostedRejection?: boolean
     redirect?: 'OBSERVED' | 'NOT_OBSERVED'
+    requireProviderProofBeforeRedirect?: boolean
   } = {}) {
+    let acceptanceRead = 0
+    let providerProven = false
     const boundary = (name: string) => async () => {
       if (options.failAt === name) {
-        throw new Error('unsafe browser detail must not escape')
+        throw new Error(name === 'observeLocalReturnRedirect'
+          ? 'timed out with unsafe browser detail'
+          : 'unsafe browser detail must not escape')
       }
     }
     return {
@@ -317,12 +323,28 @@ describe('managed proof client boundary', () => {
       interactAuxiliaryDisclosureControl: boundary('interactAuxiliaryDisclosureControl'),
       ensurePaymentSubmissionActionable: boundary('ensurePaymentSubmissionActionable'),
       dispatchPaymentSubmission: boundary('dispatchPaymentSubmission'),
-      observeProviderDisposition: async () => {
-        await boundary('observeProviderDisposition')()
-        return options.provider ?? 'REJECTED'
+      readHostedProviderRejection: async () => {
+        await boundary('readHostedProviderRejection')()
+        return options.hostedRejection ?? true
       },
+      readProviderAcceptance: async () => {
+        await boundary('readProviderAcceptance')()
+        const configured = options.providerAcceptance ?? false
+        if (!Array.isArray(configured)) {
+          providerProven = configured
+          return configured
+        }
+        const value = configured[Math.min(acceptanceRead, configured.length - 1)] ?? false
+        acceptanceRead += 1
+        providerProven = value
+        return value
+      },
+      waitForProviderObservationRetry: boundary('waitForProviderObservationRetry'),
       observeLocalReturnRedirect: async () => {
         await boundary('observeLocalReturnRedirect')()
+        if (options.requireProviderProofBeforeRedirect && !providerProven) {
+          throw new Error('redirect inspected before provider proof')
+        }
         return options.redirect ?? 'NOT_OBSERVED'
       },
     }
@@ -357,37 +379,79 @@ describe('managed proof client boundary', () => {
       'stage=PAYMENT_SUBMISSION_DISPATCH failure=BROWSER submission=NOT_ATTEMPTED',
     )
     await expect(run(hostedBrowserActions({
-      failAt: 'observeProviderDisposition',
+      hostedRejection: false,
+      failAt: 'readProviderAcceptance',
     }))).rejects.toThrow(
       'stage=PROVIDER_DISPOSITION failure=BROWSER submission=ATTEMPTED',
     )
   })
 
-  it('retains independently observed provider and redirect facts without an expected outcome', async () => {
+  it('waits for provider proof when local return arrives before accepted status', async () => {
     const run = Reflect.get(stripeTestObjects, 'runHostedCheckoutBrowserDiagnostic')
     expect(typeof run).toBe('function')
     if (typeof run !== 'function') return
 
     await expect(run(hostedBrowserActions({
-      provider: 'REJECTED',
-      redirect: 'NOT_OBSERVED',
+      hostedRejection: false,
+      providerAcceptance: [false, true],
+      redirect: 'OBSERVED',
+      requireProviderProofBeforeRedirect: true,
     }))).resolves.toEqual({
       stage: 'LOCAL_RETURN_REDIRECT',
       failure: 'NONE',
       submission: 'ATTEMPTED',
-      provider: 'REJECTED',
-      redirect: 'NOT_OBSERVED',
+      provider: 'ACCEPTED',
+      redirect: 'OBSERVED',
     })
+  })
+
+  it('retains accepted provider proof when local return is missing', async () => {
+    const run = Reflect.get(stripeTestObjects, 'runHostedCheckoutBrowserDiagnostic')
+    expect(typeof run).toBe('function')
+    if (typeof run !== 'function') return
+
     await expect(run(hostedBrowserActions({
-      provider: 'ACCEPTED',
+      hostedRejection: false,
+      providerAcceptance: true,
+      failAt: 'observeLocalReturnRedirect',
+    }))).rejects.toThrow(
+      'Hosted Checkout browser diagnostic: stage=LOCAL_RETURN_REDIRECT failure=TIMEOUT submission=ATTEMPTED provider=ACCEPTED redirect=NOT_OBSERVED',
+    )
+  })
+
+  it('retains rejected provider disposition with an unexpected local return', async () => {
+    const run = Reflect.get(stripeTestObjects, 'runHostedCheckoutBrowserDiagnostic')
+    expect(typeof run).toBe('function')
+    if (typeof run !== 'function') return
+
+    await expect(run(hostedBrowserActions({
+      hostedRejection: true,
+      providerAcceptance: false,
       redirect: 'OBSERVED',
     }))).resolves.toEqual({
       stage: 'LOCAL_RETURN_REDIRECT',
       failure: 'NONE',
       submission: 'ATTEMPTED',
-      provider: 'ACCEPTED',
+      provider: 'REJECTED',
       redirect: 'OBSERVED',
     })
+  })
+
+  it('observes provider and redirect facts without an expected-outcome input', async () => {
+    const run = Reflect.get(stripeTestObjects, 'runHostedCheckoutBrowserDiagnostic')
+    expect(typeof run).toBe('function')
+    if (typeof run !== 'function') return
+
+    await expect(run(hostedBrowserActions({
+      hostedRejection: false,
+      providerAcceptance: true,
+      redirect: 'OBSERVED',
+    }))).resolves.toMatchObject({ provider: 'ACCEPTED', redirect: 'OBSERVED' })
+    await expect(run(hostedBrowserActions({
+      hostedRejection: true,
+      providerAcceptance: false,
+      redirect: 'NOT_OBSERVED',
+    }))).resolves.toMatchObject({ provider: 'REJECTED', redirect: 'NOT_OBSERVED' })
   })
 
   it('rejects a malformed external observation without retaining its value', async () => {
@@ -396,7 +460,8 @@ describe('managed proof client boundary', () => {
     if (typeof run !== 'function') return
 
     const actions = hostedBrowserActions()
-    actions.observeProviderDisposition = async () => 'unsafe observation' as never
+    actions.readHostedProviderRejection = async () => false
+    actions.readProviderAcceptance = async () => 'unsafe observation' as never
     await expect(run(actions)).rejects.toThrow(
       'Hosted Checkout browser diagnostic: stage=PROVIDER_DISPOSITION failure=BROWSER submission=ATTEMPTED provider=NOT_OBSERVED redirect=NOT_OBSERVED',
     )

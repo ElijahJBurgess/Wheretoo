@@ -179,43 +179,15 @@ async function visibleTextbox(page: Page, name: string): Promise<Locator> {
 async function exerciseHostedCheckout(
   url: string,
   cardNumber: string,
+  readProviderAcceptance: () => Promise<boolean>,
 ): Promise<HostedCheckoutBrowserDiagnostic> {
   let browser: Browser | undefined
   let page: Page | undefined
   let payButton: Locator | undefined
-  let paymentObservation: Promise<{
-    provider: 'ACCEPTED' | 'REJECTED'
-    redirect: 'NOT_OBSERVED' | 'OBSERVED'
-  }> | undefined
 
   const currentPage = () => {
     if (page === undefined) throw new Error('Hosted Checkout page unavailable')
     return page
-  }
-
-  const observePayment = () => {
-    if (paymentObservation !== undefined) return paymentObservation
-    const hostedPage = currentPage()
-    paymentObservation = Promise.race([
-      hostedPage.waitForURL(
-        (value) => value.origin === 'http://127.0.0.1:3000',
-        { timeout: 30_000 },
-      ).then(() => ({
-        provider: 'ACCEPTED' as const,
-        redirect: 'OBSERVED' as const,
-      })),
-      (async () => {
-        const alert = hostedPage.getByRole('alert')
-        await alert.waitFor({ timeout: 30_000 })
-        const rejected = (await alert.textContent())?.toLowerCase().includes('declined') === true
-        if (!rejected) throw new Error('Hosted Checkout provider disposition unavailable')
-        return {
-          provider: 'REJECTED' as const,
-          redirect: 'NOT_OBSERVED' as const,
-        }
-      })(),
-    ])
-    return paymentObservation
   }
 
   try {
@@ -275,12 +247,44 @@ async function exerciseHostedCheckout(
         if (payButton === undefined) throw new Error('Hosted Checkout submit control unavailable')
         await payButton.click({ noWaitAfter: true })
       },
-      observeProviderDisposition: async () => (await observePayment()).provider,
-      observeLocalReturnRedirect: async () => (await observePayment()).redirect,
+      readHostedProviderRejection: async () => {
+        const alert = currentPage().getByRole('alert')
+        if (!(await alert.isVisible())) return false
+        return (await alert.textContent())?.toLowerCase().includes('declined') === true
+      },
+      readProviderAcceptance,
+      waitForProviderObservationRetry: async () => {
+        await currentPage().waitForTimeout(100)
+      },
+      observeLocalReturnRedirect: async (provider) => {
+        if (provider === 'ACCEPTED') {
+          await currentPage().waitForURL(
+            (value) => value.origin === 'http://127.0.0.1:3000',
+            { timeout: 30_000 },
+          )
+          return 'OBSERVED'
+        }
+        try {
+          return new URL(currentPage().url()).origin === 'http://127.0.0.1:3000'
+            ? 'OBSERVED'
+            : 'NOT_OBSERVED'
+        } catch {
+          throw new Error('Hosted Checkout return location invalid')
+        }
+      },
     })
   } finally {
     await browser?.close().catch(() => undefined)
   }
+}
+
+async function readAcceptedCheckoutStatus(orderHandle: 'paid' | 'declined'): Promise<boolean> {
+  const status = await proof.invoke<Record<string, unknown>>('checkout_status', {
+    order_handle: orderHandle,
+  })
+  return status.ok === true && status.livemode === false &&
+    status.status === 'complete' && status.payment_status === 'paid' &&
+    status.charge_paid === true
 }
 
 async function inspect(eventId: string): Promise<Inspection> {
@@ -354,7 +358,11 @@ describe('real Stripe test-mode ticket transaction', () => {
     )
     const paidCheckout = await createCheckout(fixture, 'paid')
     await waitForOrder(fixture.event_id, 'paid')
-    expect(await exerciseHostedCheckout(paidCheckout.checkoutUrl, '4242424242424242')).toEqual({
+    expect(await exerciseHostedCheckout(
+      paidCheckout.checkoutUrl,
+      '4242424242424242',
+      () => readAcceptedCheckoutStatus('paid'),
+    )).toEqual({
       stage: 'LOCAL_RETURN_REDIRECT',
       failure: 'NONE',
       submission: 'ATTEMPTED',
@@ -450,7 +458,11 @@ describe('real Stripe test-mode ticket transaction', () => {
     expect(state.orders).not.toContainEqual(expect.objectContaining({ order_handle: 'declined' }))
     const declinedCheckout = await createCheckout(fixture, 'declined')
     await waitForOrder(fixture.event_id, 'declined')
-    expect(await exerciseHostedCheckout(declinedCheckout.checkoutUrl, '4000000000000002')).toEqual({
+    expect(await exerciseHostedCheckout(
+      declinedCheckout.checkoutUrl,
+      '4000000000000002',
+      () => readAcceptedCheckoutStatus('declined'),
+    )).toEqual({
       stage: 'LOCAL_RETURN_REDIRECT',
       failure: 'NONE',
       submission: 'ATTEMPTED',
@@ -652,6 +664,7 @@ describe('real Stripe test-mode ticket transaction', () => {
       const diagnostic = await exerciseHostedCheckout(
         checkout.checkoutUrl,
         '4000000000000002',
+        () => readAcceptedCheckoutStatus('declined'),
       )
       expect(diagnostic).toEqual({
         stage: 'LOCAL_RETURN_REDIRECT',

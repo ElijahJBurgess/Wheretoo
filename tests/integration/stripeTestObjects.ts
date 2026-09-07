@@ -245,8 +245,12 @@ export type HostedCheckoutBrowserActions = {
   interactAuxiliaryDisclosureControl(): Promise<void>
   ensurePaymentSubmissionActionable(): Promise<void>
   dispatchPaymentSubmission(): Promise<void>
-  observeProviderDisposition(): Promise<'ACCEPTED' | 'REJECTED'>
-  observeLocalReturnRedirect(): Promise<'NOT_OBSERVED' | 'OBSERVED'>
+  readHostedProviderRejection(): Promise<boolean>
+  readProviderAcceptance(): Promise<boolean>
+  waitForProviderObservationRetry(): Promise<void>
+  observeLocalReturnRedirect(
+    provider: 'ACCEPTED' | 'REJECTED',
+  ): Promise<'NOT_OBSERVED' | 'OBSERVED'>
 }
 
 export async function runHostedCheckoutBrowserDiagnostic(
@@ -286,13 +290,30 @@ export async function runHostedCheckoutBrowserDiagnostic(
     await actions.dispatchPaymentSubmission()
     observed.submission = 'ATTEMPTED'
     checkpoint = 'PROVIDER_DISPOSITION'
-    const provider = await actions.observeProviderDisposition()
-    if (provider !== 'ACCEPTED' && provider !== 'REJECTED') {
-      throw new Error('Hosted Checkout provider disposition invalid')
+    for (let attempt = 0; attempt < 300; attempt += 1) {
+      const rejected = await actions.readHostedProviderRejection()
+      if (typeof rejected !== 'boolean') {
+        throw new Error('Hosted Checkout rejection observation invalid')
+      }
+      if (rejected) {
+        observed.provider = 'REJECTED'
+        break
+      }
+      const accepted = await actions.readProviderAcceptance()
+      if (typeof accepted !== 'boolean') {
+        throw new Error('Hosted Checkout acceptance observation invalid')
+      }
+      if (accepted) {
+        observed.provider = 'ACCEPTED'
+        break
+      }
+      if (attempt < 299) await actions.waitForProviderObservationRetry()
     }
-    observed.provider = provider
+    if (observed.provider === 'NOT_OBSERVED') {
+      throw new Error('Hosted Checkout provider observation timed out')
+    }
     checkpoint = 'LOCAL_RETURN_REDIRECT'
-    const redirect = await actions.observeLocalReturnRedirect()
+    const redirect = await actions.observeLocalReturnRedirect(observed.provider)
     if (redirect !== 'NOT_OBSERVED' && redirect !== 'OBSERVED') {
       throw new Error('Hosted Checkout redirect observation invalid')
     }
