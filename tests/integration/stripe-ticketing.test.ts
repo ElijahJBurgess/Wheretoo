@@ -1,19 +1,17 @@
 import { randomUUID } from 'node:crypto'
-import { chromium, type Locator, type Page } from '@playwright/test'
+import { chromium, type Browser, type Locator, type Page } from '@playwright/test'
 import { describe, expect, it } from 'vitest'
 import {
   createStripeProofCheckoutAttempt,
   formatHostedCheckoutBrowserDiagnostic,
-  hostedCheckoutBrowserDiagnostic,
-  type HostedCheckoutBrowserCheckpoint,
   type HostedCheckoutBrowserDiagnostic,
+  runHostedCheckoutBrowserDiagnostic,
   TASK17_ADMISSION_QUANTITY,
   TASK17_APPLICATION_FEE_MINOR,
   TASK17_CART,
   TASK17_ORGANIZER_PROCEEDS_MINOR,
   TASK17_SUBTOTAL_MINOR,
   toSafeCheckoutCreationError,
-  toSafeHostedCheckoutBrowserError,
 } from './stripeTestObjects'
 import { createManagedStripeProofClient } from './stripeWebhookHarness'
 import { loadStripeIntegrationTestEnv } from './testEnv'
@@ -181,56 +179,107 @@ async function visibleTextbox(page: Page, name: string): Promise<Locator> {
 async function exerciseHostedCheckout(
   url: string,
   cardNumber: string,
-  outcome: 'paid' | 'declined',
 ): Promise<HostedCheckoutBrowserDiagnostic> {
-  let checkpoint: HostedCheckoutBrowserCheckpoint = 'BROWSER_LAUNCH'
-  try {
-    const browser = await chromium.launch({ headless: true })
-    try {
-      const page = await browser.newPage()
-      checkpoint = 'CHECKOUT_URL_OPEN'
-      await page.goto(url)
-      checkpoint = 'HOSTED_DOCUMENT_LOAD'
-      checkpoint = 'PAYMENT_METHOD_FORM'
-      const card = page.getByRole('radio', { name: 'Card' })
-      if (!(await card.isChecked())) await card.check({ force: true })
-      checkpoint = 'CARD_NUMBER'
-      const cardNumberInput = await visibleTextbox(page, 'Card number')
-      await cardNumberInput.fill(cardNumber)
-      checkpoint = 'CARD_EXPIRATION'
-      await (await visibleTextbox(page, 'Expiration')).fill('1234')
-      checkpoint = 'CARD_CVC'
-      await (await visibleTextbox(page, 'CVC')).fill('123')
-      checkpoint = 'CARDHOLDER_NAME'
-      await (await visibleTextbox(page, 'Cardholder name')).fill('Task Seventeen')
-      checkpoint = 'POSTAL_CODE'
-      await (await visibleTextbox(page, 'ZIP')).fill('94103')
-      checkpoint = 'OPTIONAL_SAVE_CONTROL'
-      const save = page.getByRole('checkbox', { name: 'Save my information for faster checkout' }).filter({ visible: true }).first()
-      if (await save.isChecked()) await save.uncheck()
-      checkpoint = 'AUXILIARY_DISCLOSURE_CONTROL'
-      const disclosure = page.getByRole('checkbox', { name: 'I am an AI agent acting on behalf of someone else' }).filter({ visible: true }).first()
-      await disclosure.evaluate((element: HTMLInputElement) => element.click())
-      expect(await disclosure.isChecked()).toBe(true)
-      checkpoint = 'PAYMENT_SUBMISSION'
-      await page.getByRole('button', { name: 'Pay', exact: true }).filter({ visible: true }).first().click()
-      checkpoint = 'PROVIDER_DISPOSITION'
-      if (outcome === 'paid') {
-        checkpoint = 'LOCAL_RETURN_REDIRECT'
-        await page.waitForURL((value) => value.origin === 'http://127.0.0.1:3000', { timeout: 30_000 })
-        checkpoint = 'LOCAL_RETURN_REDIRECT_OBSERVED'
-      } else {
-        const alert = page.getByRole('alert')
+  let browser: Browser | undefined
+  let page: Page | undefined
+  let payButton: Locator | undefined
+  let paymentObservation: Promise<{
+    provider: 'ACCEPTED' | 'REJECTED'
+    redirect: 'NOT_OBSERVED' | 'OBSERVED'
+  }> | undefined
+
+  const currentPage = () => {
+    if (page === undefined) throw new Error('Hosted Checkout page unavailable')
+    return page
+  }
+
+  const observePayment = () => {
+    if (paymentObservation !== undefined) return paymentObservation
+    const hostedPage = currentPage()
+    paymentObservation = Promise.race([
+      hostedPage.waitForURL(
+        (value) => value.origin === 'http://127.0.0.1:3000',
+        { timeout: 30_000 },
+      ).then(() => ({
+        provider: 'ACCEPTED' as const,
+        redirect: 'OBSERVED' as const,
+      })),
+      (async () => {
+        const alert = hostedPage.getByRole('alert')
         await alert.waitFor({ timeout: 30_000 })
-        expect((await alert.textContent())?.toLowerCase()).toContain('declined')
-        checkpoint = 'PROVIDER_REJECTED'
-      }
-      return hostedCheckoutBrowserDiagnostic(checkpoint)
-    } finally {
-      await browser.close()
-    }
-  } catch (error) {
-    throw toSafeHostedCheckoutBrowserError(error, checkpoint)
+        const rejected = (await alert.textContent())?.toLowerCase().includes('declined') === true
+        if (!rejected) throw new Error('Hosted Checkout provider disposition unavailable')
+        return {
+          provider: 'REJECTED' as const,
+          redirect: 'NOT_OBSERVED' as const,
+        }
+      })(),
+    ])
+    return paymentObservation
+  }
+
+  try {
+    return await runHostedCheckoutBrowserDiagnostic({
+      launchBrowser: async () => {
+        browser = await chromium.launch({ headless: true })
+      },
+      openCheckoutUrl: async () => {
+        if (browser === undefined) throw new Error('Hosted Checkout browser unavailable')
+        page = await browser.newPage()
+        const response = await page.goto(url, { waitUntil: 'commit' })
+        if (response === null) throw new Error('Hosted Checkout response unavailable')
+      },
+      waitForHostedDocument: async () => {
+        await currentPage().waitForLoadState('domcontentloaded')
+      },
+      ensurePaymentMethodForm: async () => {
+        const card = currentPage().getByRole('radio', { name: 'Card' })
+        if (!(await card.isChecked())) await card.check({ force: true })
+      },
+      fillCardNumber: async () => {
+        await (await visibleTextbox(currentPage(), 'Card number')).fill(cardNumber)
+      },
+      fillCardExpiration: async () => {
+        await (await visibleTextbox(currentPage(), 'Expiration')).fill('1234')
+      },
+      fillCardCvc: async () => {
+        await (await visibleTextbox(currentPage(), 'CVC')).fill('123')
+      },
+      fillCardholderName: async () => {
+        await (await visibleTextbox(currentPage(), 'Cardholder name')).fill('Task Seventeen')
+      },
+      fillPostalCode: async () => {
+        await (await visibleTextbox(currentPage(), 'ZIP')).fill('94103')
+      },
+      interactOptionalSaveControl: async () => {
+        const save = currentPage().getByRole('checkbox', {
+          name: 'Save my information for faster checkout',
+        }).filter({ visible: true }).first()
+        if (await save.isChecked()) await save.uncheck()
+      },
+      interactAuxiliaryDisclosureControl: async () => {
+        const disclosure = currentPage().getByRole('checkbox', {
+          name: 'I am an AI agent acting on behalf of someone else',
+        }).filter({ visible: true }).first()
+        await disclosure.evaluate((element: HTMLInputElement) => element.click())
+        expect(await disclosure.isChecked()).toBe(true)
+      },
+      ensurePaymentSubmissionActionable: async () => {
+        payButton = currentPage().getByRole('button', {
+          name: 'Pay',
+          exact: true,
+        }).filter({ visible: true }).first()
+        await payButton.click({ trial: true })
+      },
+      dispatchPaymentSubmission: async () => {
+        if (payButton === undefined) throw new Error('Hosted Checkout submit control unavailable')
+        await payButton.click({ noWaitAfter: true })
+      },
+      observeProviderDisposition: async () => (await observePayment()).provider,
+      observeLocalReturnRedirect: async () => (await observePayment()).redirect,
+    })
+  } finally {
+    await browser?.close().catch(() => undefined)
   }
 }
 
@@ -305,7 +354,13 @@ describe('real Stripe test-mode ticket transaction', () => {
     )
     const paidCheckout = await createCheckout(fixture, 'paid')
     await waitForOrder(fixture.event_id, 'paid')
-    await exerciseHostedCheckout(paidCheckout.checkoutUrl, '4242424242424242', 'paid')
+    expect(await exerciseHostedCheckout(paidCheckout.checkoutUrl, '4242424242424242')).toEqual({
+      stage: 'LOCAL_RETURN_REDIRECT',
+      failure: 'NONE',
+      submission: 'ATTEMPTED',
+      provider: 'ACCEPTED',
+      redirect: 'OBSERVED',
+    })
     await expect(proof.invoke('checkout_status', {
       order_handle: 'paid',
     })).resolves.toMatchObject({
@@ -395,7 +450,13 @@ describe('real Stripe test-mode ticket transaction', () => {
     expect(state.orders).not.toContainEqual(expect.objectContaining({ order_handle: 'declined' }))
     const declinedCheckout = await createCheckout(fixture, 'declined')
     await waitForOrder(fixture.event_id, 'declined')
-    await exerciseHostedCheckout(declinedCheckout.checkoutUrl, '4000000000000002', 'declined')
+    expect(await exerciseHostedCheckout(declinedCheckout.checkoutUrl, '4000000000000002')).toEqual({
+      stage: 'LOCAL_RETURN_REDIRECT',
+      failure: 'NONE',
+      submission: 'ATTEMPTED',
+      provider: 'REJECTED',
+      redirect: 'NOT_OBSERVED',
+    })
     await expect(proof.invoke('checkout_status', {
       order_handle: 'declined',
     })).resolves.toMatchObject({
@@ -591,10 +652,9 @@ describe('real Stripe test-mode ticket transaction', () => {
       const diagnostic = await exerciseHostedCheckout(
         checkout.checkoutUrl,
         '4000000000000002',
-        'declined',
       )
       expect(diagnostic).toEqual({
-        stage: 'PROVIDER_DISPOSITION',
+        stage: 'LOCAL_RETURN_REDIRECT',
         failure: 'NONE',
         submission: 'ATTEMPTED',
         provider: 'REJECTED',

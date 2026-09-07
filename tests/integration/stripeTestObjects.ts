@@ -43,7 +43,7 @@ export function createStripeProofCheckoutAttempt(): {
   }
 }
 
-export type HostedCheckoutBrowserCheckpoint =
+export type HostedCheckoutBrowserStage =
   | 'BROWSER_LAUNCH'
   | 'CHECKOUT_URL_OPEN'
   | 'HOSTED_DOCUMENT_LOAD'
@@ -55,18 +55,19 @@ export type HostedCheckoutBrowserCheckpoint =
   | 'POSTAL_CODE'
   | 'OPTIONAL_SAVE_CONTROL'
   | 'AUXILIARY_DISCLOSURE_CONTROL'
-  | 'PAYMENT_SUBMISSION'
+  | 'PAYMENT_SUBMISSION_ACTIONABILITY'
+  | 'PAYMENT_SUBMISSION_DISPATCH'
   | 'PROVIDER_DISPOSITION'
+  | 'LOCAL_RETURN_REDIRECT'
+
+export type HostedCheckoutBrowserCheckpoint =
+  | HostedCheckoutBrowserStage
   | 'PROVIDER_ACCEPTED'
   | 'PROVIDER_REJECTED'
-  | 'LOCAL_RETURN_REDIRECT'
   | 'LOCAL_RETURN_REDIRECT_OBSERVED'
 
 export type HostedCheckoutBrowserDiagnostic = {
-  stage: Exclude<
-    HostedCheckoutBrowserCheckpoint,
-    'PROVIDER_ACCEPTED' | 'PROVIDER_REJECTED' | 'LOCAL_RETURN_REDIRECT_OBSERVED'
-  >
+  stage: HostedCheckoutBrowserStage
   failure: 'NONE' | 'TIMEOUT' | 'BROWSER'
   submission: 'NOT_ATTEMPTED' | 'ATTEMPTED'
   provider: 'NOT_OBSERVED' | 'ACCEPTED' | 'REJECTED'
@@ -85,7 +86,8 @@ const hostedCheckoutBrowserCheckpoints = new Set<HostedCheckoutBrowserCheckpoint
   'POSTAL_CODE',
   'OPTIONAL_SAVE_CONTROL',
   'AUXILIARY_DISCLOSURE_CONTROL',
-  'PAYMENT_SUBMISSION',
+  'PAYMENT_SUBMISSION_ACTIONABILITY',
+  'PAYMENT_SUBMISSION_DISPATCH',
   'PROVIDER_DISPOSITION',
   'PROVIDER_ACCEPTED',
   'PROVIDER_REJECTED',
@@ -93,33 +95,77 @@ const hostedCheckoutBrowserCheckpoints = new Set<HostedCheckoutBrowserCheckpoint
   'LOCAL_RETURN_REDIRECT_OBSERVED',
 ])
 
-export function hostedCheckoutBrowserDiagnostic(
+const postSubmissionCheckpoints = new Set<HostedCheckoutBrowserCheckpoint>([
+  'PROVIDER_DISPOSITION',
+  'PROVIDER_ACCEPTED',
+  'PROVIDER_REJECTED',
+  'LOCAL_RETURN_REDIRECT',
+  'LOCAL_RETURN_REDIRECT_OBSERVED',
+])
+
+const hostedCheckoutBrowserStages = new Set<HostedCheckoutBrowserStage>([
+  'BROWSER_LAUNCH',
+  'CHECKOUT_URL_OPEN',
+  'HOSTED_DOCUMENT_LOAD',
+  'PAYMENT_METHOD_FORM',
+  'CARD_NUMBER',
+  'CARD_EXPIRATION',
+  'CARD_CVC',
+  'CARDHOLDER_NAME',
+  'POSTAL_CODE',
+  'OPTIONAL_SAVE_CONTROL',
+  'AUXILIARY_DISCLOSURE_CONTROL',
+  'PAYMENT_SUBMISSION_ACTIONABILITY',
+  'PAYMENT_SUBMISSION_DISPATCH',
+  'PROVIDER_DISPOSITION',
+  'LOCAL_RETURN_REDIRECT',
+])
+
+const diagnosticFailures = new Set(['NONE', 'TIMEOUT', 'BROWSER'])
+const diagnosticSubmissions = new Set(['NOT_ATTEMPTED', 'ATTEMPTED'])
+const diagnosticProviders = new Set(['NOT_OBSERVED', 'ACCEPTED', 'REJECTED'])
+const diagnosticRedirects = new Set(['NOT_OBSERVED', 'OBSERVED'])
+
+const safeBrowserDiagnosticFallback: HostedCheckoutBrowserDiagnostic = {
+  stage: 'BROWSER_LAUNCH',
+  failure: 'BROWSER',
+  submission: 'NOT_ATTEMPTED',
+  provider: 'NOT_OBSERVED',
+  redirect: 'NOT_OBSERVED',
+}
+
+type HostedCheckoutBrowserObservedState = Pick<
+  HostedCheckoutBrowserDiagnostic,
+  'submission' | 'provider' | 'redirect'
+>
+
+function createHostedCheckoutBrowserDiagnostic(
   candidate: HostedCheckoutBrowserCheckpoint | string,
-  error?: unknown,
+  error: unknown,
+  observed?: HostedCheckoutBrowserObservedState,
 ): HostedCheckoutBrowserDiagnostic {
   const checkpoint = hostedCheckoutBrowserCheckpoints.has(candidate as HostedCheckoutBrowserCheckpoint)
     ? candidate as HostedCheckoutBrowserCheckpoint
     : 'BROWSER_LAUNCH'
-  const submission = new Set<HostedCheckoutBrowserCheckpoint>([
-    'PROVIDER_DISPOSITION',
-    'PROVIDER_ACCEPTED',
-    'PROVIDER_REJECTED',
-    'LOCAL_RETURN_REDIRECT',
-    'LOCAL_RETURN_REDIRECT_OBSERVED',
-  ]).has(checkpoint)
-    ? 'ATTEMPTED'
-    : 'NOT_ATTEMPTED'
-  const provider = checkpoint === 'PROVIDER_ACCEPTED' ||
-      checkpoint === 'LOCAL_RETURN_REDIRECT_OBSERVED'
-    ? 'ACCEPTED'
-    : checkpoint === 'PROVIDER_REJECTED'
-      ? 'REJECTED'
-      : 'NOT_OBSERVED'
-  const stage = checkpoint === 'PROVIDER_ACCEPTED' || checkpoint === 'PROVIDER_REJECTED'
-    ? 'PROVIDER_DISPOSITION'
-    : checkpoint === 'LOCAL_RETURN_REDIRECT_OBSERVED'
-      ? 'LOCAL_RETURN_REDIRECT'
-      : checkpoint
+  const stage: HostedCheckoutBrowserStage =
+    checkpoint === 'PROVIDER_ACCEPTED' || checkpoint === 'PROVIDER_REJECTED'
+      ? 'PROVIDER_DISPOSITION'
+      : checkpoint === 'LOCAL_RETURN_REDIRECT_OBSERVED'
+        ? 'LOCAL_RETURN_REDIRECT'
+        : checkpoint
+  const submission = observed?.submission ?? (
+    postSubmissionCheckpoints.has(checkpoint) ? 'ATTEMPTED' : 'NOT_ATTEMPTED'
+  )
+  const provider = observed?.provider ?? (
+    checkpoint === 'PROVIDER_ACCEPTED' || checkpoint === 'LOCAL_RETURN_REDIRECT_OBSERVED'
+      ? 'ACCEPTED'
+      : checkpoint === 'PROVIDER_REJECTED'
+        ? 'REJECTED'
+        : 'NOT_OBSERVED'
+  )
+  const redirect = observed?.redirect ?? (
+    checkpoint === 'LOCAL_RETURN_REDIRECT_OBSERVED' ? 'OBSERVED' : 'NOT_OBSERVED'
+  )
   const failure = error === undefined
     ? 'NONE'
     : error instanceof Error && (
@@ -128,18 +174,47 @@ export function hostedCheckoutBrowserDiagnostic(
       ? 'TIMEOUT'
       : 'BROWSER'
 
-  return {
-    stage,
-    failure,
-    submission,
-    provider,
-    redirect: checkpoint === 'LOCAL_RETURN_REDIRECT_OBSERVED' ? 'OBSERVED' : 'NOT_OBSERVED',
-  }
+  return { stage, failure, submission, provider, redirect }
+}
+
+export function hostedCheckoutBrowserDiagnostic(
+  candidate: HostedCheckoutBrowserCheckpoint | string,
+  error?: unknown,
+): HostedCheckoutBrowserDiagnostic {
+  return createHostedCheckoutBrowserDiagnostic(candidate, error)
 }
 
 export function formatHostedCheckoutBrowserDiagnostic(
-  diagnostic: HostedCheckoutBrowserDiagnostic,
+  candidate: unknown,
 ): string {
+  let diagnostic = safeBrowserDiagnosticFallback
+  try {
+    if (typeof candidate === 'object' && candidate !== null && !Array.isArray(candidate) &&
+      Object.keys(candidate).sort().join(',') ===
+        ['failure', 'provider', 'redirect', 'stage', 'submission'].join(',')) {
+      const value = candidate as Record<string, unknown>
+      const stage = value.stage
+      const failure = value.failure
+      const submission = value.submission
+      const provider = value.provider
+      const redirect = value.redirect
+      if (hostedCheckoutBrowserStages.has(stage as HostedCheckoutBrowserStage) &&
+        diagnosticFailures.has(failure as string) &&
+        diagnosticSubmissions.has(submission as string) &&
+        diagnosticProviders.has(provider as string) &&
+        diagnosticRedirects.has(redirect as string)) {
+        diagnostic = {
+          stage: stage as HostedCheckoutBrowserStage,
+          failure: failure as HostedCheckoutBrowserDiagnostic['failure'],
+          submission: submission as HostedCheckoutBrowserDiagnostic['submission'],
+          provider: provider as HostedCheckoutBrowserDiagnostic['provider'],
+          redirect: redirect as HostedCheckoutBrowserDiagnostic['redirect'],
+        }
+      }
+    }
+  } catch {
+    diagnostic = safeBrowserDiagnosticFallback
+  }
   return `stage=${diagnostic.stage} failure=${diagnostic.failure} ` +
     `submission=${diagnostic.submission} provider=${diagnostic.provider} ` +
     `redirect=${diagnostic.redirect}`
@@ -148,11 +223,84 @@ export function formatHostedCheckoutBrowserDiagnostic(
 export function toSafeHostedCheckoutBrowserError(
   error: unknown,
   checkpoint: HostedCheckoutBrowserCheckpoint = 'BROWSER_LAUNCH',
+  observed?: HostedCheckoutBrowserObservedState,
 ): Error {
-  const diagnostic = hostedCheckoutBrowserDiagnostic(checkpoint, error)
+  const diagnostic = createHostedCheckoutBrowserDiagnostic(checkpoint, error, observed)
   return new Error(
     `Hosted Checkout browser diagnostic: ${formatHostedCheckoutBrowserDiagnostic(diagnostic)}`,
   )
+}
+
+export type HostedCheckoutBrowserActions = {
+  launchBrowser(): Promise<void>
+  openCheckoutUrl(): Promise<void>
+  waitForHostedDocument(): Promise<void>
+  ensurePaymentMethodForm(): Promise<void>
+  fillCardNumber(): Promise<void>
+  fillCardExpiration(): Promise<void>
+  fillCardCvc(): Promise<void>
+  fillCardholderName(): Promise<void>
+  fillPostalCode(): Promise<void>
+  interactOptionalSaveControl(): Promise<void>
+  interactAuxiliaryDisclosureControl(): Promise<void>
+  ensurePaymentSubmissionActionable(): Promise<void>
+  dispatchPaymentSubmission(): Promise<void>
+  observeProviderDisposition(): Promise<'ACCEPTED' | 'REJECTED'>
+  observeLocalReturnRedirect(): Promise<'NOT_OBSERVED' | 'OBSERVED'>
+}
+
+export async function runHostedCheckoutBrowserDiagnostic(
+  actions: HostedCheckoutBrowserActions,
+): Promise<HostedCheckoutBrowserDiagnostic> {
+  let checkpoint: HostedCheckoutBrowserCheckpoint = 'BROWSER_LAUNCH'
+  const observed: HostedCheckoutBrowserObservedState = {
+    submission: 'NOT_ATTEMPTED',
+    provider: 'NOT_OBSERVED',
+    redirect: 'NOT_OBSERVED',
+  }
+  try {
+    await actions.launchBrowser()
+    checkpoint = 'CHECKOUT_URL_OPEN'
+    await actions.openCheckoutUrl()
+    checkpoint = 'HOSTED_DOCUMENT_LOAD'
+    await actions.waitForHostedDocument()
+    checkpoint = 'PAYMENT_METHOD_FORM'
+    await actions.ensurePaymentMethodForm()
+    checkpoint = 'CARD_NUMBER'
+    await actions.fillCardNumber()
+    checkpoint = 'CARD_EXPIRATION'
+    await actions.fillCardExpiration()
+    checkpoint = 'CARD_CVC'
+    await actions.fillCardCvc()
+    checkpoint = 'CARDHOLDER_NAME'
+    await actions.fillCardholderName()
+    checkpoint = 'POSTAL_CODE'
+    await actions.fillPostalCode()
+    checkpoint = 'OPTIONAL_SAVE_CONTROL'
+    await actions.interactOptionalSaveControl()
+    checkpoint = 'AUXILIARY_DISCLOSURE_CONTROL'
+    await actions.interactAuxiliaryDisclosureControl()
+    checkpoint = 'PAYMENT_SUBMISSION_ACTIONABILITY'
+    await actions.ensurePaymentSubmissionActionable()
+    checkpoint = 'PAYMENT_SUBMISSION_DISPATCH'
+    await actions.dispatchPaymentSubmission()
+    observed.submission = 'ATTEMPTED'
+    checkpoint = 'PROVIDER_DISPOSITION'
+    const provider = await actions.observeProviderDisposition()
+    if (provider !== 'ACCEPTED' && provider !== 'REJECTED') {
+      throw new Error('Hosted Checkout provider disposition invalid')
+    }
+    observed.provider = provider
+    checkpoint = 'LOCAL_RETURN_REDIRECT'
+    const redirect = await actions.observeLocalReturnRedirect()
+    if (redirect !== 'NOT_OBSERVED' && redirect !== 'OBSERVED') {
+      throw new Error('Hosted Checkout redirect observation invalid')
+    }
+    observed.redirect = redirect
+    return createHostedCheckoutBrowserDiagnostic(checkpoint, undefined, observed)
+  } catch (error) {
+    throw toSafeHostedCheckoutBrowserError(error, checkpoint, observed)
+  }
 }
 
 const checkoutCreationErrorCodes = new Set([

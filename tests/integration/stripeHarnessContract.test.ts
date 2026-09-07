@@ -279,7 +279,8 @@ describe('managed proof client boundary', () => {
       ['POSTAL_CODE', 'POSTAL_CODE'],
       ['OPTIONAL_SAVE_CONTROL', 'OPTIONAL_SAVE_CONTROL'],
       ['AUXILIARY_DISCLOSURE_CONTROL', 'AUXILIARY_DISCLOSURE_CONTROL'],
-      ['PAYMENT_SUBMISSION', 'PAYMENT_SUBMISSION'],
+      ['PAYMENT_SUBMISSION_ACTIONABILITY', 'PAYMENT_SUBMISSION_ACTIONABILITY'],
+      ['PAYMENT_SUBMISSION_DISPATCH', 'PAYMENT_SUBMISSION_DISPATCH'],
       ['PROVIDER_DISPOSITION', 'PROVIDER_DISPOSITION'],
       ['PROVIDER_ACCEPTED', 'PROVIDER_DISPOSITION'],
       ['PROVIDER_REJECTED', 'PROVIDER_DISPOSITION'],
@@ -290,6 +291,116 @@ describe('managed proof client boundary', () => {
     for (const [checkpoint, stage] of mappings) {
       expect(diagnose(checkpoint)).toMatchObject({ stage })
     }
+  })
+
+  function hostedBrowserActions(options: {
+    failAt?: string
+    provider?: 'ACCEPTED' | 'REJECTED'
+    redirect?: 'OBSERVED' | 'NOT_OBSERVED'
+  } = {}) {
+    const boundary = (name: string) => async () => {
+      if (options.failAt === name) {
+        throw new Error('unsafe browser detail must not escape')
+      }
+    }
+    return {
+      launchBrowser: boundary('launchBrowser'),
+      openCheckoutUrl: boundary('openCheckoutUrl'),
+      waitForHostedDocument: boundary('waitForHostedDocument'),
+      ensurePaymentMethodForm: boundary('ensurePaymentMethodForm'),
+      fillCardNumber: boundary('fillCardNumber'),
+      fillCardExpiration: boundary('fillCardExpiration'),
+      fillCardCvc: boundary('fillCardCvc'),
+      fillCardholderName: boundary('fillCardholderName'),
+      fillPostalCode: boundary('fillPostalCode'),
+      interactOptionalSaveControl: boundary('interactOptionalSaveControl'),
+      interactAuxiliaryDisclosureControl: boundary('interactAuxiliaryDisclosureControl'),
+      ensurePaymentSubmissionActionable: boundary('ensurePaymentSubmissionActionable'),
+      dispatchPaymentSubmission: boundary('dispatchPaymentSubmission'),
+      observeProviderDisposition: async () => {
+        await boundary('observeProviderDisposition')()
+        return options.provider ?? 'REJECTED'
+      },
+      observeLocalReturnRedirect: async () => {
+        await boundary('observeLocalReturnRedirect')()
+        return options.redirect ?? 'NOT_OBSERVED'
+      },
+    }
+  }
+
+  it.each([
+    ['openCheckoutUrl', 'CHECKOUT_URL_OPEN'],
+    ['waitForHostedDocument', 'HOSTED_DOCUMENT_LOAD'],
+  ])('drives the real orchestration and distinguishes %s failure', async (failAt, stage) => {
+    const run = Reflect.get(stripeTestObjects, 'runHostedCheckoutBrowserDiagnostic')
+    expect(typeof run).toBe('function')
+    if (typeof run !== 'function') return
+
+    await expect(run(hostedBrowserActions({ failAt }))).rejects.toThrow(
+      `Hosted Checkout browser diagnostic: stage=${stage} failure=BROWSER submission=NOT_ATTEMPTED provider=NOT_OBSERVED redirect=NOT_OBSERVED`,
+    )
+  })
+
+  it('separates submission actionability, dispatch, and post-dispatch failure state', async () => {
+    const run = Reflect.get(stripeTestObjects, 'runHostedCheckoutBrowserDiagnostic')
+    expect(typeof run).toBe('function')
+    if (typeof run !== 'function') return
+
+    await expect(run(hostedBrowserActions({
+      failAt: 'ensurePaymentSubmissionActionable',
+    }))).rejects.toThrow(
+      'stage=PAYMENT_SUBMISSION_ACTIONABILITY failure=BROWSER submission=NOT_ATTEMPTED',
+    )
+    await expect(run(hostedBrowserActions({
+      failAt: 'dispatchPaymentSubmission',
+    }))).rejects.toThrow(
+      'stage=PAYMENT_SUBMISSION_DISPATCH failure=BROWSER submission=NOT_ATTEMPTED',
+    )
+    await expect(run(hostedBrowserActions({
+      failAt: 'observeProviderDisposition',
+    }))).rejects.toThrow(
+      'stage=PROVIDER_DISPOSITION failure=BROWSER submission=ATTEMPTED',
+    )
+  })
+
+  it('retains independently observed provider and redirect facts without an expected outcome', async () => {
+    const run = Reflect.get(stripeTestObjects, 'runHostedCheckoutBrowserDiagnostic')
+    expect(typeof run).toBe('function')
+    if (typeof run !== 'function') return
+
+    await expect(run(hostedBrowserActions({
+      provider: 'REJECTED',
+      redirect: 'NOT_OBSERVED',
+    }))).resolves.toEqual({
+      stage: 'LOCAL_RETURN_REDIRECT',
+      failure: 'NONE',
+      submission: 'ATTEMPTED',
+      provider: 'REJECTED',
+      redirect: 'NOT_OBSERVED',
+    })
+    await expect(run(hostedBrowserActions({
+      provider: 'ACCEPTED',
+      redirect: 'OBSERVED',
+    }))).resolves.toEqual({
+      stage: 'LOCAL_RETURN_REDIRECT',
+      failure: 'NONE',
+      submission: 'ATTEMPTED',
+      provider: 'ACCEPTED',
+      redirect: 'OBSERVED',
+    })
+  })
+
+  it('rejects a malformed external observation without retaining its value', async () => {
+    const run = Reflect.get(stripeTestObjects, 'runHostedCheckoutBrowserDiagnostic')
+    expect(typeof run).toBe('function')
+    if (typeof run !== 'function') return
+
+    const actions = hostedBrowserActions()
+    actions.observeProviderDisposition = async () => 'unsafe observation' as never
+    await expect(run(actions)).rejects.toThrow(
+      'Hosted Checkout browser diagnostic: stage=PROVIDER_DISPOSITION failure=BROWSER submission=ATTEMPTED provider=NOT_OBSERVED redirect=NOT_OBSERVED',
+    )
+    await expect(run(actions)).rejects.not.toThrow('unsafe observation')
   })
 
   it('distinguishes pre-submission automation failure from post-submission observation', () => {
@@ -384,6 +495,58 @@ describe('managed proof client boundary', () => {
     expect(safe.message).not.toContain('sk_test_')
     expect(safe.message).not.toContain('4242424242424242')
     expect(safe).not.toHaveProperty('cause')
+  })
+
+  it.each([
+    'unsafe formatter input',
+    {
+      stage: 'unsafe formatter input',
+      failure: 'NONE',
+      submission: 'ATTEMPTED',
+      provider: 'ACCEPTED',
+      redirect: 'OBSERVED',
+    },
+    {
+      stage: 'LOCAL_RETURN_REDIRECT',
+      failure: 'NONE',
+      submission: 'ATTEMPTED',
+      provider: 'ACCEPTED',
+      redirect: 'OBSERVED',
+      unexpected: 'unsafe formatter input',
+    },
+  ])('formats malformed runtime diagnostic input as one fixed safe fallback', (malformed) => {
+    const format = Reflect.get(stripeTestObjects, 'formatHostedCheckoutBrowserDiagnostic')
+    expect(typeof format).toBe('function')
+    if (typeof format !== 'function') return
+
+    const formatted = format(malformed)
+    expect(formatted).toBe(
+      'stage=BROWSER_LAUNCH failure=BROWSER submission=NOT_ATTEMPTED provider=NOT_OBSERVED redirect=NOT_OBSERVED',
+    )
+    expect(formatted).not.toContain('unsafe formatter input')
+  })
+
+  it('copies allowlisted formatter values before interpolation', () => {
+    const format = Reflect.get(stripeTestObjects, 'formatHostedCheckoutBrowserDiagnostic')
+    expect(typeof format).toBe('function')
+    if (typeof format !== 'function') return
+
+    let stageReads = 0
+    const candidate = {
+      get stage() {
+        stageReads += 1
+        return stageReads === 1 ? 'BROWSER_LAUNCH' : 'unsafe formatter input'
+      },
+      failure: 'BROWSER',
+      submission: 'NOT_ATTEMPTED',
+      provider: 'NOT_OBSERVED',
+      redirect: 'NOT_OBSERVED',
+    }
+    const formatted = format(candidate)
+    expect(formatted).toBe(
+      'stage=BROWSER_LAUNCH failure=BROWSER submission=NOT_ATTEMPTED provider=NOT_OBSERVED redirect=NOT_OBSERVED',
+    )
+    expect(formatted).not.toContain('unsafe formatter input')
   })
 
   it('reports only the allowlisted checkout error code and status', async () => {
