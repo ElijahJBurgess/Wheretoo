@@ -143,15 +143,14 @@ select results_eq(
       on namespaces.oid = procedures.pronamespace
     where namespaces.nspname = 'private'
       and procedures.proname in (
-        'checkout_reservation_v1', 'get_checkout_preflight', 'fulfill_paid_order'
+        'reserve_checkout', 'get_checkout_preflight', 'fulfill_paid_order'
       )
     order by procedures.proname
   $$,
   $$ values
-    ('checkout_reservation_v1'::name, true, true),
     ('fulfill_paid_order'::name, true, true),
     ('get_checkout_preflight'::name, true, true),
-    ('get_checkout_preflight'::name, true, true)
+    ('reserve_checkout'::name, true, true)
   $$,
   'reservation, preflight, and fulfillment route through one canonical eligibility helper'
 );

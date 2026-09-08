@@ -35,7 +35,7 @@ select col_not_null('public', 'orders', 'stripe_checkout_integration_identifier'
 select col_not_null('public', 'orders', 'stripe_checkout_request_digest',
   'the canonical create digest is required');
 
-select has_function('public', 'server_get_checkout_preflight', array['uuid', 'uuid'],
+select has_function('public', 'server_get_checkout_preflight', array['uuid', 'uuid[]'],
   'a narrow service preflight boundary exists');
 select has_function('public', 'server_lookup_checkout_cancellation', array['text'],
   'a narrow bearer cancellation lookup exists');
@@ -51,7 +51,7 @@ select results_eq(
     ]
     from unnest(array[
       'public.server_consume_checkout_rate_limit(text)',
-      'public.server_get_checkout_preflight(uuid,uuid)',
+      'public.server_get_checkout_preflight(uuid,uuid[])',
       'public.server_lookup_checkout_cancellation(text)'
     ]) as functions(function_name)
     order by function_name
@@ -67,7 +67,7 @@ select results_eq(
 select throws_ok(
   $$ select * from public.server_get_checkout_preflight(
     'aaaaaaaa-0000-4000-8000-000000000001',
-    'bbbbbbbb-0000-4000-8000-000000000001'
+    array['bbbbbbbb-0000-4000-8000-000000000001']::uuid[]
   ) $$,
   'P0001', 'EVENT_NOT_SELLABLE',
   'a missing event returns the stable event domain code before Connect'

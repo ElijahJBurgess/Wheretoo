@@ -241,7 +241,7 @@ select public.server_attach_checkout_session(
 );
 select * from public.server_reserve_checkout(
   '28000000-0000-4000-8000-000000000001',
-  '38000000-0000-4000-8000-000000000003'::uuid,
+  jsonb_build_array(jsonb_build_object('tier_id', '38000000-0000-4000-8000-000000000003'::uuid, 'quantity', 1)),
   'Concurrent Buyer Two', 'concurrent-two@example.invalid',
   '48000000-0000-4000-8000-000000000002', repeat('2', 64)
 );
@@ -458,10 +458,9 @@ select orders.status,
   events.status as event_status,
   tiers.status as tier_status,
   orders.stripe_checkout_request_digest is distinct from
-    private.checkout_request_digest(
+    private.checkout_cart_request_digest(
       orders.id,
       orders.event_id,
-      items.ticket_tier_id,
       orders.client_request_id,
       orders.confirmation_token_hash,
       orders.buyer_email,
@@ -470,7 +469,17 @@ select orders.status,
       orders.application_fee_amount_minor,
       orders.stripe_destination_account_id,
       orders.checkout_expires_at,
-      orders.stripe_checkout_integration_identifier
+      orders.stripe_checkout_integration_identifier,
+      (select jsonb_agg(jsonb_build_object(
+        'order_item_id', snapshot.id,
+        'ticket_tier_id', snapshot.ticket_tier_id,
+        'tier_name', snapshot.tier_name,
+        'unit_amount_minor', snapshot.unit_amount_minor,
+        'quantity', snapshot.quantity,
+        'subtotal_minor', snapshot.subtotal_minor,
+        'currency', snapshot.currency
+      ) order by snapshot.ticket_tier_id)
+       from public.order_items as snapshot where snapshot.order_id = orders.id)
     ) as digest_mismatch
 from public.orders as orders
 join public.events as events on events.id = orders.event_id

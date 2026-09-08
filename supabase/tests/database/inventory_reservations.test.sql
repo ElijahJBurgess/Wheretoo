@@ -7,7 +7,7 @@ select no_plan();
 select has_schema('private', 'private service function schema exists');
 
 -- Task 1 intentionally defaults new checkout creation off. This legacy
--- reservation suite exercises admitted creation paths, so opt in explicitly.
+-- reservation suite exercises generalized creation paths, so opt in transactionally.
 update private.checkout_runtime_control
 set checkout_creation_enabled = true
 where singleton;
@@ -20,7 +20,7 @@ select results_eq(
       'private.attach_checkout_session(uuid,text,timestamp with time zone)',
       'private.cancel_checkout_reservation(uuid,text)',
       'private.expire_checkout_reservations(timestamp with time zone)',
-      'private.reserve_checkout(uuid,uuid,text,text,uuid,text)'
+      'private.reserve_checkout(uuid,jsonb,text,text,uuid,text)'
     ]) as signatures(signature)
   $$,
   $$
@@ -28,7 +28,7 @@ select results_eq(
       'private.attach_checkout_session(uuid,text,timestamp with time zone)',
       'private.cancel_checkout_reservation(uuid,text)',
       'private.expire_checkout_reservations(timestamp with time zone)',
-      'private.reserve_checkout(uuid,uuid,text,text,uuid,text)'
+      'private.reserve_checkout(uuid,jsonb,text,text,uuid,text)'
     ]::text[]) collate "C")
   $$,
   'the four private reservation functions have their exact signatures'
@@ -42,7 +42,7 @@ select results_eq(
       'public.server_attach_checkout_session(uuid,text,timestamp with time zone)',
       'public.server_cancel_checkout_reservation(uuid,text)',
       'public.server_expire_checkout_reservations(timestamp with time zone)',
-      'public.server_reserve_checkout(uuid,uuid,text,text,uuid,text)'
+      'public.server_reserve_checkout(uuid,jsonb,text,text,uuid,text)'
     ]) as signatures(signature)
   $$,
   $$
@@ -50,7 +50,7 @@ select results_eq(
       'server_attach_checkout_session(uuid,text,timestamp with time zone)',
       'server_cancel_checkout_reservation(uuid,text)',
       'server_expire_checkout_reservations(timestamp with time zone)',
-      'server_reserve_checkout(uuid,uuid,text,text,uuid,text)'
+      'server_reserve_checkout(uuid,jsonb,text,text,uuid,text)'
     ]::text[]) collate "C")
   $$,
   'the four public server wrappers have their exact PostgREST signatures'
@@ -73,7 +73,7 @@ select results_eq(
   $$
     values ((array[
       'attach_checkout_session', 'cancel_checkout_reservation',
-      'expire_checkout_reservations', 'reserve_checkout', 'reserve_checkout'
+      'expire_checkout_reservations', 'reserve_checkout'
     ]::text[]) collate "C")
   $$,
   'all reservation functions are security definers with an empty search path'
@@ -96,8 +96,7 @@ select results_eq(
   $$
     values ((array[
       'server_attach_checkout_session', 'server_cancel_checkout_reservation',
-      'server_expire_checkout_reservations', 'server_reserve_checkout',
-      'server_reserve_checkout'
+      'server_expire_checkout_reservations', 'server_reserve_checkout'
     ]::text[]) collate "C")
   $$,
   'all public server wrappers are security definers with an empty search path'
@@ -119,7 +118,7 @@ select results_eq(
       and helper_namespace.nspname = 'public'
       and helper_function.proname = 'lock_event_ticketing_operation'
   $$,
-  $$ values (true), (true) $$,
+  $$ values (true) $$,
   'reserve checkout runs as the owner that alone can call the shared lock helper'
 );
 
@@ -155,7 +154,7 @@ select results_eq(
       'private.attach_checkout_session(uuid,text,timestamp with time zone)',
       'private.cancel_checkout_reservation(uuid,text)',
       'private.expire_checkout_reservations(timestamp with time zone)',
-      'private.reserve_checkout(uuid,uuid,text,text,uuid,text)'
+      'private.reserve_checkout(uuid,jsonb,text,text,uuid,text)'
     ]) as functions(function_name)
     order by function_name
   $$,
@@ -178,7 +177,7 @@ select results_eq(
       'public.server_attach_checkout_session(uuid,text,timestamp with time zone)',
       'public.server_cancel_checkout_reservation(uuid,text)',
       'public.server_expire_checkout_reservations(timestamp with time zone)',
-      'public.server_reserve_checkout(uuid,uuid,text,text,uuid,text)'
+      'public.server_reserve_checkout(uuid,jsonb,text,text,uuid,text)'
     ]) as functions(function_name)
     order by function_name
   $$,
@@ -227,8 +226,8 @@ select results_eq(
         'public.server_expire_checkout_reservations(timestamp with time zone)'
       ),
       (
-        'private.reserve_checkout(uuid,uuid,text,text,uuid,text)',
-        'public.server_reserve_checkout(uuid,uuid,text,text,uuid,text)'
+        'private.reserve_checkout(uuid,jsonb,text,text,uuid,text)',
+        'public.server_reserve_checkout(uuid,jsonb,text,text,uuid,text)'
       )
     ) as functions(private_name, wrapper_name)
     order by private_name
@@ -266,7 +265,6 @@ select results_eq(
       'server_attach_checkout_session:service_role:EXECUTE',
       'server_cancel_checkout_reservation:service_role:EXECUTE',
       'server_expire_checkout_reservations:service_role:EXECUTE',
-      'server_reserve_checkout:service_role:EXECUTE',
       'server_reserve_checkout:service_role:EXECUTE'
     ]::text[]) collate "C")
   $$,
@@ -280,16 +278,18 @@ select results_eq(
     from information_schema.parameters
     where specific_schema = 'private'
       and specific_name = 'reserve_checkout_' || (
-        'private.reserve_checkout(uuid,uuid,text,text,uuid,text)'::regprocedure::oid
+        'private.reserve_checkout(uuid,jsonb,text,text,uuid,text)'::regprocedure::oid
       )::text
       and parameter_mode = 'OUT'
   $$,
   $$
     values ((array[
-      'order_id:uuid', 'organizer_id:uuid', 'subtotal_minor:bigint', 'currency:text',
-      'application_fee_amount_minor:bigint', 'stripe_account_id:text',
+      'order_id:uuid', 'organizer_id:uuid', 'quantity:integer', 'subtotal_minor:bigint', 'currency:text',
+      'platform_product_fee_minor:bigint', 'stripe_fee_estimate_minor:bigint',
+      'application_fee_amount_minor:bigint', 'expected_organizer_proceeds_minor:bigint',
+      'total_minor:bigint', 'stripe_account_id:text',
       'checkout_expires_at:timestamp with time zone', 'existing_checkout_session_id:text',
-      'integration_identifier:text', 'create_request_digest:text'
+      'integration_identifier:text', 'create_request_digest:text', 'order_items:jsonb'
     ]::text[]) collate "C")
   $$,
   'reserve checkout returns only the exact service projection'
@@ -302,31 +302,21 @@ select results_eq(
     from information_schema.parameters
     where specific_schema = 'public'
       and specific_name = 'server_reserve_checkout_' || (
-        'public.server_reserve_checkout(uuid,uuid,text,text,uuid,text)'::regprocedure::oid
+        'public.server_reserve_checkout(uuid,jsonb,text,text,uuid,text)'::regprocedure::oid
       )::text
       and parameter_mode = 'OUT'
   $$,
   $$
     values ((array[
-      'order_id:uuid', 'organizer_id:uuid', 'subtotal_minor:bigint', 'currency:text',
-      'application_fee_amount_minor:bigint', 'stripe_account_id:text',
+      'order_id:uuid', 'organizer_id:uuid', 'quantity:integer', 'subtotal_minor:bigint', 'currency:text',
+      'platform_product_fee_minor:bigint', 'stripe_fee_estimate_minor:bigint',
+      'application_fee_amount_minor:bigint', 'expected_organizer_proceeds_minor:bigint',
+      'total_minor:bigint', 'stripe_account_id:text',
       'checkout_expires_at:timestamp with time zone', 'existing_checkout_session_id:text',
-      'integration_identifier:text', 'create_request_digest:text'
+      'integration_identifier:text', 'create_request_digest:text', 'order_items:jsonb'
     ]::text[]) collate "C")
   $$,
   'server reserve wrapper returns only the exact service projection'
-);
-
-select ok(
-  pg_catalog.obj_description(
-    'public.server_reserve_checkout(uuid,uuid,text,text,uuid,text)'::regprocedure,
-    'pg_proc'
-  ) like '%SHA-256 bytes of p_client_request_id::text%'
-  and pg_catalog.obj_description(
-    'public.server_reserve_checkout(uuid,uuid,text,text,uuid,text)'::regprocedure,
-    'pg_proc'
-  ) like '%SHA-256 of those bytes%',
-  'the server wrapper documents deterministic stateless confirmation-token derivation'
 );
 
 select results_eq(
@@ -363,7 +353,7 @@ begin
   select count(*) into v_count
   from public.server_reserve_checkout(
     p_event_id,
-    p_tier_id,
+    jsonb_build_array(jsonb_build_object('tier_id', p_tier_id, 'quantity', 1)),
     p_name,
     p_email,
     p_client_request_id,
@@ -461,7 +451,7 @@ create temporary table first_reservation on commit drop as
 select *
 from public.server_reserve_checkout(
   '25000000-0000-0000-0000-000000000001',
-  '35000000-0000-4000-8000-000000000001'::uuid,
+  jsonb_build_array(jsonb_build_object('tier_id', '35000000-0000-4000-8000-000000000001'::uuid, 'quantity', 1)),
   '  Ada Lovelace  ',
   '  ADA@Example.COM  ',
   '45000000-0000-4000-8000-000000000001',
@@ -602,7 +592,7 @@ create temporary table retried_reservation on commit drop as
 select *
 from public.server_reserve_checkout(
   '25000000-0000-0000-0000-000000000001',
-  '35000000-0000-4000-8000-000000000001'::uuid,
+  jsonb_build_array(jsonb_build_object('tier_id', '35000000-0000-4000-8000-000000000001'::uuid, 'quantity', 1)),
   'Ada Lovelace',
   'ada@example.com',
   '45000000-0000-4000-8000-000000000001',
@@ -639,7 +629,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
-      '35000000-0000-4000-8000-000000000001'::uuid,
+      jsonb_build_array(jsonb_build_object('tier_id', '35000000-0000-4000-8000-000000000001'::uuid, 'quantity', 1)),
       'Ada Lovelace', 'ada@example.com',
       '45000000-0000-4000-8000-000000000001',
       'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
@@ -685,7 +675,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
-      '35000000-0000-4000-8000-000000000001'::uuid,
+      jsonb_build_array(jsonb_build_object('tier_id', '35000000-0000-4000-8000-000000000001'::uuid, 'quantity', 1)),
       'Blocked Buyer', 'blocked@example.com',
       '45000000-0000-4000-8000-000000000002',
       'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
@@ -703,14 +693,14 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
-      '35000000-0000-4000-8000-000000000003'::uuid,
+      jsonb_build_array(jsonb_build_object('tier_id', '35000000-0000-4000-8000-000000000003'::uuid, 'quantity', 1)),
       'Wrong Tier', 'wrong-tier@example.com',
       '45000000-0000-4000-8000-000000000003',
       'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
     )
   $$,
-  'P0001', 'TIER_NOT_FOUND',
-  'checkout rejects a tier that does not belong to the event'
+  'P0001', 'TIER_NOT_ACTIVE',
+  'the canonical cart rejects an existing tier that does not belong to the event'
 );
 
 update public.ticket_tiers
@@ -721,7 +711,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
-      '35000000-0000-4000-8000-000000000001'::uuid,
+      jsonb_build_array(jsonb_build_object('tier_id', '35000000-0000-4000-8000-000000000001'::uuid, 'quantity', 1)),
       'Archived Tier', 'archived@example.com',
       '45000000-0000-4000-8000-000000000004',
       'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
@@ -743,7 +733,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
-      '35000000-0000-4000-8000-000000000001'::uuid,
+      jsonb_build_array(jsonb_build_object('tier_id', '35000000-0000-4000-8000-000000000001'::uuid, 'quantity', 1)),
       'Stale Connect', 'stale-connect@example.com',
       '45000000-0000-4000-8000-000000000005',
       'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
@@ -762,7 +752,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
-      '35000000-0000-4000-8000-000000000001'::uuid,
+      jsonb_build_array(jsonb_build_object('tier_id', '35000000-0000-4000-8000-000000000001'::uuid, 'quantity', 1)),
       'Connect Due', 'connect-due@example.com',
       '45000000-0000-4000-8000-000000000006',
       'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'
@@ -784,7 +774,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
-      '35000000-0000-4000-8000-000000000001'::uuid,
+      jsonb_build_array(jsonb_build_object('tier_id', '35000000-0000-4000-8000-000000000001'::uuid, 'quantity', 1)),
       'No Fee', 'no-fee@example.com',
       '45000000-0000-4000-8000-000000000007',
       '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -802,7 +792,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
-      '35000000-0000-4000-8000-000000000001'::uuid,
+      jsonb_build_array(jsonb_build_object('tier_id', '35000000-0000-4000-8000-000000000001'::uuid, 'quantity', 1)),
       ' ', 'valid@example.com',
       '45000000-0000-4000-8000-000000000008',
       '1123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -816,7 +806,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
-      '35000000-0000-4000-8000-000000000001'::uuid,
+      jsonb_build_array(jsonb_build_object('tier_id', '35000000-0000-4000-8000-000000000001'::uuid, 'quantity', 1)),
       'Valid Buyer', 'not-an-email',
       '45000000-0000-4000-8000-000000000009',
       '2123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -830,7 +820,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
-      '35000000-0000-4000-8000-000000000001'::uuid,
+      jsonb_build_array(jsonb_build_object('tier_id', '35000000-0000-4000-8000-000000000001'::uuid, 'quantity', 1)),
       'Valid Buyer', 'valid@example.com',
       '45000000-0000-4000-8000-000000000010', 'clear-confirmation-token'
     )
@@ -843,7 +833,7 @@ create temporary table stale_final_reservation on commit drop as
 select *
 from public.server_reserve_checkout(
   '25000000-0000-0000-0000-000000000001',
-  '35000000-0000-4000-8000-000000000002'::uuid,
+  jsonb_build_array(jsonb_build_object('tier_id', '35000000-0000-4000-8000-000000000002'::uuid, 'quantity', 1)),
   'Stale Final Buyer', 'stale-final@example.com',
   '45000000-0000-4000-8000-000000000011',
   '3123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -853,7 +843,7 @@ create temporary table stale_tier_reservation on commit drop as
 select *
 from public.server_reserve_checkout(
   '25000000-0000-0000-0000-000000000001',
-  '35000000-0000-4000-8000-000000000001'::uuid,
+  jsonb_build_array(jsonb_build_object('tier_id', '35000000-0000-4000-8000-000000000001'::uuid, 'quantity', 1)),
   'Stale Tier Buyer', 'stale-tier@example.com',
   '45000000-0000-4000-8000-000000000018',
   'a123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -863,7 +853,7 @@ create temporary table stale_connect_reservation on commit drop as
 select *
 from public.server_reserve_checkout(
   '25000000-0000-0000-0000-000000000001',
-  '35000000-0000-4000-8000-000000000001'::uuid,
+  jsonb_build_array(jsonb_build_object('tier_id', '35000000-0000-4000-8000-000000000001'::uuid, 'quantity', 1)),
   'Stale Connect Retry', 'stale-connect-retry@example.com',
   '45000000-0000-4000-8000-000000000019',
   'b123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -873,7 +863,7 @@ create temporary table restricted_connect_reservation on commit drop as
 select *
 from public.server_reserve_checkout(
   '25000000-0000-0000-0000-000000000001',
-  '35000000-0000-4000-8000-000000000001'::uuid,
+  jsonb_build_array(jsonb_build_object('tier_id', '35000000-0000-4000-8000-000000000001'::uuid, 'quantity', 1)),
   'Restricted Connect Retry', 'restricted-connect-retry@example.com',
   '45000000-0000-4000-8000-000000000020',
   'c123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -883,7 +873,7 @@ create temporary table stale_fee_reservation on commit drop as
 select *
 from public.server_reserve_checkout(
   '25000000-0000-0000-0000-000000000001',
-  '35000000-0000-4000-8000-000000000001'::uuid,
+  jsonb_build_array(jsonb_build_object('tier_id', '35000000-0000-4000-8000-000000000001'::uuid, 'quantity', 1)),
   'Stale Fee Retry', 'stale-fee-retry@example.com',
   '45000000-0000-4000-8000-000000000021',
   'd123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -1111,7 +1101,7 @@ create temporary table replacement_final_reservation on commit drop as
 select *
 from public.server_reserve_checkout(
   '25000000-0000-0000-0000-000000000001',
-  '35000000-0000-4000-8000-000000000002'::uuid,
+  jsonb_build_array(jsonb_build_object('tier_id', '35000000-0000-4000-8000-000000000002'::uuid, 'quantity', 1)),
   'Replacement Final Buyer', 'replacement-final@example.com',
   '45000000-0000-4000-8000-000000000012',
   '4123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -1131,7 +1121,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
-      '35000000-0000-4000-8000-000000000002'::uuid,
+      jsonb_build_array(jsonb_build_object('tier_id', '35000000-0000-4000-8000-000000000002'::uuid, 'quantity', 1)),
       'Sold Out Buyer', 'sold-out@example.com',
       '45000000-0000-4000-8000-000000000013',
       '5123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -1149,7 +1139,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '25000000-0000-0000-0000-000000000001',
-      '35000000-0000-4000-8000-000000000002'::uuid,
+      jsonb_build_array(jsonb_build_object('tier_id', '35000000-0000-4000-8000-000000000002'::uuid, 'quantity', 1)),
       'Paid Sold Out Buyer', 'paid-sold-out@example.com',
       '45000000-0000-4000-8000-000000000022',
       'e123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -1181,7 +1171,7 @@ create temporary table attached_reservation on commit drop as
 select *
 from public.server_reserve_checkout(
   '25000000-0000-0000-0000-000000000001',
-  '35000000-0000-4000-8000-000000000001'::uuid,
+  jsonb_build_array(jsonb_build_object('tier_id', '35000000-0000-4000-8000-000000000001'::uuid, 'quantity', 1)),
   'Attached Buyer', 'attached@example.com',
   '45000000-0000-4000-8000-000000000014',
   '6123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -1252,7 +1242,7 @@ create temporary table cancelled_reservation on commit drop as
 select *
 from public.server_reserve_checkout(
   '25000000-0000-0000-0000-000000000001',
-  '35000000-0000-4000-8000-000000000001'::uuid,
+  jsonb_build_array(jsonb_build_object('tier_id', '35000000-0000-4000-8000-000000000001'::uuid, 'quantity', 1)),
   'Cancelled Buyer', 'cancelled@example.com',
   '45000000-0000-4000-8000-000000000015',
   '7123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -1310,7 +1300,7 @@ create temporary table expiring_reservation on commit drop as
 select *
 from public.server_reserve_checkout(
   '25000000-0000-0000-0000-000000000001',
-  '35000000-0000-4000-8000-000000000001'::uuid,
+  jsonb_build_array(jsonb_build_object('tier_id', '35000000-0000-4000-8000-000000000001'::uuid, 'quantity', 1)),
   'Expiring Buyer', 'expiring@example.com',
   '45000000-0000-4000-8000-000000000016',
   '8123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -1346,7 +1336,7 @@ create temporary table processing_reservation on commit drop as
 select *
 from public.server_reserve_checkout(
   '25000000-0000-0000-0000-000000000001',
-  '35000000-0000-4000-8000-000000000001'::uuid,
+  jsonb_build_array(jsonb_build_object('tier_id', '35000000-0000-4000-8000-000000000001'::uuid, 'quantity', 1)),
   'Processing Buyer', 'processing@example.com',
   '45000000-0000-4000-8000-000000000017',
   '9123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'

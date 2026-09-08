@@ -377,16 +377,16 @@ select results_eq(
   $$
     select array[
       pg_catalog.has_function_privilege(
-        'anon', 'public.server_reserve_checkout(uuid,uuid,text,text,uuid,text)', 'EXECUTE'
+        'anon', 'public.server_reserve_checkout(uuid,jsonb,text,text,uuid,text)', 'EXECUTE'
       ),
       pg_catalog.has_function_privilege(
-        'authenticated', 'public.server_reserve_checkout(uuid,uuid,text,text,uuid,text)', 'EXECUTE'
+        'authenticated', 'public.server_reserve_checkout(uuid,jsonb,text,text,uuid,text)', 'EXECUTE'
       ),
       pg_catalog.has_function_privilege(
-        'service_role', 'private.reserve_checkout(uuid,uuid,text,text,uuid,text)', 'EXECUTE'
+        'service_role', 'private.reserve_checkout(uuid,jsonb,text,text,uuid,text)', 'EXECUTE'
       ),
       pg_catalog.has_function_privilege(
-        'service_role', 'public.server_reserve_checkout(uuid,uuid,text,text,uuid,text)', 'EXECUTE'
+        'service_role', 'public.server_reserve_checkout(uuid,jsonb,text,text,uuid,text)', 'EXECUTE'
       )
     ]
   $$,
@@ -399,7 +399,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '20000000-0000-4000-8000-000000000101',
-      '30000000-0000-4000-8000-000000000101'::uuid,
+      jsonb_build_array(jsonb_build_object('tier_id', '30000000-0000-4000-8000-000000000101'::uuid, 'quantity', 1)),
       'Disabled Buyer', 'disabled-buyer@example.invalid',
       '50000000-0000-4000-8000-000000000103', repeat('c', 64)
     )
@@ -417,7 +417,7 @@ create temporary table enabled_reservation on commit drop as
 select *
 from public.server_reserve_checkout(
   '20000000-0000-4000-8000-000000000101',
-  '30000000-0000-4000-8000-000000000101'::uuid,
+  jsonb_build_array(jsonb_build_object('tier_id', '30000000-0000-4000-8000-000000000101'::uuid, 'quantity', 1)),
   'Retry Buyer', 'retry-buyer@example.invalid',
   '50000000-0000-4000-8000-000000000104', repeat('d', 64)
 );
@@ -437,7 +437,7 @@ select results_eq(
     select order_id
     from public.server_reserve_checkout(
       '20000000-0000-4000-8000-000000000101',
-      '30000000-0000-4000-8000-000000000101'::uuid,
+      jsonb_build_array(jsonb_build_object('tier_id', '30000000-0000-4000-8000-000000000101'::uuid, 'quantity', 1)),
       'Retry Buyer', 'retry-buyer@example.invalid',
       '50000000-0000-4000-8000-000000000104', repeat('d', 64)
     )
@@ -450,7 +450,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '20000000-0000-4000-8000-000000000101',
-      '30000000-0000-4000-8000-000000000102'::uuid,
+      jsonb_build_array(jsonb_build_object('tier_id', '30000000-0000-4000-8000-000000000102'::uuid, 'quantity', 1)),
       'Retry Buyer', 'retry-buyer@example.invalid',
       '50000000-0000-4000-8000-000000000104', repeat('d', 64)
     )
@@ -464,7 +464,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '20000000-0000-4000-8000-000000000101',
-      '30000000-0000-4000-8000-000000000101'::uuid,
+      jsonb_build_array(jsonb_build_object('tier_id', '30000000-0000-4000-8000-000000000101'::uuid, 'quantity', 1)),
       'Changed Buyer', 'retry-buyer@example.invalid',
       '50000000-0000-4000-8000-000000000104', repeat('d', 64)
     )
@@ -478,7 +478,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '20000000-0000-4000-8000-000000000101',
-      '30000000-0000-4000-8000-000000000101'::uuid,
+      jsonb_build_array(jsonb_build_object('tier_id', '30000000-0000-4000-8000-000000000101'::uuid, 'quantity', 1)),
       'Retry Buyer', 'changed-buyer@example.invalid',
       '50000000-0000-4000-8000-000000000104', repeat('d', 64)
     )
@@ -492,7 +492,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '20000000-0000-4000-8000-000000000101',
-      '30000000-0000-4000-8000-000000000101'::uuid,
+      jsonb_build_array(jsonb_build_object('tier_id', '30000000-0000-4000-8000-000000000101'::uuid, 'quantity', 1)),
       'Retry Buyer', 'retry-buyer@example.invalid',
       '50000000-0000-4000-8000-000000000104', repeat('9', 64)
     )
@@ -506,7 +506,7 @@ select throws_ok(
   $$
     select * from public.server_reserve_checkout(
       '20000000-0000-4000-8000-000000000101',
-      '30000000-0000-4000-8000-000000000101'::uuid,
+      jsonb_build_array(jsonb_build_object('tier_id', '30000000-0000-4000-8000-000000000101'::uuid, 'quantity', 1)),
       'Another Buyer', 'another-buyer@example.invalid',
       '50000000-0000-4000-8000-000000000105', repeat('e', 64)
     )

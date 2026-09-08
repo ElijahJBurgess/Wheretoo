@@ -141,8 +141,8 @@ const payload = JSON.parse(fs.readFileSync(process.env.MIGRATIONS_FILE, 'utf8'))
 const migrations = payload.migrations
 if (!Array.isArray(migrations) || migrations.length === 0 ||
     migrations.some((migration) => !migration.local || migration.local !== migration.remote) ||
-    migrations.at(-1)?.remote !== '20260902010500') {
-  console.error('Local and linked migration histories must be fully aligned through 20260902010500.')
+    migrations.at(-1)?.remote !== '20260902010600') {
+  console.error('Local and linked migration histories must be fully aligned through 20260902010600.')
   process.exit(1)
 }
 NODE
@@ -223,9 +223,6 @@ NODE
        or not pg_catalog.has_function_privilege('postgres', 'public.get_public_event(uuid)', 'execute')
        or pg_catalog.has_function_privilege('anon', 'public.moderate_event(uuid,bigint,text,bigint,text,text,text)', 'execute')
        or not pg_catalog.has_function_privilege('authenticated', 'public.moderate_event(uuid,bigint,text,bigint,text,text,text)', 'execute')
-       or pg_catalog.has_function_privilege('anon', 'public.server_reserve_checkout(uuid,uuid,text,text,uuid,text)', 'execute')
-       or pg_catalog.has_function_privilege('authenticated', 'public.server_reserve_checkout(uuid,uuid,text,text,uuid,text)', 'execute')
-       or not pg_catalog.has_function_privilege('service_role', 'public.server_reserve_checkout(uuid,uuid,text,text,uuid,text)', 'execute')
        or pg_catalog.has_function_privilege('anon', 'public.server_reserve_checkout(uuid,jsonb,text,text,uuid,text)', 'execute')
        or pg_catalog.has_function_privilege('authenticated', 'public.server_reserve_checkout(uuid,jsonb,text,text,uuid,text)', 'execute')
        or not pg_catalog.has_function_privilege('service_role', 'public.server_reserve_checkout(uuid,jsonb,text,text,uuid,text)', 'execute')

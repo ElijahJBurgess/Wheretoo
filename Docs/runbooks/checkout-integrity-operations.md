@@ -465,9 +465,11 @@ The switch gates only new sales. Webhooks, reconciliation, fulfillment of
 already-valid paid Sessions, cancellation, expiration, refunds, cleanup, and
 confirmation must remain operational.
 
-Do not re-enable new checkout creation until every item in
-`Docs/testing/checkout-integrity-1-verification.md` passes in the intended
-environment. The owner-only re-enable uses the same narrow row:
+Checkout creation remains disabled at Task 15 and branch handoff, even after
+all verification gates pass. Passing tests is not authorization to launch.
+Only a separately authorized database owner may enable new sales after every
+item in `Docs/testing/checkout-integrity-1-verification.md` passes in the
+intended environment. That later owner-only operation uses the same narrow row:
 
 ```sql
 update private.checkout_runtime_control
@@ -478,3 +480,32 @@ where singleton;
 After any cart order or Checkout Session exists, safe rollback is
 stop-new-sales and fix forward. Never delete, merge, collapse, or rewrite
 orders, order items, tickets, refunds, receipts, or provider identifiers.
+
+## Singular-contract removal and forward recovery
+
+Migration `20260902010600_remove_single_ticket_checkout_contract.sql` removes
+the obsolete UUID-tier reservation/preflight overloads, legacy reservation and
+digest helpers, singular webhook snapshots, and old confirmation projection.
+The canonical fulfillment function accepts only the complete cart digest;
+quantity-one purchases still use the same JSON cart and item-array contract.
+No normalized table, financial history, or lifecycle endpoint is removed.
+
+Before applying this migration, finish the approved browser/financial proof,
+confirm exact cleanup, and inspect any outstanding order or Session that still
+depends on the legacy digest. Resolve such an outstanding lifecycle with its
+compatible runtime before cleanup; do not rewrite historical frozen digests.
+Review and commit the forward migration before the owner runs a linked dry-run
+and apply. Regenerate database types only after application and verify that the
+canonical service ACLs remain exact. Do not enable checkout as part of this step.
+
+If a defect appears after removal:
+
+1. Disable new checkout creation with the owner-only statement above.
+2. Keep webhook, cancellation, expiry, refund, reconciliation, and confirmation
+   processing available for existing orders.
+3. Preserve every financial row and immutable snapshot. Do not revert migration
+   `20260902010600` or deploy a singular runtime.
+4. Review and ship a forward migration or compatible runtime correction, then
+   reconcile affected existing orders through their guarded lifecycle.
+5. Rerun the affected database, code, and transaction gates. Keep checkout
+   disabled at handoff; any subsequent enablement requires separate owner action.

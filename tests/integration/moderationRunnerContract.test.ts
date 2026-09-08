@@ -110,7 +110,7 @@ async function readRunnerSource() {
   }
 }
 
-async function executeRunner(source: string) {
+async function executeRunner(source: string, migrationVersion = '20260902010600') {
   const root = await mkdtemp(path.join(tmpdir(), 'moderation-runner-contract-'))
   temporaryDirectories.push(root)
 
@@ -159,7 +159,7 @@ case "$*" in
     printf '%s\\n' '[{"id":"abcdefghijklmnopqrst","linked":true,"status":"ACTIVE_HEALTHY"}]'
     ;;
   "migration list --linked")
-    printf '%s\\n' '{"migrations":[{"local":"20260826011475","remote":"20260826011475"}]}'
+    printf '%s\\n' '{"migrations":[{"local":"${migrationVersion}","remote":"${migrationVersion}"}]}'
     ;;
   *"test db --linked"*)
     printf '%s\\n' 'LegacyDockerRunError: Docker Desktop is a prerequisite for local development.' >&2
@@ -372,6 +372,16 @@ describe('Build 2.5 moderation proof runner', () => {
     expect(result.log).not.toMatch(
       /checkout_boundaries|checkout_rate_limit|connect_refresh|refunds_disputes|webhook_|payment_fulfillment_concurrency|stripe-/,
     )
+  })
+
+  it.each(['20260902010500', '20260902010550'])('rejects pre-cleanup migration history %s before child proofs', async (version) => {
+    const source = await readRunnerSource()
+    expect(source).not.toBeNull()
+    if (source === null) return
+    const result = await executeRunner(source, version)
+    expect(result.exitCode).not.toBe(0)
+    expect(result.log).not.toContain('supabase:test db --linked')
+    expect(result.log).not.toContain('child:')
   })
 
   it('fails when a required child invocation is omitted', async () => {

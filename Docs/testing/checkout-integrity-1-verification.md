@@ -1,7 +1,8 @@
 # Checkout Integrity 1.0 Verification
 
-Checkout creation remains disabled until this checklist and the bounded
-test-mode release proof are complete. Run commands from the repository root.
+Checkout creation remains disabled throughout Task 15 and at branch handoff,
+including after this checklist and the bounded test-mode release proof pass.
+Any later enablement requires separate owner authorization. Run commands from the repository root.
 Do not print credentials, call live mode, or use browser redirect state as
 payment evidence.
 
@@ -162,9 +163,40 @@ database owner/operator inside a read-only transaction.
   creation is still disabled.
 - [ ] The bounded test-mode release proof passes without creating or retrieving
   any live-mode object.
-- [ ] Only after every preceding gate passes, the database owner uses the
-  owner-only statement in the runbook to re-enable checkout creation.
+- [ ] Review confirms that the forward-only singular-contract removal preserves
+  all existing cart fulfillment locks, snapshot binding, inventory, ticket-set,
+  lifecycle, and duplicate-delivery checks; only the legacy digest alternative
+  and the exact obsolete function signatures are removed.
+- [ ] The owner checks for unresolved legacy-digest orders/Sessions before
+  applying the cleanup migration; none are silently rewritten or discarded.
+- [ ] After the reviewed migration is committed, the owner dry-runs/applies it
+  and regenerates database types separately. No migration or type-generation
+  command below has an implicit checkout enablement:
+
+  ```bash
+  pnpm exec supabase db push --linked --dry-run
+  pnpm exec supabase db push --linked
+  pnpm db:types
+  pnpm typecheck
+  pnpm exec supabase test db --linked \
+    supabase/tests/database/checkout_integrity_contract_cleanup.test.sql
+  pnpm exec vitest run --config vitest.integration.config.ts \
+    tests/integration/checkoutIntegrityCleanupContract.test.ts
+  ```
+
+- [ ] Installed-contract checks prove all obsolete signatures absent, exact
+  canonical service/private ACLs retained, and normalized cardinality constraints
+  unchanged. A rollback-only quantity-one JSON cart reserves, fulfills
+  idempotently, and confirms through the generalized contract; lifecycle proof
+  continues after checkout is re-disabled inside that transaction.
+- [ ] Updated historical regression suites still cover reservation/ACL boundaries,
+  receipt handling, refunds, confirmation status/privacy, eligibility, kill-switch
+  serialization, and fulfillment concurrency using the canonical APIs.
+- [ ] Checkout is explicitly verified disabled at handoff. A completed checklist
+  is not a launch or permission to enable sales.
 - [ ] Re-disabling creation is verified not to disable webhooks, fulfillment,
   cancellation, expiration, refunds, cleanup, or confirmation.
 - [ ] If a defect appears after cart data exists, stop new sales and fix
-  forward. Never delete or collapse financial records.
+  forward. Never revert the cleanup migration, deploy singular code, or delete,
+  collapse, or rewrite financial records. Reconcile existing orders, rerun the
+  affected gates, and retain the disabled handoff posture.

@@ -9,9 +9,9 @@ select has_function(
   'public', 'server_finalize_webhook_receipt', array['text', 'text', 'text'],
   'webhook receipt finalization has a narrow service wrapper'
 );
-select has_function(
+select hasnt_function(
   'public', 'server_get_webhook_order_snapshot', array['uuid', 'text'],
-  'webhook order snapshot has a narrow service wrapper'
+  'the obsolete singular webhook snapshot is absent'
 );
 select has_function(
   'public', 'server_get_checkout_integrity_order_snapshot', array['uuid', 'text'],
@@ -24,9 +24,9 @@ select function_privs_are(
   'service role can finalize a webhook receipt'
 );
 select function_privs_are(
-  'public', 'server_get_webhook_order_snapshot', array['uuid', 'text'],
-  'service_role', array['EXECUTE'],
-  'service role can read only the webhook order snapshot'
+  'private', 'get_checkout_integrity_order_snapshot', array['uuid', 'text'],
+  'service_role', array[]::text[],
+  'service role cannot bypass the public snapshot boundary'
 );
 select function_privs_are(
   'public', 'server_get_checkout_integrity_order_snapshot', array['uuid', 'text'],
@@ -45,14 +45,14 @@ select function_privs_are(
   'authenticated callers cannot finalize receipts'
 );
 select function_privs_are(
-  'public', 'server_get_webhook_order_snapshot', array['uuid', 'text'],
+  'private', 'get_checkout_integrity_order_snapshot', array['uuid', 'text'],
   'anon', array[]::text[],
-  'anonymous callers cannot inspect webhook order snapshots'
+  'anonymous callers cannot inspect private webhook order snapshots'
 );
 select function_privs_are(
-  'public', 'server_get_webhook_order_snapshot', array['uuid', 'text'],
+  'private', 'get_checkout_integrity_order_snapshot', array['uuid', 'text'],
   'authenticated', array[]::text[],
-  'authenticated callers cannot inspect webhook order snapshots'
+  'authenticated callers cannot inspect private webhook order snapshots'
 );
 select function_privs_are(
   'public', 'server_get_checkout_integrity_order_snapshot', array['uuid', 'text'],
@@ -135,12 +135,11 @@ select throws_ok(
 
 select is_empty(
   $$
-    select * from public.server_get_webhook_order_snapshot(
-      '11111111-2222-4333-8444-555555555555',
-      'cs_test_Task14Missing'
+    select * from public.server_get_checkout_integrity_payment_snapshot(
+      '11111111-2222-4333-8444-555555555555'
     )
   $$,
-  'an unknown order/session pair exposes no snapshot'
+  'an unknown order exposes no payment snapshot'
 );
 
 select is_empty(

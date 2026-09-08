@@ -173,7 +173,7 @@ declare
 begin
   select reservation.order_id into v_order_id
   from public.server_reserve_checkout(
-    '26000000-0000-4000-8000-000000000001', p_tier_id,
+    '26000000-0000-4000-8000-000000000001', jsonb_build_array(jsonb_build_object('tier_id', p_tier_id, 'quantity', 1)),
     'Test Buyer', 'buyer@example.invalid', p_request_id, p_hash
   ) as reservation;
 
