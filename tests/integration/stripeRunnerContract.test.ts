@@ -146,6 +146,8 @@ done
 if grep -q 'recover_refund' "$config_file"; then
   printf '%s\\n' 'curl-action recover_refund' >> "$FAKE_COMMAND_LOG"
   printf '%s\\n' "$FAKE_RECOVERY_RESPONSE"
+  printf '%s' "\${FAKE_RECOVERY_STDERR:-}" >&2
+  exit "\${FAKE_RECOVERY_CURL_STATUS:-0}"
 elif grep -q 'account_diagnostic' "$config_file"; then
   printf '%s\\n' 'curl-action account_diagnostic' >> "$FAKE_COMMAND_LOG"
   printf '%s\\n' "$FAKE_DIAGNOSTIC_RESPONSE"
@@ -232,6 +234,24 @@ fi
 }
 
 describe('Task 17 managed proof runner', () => {
+  it.each([
+    [{ ok: false, kind: 'TASK14_REFUND_EVIDENCE_CONFLICT' }, 'kind=TASK14_REFUND_EVIDENCE_CONFLICT'],
+    [{ ok: false, kind: 'TASK14_REFUND_RECOVERY_FAILED', recovery_diagnostic: { stage: 'refund_retrieve', category: 'provider_or_network' } }, 'stage=refund_retrieve category=provider_or_network'],
+    [{ ok: false, kind: 'unsafe-provider-detail', recovery_diagnostic: { stage: 'unsafe-provider-detail', category: 'unsafe-provider-detail' } }, 'UNSAFE_OR_UNAVAILABLE'],
+  ])('Task14 HTTP500 preserves only the allowlisted recovery diagnostic', async (body, expected) => {
+    const result = await runRunner(false, false, {
+      TASK14_REFUND_RECOVERY_ONLY: '1',
+      FAKE_RESIDUAL_FIXTURE_RESPONSE: '{"rows":[{"residual_fixture_candidate":"task17_checkout0001","residual_fixture_exact":true}]}',
+      FAKE_RECOVERY_RESPONSE: JSON.stringify(body), FAKE_RECOVERY_CURL_STATUS: '22',
+      FAKE_RECOVERY_STDERR: 'unsafe-provider-detail',
+    })
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain(expected)
+    expect(result.stderr).not.toContain('unsafe-provider-detail')
+    expect(result.log).not.toContain('task17_cleanup_receipts')
+    expect(result.log).not.toContain('curl-action retire_connected_account')
+    expect(result.materializedExists).toBe(false)
+  })
   it.each([true, false])('Task14 recovery-only never enables checkout or creates/retire objects (certified=%s)', async (certified) => {
     const result = await runRunner(false, false, {
       TASK14_REFUND_RECOVERY_ONLY: '1',

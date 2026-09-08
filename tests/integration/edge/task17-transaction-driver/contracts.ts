@@ -15,6 +15,51 @@ export const CONNECT_ACCOUNT_CONFLICT_TARGET = "organizer_id,livemode";
 
 type RecoveryRecord = Record<string, unknown>;
 type RecoveryList = { has_more: boolean; data: RecoveryRecord[] };
+type RefundRecoveryStage =
+  | "scope"
+  | "refund_list"
+  | "refund_retrieve"
+  | "transfer_retrieve"
+  | "application_fee_retrieve"
+  | "fee_refunds_list"
+  | "evidence_validation"
+  | "metadata_update"
+  | "webhook_delivery"
+  | "durable_verification";
+class RefundRecoveryFailure extends Error {
+  constructor(readonly stage: RefundRecoveryStage, readonly category: string) {
+    super("TASK14_REFUND_RECOVERY_FAILED");
+  }
+}
+export async function runRefundRecoveryStage<T>(
+  stage: RefundRecoveryStage,
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (error instanceof RefundRecoveryFailure) throw error;
+    const safeCategories = [
+      "TASK14_REFUND_EVIDENCE_CONFLICT",
+      "TASK14_REFUND_EVIDENCE_RETRYABLE",
+      "INPUT",
+      "DATABASE",
+      "STRIPE",
+      "LIVE_MODE_FORBIDDEN",
+    ];
+    const category =
+      error instanceof Error && safeCategories.includes(error.message)
+        ? error.message
+        : "provider_or_network";
+    // Deliberately discard cause, stack, provider message, request, and response.
+    throw new RefundRecoveryFailure(stage, category);
+  }
+}
+export function refundRecoveryDiagnostic(error: unknown) {
+  return error instanceof RefundRecoveryFailure
+    ? { stage: error.stage, category: error.category }
+    : null;
+}
 export function recoveryDriverActionAllowed(
   mode: string | undefined,
   action: string,

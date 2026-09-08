@@ -12,6 +12,23 @@ const evidence = () => ({
 })
 
 describe('Task14 existing-refund recovery', () => {
+  it('reports the exact failing recovery stage without retaining arbitrary provider detail', async () => {
+    let caught: unknown
+    try {
+      await contracts.runRefundRecoveryStage('evidence_validation', () => contracts.runRefundRecoveryStage('refund_retrieve', async () => {
+        throw new Error('unsafe-provider-detail')
+      }))
+    } catch (error) { caught = error }
+    expect(contracts.refundRecoveryDiagnostic(caught)).toEqual({ stage: 'refund_retrieve', category: 'provider_or_network' })
+    expect(JSON.stringify(caught)).not.toContain('unsafe-provider-detail')
+    expect(contracts.refundRecoveryDiagnostic(new Error('unsafe-provider-detail'))).toBeNull()
+  })
+  it.each(['TASK14_REFUND_EVIDENCE_CONFLICT', 'TASK14_REFUND_EVIDENCE_RETRYABLE'])('retains safe evidence classification %s', async (category) => {
+    let caught: unknown
+    try { await contracts.runRefundRecoveryStage('evidence_validation', async () => { throw new Error(category) }) }
+    catch (error) { caught = error }
+    expect(contracts.refundRecoveryDiagnostic(caught)).toEqual({ stage: 'evidence_validation', category })
+  })
   it('admits exactly the three cancelled review tickets, never valid or already-refunded tickets', () => {
     const runner = readFileSync(new URL('./run-stripe-ticketing-proof.sh', import.meta.url), 'utf8')
     // Execute the actual portable SQL predicates against an in-memory database;

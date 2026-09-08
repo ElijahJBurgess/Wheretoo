@@ -1004,16 +1004,44 @@ if [ "$TASK14_REFUND_RECOVERY_ONLY" -eq 1 ]; then
   recovery_response="$TEMP_DIR/recovery.json"
   write_driver_request_config "$recovery_config" \
     '{\"action\":\"recover_refund\",\"order_handle\":\"paid\"}'
-  curl --silent --show-error --fail-with-body --config "$recovery_config" > "$recovery_response"
-  RECOVERY_RESPONSE="$recovery_response" node --input-type=module <<'NODE'
+  recovery_curl_status=0
+  curl --silent --show-error --fail-with-body --config "$recovery_config" \
+    > "$recovery_response" 2> "$TEMP_DIR/recovery-curl.log" || recovery_curl_status=$?
+  RECOVERY_RESPONSE="$recovery_response" RECOVERY_CURL_STATUS="$recovery_curl_status" node --input-type=module <<'NODE'
 import fs from 'node:fs'
-const value = JSON.parse(fs.readFileSync(process.env.RECOVERY_RESPONSE, 'utf8'))
+const unavailable = () => {
+  process.stderr.write('Task 14 refund recovery failure: UNSAFE_OR_UNAVAILABLE\n')
+  process.exit(1)
+}
+let value
+try { value = JSON.parse(fs.readFileSync(process.env.RECOVERY_RESPONSE, 'utf8')) } catch { unavailable() }
+if (!value || typeof value !== 'object' || Array.isArray(value)) unavailable()
+const exactKeys = (object, keys) => Object.keys(object).sort().join(',') === keys.sort().join(',')
+const categories = new Set(['TASK14_REFUND_EVIDENCE_CONFLICT', 'TASK14_REFUND_EVIDENCE_RETRYABLE',
+  'INPUT', 'DATABASE', 'STRIPE', 'LIVE_MODE_FORBIDDEN'])
+if (value.ok === false) {
+  const diagnostic = value.recovery_diagnostic
+  const stages = new Set(['scope', 'refund_list', 'refund_retrieve', 'transfer_retrieve', 'application_fee_retrieve',
+    'fee_refunds_list', 'evidence_validation', 'metadata_update', 'webhook_delivery', 'durable_verification'])
+  if (value.kind === 'TASK14_REFUND_RECOVERY_FAILED' && exactKeys(value, ['ok', 'kind', 'recovery_diagnostic']) &&
+    diagnostic && typeof diagnostic === 'object' && !Array.isArray(diagnostic) && exactKeys(diagnostic, ['stage', 'category']) &&
+    stages.has(diagnostic.stage) && (categories.has(diagnostic.category) || diagnostic.category === 'provider_or_network')) {
+    process.stderr.write(`Task 14 refund recovery failure: stage=${diagnostic.stage} category=${diagnostic.category}\n`)
+    process.exit(1)
+  }
+  if (exactKeys(value, ['ok', 'kind']) && categories.has(value.kind)) {
+    process.stderr.write(`Task 14 refund recovery failure: kind=${value.kind}\n`)
+    process.exit(1)
+  }
+  unavailable()
+}
+if (process.env.RECOVERY_CURL_STATUS !== '0') unavailable()
 const expected = { ok: true, livemode: false, amount: 5500, reversal_amount: 5500,
   application_fee_refund_amount: 425, order_refunded: true, reconciled: true,
   refund_count: 1, policy_verified: true, ticket_count: 3, invalid_ticket_count: 3,
   refunded_ticket_count: 3 }
 if (Object.keys(value).sort().join(',') !== Object.keys(expected).sort().join(',') ||
-  Object.entries(expected).some(([key, expectedValue]) => value[key] !== expectedValue)) process.exit(1)
+  Object.entries(expected).some(([key, expectedValue]) => value[key] !== expectedValue)) unavailable()
 process.stdout.write('Task 14 same-refund durable recovery: pass\n')
 NODE
   TASK14_SETTLEMENT_FAILED=0

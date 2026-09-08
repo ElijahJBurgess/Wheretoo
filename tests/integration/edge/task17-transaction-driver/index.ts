@@ -41,6 +41,7 @@ import {
   recoveredRefundStateIsSafe,
   recoverExistingRefundEvidence,
   recoveryDriverActionAllowed,
+  refundRecoveryDiagnostic,
   requirePublicApiKey,
   restoreSellableFixture,
   retireCertifiedConnectedAccount,
@@ -49,6 +50,7 @@ import {
   runCleanupStage,
   runCleanupWithFailureFinalizers,
   runFixtureStage,
+  runRefundRecoveryStage,
   validateAccountForDiagnostic,
 } from "./contracts.ts";
 
@@ -1674,90 +1676,126 @@ async function createRefund(
 async function recoverRefund(
   orderHandleValue: unknown,
 ): Promise<Record<string, unknown>> {
-  if (orderHandleValue !== "paid") throw new Error("INPUT");
   const client = getServiceClient();
-  const order = await proofOrder(orderHandleValue);
-  const scope = await client.from("orders").select(
-    "event_id,organizer_id,livemode,currency,quantity,stripe_destination_account_id",
-  )
-    .eq("id", order.id).single();
-  const fixture = await client.from("events").select("id,organizer_id")
-    .eq("title", `${fixturePrefix()} transaction`).single();
-  if (
-    scope.error || fixture.error || scope.data.event_id !== fixture.data.id ||
-    scope.data.organizer_id !== fixture.data.organizer_id ||
-    scope.data.livemode !== false ||
-    scope.data.currency !== "usd" || scope.data.quantity !== 3 ||
-    scope.data.stripe_destination_account_id !== connectedAccountId() ||
-    order.total_minor !== 5500 || order.application_fee_amount_minor !== 425 ||
-    !["paid", "requires_review", "refunded"].includes(order.status)
-  ) throw new Error("INPUT");
-  const persisted = await client.from("refunds")
-    .select(
-      "stripe_refund_id,stripe_transfer_reversal_id,stripe_application_fee_refund_id",
-    )
-    .eq("order_id", order.id);
-  if (persisted.error || persisted.data.length > 1) throw new Error("DATABASE");
-  const existing = persisted.data[0];
+  const { order, fixture, existing } = await runRefundRecoveryStage(
+    "scope",
+    async () => {
+      if (orderHandleValue !== "paid") throw new Error("INPUT");
+      const order = await proofOrder(orderHandleValue);
+      const scope = await client.from("orders").select(
+        "event_id,organizer_id,livemode,currency,quantity,stripe_destination_account_id",
+      )
+        .eq("id", order.id).single();
+      const fixture = await client.from("events").select("id,organizer_id")
+        .eq("title", `${fixturePrefix()} transaction`).single();
+      if (
+        scope.error || fixture.error ||
+        scope.data.event_id !== fixture.data.id ||
+        scope.data.organizer_id !== fixture.data.organizer_id ||
+        scope.data.livemode !== false ||
+        scope.data.currency !== "usd" || scope.data.quantity !== 3 ||
+        scope.data.stripe_destination_account_id !== connectedAccountId() ||
+        order.total_minor !== 5500 ||
+        order.application_fee_amount_minor !== 425 ||
+        !["paid", "requires_review", "refunded"].includes(order.status)
+      ) throw new Error("INPUT");
+      const persisted = await client.from("refunds")
+        .select(
+          "stripe_refund_id,stripe_transfer_reversal_id,stripe_application_fee_refund_id",
+        )
+        .eq("order_id", order.id);
+      if (persisted.error || persisted.data.length > 1) {
+        throw new Error(
+          "DATABASE",
+        );
+      }
+      const existing = persisted.data[0];
+      return { order, fixture, existing };
+    },
+  );
   const stripe = getStripe();
   let verifiedRefundId: string | undefined;
   const boundedRequest = { timeout: 10_000, maxNetworkRetries: 0 };
-  const result = await recoverExistingRefundEvidence({
-    orderId: order.id,
-    paymentIntentId: stripeId(order.stripe_payment_intent_id, "pi_"),
-    chargeId: stripeId(order.stripe_charge_id, "ch_"),
-    transferId: stripeId(order.stripe_transfer_id, "tr_"),
-    applicationFeeId: stripeId(order.stripe_application_fee_id, "fee_"),
-    connectedAccountId: connectedAccountId(),
-    refundId: existing?.stripe_refund_id ?? null,
-    reversalId: existing?.stripe_transfer_reversal_id ?? null,
-    feeRefundId: existing?.stripe_application_fee_refund_id ?? null,
-  }, {
-    read: async () => {
-      const [refunds, transfer, fee, feeRefunds] = await Promise.all([
-        stripe.refunds.list(
-          { charge: order.stripe_charge_id!, limit: 10 },
-          boundedRequest,
-        ),
-        stripe.transfers.retrieve(order.stripe_transfer_id!, {
-          expand: ["reversals"],
-        }, boundedRequest),
-        stripe.applicationFees.retrieve(
-          order.stripe_application_fee_id!,
-          {},
-          boundedRequest,
-        ),
-        stripe.applicationFees.listRefunds(order.stripe_application_fee_id!, {
-          limit: 10,
-        }, boundedRequest),
-      ]);
-      if (refunds.data.length === 1 && !refunds.has_more) {
-        const retrieved = await stripe.refunds.retrieve(
-          refunds.data[0].id,
-          {},
-          boundedRequest,
-        );
-        if (retrieved.id !== refunds.data[0].id) {
-          throw new Error("TASK14_REFUND_EVIDENCE_CONFLICT");
-        }
-        refunds.data[0] = retrieved;
-      }
-      return { refunds, transfer, fee, feeRefunds } as unknown as Awaited<
-        ReturnType<Parameters<typeof recoverExistingRefundEvidence>[1]["read"]>
-      >;
-    },
-    update: async (id, metadata) => {
-      const updated = await stripe.refunds.update(
-        id,
-        { metadata },
-        boundedRequest,
-      );
-      assertTestMode(updated);
-      if (updated.id !== id) throw new Error("STRIPE");
-      verifiedRefundId = id;
-    },
-    pause: () => new Promise((resolve) => setTimeout(resolve, 500)),
-  });
+  const result = await runRefundRecoveryStage(
+    "evidence_validation",
+    () =>
+      recoverExistingRefundEvidence({
+        orderId: order.id,
+        paymentIntentId: stripeId(order.stripe_payment_intent_id, "pi_"),
+        chargeId: stripeId(order.stripe_charge_id, "ch_"),
+        transferId: stripeId(order.stripe_transfer_id, "tr_"),
+        applicationFeeId: stripeId(order.stripe_application_fee_id, "fee_"),
+        connectedAccountId: connectedAccountId(),
+        refundId: existing?.stripe_refund_id ?? null,
+        reversalId: existing?.stripe_transfer_reversal_id ?? null,
+        feeRefundId: existing?.stripe_application_fee_refund_id ?? null,
+      }, {
+        read: async () => {
+          const [refunds, transfer, fee, feeRefunds] = await Promise.all([
+            runRefundRecoveryStage("refund_list", () =>
+              stripe.refunds.list(
+                { charge: order.stripe_charge_id!, limit: 10 },
+                boundedRequest,
+              )),
+            runRefundRecoveryStage("transfer_retrieve", () =>
+              stripe.transfers.retrieve(order.stripe_transfer_id!, {
+                expand: ["reversals"],
+              }, boundedRequest)),
+            runRefundRecoveryStage("application_fee_retrieve", () =>
+              stripe.applicationFees.retrieve(
+                order.stripe_application_fee_id!,
+                {},
+                boundedRequest,
+              )),
+            runRefundRecoveryStage("fee_refunds_list", () =>
+              stripe.applicationFees.listRefunds(
+                order.stripe_application_fee_id!,
+                {
+                  limit: 10,
+                },
+                boundedRequest,
+              )),
+          ]);
+          if (refunds.data.length === 1 && !refunds.has_more) {
+            const retrieved = await runRefundRecoveryStage(
+              "refund_retrieve",
+              () =>
+                stripe.refunds.retrieve(
+                  refunds.data[0].id,
+                  {},
+                  boundedRequest,
+                ),
+            );
+            if (retrieved.id !== refunds.data[0].id) {
+              throw new Error("TASK14_REFUND_EVIDENCE_CONFLICT");
+            }
+            refunds.data[0] = retrieved;
+          }
+          return { refunds, transfer, fee, feeRefunds } as unknown as Awaited<
+            ReturnType<
+              Parameters<typeof recoverExistingRefundEvidence>[1]["read"]
+            >
+          >;
+        },
+        update: (id, metadata) =>
+          runRefundRecoveryStage("metadata_update", async () => {
+            const updated = await stripe.refunds.update(
+              id,
+              { metadata },
+              boundedRequest,
+            );
+            assertTestMode(updated);
+            if (updated.id !== id) {
+              throw new Error("STRIPE");
+            }
+            verifiedRefundId = id;
+          }),
+        pause: () =>
+          new Promise((resolve) =>
+            setTimeout(resolve, 500)
+          ),
+      }),
+  );
   if (!verifiedRefundId) throw new Error("STRIPE");
   // Fresh receipt, canonical signed webhook and provider retrieval: no direct DB repair.
   const descriptor: EventDescriptor = {
@@ -1767,20 +1805,24 @@ async function recoverRefund(
     object_id: verifiedRefundId,
     created: Math.floor(Date.now() / 1000),
   };
-  const response = await createStripeWebhookHandler(
-    createDefaultStripeWebhookDependencies(),
-  )(await signedRequest(descriptor));
-  if (response.status !== 200) throw new Error("STRIPE");
-  const state = await inspect(fixture.data.id);
-  const receipt = await client.from("stripe_webhook_events").select(
-    "processing_status,error_code",
-  )
-    .eq("stripe_event_id", descriptor.event_id).single();
-  if (
-    receipt.error || receipt.data.processing_status !== "processed" ||
-    receipt.data.error_code !== null ||
-    !recoveredRefundStateIsSafe(state)
-  ) throw new Error("STRIPE");
+  await runRefundRecoveryStage("webhook_delivery", async () => {
+    const response = await createStripeWebhookHandler(
+      createDefaultStripeWebhookDependencies(),
+    )(await signedRequest(descriptor));
+    if (response.status !== 200) throw new Error("STRIPE");
+  });
+  await runRefundRecoveryStage("durable_verification", async () => {
+    const state = await inspect(fixture.data.id);
+    const receipt = await client.from("stripe_webhook_events").select(
+      "processing_status,error_code",
+    )
+      .eq("stripe_event_id", descriptor.event_id).single();
+    if (
+      receipt.error || receipt.data.processing_status !== "processed" ||
+      receipt.data.error_code !== null ||
+      !recoveredRefundStateIsSafe(state)
+    ) throw new Error("STRIPE");
+  });
   return {
     ...result,
     order_refunded: true,
@@ -2315,15 +2357,20 @@ Deno.serve(async (request) => {
         "STRIPE",
         "TASK14_REFUND_EVIDENCE_RETRYABLE",
         "TASK14_REFUND_EVIDENCE_CONFLICT",
+        "TASK14_REFUND_RECOVERY_FAILED",
       ].includes(error.message))
       ? error.message
       : "UNKNOWN";
     const cleanupDiagnostic = kind.startsWith("CLEANUP_")
       ? cleanupFailureDiagnostic(error)
       : null;
+    const recoveryDiagnostic = refundRecoveryDiagnostic(error);
     return json({
       ok: false,
       kind,
+      ...(recoveryDiagnostic === null
+        ? {}
+        : { recovery_diagnostic: recoveryDiagnostic }),
       ...(cleanupDiagnostic === null
         ? {}
         : { cleanup_diagnostic: cleanupDiagnostic }),
