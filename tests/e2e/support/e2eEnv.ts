@@ -58,7 +58,7 @@ export type E2EEnv = {
   stripePublishableKey: string
 }
 
-export type Task18E2EEnv = E2EEnv & {
+export type Task18E2EEnv = Pick<E2EEnv, 'supabaseUrl' | 'supabasePublishableKey' | 'mapboxAccessToken' | 'stripePublishableKey'> & {
   task18FunctionUrl: string
   task18DriverToken: string
   task18FixturePrefix: string
@@ -238,10 +238,16 @@ export function loadE2EEnv(
 export function loadTask18E2EEnv(
   source: Partial<Record<E2EVariable, string | undefined>> = process.env,
 ): Task18E2EEnv {
-  const base = loadE2EEnv(source)
-  const missing = requiredTask18Variables.filter((name) => !source[name]?.trim())
+  const buyerVariables = ['TEST_SUPABASE_URL', 'TEST_SUPABASE_PUBLISHABLE_KEY',
+    'VITE_MAPBOX_ACCESS_TOKEN', 'VITE_STRIPE_PUBLISHABLE_KEY', ...requiredTask18Variables] as const
+  const missing = buyerVariables.filter((name) => !source[name]?.trim())
   if (missing.length > 0) {
     throw new Error(`Missing required Task 18 E2E environment variables: ${missing.join(', ')}`)
+  }
+  if (!source.TEST_SUPABASE_PUBLISHABLE_KEY!.startsWith('sb_publishable_') ||
+    !source.VITE_STRIPE_PUBLISHABLE_KEY!.startsWith('pk_test_') ||
+    !source.VITE_MAPBOX_ACCESS_TOKEN!.startsWith('pk.')) {
+    throw new Error('Task 18 requires public browser keys and Stripe TEST mode.')
   }
 
   let functionUrl: URL
@@ -267,7 +273,10 @@ export function loadTask18E2EEnv(
   }
 
   return {
-    ...base,
+    supabaseUrl: source.TEST_SUPABASE_URL!,
+    supabasePublishableKey: source.TEST_SUPABASE_PUBLISHABLE_KEY!,
+    mapboxAccessToken: source.VITE_MAPBOX_ACCESS_TOKEN!,
+    stripePublishableKey: source.VITE_STRIPE_PUBLISHABLE_KEY!,
     task18FunctionUrl: functionUrl.toString(),
     task18DriverToken: source.TEST_TASK18_DRIVER_TOKEN!,
     task18FixturePrefix: source.TEST_TASK18_FIXTURE_PREFIX!,

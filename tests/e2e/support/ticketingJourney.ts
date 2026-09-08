@@ -1,29 +1,16 @@
-import { createClient } from '@supabase/supabase-js'
 import { randomUUID } from 'node:crypto'
 import { expect, type Locator, type Page, type TestInfo } from '@playwright/test'
-import type { Database } from '../../../src/lib/supabase/database.types'
 import { loadTask18E2EEnv } from './e2eEnv'
 import {
-  task18EventTitle,
+  prepareStableBuyerFixture,
   task18CheckoutTierNames,
   checkoutAttemptMatches,
-  task18MapboxFeatureId,
-  type TicketingProjectName,
 } from './ticketingFixture'
 
 const env = loadTask18E2EEnv()
 const unsafeVisibleEvidence = /(?:https:\/\/checkout\.stripe\.com\/|\b(?:bearer|authorization)\b|\b(?:acct|cs_(?:test|live)|ch|evt|fee|pi|price|prod|re|tr|trr|txn)_[A-Za-z0-9]+\b|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b)/i
 
-export type TicketingJourneyFixture = {
-  eventId: string
-  organizerEmail: string
-  organizerPassword: string
-  organizerName: string
-  publicEventPath: string
-  title: string
-  buyerEmail: string
-  orderHandle: 'paid' | 'declined'
-}
+export type TicketingJourneyFixture = Awaited<ReturnType<typeof prepareStableBuyerFixture>>
 
 async function invokeDriver<T>(action: string, input: Record<string, unknown> = {}): Promise<T> {
   const response = await fetch(env.task18FunctionUrl, {
@@ -42,119 +29,18 @@ async function invokeDriver<T>(action: string, input: Record<string, unknown> = 
   return await response.json() as T
 }
 
-export async function prepareTicketingJourney(
-  projectName: string,
-  scenario: 'purchase' | 'visual',
-): Promise<TicketingJourneyFixture> {
-  if (projectName !== 'mobile-chromium' && projectName !== 'desktop-chromium') {
-    throw new Error(`Unsupported Task 18 Playwright project: ${projectName}`)
-  }
+export async function prepareTicketingJourney(): Promise<TicketingJourneyFixture> {
   const proof = await invokeDriver<Record<string, unknown>>('server_proof')
   expect(proof).toMatchObject({
-    ok: true,
-    livemode: false,
-    connected_account_matches: true,
-    transfers_status: 'active',
-    payouts_status: 'active',
-    requirements_status: 'clear',
+    ok: true, livemode: false, connected_account_matches: true,
+    transfers_status: 'active', payouts_status: 'active', requirements_status: 'clear',
   })
-
-  const client = createClient<Database>(env.supabaseUrl, env.supabasePublishableKey, {
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-  })
-  const signIn = await client.auth.signInWithPassword({
-    email: env.organizerAEmail,
-    password: env.organizerAPassword,
-  })
-  if (signIn.error || !signIn.data.user) throw new Error('TASK18_FIXTURE_SIGN_IN_FAILED')
-  const typedProjectName = projectName as TicketingProjectName
-  const orderHandle = typedProjectName === 'mobile-chromium' ? 'paid' : 'declined'
-  const title = task18EventTitle(typedProjectName, scenario)
-  const mapboxFeatureId = task18MapboxFeatureId(env.task18FixturePrefix, typedProjectName, scenario)
-  const existing = await client.from('events').select('id, mapbox_feature_id')
-    .eq('mapbox_feature_id', mapboxFeatureId).maybeSingle()
-  if (existing.error) throw new Error('TASK18_FIXTURE_EVENT_LOOKUP_FAILED')
-  let eventId = existing.data?.id
-  if (!eventId) {
-    const startsAt = new Date(Date.now() + 14 * 86_400_000)
-    const created = await client.from('events').insert({
-      organizer_id: signIn.data.user.id,
-      title,
-      description: 'A disposable credentialed browser proof for native Whereto tickets.',
-      category: 'music',
-      starts_at: startsAt.toISOString(),
-      ends_at: new Date(startsAt.getTime() + 3_600_000).toISOString(),
-      timezone: 'America/Los_Angeles',
-      venue_name: 'Task 18 Test Venue',
-      address_line1: '1 Market Street',
-      city: 'San Francisco',
-      region: 'CA',
-      postal_code: '94105',
-      country_code: 'US',
-      mapbox_feature_id: mapboxFeatureId,
-      latitude: 37.7936,
-      longitude: -122.3958,
-      admission_type: 'paid',
-      capacity: 9,
-    }).select('id').single()
-    if (created.error) throw new Error('TASK18_FIXTURE_EVENT_CREATE_FAILED')
-    eventId = created.data.id
-  }
-  await client.auth.signOut()
-  return {
-    eventId,
-    organizerEmail: env.organizerAEmail,
-    organizerPassword: env.organizerAPassword,
-    organizerName: 'Whereto Task 18 Organizer',
-    publicEventPath: `/events/${eventId}`,
-    title,
-    buyerEmail: `${env.task18FixturePrefix}-${orderHandle}@example.invalid`,
-    orderHandle,
-  }
-}
-
-export async function signOutTicketingOrganizer(page: Page) {
-  await page.getByRole('button', { name: 'Sign out' }).click()
-  await expect(page).toHaveURL(/\/auth\/sign-in$/)
-}
-
-export async function signInTicketingOrganizer(page: Page, fixture: TicketingJourneyFixture) {
-  await page.goto('/auth/sign-in')
-  await page.getByLabel('Email').fill(fixture.organizerEmail)
-  await page.getByLabel('Password').fill(fixture.organizerPassword)
-  await page.getByRole('button', { name: 'Sign in' }).click()
-  await expect(page).toHaveURL(/\/organizer\/events$/)
-}
-
-export async function signInCrossUser(page: Page) {
-  await page.goto('/auth/sign-in')
-  await page.getByLabel('Email').fill(env.organizerBEmail)
-  await page.getByLabel('Password').fill(env.organizerBPassword)
-  await page.getByRole('button', { name: 'Sign in' }).click()
-  await expect(page).toHaveURL(/\/organizer\/events$/)
-}
-
-export async function configureCheckoutTicketTiers(page: Page) {
-  const definitions = [
-    { name: task18CheckoutTierNames[0], price: '18.50', capacity: '10', description: 'Standard admission to the event.' },
-    { name: task18CheckoutTierNames[1], price: '30.01', capacity: '10', description: 'Early entry and lounge access.' },
-  ]
-  for (let index = 0; index < definitions.length; index += 1) {
-    if (await page.locator('.ticket-tier-card').count() <= index) {
-      await page.getByRole('button', { name: 'Add ticket tier' }).click()
-    }
-    const tier = page.locator('.ticket-tier-card').nth(index)
-    await tier.getByLabel('Name').fill(definitions[index].name)
-    await tier.getByLabel(new RegExp(`Price for ${definitions[index].name}`)).fill(definitions[index].price)
-    await tier.getByLabel('Capacity').fill(definitions[index].capacity)
-    await tier.getByLabel('Description (optional)').fill(definitions[index].description)
-  }
-  await expect(page.locator('.ticket-tier-card')).toHaveCount(2)
+  return await prepareStableBuyerFixture(invokeDriver, env.task18FixturePrefix)
 }
 
 export async function chooseTwoGeneralAdmissionAndOneVip(page: Page) {
-  const generalAdmission = page.getByRole('spinbutton', { name: 'General admission quantity' })
-  const vip = page.getByRole('spinbutton', { name: 'VIP quantity' })
+  const generalAdmission = page.getByRole('spinbutton', { name: `${task18CheckoutTierNames[0]} quantity` })
+  const vip = page.getByRole('spinbutton', { name: `${task18CheckoutTierNames[1]} quantity` })
 
   await generalAdmission.focus()
   await page.keyboard.press('ArrowUp')
@@ -284,12 +170,12 @@ export async function deliverAndAssertRealPaidOrder(page: Page, fixture: Ticketi
   expect(beforeDelivery.orders).toHaveLength(1)
   expect(beforeDelivery.orders[0]).toMatchObject({
     order_handle: fixture.orderHandle,
-    subtotal_minor: 6701,
-    total_minor: 6701,
+    subtotal_minor: 5500,
+    total_minor: 5500,
   })
   expect(beforeDelivery.items).toEqual(expect.arrayContaining([
-    expect.objectContaining({ order_handle: fixture.orderHandle, tier_label: 'ga', quantity: 2, subtotal_minor: 3700 }),
-    expect.objectContaining({ order_handle: fixture.orderHandle, tier_label: 'vip', quantity: 1, subtotal_minor: 3001 }),
+    expect.objectContaining({ order_handle: fixture.orderHandle, tier_label: 'ga', quantity: 2, subtotal_minor: 3000 }),
+    expect.objectContaining({ order_handle: fixture.orderHandle, tier_label: 'vip', quantity: 1, subtotal_minor: 2500 }),
   ]))
 
   const delivered = await invokeDriver<{
@@ -311,8 +197,8 @@ export async function deliverAndAssertRealPaidOrder(page: Page, fixture: Ticketi
     order_handle: fixture.orderHandle,
     status: 'paid',
     reconciliation_status: 'reconciled',
-    subtotal_minor: 6701,
-    total_minor: 6701,
+    subtotal_minor: 5500,
+    total_minor: 5500,
   }))
   expect(paid.tickets).toContainEqual(expect.objectContaining({
     order_handle: fixture.orderHandle,

@@ -46,6 +46,66 @@ CHECKOUT_SWITCH_CAPTURED=0
 ACCOUNT_OWNERSHIP_ACCEPTED=0
 PROOF_COMPLETED=0
 TEARDOWN_FAILURE=0
+TASK14_BROWSER_PROJECT=${TASK14_BROWSER_PROJECT-}
+TASK14_FIXTURE_FILE=""
+TASK14_SETTLEMENT_FAILED=0
+
+verify_task14_browser_prerequisites() {
+  VITE_MAPBOX_ACCESS_TOKEN=$(read_public_env VITE_MAPBOX_ACCESS_TOKEN VITE_MAPBOX_ACCESS_TOKEN)
+  case "$VITE_MAPBOX_ACCESS_TOKEN" in pk.*) ;; *) return 1 ;; esac
+  pnpm exec supabase migration list --linked > "$TEMP_DIR/browser-migrations.json"
+  MIGRATIONS_FILE="$TEMP_DIR/browser-migrations.json" node --input-type=module <<'NODE'
+import fs from 'node:fs'
+const value = JSON.parse(fs.readFileSync(process.env.MIGRATIONS_FILE, 'utf8'))
+if (!Array.isArray(value.migrations) || value.migrations.some((row) => !row.local || row.local !== row.remote)) process.exit(1)
+NODE
+}
+
+run_task14_browser_project() {
+  pnpm exec playwright test --config playwright.config.ts \
+    tests/e2e/ticket-purchase.visual.spec.ts --project="$TASK14_BROWSER_PROJECT" \
+    --output="test-results/e2e/task14/$TASK14_BROWSER_PROJECT/visual"
+  pnpm exec playwright test --config playwright.config.ts \
+    tests/e2e/ticket-purchase.spec.ts --project="$TASK14_BROWSER_PROJECT" \
+    --output="test-results/e2e/task14/$TASK14_BROWSER_PROJECT/purchase"
+}
+
+task14_fixture_action() {
+  TASK14_ACTION="$1" TASK14_FIXTURE_FILE="$TASK14_FIXTURE_FILE" \
+    TEST_FUNCTION_URL="$TEST_FUNCTION_URL" TEST_STRIPE_DRIVER_TOKEN="$PROOF_TOKEN" \
+    TEST_SUPABASE_PUBLISHABLE_KEY="$TEST_SUPABASE_PUBLISHABLE_KEY" \
+    TEST_STRIPE_FIXTURE_PREFIX="$TEST_STRIPE_FIXTURE_PREFIX" \
+    node --disable-warning=ExperimentalWarning --experimental-strip-types --input-type=module <<'NODE'
+import fs from 'node:fs'
+import { prepareStableBuyerFixture, settleBrowserCheckout } from './tests/e2e/support/ticketingFixture.ts'
+const invoke = async (action, input = {}) => {
+  const response = await fetch(process.env.TEST_FUNCTION_URL, {
+    method: 'POST',
+    headers: {
+      apikey: process.env.TEST_SUPABASE_PUBLISHABLE_KEY,
+      authorization: `Bearer ${process.env.TEST_SUPABASE_PUBLISHABLE_KEY}`,
+      'content-type': 'application/json',
+      'x-task17-proof-token': process.env.TEST_STRIPE_DRIVER_TOKEN,
+    },
+    body: JSON.stringify({ action, ...input }),
+  })
+  if (!response.ok) throw new Error('TASK14_DRIVER_FAILED')
+  return await response.json()
+}
+try {
+  if (process.env.TASK14_ACTION === 'prepare') {
+    const fixture = await prepareStableBuyerFixture(invoke, process.env.TEST_STRIPE_FIXTURE_PREFIX)
+    fs.writeFileSync(process.env.TASK14_FIXTURE_FILE, JSON.stringify({ eventId: fixture.eventId }), { mode: 0o600 })
+  } else if (process.env.TASK14_ACTION === 'settle') {
+    const fixture = JSON.parse(fs.readFileSync(process.env.TASK14_FIXTURE_FILE, 'utf8'))
+    await settleBrowserCheckout(invoke, fixture.eventId)
+  } else throw new Error('TASK14_ACTION_INVALID')
+} catch {
+  process.stderr.write('Task 14 fixture/financial boundary verification: fail\n')
+  process.exitCode = 1
+}
+NODE
+}
 
 read_public_env() {
   variable_name=$1
@@ -222,6 +282,14 @@ cleanup() {
   restore_checkout_switch
   [ $? -eq 0 ] || TEARDOWN_FAILURE=1
 
+  if [ -n "$TASK14_BROWSER_PROJECT" ] && [ -n "$TASK14_FIXTURE_FILE" ] && [ -f "$TASK14_FIXTURE_FILE" ]; then
+    task14_fixture_action settle
+    if [ $? -ne 0 ]; then
+      TASK14_SETTLEMENT_FAILED=1
+      TEARDOWN_FAILURE=1
+    fi
+  fi
+
   if [ "$DRIVER_DEPLOYED" -eq 1 ] && [ -n "$CURL_CONFIG" ] && [ -f "$CURL_CONFIG" ]; then
     write_cleanup_config
     curl --silent --show-error --fail-with-body --config "$CURL_CONFIG" > "$CLEANUP_RESPONSE"
@@ -315,7 +383,7 @@ cleanup() {
       TEARDOWN_FAILURE=1
       cleanup_contract_status=1
     fi
-    if [ "$cleanup_status" -eq 0 ] && [ "$cleanup_contract_status" -eq 0 ]; then
+    if [ "$cleanup_status" -eq 0 ] && [ "$cleanup_contract_status" -eq 0 ] && [ "$TASK14_SETTLEMENT_FAILED" -eq 0 ]; then
       delete_fixture_runtime
       if [ $? -ne 0 ]; then
         printf '%s\n' 'Task 17 cleanup error kind: DATABASE_DELETE_RUNTIME'
@@ -416,7 +484,7 @@ NODE
       if [ "$tombstone_query_status" -ne 0 ] || [ "$tombstone_parse_status" -ne 0 ]; then
         TEARDOWN_FAILURE=1
       fi
-      if [ "$PROOF_COMPLETED" -eq 1 ] && [ "$TEARDOWN_FAILURE" -eq 0 ]; then
+      if [ "$PROOF_COMPLETED" -eq 1 ] && [ "$TEARDOWN_FAILURE" -eq 0 ] && [ -z "$TASK14_BROWSER_PROJECT" ]; then
         authorize_account_retirement
         retirement_authorization_status=$?
         retirement_config_status=1
@@ -536,6 +604,17 @@ TASK13_CHECKOUT_DIAGNOSTIC_ONLY=${TASK13_CHECKOUT_DIAGNOSTIC_ONLY-0}
 TASK13_BROWSER_DIAGNOSTIC_ONLY=${TASK13_BROWSER_DIAGNOSTIC_ONLY-0}
 TASK13_CLEANUP_ONLY=${TASK13_CLEANUP_ONLY-0}
 
+case "$TASK14_BROWSER_PROJECT" in
+  ''|mobile-chromium|desktop-chromium) ;;
+  *) printf '%s\n' 'Invalid Task 14 browser project.' >&2; exit 1 ;;
+esac
+if [ -n "$TASK14_BROWSER_PROJECT" ]; then
+  [ "$TASK13_FIXTURE_PREFLIGHT_ONLY$TASK13_CHECKOUT_DIAGNOSTIC_ONLY$TASK13_BROWSER_DIAGNOSTIC_ONLY$TASK13_CLEANUP_ONLY" = 0000 ] || {
+    printf '%s\n' 'Task 14 browser proof cannot run with diagnostic modes.' >&2
+    exit 1
+  }
+fi
+
 case "$TEST_SUPABASE_URL" in https://*.supabase.co) ;; *) printf '%s\n' 'Invalid TEST_SUPABASE_URL.' >&2; exit 1 ;; esac
 [ "$TEST_SUPABASE_URL" = "https://${PROJECT_REF}.supabase.co" ] || {
   printf '%s\n' 'TEST Supabase URL does not match the linked project.' >&2
@@ -602,6 +681,9 @@ const rows = Array.isArray(payload.rows)
 if (rows?.length !== 1 || rows[0]?.policy_environment !== 'development') process.exit(1)
 NODE
 chmod 600 "$projects_file" "$environment_file"
+if [ -n "$TASK14_BROWSER_PROJECT" ]; then
+  verify_task14_browser_prerequisites
+fi
 if [ "$TASK13_CLEANUP_ONLY" -eq 1 ]; then
   capture_checkout_switch
   [ "$(tr -d '\r\n' < "$CHECKOUT_SWITCH_STATE_FILE")" = false ] || {
@@ -1054,13 +1136,27 @@ if [ "$TASK13_FIXTURE_PREFLIGHT_ONLY" -eq 1 ]; then
 fi
 
 capture_checkout_switch
-if [ "$TASK13_BROWSER_DIAGNOSTIC_ONLY" -eq 1 ] && \
+if { [ "$TASK13_BROWSER_DIAGNOSTIC_ONLY" -eq 1 ] || [ -n "$TASK14_BROWSER_PROJECT" ]; } && \
   [ "$(tr -d '\r\n' < "$CHECKOUT_SWITCH_STATE_FILE")" != false ]; then
   CHECKOUT_SWITCH_CAPTURED=0
   printf '%s\n' 'Browser diagnostic requires checkout disabled.' >&2
   exit 1
 fi
 enable_checkout_for_fixture
+
+if [ -n "$TASK14_BROWSER_PROJECT" ]; then
+  TASK14_FIXTURE_FILE="$TEMP_DIR/browser-fixture.json"
+  task14_fixture_action prepare
+  export WHERETO_E2E_PROFILE=ticketing
+  export TEST_SUPABASE_URL TEST_SUPABASE_PUBLISHABLE_KEY VITE_STRIPE_PUBLISHABLE_KEY
+  export VITE_MAPBOX_ACCESS_TOKEN
+  export TEST_TASK18_FUNCTION_URL="$TEST_FUNCTION_URL"
+  export TEST_TASK18_DRIVER_TOKEN="$PROOF_TOKEN"
+  export TEST_TASK18_FIXTURE_PREFIX="$TEST_STRIPE_FIXTURE_PREFIX"
+  run_task14_browser_project
+  PROOF_COMPLETED=1
+  exit 0
+fi
 
 export RUN_STRIPE_TRANSACTION_PROOF=1
 export TASK13_BROWSER_DIAGNOSTIC_ONLY
