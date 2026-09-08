@@ -6,6 +6,8 @@ const sentinelBearer = 'a'.repeat(42) + 'A'
 const edgeUrl = 'https://ticket-shells-disabled.supabase.co/functions/v1/ticket-collection'
 
 const developmentOnlyRoutes = [
+  '/preview',
+  '/preview/ticket-selection',
   '/tickets/wh_test_collection_paid',
   '/__dev/ticket-shells/events/event-a/dashboard',
   '/__dev/ticket-shells/events/event-a/check-in',
@@ -90,6 +92,7 @@ test('production preview fails closed without exposing ticket shell development 
 
   for (const route of developmentOnlyRoutes) {
     await page.goto(route)
+    await expect(page.locator('body')).toContainText(route.startsWith('/tickets/') ? 'Tickets unavailable' : /404|not found/i)
     const body = await page.locator('body').innerText()
 
     for (const sentinel of developmentBodySentinels) {

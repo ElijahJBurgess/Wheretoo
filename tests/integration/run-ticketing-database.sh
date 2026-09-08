@@ -378,7 +378,8 @@ TEST_ORGANIZER_B_EMAIL="$organizer_b_email" \
 TEST_ORGANIZER_B_PASSWORD="$organizer_b_password" \
   pnpm exec vitest run --config vitest.integration.config.ts \
     tests/integration/ticketing-database.test.ts \
-    tests/integration/ticketing-concurrency.test.ts
+    tests/integration/ticketing-concurrency.test.ts \
+    tests/integration/public-event-visibility.test.ts
 
 "$repository_root/tests/integration/ticketing-final-inventory-race.sh"
 

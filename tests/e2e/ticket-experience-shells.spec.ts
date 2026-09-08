@@ -13,6 +13,7 @@ test('existing organizer mobile navigation remains contained', async ({ page }, 
   for (const width of [320, 375]) {
     await page.setViewportSize({ width, height: 844 })
     await page.goto('/tickets/wh_test_collection_unavailable')
+    await expect(page.getByText('Tickets unavailable', { exact: true })).toBeVisible()
     await page.evaluate(async () => {
       const modulePath = '/tests/e2e/support/organizerLayoutProof.ts'
       const module = await import(/* @vite-ignore */ modulePath)

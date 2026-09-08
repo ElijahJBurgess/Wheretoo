@@ -1,5 +1,17 @@
 # Day 1 Organizer Event Publishing Verification
 
+## Current integration runner
+
+Run `pnpm test:integration:ticketing-db` against the confirmed linked development
+project to provision disposable organizer credentials and run this API proof alongside
+the ticketing boundary/concurrency suites. Its guarded cleanup captures exact fixture IDs
+and restores the checkout switch. The standalone suite still requires the variables below.
+
+The current proof expects a new draft to be `not_evaluated`, submits the approved
+requirements/policy acceptance before publishing, and reads the anonymous
+`get_public_event` projection. Anonymous base-table access is denied. The historical
+Day 1 results below predate that moderation/public-projection contract.
+
 ## Verification target
 
 The linked development target was positively identified on 2026-08-24 before test-data

@@ -1,0 +1,39 @@
+.preview-hub {
+  width: min(100% - 2rem, 960px);
+  margin: 3rem auto;
+  color: var(--color-ink, #202827);
+}
+.preview-hub header { margin-bottom: 3rem; }
+.preview-hub h1 { font-size: clamp(2rem, 5vw, 3rem); }
+.preview-hub h2 { font-size: 1.25rem; margin: 2.5rem 0 1rem; }
+.preview-hub p { line-height: 1.6; max-width: 70ch; }
+.preview-hub ul { list-style: none; padding: 0; margin: 0; }
+.preview-hub li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 0;
+  border-bottom: 1px solid #d5d9d3;
+}
+.preview-hub a, .preview-toolbar a { color: #245544; text-underline-offset: 4px; font-weight: 700; }
+.preview-hub code, .preview-hub small { display: block; margin-top: .4rem; overflow-wrap: anywhere; }
+.preview-hub code { font-size: .8rem; }
+.preview-hub small, .preview-hub__status { color: #525d56; font-size: .85rem; }
+.preview-hub__status { flex-shrink: 0; padding-top: .2rem; }
+.preview-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: .5rem 1.5rem;
+  padding: .75rem 1rem;
+  background: #f6f6ef;
+  border-bottom: 1px solid #d5d9d3;
+  font-size: .85rem;
+}
+.preview-toolbar p { margin: 0; }
+.preview-caption { margin: 0; padding: .6rem 1rem; text-align: center; font-size: .8rem; background: #f6f6ef; }
+@media (max-width: 520px) {
+  .preview-hub { margin: 1.5rem auto; }
+  .preview-hub li { flex-direction: column; gap: .5rem; }
+}

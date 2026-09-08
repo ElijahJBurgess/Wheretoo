@@ -32,9 +32,14 @@ export default defineConfig(({ command, mode }) => {
 
   return {
     envPrefix: [],
-    define: Object.fromEntries(
-      browserEnvKeys.map((key) => [`import.meta.env.${key}`, JSON.stringify(browserEnv[key] ?? '')]),
-    ),
+    define: {
+      ...Object.fromEntries(
+        browserEnvKeys.map((key) => [`import.meta.env.${key}`, JSON.stringify(browserEnv[key] ?? '')]),
+      ),
+      'import.meta.env.VITE_SCREEN_PREVIEW_ENABLED': JSON.stringify(
+        mode === 'development' || process.env.VERCEL_ENV === 'preview' || process.env.WHERETOO_ENABLE_PREVIEW === '1',
+      ),
+    },
     plugins: [developmentCspBypass(), ticketExperienceEntry(command), react()],
     test: {
       environment: 'jsdom',

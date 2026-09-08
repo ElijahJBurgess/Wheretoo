@@ -127,7 +127,7 @@ describe('public event visibility and organizer isolation', () => {
     expect(inserted.data).toMatchObject({
       organizer_id: userA.id,
       status: 'draft',
-      moderation_status: 'clear',
+      moderation_status: 'not_evaluated',
       title,
       published_at: null,
     })
@@ -164,8 +164,23 @@ describe('public event visibility and organizer isolation', () => {
     })
 
     const anonymousDraft = await anonymous.from('events').select('id').eq('id', eventId).maybeSingle()
-    assertNoError(anonymousDraft.error, 'Anonymous draft visibility check failed unexpectedly')
+    expect(anonymousDraft.error?.code).toBe('42501')
     expect(anonymousDraft.data).toBeNull()
+    const draftProjection = await anonymous.rpc('get_public_event', { p_event_id: eventId })
+    assertNoError(draftProjection.error, 'Anonymous draft projection failed')
+    expect(draftProjection.data).toEqual([])
+
+    const requirements = await organizerA.rpc('save_owned_event_requirements', {
+      p_event_id: eventId,
+      p_requirements: {
+        minimum_age: 'all_ages', alcohol_present: false, cannabis_present: false,
+        explicit_adult_content: false, gambling_present: false, weapons_present: false,
+        high_risk_activity: false,
+      },
+    })
+    assertNoError(requirements.error, 'Save current event requirements failed')
+    const acceptance = await organizerA.rpc('accept_current_event_policies', { p_event_id: eventId })
+    assertNoError(acceptance.error, 'Accept current policies failed')
 
     const firstPublish = await organizerA.rpc('publish_event', { p_event_id: eventId })
     assertNoError(firstPublish.error, 'First publish failed')
@@ -179,19 +194,11 @@ describe('public event visibility and organizer isolation', () => {
     expect(firstPublish.data.published_at).not.toBeNull()
     const firstPublishedAt = firstPublish.data.published_at
 
-    const publicRead = await anonymous
-      .from('events')
-      .select(
-        'id, organizer_id, status, moderation_status, title, description, starts_at, ends_at, timezone, city, region, country_code, admission_type, published_at',
-      )
-      .eq('id', eventId)
-      .single()
+    const publicRead = await anonymous.rpc('get_public_event', { p_event_id: eventId })
     assertNoError(publicRead.error, 'Anonymous published-event read failed')
-    expect(publicRead.data).toEqual({
+    expect(publicRead.data).toHaveLength(1)
+    expect(publicRead.data![0]).toMatchObject({
       id: eventId,
-      organizer_id: userA.id,
-      status: 'published',
-      moderation_status: 'clear',
       title,
       description: 'A real disposable event proving immediate public visibility and ownership isolation.',
       starts_at: persistedStartsAt,
@@ -201,8 +208,9 @@ describe('public event visibility and organizer isolation', () => {
       region: 'CA',
       country_code: 'US',
       admission_type: 'free',
-      published_at: firstPublishedAt,
     })
+    expect(publicRead.data![0]).not.toHaveProperty('organizer_id')
+    expect(publicRead.data![0]).not.toHaveProperty('moderation_status')
 
     const retryPublish = await organizerA.rpc('publish_event', { p_event_id: eventId })
     assertNoError(retryPublish.error, 'Publish retry failed')

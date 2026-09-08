@@ -71,6 +71,8 @@ async function captureRoute(page: Page, testInfo: TestInfo, name: string, path: 
 }
 
 test('captures every stable shell state with credential-bearing regions masked', async ({ page }, testInfo) => {
+  // This matrix opens many independent routes; budget for all captures, not one page.
+  test.setTimeout(180_000)
   await page.emulateMedia({ reducedMotion: 'reduce' })
   for (const [name, path, marker] of customerCaptures) {
     await captureRoute(page, testInfo, name, path, marker)
@@ -120,6 +122,7 @@ test('captures every stable shell state with credential-bearing regions masked',
 
 test('keyboard, zoom, touch targets, announcements, and reduced motion remain usable', async ({ page }) => {
   await page.goto('/tickets/wh_test_collection_paid_multi')
+  await expect(page.getByRole('heading', { name: 'Your tickets' })).toBeVisible()
   await assertVisibleKeyboardFocus(page)
   await assertMinimumTouchTargets(page)
   await page.evaluate(() => { document.documentElement.style.fontSize = '200%' })
@@ -148,6 +151,7 @@ test('keyboard, zoom, touch targets, announcements, and reduced motion remain us
   await assertMinimumTouchTargets(page)
 
   await page.goto('/__dev/ticket-shells/events/event-a/dashboard')
+  await expect(page.getByRole('heading', { name: 'Mission Night Market' })).toBeVisible()
   await assertVisibleKeyboardFocus(page)
   await assertMinimumTouchTargets(page)
   await page.evaluate(() => { document.documentElement.style.fontSize = '200%' })
