@@ -1,10 +1,56 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import * as fixtureHarness from '../e2e/support/ticketingFixture'
 import {
   checkoutAttemptMatches,
 } from '../e2e/support/ticketingFixture'
 
 describe('Task 14 stable buyer fixture and failure cleanup', () => {
+  it('aborts a stalled driver request and rejects settlement within the request deadline', async () => {
+    let signal: AbortSignal | undefined
+    const settlement = fixtureHarness.settleBrowserCheckout(async (_action, _input, requestSignal) => {
+      signal = requestSignal
+      return await new Promise<Record<string, unknown>>(() => {})
+    }, 'event', false, { requestTimeoutMs: 25, settlementTimeoutMs: 200 })
+    const result = await Promise.race([
+      settlement.then(() => 'settled', (error: Error) => error.message),
+      new Promise<string>(resolve => setTimeout(() => resolve('unbounded'), 300)),
+    ])
+    expect(result).toBe('TASK14_SETTLEMENT_TIMEOUT')
+    expect(signal?.aborted).toBe(true)
+  })
+
+  it('applies one overall deadline across individually responsive settlement requests', async () => {
+    vi.useFakeTimers()
+    try {
+      const actions: string[] = []
+      const settlement = fixtureHarness.settleBrowserCheckout(async (action) => {
+        actions.push(action)
+        await new Promise(resolve => setTimeout(resolve, 30))
+        if (action === 'inspect') return { orders: [{ order_handle: 'paid' }] }
+        if (action === 'checkout_status') return { ok: true, livemode: false, status: 'expired', payment_status: 'unpaid', charge_paid: false }
+        return { status: 200, receipt: { processing_status: 'processed' } }
+      }, 'event', false, { requestTimeoutMs: 100, settlementTimeoutMs: 50 })
+      const assertion = expect(settlement).rejects.toThrow('TASK14_SETTLEMENT_TIMEOUT')
+      await vi.advanceTimersByTimeAsync(60)
+      await assertion
+      expect(actions).toEqual(['inspect', 'checkout_status'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('stops after a timed-out refund write instead of treating it as a recoverable enrichment failure', async () => {
+    const actions: string[] = []
+    await expect(fixtureHarness.settleBrowserCheckout(async action => {
+      actions.push(action)
+      if (action === 'inspect') return { orders: [{ order_handle: 'paid' }] }
+      if (action === 'checkout_status') return { ok: true, livemode: false, status: 'complete', payment_status: 'paid', charge_paid: true }
+      if (action === 'deliver') return { status: 200, receipt: { processing_status: 'processed' } }
+      return await new Promise<Record<string, unknown>>(() => {})
+    }, 'event', false, { requestTimeoutMs: 25, settlementTimeoutMs: 200 })).rejects.toThrow('TASK14_SETTLEMENT_TIMEOUT')
+    expect(actions).toEqual(['inspect', 'checkout_status', 'deliver', 'create_refund'])
+  })
+
   it('reuses managed setup and rejects a stale cart without creating organizer browser rows', async () => {
     const prepare = fixtureHarness.prepareStableBuyerFixture
     const calls: string[] = []

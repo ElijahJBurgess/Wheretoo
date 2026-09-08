@@ -1,6 +1,6 @@
 export const task18CheckoutTierNames = ['Task 17 General Admission', 'Task 17 VIP'] as const
 
-type DriverInvoke = (action: string, input?: Record<string, unknown>) => Promise<Record<string, unknown>>
+type DriverInvoke = (action: string, input?: Record<string, unknown>, signal?: AbortSignal) => Promise<Record<string, unknown>>
 
 export async function prepareStableBuyerFixture(invoke: DriverInvoke, prefix: string) {
   const setup = await invoke('setup')
@@ -26,7 +26,42 @@ export async function prepareStableBuyerFixture(invoke: DriverInvoke, prefix: st
 
 // The outer runner invokes this even when Playwright fails after payment.
 // Refuse destructive database teardown until the exact session is settled.
-export async function settleBrowserCheckout(invoke: DriverInvoke, eventId: string, liteProof = false) {
+export async function settleBrowserCheckout(
+  invoke: DriverInvoke,
+  eventId: string,
+  liteProof = false,
+  deadlines = { requestTimeoutMs: 30_000, settlementTimeoutMs: 120_000 },
+) {
+  if (![deadlines.requestTimeoutMs, deadlines.settlementTimeoutMs].every(value => Number.isSafeInteger(value) && value > 0)) {
+    throw new Error('TASK14_SETTLEMENT_TIMEOUT')
+  }
+  const controller = new AbortController()
+  const abort = () => controller.abort(new Error('TASK14_SETTLEMENT_TIMEOUT'))
+  const settlementTimer = setTimeout(abort, deadlines.settlementTimeoutMs)
+  try {
+    await settleBrowserCheckoutWithinDeadline(async (action, input) => {
+      controller.signal.throwIfAborted()
+      const requestTimer = setTimeout(abort, deadlines.requestTimeoutMs)
+      let onAbort = () => {}
+      const expired = new Promise<never>((_resolve, reject) => {
+        onAbort = () => reject(controller.signal.reason)
+        controller.signal.addEventListener('abort', onAbort, { once: true })
+      })
+      try {
+        // Race as well as abort: a transport that stalls or ignores cancellation
+        // cannot block outer cleanup. A timed-out write remains financially uncertain.
+        return await Promise.race([invoke(action, input, controller.signal), expired])
+      } finally {
+        clearTimeout(requestTimer)
+        controller.signal.removeEventListener('abort', onAbort)
+      }
+    }, eventId, liteProof)
+  } finally {
+    clearTimeout(settlementTimer)
+  }
+}
+
+async function settleBrowserCheckoutWithinDeadline(invoke: DriverInvoke, eventId: string, liteProof: boolean) {
   const inspection = await invoke('inspect', { event_id: eventId })
   const orders = inspection.orders as Array<Record<string, unknown>> | undefined
   const unsafe = () => { throw new Error('TASK14_CLEANUP_UNSAFE') }

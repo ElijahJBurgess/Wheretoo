@@ -93,7 +93,7 @@ task14_fixture_action() {
     node --disable-warning=ExperimentalWarning --experimental-strip-types --input-type=module <<'NODE'
 import fs from 'node:fs'
 import { prepareStableBuyerFixture, settleBrowserCheckout } from './tests/e2e/support/ticketingFixture.ts'
-const invoke = async (action, input = {}) => {
+const invoke = async (action, input = {}, signal = AbortSignal.timeout(30_000)) => {
   const response = await fetch(process.env.TEST_FUNCTION_URL, {
     method: 'POST',
     headers: {
@@ -103,6 +103,7 @@ const invoke = async (action, input = {}) => {
       'x-task17-proof-token': process.env.TEST_STRIPE_DRIVER_TOKEN,
     },
     body: JSON.stringify({ action, ...input }),
+    signal,
   })
   if (!response.ok) throw new Error('TASK14_DRIVER_FAILED')
   return await response.json()

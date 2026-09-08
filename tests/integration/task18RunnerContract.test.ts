@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -75,6 +75,17 @@ verify_task14_browser_prerequisites
     expect(result.stderr).toContain('Task 17 teardown verification: fail')
   })
 
+  it('continues temporary driver retirement after a real settlement deadline without deleting financial rows', () => {
+    const result = runCleanup(23, false, true)
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('TASK14_SETTLEMENT_TIMEOUT')
+    expect(result.stdout).not.toContain('delete-runtime')
+    expect(result.stdout).not.toContain('RETIRE')
+    expect(result.commands).toContain('functions delete task17-transaction-driver')
+    expect(result.commands).toContain('secrets unset TASK17_PROOF_TOKEN')
+    expect(result.stderr).toContain('Task 17 teardown verification: fail')
+  })
+
   it('delegates both viewports to the guarded lifecycle and stops on its failure', () => {
     const wrapper = readFileSync(runnerPath, 'utf8')
     const body = wrapper.slice(wrapper.indexOf('for browser_project'))
@@ -102,11 +113,12 @@ ${body}`], { encoding: 'utf8' })
   })
 })
 
-function runCleanup(originalStatus: number, settlementFails: boolean) {
+function runCleanup(originalStatus: number, settlementFails: boolean, settlementTimeout = false) {
   const shared = readFileSync(sharedRunnerPath, 'utf8')
   const cleanup = shared.slice(shared.indexOf('\ncleanup() {'), shared.indexOf('\ntrap cleanup EXIT HUP INT TERM'))
   const directory = mkdtempSync(join(tmpdir(), 'task14-cleanup-contract-'))
-  writeFileSync(join(directory, 'fixture'), '{}')
+  mkdirSync(join(directory, 'runtime'))
+  writeFileSync(join(directory, 'runtime/fixture'), '{}')
   const cleaned = {
     ok: true, connected_account_closed: false, connected_account_preserved: true,
     database_cleanup_required: true, stable_fixture: true, fixture_reusable: true,
@@ -122,9 +134,20 @@ function runCleanup(originalStatus: number, settlementFails: boolean) {
     refund_count: 0, staff_role_count: 0, public_projection_count: 0, event_tombstoned: true,
   }] }
   try {
-    return spawnSync('sh', ['-c', `
+    const result = spawnSync('sh', ['-c', `
 restore_checkout_switch() { return 0; }
-task14_fixture_action() { echo settle; return ${settlementFails ? 1 : 0}; }
+${settlementTimeout ? `task14_fixture_action() {
+node --disable-warning=ExperimentalWarning --experimental-strip-types --input-type=module <<'SETTLE'
+import { settleBrowserCheckout } from './tests/e2e/support/ticketingFixture.ts'
+try {
+  await settleBrowserCheckout(() => new Promise(() => {}), 'fixture', false,
+    { requestTimeoutMs: 25, settlementTimeoutMs: 100 })
+} catch (error) {
+  process.stderr.write(error.message + '\\n')
+  process.exitCode = 1
+}
+SETTLE
+}` : `task14_fixture_action() { echo settle; return ${settlementFails ? 1 : 0}; }`}
 write_cleanup_config() { return 0; }
 delete_fixture_runtime() { echo delete-runtime; }
 authorize_account_retirement() { echo RETIRE; return 1; }
@@ -132,12 +155,13 @@ remote_function_count() { echo 0; }
 temporary_secret_count() { echo 0; }
 curl() { printf '%s' '${JSON.stringify(cleaned)}'; }
 pnpm() {
+  printf '%s\\n' "$*" >> "$CONTRACT_DIR/retirement.log"
   case "$*" in
     *'db query'*) printf '%s' '${JSON.stringify(audit)}' ;;
     *) printf '[]' ;;
   esac
 }
-TEMP_DIR="$CONTRACT_DIR"
+TEMP_DIR="$CONTRACT_DIR/runtime"
 TASK14_FIXTURE_FILE="$TEMP_DIR/fixture"
 CURL_CONFIG="$TEMP_DIR/fixture"
 CLEANUP_RESPONSE="$TEMP_DIR/cleaned"
@@ -158,7 +182,8 @@ PROJECT_REF=fixture
 ${cleanup}
 (exit ${originalStatus})
 cleanup
-`], { encoding: 'utf8', env: { ...process.env, CONTRACT_DIR: directory } })
+`], { encoding: 'utf8', timeout: 5_000, env: { ...process.env, CONTRACT_DIR: directory } })
+    return { ...result, commands: readFileSync(join(directory, 'retirement.log'), 'utf8') }
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }
