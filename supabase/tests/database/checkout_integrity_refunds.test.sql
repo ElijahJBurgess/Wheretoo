@@ -129,7 +129,15 @@ begin
     v_event_id, v_order_id, v_session_id, v_payment_intent_id, v_charge_id,
     'tr_task8' || p_kind, 'fee_task8' || p_kind,
     'txn_task8' || p_kind, 'cus_task8' || p_kind,
-    'payment', 'paid', 'usd', 3001, 3001, 300, 'acct_task8refund'
+    'payment', 'paid', 'usd', 3001, 3001, 300, 'acct_task8refund',
+    (select jsonb_agg(jsonb_build_object(
+      'order_item_id', manifest_item.id, 'unit_sequence', manifest_unit.n,
+      'admission_label', manifest_item.tier_name,
+      'credential_hash', encode(extensions.digest(manifest_item.id::text || ':' || manifest_unit.n::text, 'sha256'), 'hex'))
+      order by manifest_item.id, manifest_unit.n)
+    from public.order_items as manifest_item
+    cross join lateral generate_series(1, manifest_item.quantity) as manifest_unit(n)
+    where manifest_item.order_id = (v_order_id))
   );
   insert into pg_temp.refund_orders values (
     p_kind, v_order_id, v_session_id, v_payment_intent_id, v_charge_id
@@ -549,8 +557,16 @@ select lives_ok(
       'cs_test_task8failed', 'pi_task8failed', 'ch_task8failed',
       'tr_task8failed', 'fee_task8failed', 'txn_task8failed',
       'cus_task8failed', 'payment', 'paid', 'usd',
-      3001, 3001, 300, 'acct_task8refund'
-    )
+      3001, 3001, 300, 'acct_task8refund',
+    (select jsonb_agg(jsonb_build_object(
+      'order_item_id', manifest_item.id, 'unit_sequence', manifest_unit.n,
+      'admission_label', manifest_item.tier_name,
+      'credential_hash', encode(extensions.digest(manifest_item.id::text || ':' || manifest_unit.n::text, 'sha256'), 'hex'))
+      order by manifest_item.id, manifest_unit.n)
+    from public.order_items as manifest_item
+    cross join lateral generate_series(1, manifest_item.quantity) as manifest_unit(n)
+    where manifest_item.order_id = ((select id from refund_orders where kind = 'failed')))
+  )
   $$,
   'the creation kill switch does not disable payment fulfillment lifecycle APIs'
 );

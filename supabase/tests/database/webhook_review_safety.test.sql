@@ -394,8 +394,16 @@ select * from public.server_fulfill_paid_order(
   'ch_ReviewPolicyMismatch', 'tr_ReviewPolicyMismatch',
   'fee_ReviewPolicyMismatch', 'txn_ReviewPolicyMismatch',
   'cus_ReviewPolicyMismatch', 'payment', 'paid', 'usd',
-  2000, 2000, 150, 'acct_WebhookReviewSafety'
-);
+  2000, 2000, 150, 'acct_WebhookReviewSafety',
+    (select jsonb_agg(jsonb_build_object(
+      'order_item_id', manifest_item.id, 'unit_sequence', manifest_unit.n,
+      'admission_label', manifest_item.tier_name,
+      'credential_hash', encode(extensions.digest(manifest_item.id::text || ':' || manifest_unit.n::text, 'sha256'), 'hex'))
+      order by manifest_item.id, manifest_unit.n)
+    from public.order_items as manifest_item
+    cross join lateral generate_series(1, manifest_item.quantity) as manifest_unit(n)
+    where manifest_item.order_id = ((select id from review_orders where kind = 'policy')))
+  );
 select * from public.server_record_webhook_receipt(
   'evt_ReviewPolicyMismatch', 'refund.updated', false,
   're_ReviewPolicyMismatch', '2026-07-29.dahlia',
@@ -458,9 +466,14 @@ select results_eq(
   'verified refund recovery leaves no cancelled admission residue'
 );
 
+-- Elevated rollback-only corruption fixture for historical refund recovery.
+reset role;
+alter table public.tickets disable trigger tickets_identity_and_transition;
 update public.tickets
 set status = 'cancelled', refunded_at = null, cancelled_at = statement_timestamp()
 where order_id = (select id from review_orders where kind = 'policy');
+alter table public.tickets enable trigger tickets_identity_and_transition;
+set local role service_role;
 select * from public.server_record_webhook_receipt(
   'evt_ReviewPolicyRecoveredRetry', 'refund.updated', false,
   're_ReviewPolicyMismatch', '2026-07-29.dahlia',

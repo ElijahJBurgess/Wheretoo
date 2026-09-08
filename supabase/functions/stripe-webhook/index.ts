@@ -10,6 +10,11 @@ import {
 } from "../_shared/operationalLog.ts";
 import { getStripe } from "../_shared/stripeClient.ts";
 import {
+  derivePaidAdmissionCredential,
+  getTicketCredentialSecret,
+  hashAdmissionCredential,
+} from "../_shared/ticketCredentials.ts";
+import {
   ACCOUNT_INCLUDE,
   createAccountRepository,
   validateApprovedConnectAccount,
@@ -80,6 +85,7 @@ export interface ReceiptInput {
 export interface OrderItemSnapshot {
   orderItemId: string;
   tierId: string;
+  tierName: string;
   currency: "usd";
   unitAmountMinor: number;
   quantity: number;
@@ -133,13 +139,24 @@ export interface PaymentSnapshot {
   destinationAccountId: string;
 }
 
-export interface FulfillmentSnapshot extends PaymentSnapshot {
+export interface VerifiedPaymentSnapshot extends PaymentSnapshot {
   paymentIntentId: string;
   chargeId: string;
   transferId: string;
   applicationFeeId: string;
   balanceTransactionId: string;
   customerId: string | null;
+}
+
+export type TicketManifestEntry = {
+  order_item_id: string;
+  unit_sequence: number;
+  admission_label: string;
+  credential_hash: string;
+};
+
+export interface FulfillmentSnapshot extends VerifiedPaymentSnapshot {
+  ticketManifest: TicketManifestEntry[];
 }
 
 export interface FulfillmentApplyResult {
@@ -152,7 +169,7 @@ export interface PaymentFailureSnapshot extends PaymentSnapshot {
   failureCode: "ASYNC_PAYMENT_FAILED" | "CHECKOUT_EXPIRED";
 }
 
-export interface PaymentReviewSnapshot extends FulfillmentSnapshot {
+export interface PaymentReviewSnapshot extends VerifiedPaymentSnapshot {
   failureCode:
     | "PAYMENT_CHARGE_REFUNDED"
     | "PAYMENT_CHARGE_DISPUTED"
@@ -251,6 +268,7 @@ export interface StripeWebhookDependencies {
   fulfillPaidOrder(
     snapshot: FulfillmentSnapshot,
   ): Promise<FulfillmentApplyResult>;
+  getTicketCredentialSecret(): Uint8Array;
   markPaymentProcessing(snapshot: PaymentSnapshot): Promise<void>;
   markPaymentFailed(snapshot: PaymentFailureSnapshot): Promise<void>;
   markPaymentRequiresReview(snapshot: PaymentReviewSnapshot): Promise<void>;
@@ -629,12 +647,16 @@ function orderSnapshotFromRpc(
         "quantity",
         "subtotal_minor",
         "ticket_tier_id",
+        "tier_name",
         "unit_amount_minor",
       ]) ||
       typeof item.order_item_id !== "string" ||
       !UUID_PATTERN.test(item.order_item_id) ||
       typeof item.ticket_tier_id !== "string" ||
       !UUID_PATTERN.test(item.ticket_tier_id) ||
+      typeof item.tier_name !== "string" ||
+      item.tier_name !== item.tier_name.trim() ||
+      [...item.tier_name].length < 1 || [...item.tier_name].length > 80 ||
       item.currency !== "usd" ||
       !Number.isSafeInteger(item.unit_amount_minor) ||
       (item.unit_amount_minor as number) <= 0 ||
@@ -646,6 +668,7 @@ function orderSnapshotFromRpc(
     return {
       orderItemId: item.order_item_id,
       tierId: item.ticket_tier_id,
+      tierName: item.tier_name,
       currency: "usd",
       unitAmountMinor: item.unit_amount_minor as number,
       quantity: item.quantity as number,
@@ -831,6 +854,7 @@ export function createDefaultStripeWebhookDependencies(): StripeWebhookDependenc
       );
       return true;
     },
+    getTicketCredentialSecret,
     fulfillPaidOrder: async (value) => {
       const { data, error } = await getServiceClient().rpc(
         "server_fulfill_paid_order",
@@ -851,6 +875,7 @@ export function createDefaultStripeWebhookDependencies(): StripeWebhookDependenc
           p_total_minor: value.totalMinor,
           p_application_fee_amount_minor: value.applicationFeeAmountMinor,
           p_destination_account_id: value.destinationAccountId,
+          p_ticket_manifest: value.ticketManifest,
         },
       );
       if (error !== null) throwRpc(error);
@@ -1425,6 +1450,36 @@ async function dispatchCheckout(
       (sum, item) => sum + item.quantity,
       0,
     );
+    const secret = dependencies.getTicketCredentialSecret();
+    const ticketManifest: TicketManifestEntry[] = [];
+    for (
+      const item of [...current.order.items].sort((a, b) =>
+        a.orderItemId.localeCompare(b.orderItemId)
+      )
+    ) {
+      for (
+        let unitSequence = 1;
+        unitSequence <= item.quantity;
+        unitSequence++
+      ) {
+        // Only the one-way hash crosses the database/operational boundary.
+        const hash = await hashAdmissionCredential(
+          await derivePaidAdmissionCredential(secret, {
+            orderItemId: item.orderItemId,
+            unitSequence,
+          }),
+        );
+        ticketManifest.push({
+          order_item_id: item.orderItemId,
+          unit_sequence: unitSequence,
+          admission_label: item.tierName,
+          credential_hash: Array.from(
+            hash,
+            (byte) => byte.toString(16).padStart(2, "0"),
+          ).join(""),
+        });
+      }
+    }
     const fulfillment = await dependencies.fulfillPaidOrder({
       ...current.payment,
       paymentIntentId: current.paymentIntent.id,
@@ -1433,6 +1488,7 @@ async function dispatchCheckout(
       applicationFeeId: charge.applicationFeeId,
       balanceTransactionId: charge.balanceTransactionId,
       customerId: charge.customerId,
+      ticketManifest,
     });
     if (
       fulfillment.orderId !== current.order.orderId ||
@@ -1481,7 +1537,7 @@ async function validatePaymentBinding(
   order: OrderSnapshot;
   charge: Record<string, unknown>;
   intent: Record<string, unknown>;
-  payment: FulfillmentSnapshot;
+  payment: VerifiedPaymentSnapshot;
 }> {
   if (
     !isRecord(chargeValue) || chargeValue.object !== "charge" ||

@@ -30,7 +30,7 @@ from unnest(array[
   'public.server_get_checkout_integrity_order_snapshot(uuid,text)',
   'public.server_get_checkout_integrity_payment_snapshot(uuid)',
   'public.server_lookup_checkout_integrity_confirmation(text)',
-  'public.server_fulfill_paid_order(text,uuid,text,text,text,text,text,text,text,text,text,text,bigint,bigint,bigint,text)'
+  'public.server_fulfill_paid_order(text,uuid,text,text,text,text,text,text,text,text,text,text,bigint,bigint,bigint,text,jsonb)'
 ]) as canonical(signature);
 
 select is(array[
@@ -45,7 +45,7 @@ from unnest(array[
   'public.server_get_checkout_integrity_order_snapshot(uuid,text)',
   'public.server_get_checkout_integrity_payment_snapshot(uuid)',
   'public.server_lookup_checkout_integrity_confirmation(text)',
-  'public.server_fulfill_paid_order(text,uuid,text,text,text,text,text,text,text,text,text,text,bigint,bigint,bigint,text)'
+  'public.server_fulfill_paid_order(text,uuid,text,text,text,text,text,text,text,text,text,text,bigint,bigint,bigint,text,jsonb)'
 ]) as canonical(signature);
 
 select is(array[
@@ -60,16 +60,16 @@ from unnest(array[
   'private.get_checkout_integrity_order_snapshot(uuid,text)',
   'private.get_checkout_integrity_payment_snapshot(uuid)',
   'private.lookup_checkout_integrity_confirmation(text)',
-  'private.fulfill_paid_order(text,uuid,text,text,text,text,text,text,text,text,text,text,bigint,bigint,bigint,text)'
+  'private.fulfill_paid_order(text,uuid,text,text,text,text,text,text,text,text,text,text,bigint,bigint,bigint,text,jsonb)'
 ]) as canonical(signature);
 
 select ok(pg_catalog.strpos(pg_catalog.pg_get_functiondef(
-  'private.fulfill_paid_order(text,uuid,text,text,text,text,text,text,text,text,text,text,bigint,bigint,bigint,text)'::regprocedure),
+  'private.fulfill_paid_order(text,uuid,text,text,text,text,text,text,text,text,text,text,bigint,bigint,bigint,text,jsonb)'::regprocedure),
   'private.checkout_request_digest(') = 0,
   'installed fulfillment has no singular digest acceptance branch');
 
 select ok(pg_catalog.strpos(pg_catalog.pg_get_functiondef(
-  'private.fulfill_paid_order(text,uuid,text,text,text,text,text,text,text,text,text,text,bigint,bigint,bigint,text)'::regprocedure),
+  'private.fulfill_paid_order(text,uuid,text,text,text,text,text,text,text,text,text,text,bigint,bigint,bigint,text,jsonb)'::regprocedure),
   'private.checkout_cart_request_digest(') > 0,
   'installed fulfillment continues binding the complete cart snapshot');
 
@@ -182,7 +182,15 @@ select results_eq(
   $$ select order_status, ticket_count from public.server_fulfill_paid_order(
     'evt_Task15One', (select order_id from cleanup_cart_order), 'cs_test_Task15One',
     'pi_Task15One', 'ch_Task15One', 'tr_Task15One', 'fee_Task15One', 'txn_Task15One',
-    null, 'payment', 'paid', 'usd', 2500, 2500, 175, 'acct_task15confirmation'
+    null, 'payment', 'paid', 'usd', 2500, 2500, 175, 'acct_task15confirmation',
+    (select jsonb_agg(jsonb_build_object(
+      'order_item_id', manifest_item.id, 'unit_sequence', manifest_unit.n,
+      'admission_label', manifest_item.tier_name,
+      'credential_hash', encode(extensions.digest(manifest_item.id::text || ':' || manifest_unit.n::text, 'sha256'), 'hex'))
+      order by manifest_item.id, manifest_unit.n)
+    from public.order_items as manifest_item
+    cross join lateral generate_series(1, manifest_item.quantity) as manifest_unit(n)
+    where manifest_item.order_id = ((select order_id from cleanup_cart_order)))
   ) $$,
   $$ values ('paid'::text, 1::bigint) $$,
   'the generalized quantity-one order fulfills while new checkout creation is disabled'
@@ -193,7 +201,15 @@ select results_eq(
   $$ select order_status, ticket_count from public.server_fulfill_paid_order(
     'evt_Task15One', (select order_id from cleanup_cart_order), 'cs_test_Task15One',
     'pi_Task15One', 'ch_Task15One', 'tr_Task15One', 'fee_Task15One', 'txn_Task15One',
-    null, 'payment', 'paid', 'usd', 2500, 2500, 175, 'acct_task15confirmation'
+    null, 'payment', 'paid', 'usd', 2500, 2500, 175, 'acct_task15confirmation',
+    (select jsonb_agg(jsonb_build_object(
+      'order_item_id', manifest_item.id, 'unit_sequence', manifest_unit.n,
+      'admission_label', manifest_item.tier_name,
+      'credential_hash', encode(extensions.digest(manifest_item.id::text || ':' || manifest_unit.n::text, 'sha256'), 'hex'))
+      order by manifest_item.id, manifest_unit.n)
+    from public.order_items as manifest_item
+    cross join lateral generate_series(1, manifest_item.quantity) as manifest_unit(n)
+    where manifest_item.order_id = ((select order_id from cleanup_cart_order)))
   ) $$,
   $$ values ('paid'::text, 1::bigint) $$,
   'duplicate generalized fulfillment does not issue an additional quantity-one ticket'

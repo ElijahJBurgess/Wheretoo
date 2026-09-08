@@ -802,7 +802,9 @@ export type Database = {
       }
       tickets: {
         Row: {
+          admission_label: string
           cancelled_at: string | null
+          credential_hash: string
           event_id: string
           id: string
           issued_at: string
@@ -813,9 +815,12 @@ export type Database = {
           status: string
           ticket_tier_id: string
           unit_sequence: number
+          used_at: string | null
         }
         Insert: {
+          admission_label: string
           cancelled_at?: string | null
+          credential_hash: string
           event_id: string
           id?: string
           issued_at?: string
@@ -826,9 +831,12 @@ export type Database = {
           status?: string
           ticket_tier_id: string
           unit_sequence: number
+          used_at?: string | null
         }
         Update: {
+          admission_label?: string
           cancelled_at?: string | null
+          credential_hash?: string
           event_id?: string
           id?: string
           issued_at?: string
@@ -839,6 +847,7 @@ export type Database = {
           status?: string
           ticket_tier_id?: string
           unit_sequence?: number
+          used_at?: string | null
         }
         Relationships: [
           {
@@ -1618,6 +1627,7 @@ export type Database = {
           p_payment_status: string
           p_stripe_event_id: string
           p_subtotal_minor: number
+          p_ticket_manifest: Json
           p_total_minor: number
           p_transfer_id: string
         }

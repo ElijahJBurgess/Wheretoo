@@ -283,8 +283,17 @@ select * from public.server_fulfill_paid_order(
   'cs_test_ConcurrencyAbCdEf01', 'pi_1ConcurrencyAbCdEf', 'ch_1ConcurrencyAbCdEf',
   'tr_1ConcurrencyAbCdEf', 'fee_1ConcurrencyAbCdEf', 'txn_1ConcurrencyAbCdEf',
   'cus_1ConcurrencyAbCdEf', 'payment', 'paid', 'usd',
-  6500, 6500, 475, 'acct_1ConcurrencyAbCdEf'
-);
+  6500, 6500, 475, 'acct_1ConcurrencyAbCdEf',
+    (select jsonb_agg(jsonb_build_object(
+      'order_item_id', manifest_item.id, 'unit_sequence', manifest_unit.n,
+      'admission_label', manifest_item.tier_name,
+      'credential_hash', encode(extensions.digest(manifest_item.id::text || ':' || manifest_unit.n::text, 'sha256'), 'hex'))
+      order by manifest_item.id, manifest_unit.n)
+    from public.order_items as manifest_item
+    cross join lateral generate_series(1, manifest_item.quantity) as manifest_unit(n)
+    where manifest_item.order_id = ((select id from public.orders
+    where client_request_id = '48000000-0000-4000-8000-000000000001')))
+  );
 select
   (
     select array_to_string(
@@ -318,8 +327,17 @@ select * from public.server_fulfill_paid_order(
   'cs_test_ConcurrencyAbCdEf01', 'pi_1ConcurrencyAbCdEf', 'ch_1ConcurrencyAbCdEf',
   'tr_1ConcurrencyAbCdEf', 'fee_1ConcurrencyAbCdEf', 'txn_1ConcurrencyAbCdEf',
   'cus_1ConcurrencyAbCdEf', 'payment', 'paid', 'usd',
-  6500, 6500, 475, 'acct_1ConcurrencyAbCdEf'
-);
+  6500, 6500, 475, 'acct_1ConcurrencyAbCdEf',
+    (select jsonb_agg(jsonb_build_object(
+      'order_item_id', manifest_item.id, 'unit_sequence', manifest_unit.n,
+      'admission_label', manifest_item.tier_name,
+      'credential_hash', encode(extensions.digest(manifest_item.id::text || ':' || manifest_unit.n::text, 'sha256'), 'hex'))
+      order by manifest_item.id, manifest_unit.n)
+    from public.order_items as manifest_item
+    cross join lateral generate_series(1, manifest_item.quantity) as manifest_unit(n)
+    where manifest_item.order_id = ((select id from public.orders
+    where client_request_id = '48000000-0000-4000-8000-000000000001')))
+  );
 commit;" >"$temporary_directory/duplicate-second.log" 2>&1
 duplicate_second_status=$?
 wait "$duplicate_first_pid"
@@ -407,8 +425,17 @@ select * from public.server_fulfill_paid_order(
   'cs_test_MutationRaceAbCd02', 'pi_1MutationRaceAbCd', 'ch_1MutationRaceAbCd',
   'tr_1MutationRaceAbCd', 'fee_1MutationRaceAbCd', 'txn_1MutationRaceAbCd',
   'cus_1MutationRaceAbCd', 'payment', 'paid', 'usd',
-  2000, 2000, 150, 'acct_1ConcurrencyAbCdEf'
-);
+  2000, 2000, 150, 'acct_1ConcurrencyAbCdEf',
+    (select jsonb_agg(jsonb_build_object(
+      'order_item_id', manifest_item.id, 'unit_sequence', manifest_unit.n,
+      'admission_label', manifest_item.tier_name,
+      'credential_hash', encode(extensions.digest(manifest_item.id::text || ':' || manifest_unit.n::text, 'sha256'), 'hex'))
+      order by manifest_item.id, manifest_unit.n)
+    from public.order_items as manifest_item
+    cross join lateral generate_series(1, manifest_item.quantity) as manifest_unit(n)
+    where manifest_item.order_id = ((select id from public.orders
+    where client_request_id = '48000000-0000-4000-8000-000000000002')))
+  );
 commit;" >"$temporary_directory/mutation-fulfillment.log" 2>&1 &
 mutation_fulfillment_pid=$!
 

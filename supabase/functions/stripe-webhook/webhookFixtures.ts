@@ -27,6 +27,31 @@ export const REFUND_REVERSAL_ID = "trr_Task14RefundReversal";
 export const DISPUTE_REVERSAL_ID = "trr_Task14DisputeRecovery";
 export const FEE_REFUND_ID = "fr_Task14ApplicationFeeRefund";
 
+// Independent Node crypto vectors for the test-only 32-byte 0x07 secret.
+export const TICKET_MANIFEST = [
+  {
+    order_item_id: GA_ORDER_ITEM_ID,
+    unit_sequence: 1,
+    admission_label: "General Admission",
+    credential_hash:
+      "614a28b342b1de83fe5add247cae4c455d7443e28b398f9087ccebbbdf1e1f35",
+  },
+  {
+    order_item_id: GA_ORDER_ITEM_ID,
+    unit_sequence: 2,
+    admission_label: "General Admission",
+    credential_hash:
+      "cf6a5bc25a94aafe1f11b2ebd355a2543e6a097f54195a51f56a3e69924c2b3e",
+  },
+  {
+    order_item_id: VIP_ORDER_ITEM_ID,
+    unit_sequence: 1,
+    admission_label: "VIP Entry",
+    credential_hash:
+      "34aea81e0539265027078da77aeac5b3b3d27e2d4710f743b80c80ad5ed48af4",
+  },
+];
+
 export const ORDER_ITEMS = [
   {
     orderItemId: GA_ORDER_ITEM_ID,

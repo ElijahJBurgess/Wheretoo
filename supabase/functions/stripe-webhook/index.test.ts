@@ -1,10 +1,13 @@
 // deno-lint-ignore-file require-await
+
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import Stripe from "stripe";
 import {
+  createDefaultStripeWebhookDependencies,
   createStripeWebhookHandler,
   type DisputeSnapshot,
   fulfillmentApplyResultFromRpc,
+  type FulfillmentSnapshot,
   type PaymentReviewSnapshot,
   type ReceiptInput,
   refundApplyResultFromRpc,
@@ -44,11 +47,13 @@ import {
   snapshotEvent,
   THIN_WEBHOOK_SECRET,
   thinAccountEvent,
+  TICKET_MANIFEST,
   TRANSFER_ID,
   transferFixture,
   transferReversalFixture,
   WEBHOOK_SECRET,
 } from "./webhookFixtures.ts";
+import { getTicketCredentialSecret } from "../_shared/ticketCredentials.ts";
 
 type CheckoutMismatchCode =
   | "CHECKOUT_LINE_COUNT_MISMATCH"
@@ -86,10 +91,223 @@ const FULFILLMENT_APPLY_RESULT = {
   ticketCount: 3,
 } as const;
 
+Deno.test("default RPC boundary parses immutable labels and sends only the hash manifest", async () => {
+  const names = [
+    "STRIPE_RESTRICTED_KEY",
+    "SUPABASE_URL",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "TICKET_CREDENTIAL_SECRET",
+  ];
+  const prior = names.map((name) => Deno.env.get(name));
+  Deno.env.set(names[0], ["rk", "test", "litefixture"].join("_"));
+  Deno.env.set(names[1], "https://lite-database.example.invalid");
+  Deno.env.set(names[2], "lite-test-service-role");
+  const encodedSecret = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)))
+    .replace(/=+$/, "");
+  Deno.env.set(names[3], encodedSecret);
+  const originalFetch = globalThis.fetch;
+  const calls: { url: string; body: Record<string, unknown> }[] = [];
+  let paidSnapshot: FulfillmentSnapshot | undefined;
+  let rpcError = false;
+  let snapshotRows: unknown = [{
+    order_id: ORDER_ID,
+    checkout_session_id: SESSION_ID,
+    event_id: orderSnapshot().eventId,
+    currency: "usd",
+    subtotal_minor: 5500,
+    total_minor: 5500,
+    application_fee_amount_minor: 450,
+    destination_account_id: ACCOUNT_ID,
+    order_items: ORDER_ITEMS.map((item) => ({
+      order_item_id: item.orderItemId,
+      ticket_tier_id: item.tierId,
+      tier_name: item.tierName,
+      currency: item.currency,
+      unit_amount_minor: item.unitAmountMinor,
+      quantity: item.quantity,
+      subtotal_minor: item.subtotalMinor,
+    })),
+  }];
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    calls.push({ url, body: JSON.parse(String(init?.body)) });
+    if (rpcError) {
+      return new Response(
+        JSON.stringify({
+          message: `untrusted provider error wta1_${
+            "x".repeat(43)
+          } ${encodedSecret}`,
+        }),
+        { status: 400, headers: { "content-type": "application/json" } },
+      );
+    }
+    return new Response(
+      JSON.stringify(
+        url.endsWith("server_fulfill_paid_order")
+          ? [{ order_id: ORDER_ID, order_status: "paid", ticket_count: 3 }]
+          : snapshotRows,
+      ),
+      { headers: { "content-type": "application/json" } },
+    );
+  };
+  try {
+    const adapter = createDefaultStripeWebhookDependencies();
+    assertEquals(
+      await adapter.getOrderSnapshot(ORDER_ID, SESSION_ID),
+      orderSnapshot(),
+    );
+    assertEquals(
+      await adapter.getPaymentOrderSnapshot(ORDER_ID),
+      orderSnapshot(),
+    );
+    const valid = structuredClone(snapshotRows);
+    for (
+      const label of [undefined, null, "", " GA", "GA ", "x".repeat(81), 12]
+    ) {
+      snapshotRows = structuredClone(valid);
+      const row =
+        (snapshotRows as { order_items: Record<string, unknown>[] }[])[0];
+      if (label === undefined) delete row.order_items[0].tier_name;
+      else row.order_items[0].tier_name = label;
+      await assertRejects(
+        () => adapter.getOrderSnapshot(ORDER_ID, SESSION_ID),
+        Error,
+        "invalid database response",
+      );
+    }
+    snapshotRows = valid;
+    const logs: unknown[] = [];
+    const response = await createStripeWebhookHandler(dependencies({
+      getOrderSnapshot: adapter.getOrderSnapshot,
+      getTicketCredentialSecret: adapter.getTicketCredentialSecret,
+      fulfillPaidOrder: async (value) => {
+        paidSnapshot = value;
+        return await adapter.fulfillPaidOrder(value);
+      },
+      operationalSink: (event) => {
+        logs.push(event);
+      },
+    }))(
+      request(snapshotEvent("checkout.session.completed", { id: SESSION_ID })),
+    );
+    assertEquals(response.status, 200);
+    const rpc = calls.find((call) =>
+      call.url.endsWith("server_fulfill_paid_order")
+    );
+    assertEquals(rpc?.body.p_ticket_manifest, TICKET_MANIFEST);
+    assertEquals(Object.keys(rpc!.body).length, 17);
+    assertEquals(
+      JSON.stringify([calls, logs, await response.text()]).includes("wta1_"),
+      false,
+    );
+    assertEquals(JSON.stringify([calls, logs]).includes(encodedSecret), false);
+    rpcError = true;
+    const error = await assertRejects(
+      () => adapter.fulfillPaidOrder(paidSnapshot!),
+      Error,
+      "database request failed",
+    );
+    assertEquals(error.message.includes("wta1_"), false);
+    assertEquals(error.message.includes(encodedSecret), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    names.forEach((name, i) =>
+      prior[i] === undefined
+        ? Deno.env.delete(name)
+        : Deno.env.set(name, prior[i]!)
+    );
+  }
+});
+
+Deno.test("credential configuration is lazy and failures remain retryable without secret disclosure", async () => {
+  const secretMarker = "external-secret-must-never-escape";
+  let reads = 0;
+  let fulfillments = 0;
+  const logs: unknown[] = [];
+  const safe = dependencies({
+    getTicketCredentialSecret: () => {
+      reads++;
+      return getTicketCredentialSecret(() => secretMarker);
+    },
+    fulfillPaidOrder: async () => {
+      fulfillments++;
+      return FULFILLMENT_APPLY_RESULT;
+    },
+    operationalSink: (event) => {
+      logs.push(event);
+    },
+  });
+  const unpaid = await createStripeWebhookHandler({
+    ...safe,
+    retrieveSession: async () =>
+      checkoutSessionFixture({ payment_status: "unpaid" }),
+  })(request(snapshotEvent("checkout.session.completed", { id: SESSION_ID })));
+  assertEquals(unpaid.status, 200);
+  assertEquals(reads, 0);
+  const paid = await createStripeWebhookHandler(safe)(
+    request(snapshotEvent("checkout.session.completed", { id: SESSION_ID })),
+  );
+  assertEquals(paid.status, 503);
+  assertEquals(reads, 1);
+  assertEquals(fulfillments, 0);
+  assertEquals(
+    JSON.stringify([logs, await paid.text()]).includes(secretMarker),
+    false,
+  );
+  assertEquals(JSON.stringify(logs).includes("wta1_"), false);
+});
+
+Deno.test("paid fulfillment sends only sorted per-unit hashed credentials", async () => {
+  let captured: Record<string, unknown> = {};
+  const logs: unknown[] = [];
+  const response = await createStripeWebhookHandler(dependencies({
+    getOrderSnapshot: async () => ({
+      ...orderSnapshot(),
+      items: orderSnapshot().items.reverse(),
+    }),
+    fulfillPaidOrder: async (snapshot) => {
+      captured = { ...snapshot };
+      return FULFILLMENT_APPLY_RESULT;
+    },
+    operationalSink: (event) => {
+      logs.push(event);
+    },
+  }))(request(snapshotEvent("checkout.session.completed", { id: SESSION_ID })));
+  assertEquals(response.status, 200);
+  const manifest = captured.ticketManifest as Record<string, unknown>[];
+  assertEquals(Array.isArray(manifest), true);
+  assertEquals(manifest, TICKET_MANIFEST);
+  assertEquals(
+    manifest.map((
+      entry,
+    ) => [entry.order_item_id, entry.unit_sequence, entry.admission_label]),
+    [
+      [ORDER_ITEMS[0].orderItemId, 1, "General Admission"],
+      [ORDER_ITEMS[0].orderItemId, 2, "General Admission"],
+      [ORDER_ITEMS[1].orderItemId, 1, "VIP Entry"],
+    ],
+  );
+  for (const entry of manifest) {
+    assertEquals(Object.keys(entry).sort(), [
+      "admission_label",
+      "credential_hash",
+      "order_item_id",
+      "unit_sequence",
+    ]);
+    assertEquals(/^[0-9a-f]{64}$/.test(String(entry.credential_hash)), true);
+  }
+  assertEquals(new Set(manifest.map((entry) => entry.credential_hash)).size, 3);
+  assertEquals(
+    JSON.stringify([captured, logs, await response.text()]).includes("wta1_"),
+    false,
+  );
+});
+
 function orderSnapshot(
   items = ORDER_ITEMS.map((item) => ({
     orderItemId: item.orderItemId,
     tierId: item.tierId,
+    tierName: item.tierName,
     currency: item.currency,
     unitAmountMinor: item.unitAmountMinor,
     quantity: item.quantity,
@@ -199,6 +417,7 @@ function dependencies(
     beginAccountRefresh: async () => 401,
     persistAccountStatus: async () => true,
     fulfillPaidOrder: async () => FULFILLMENT_APPLY_RESULT,
+    getTicketCredentialSecret: () => new Uint8Array(32).fill(7),
     markPaymentProcessing: async () => undefined,
     markPaymentFailed: async () => undefined,
     markPaymentRequiresReview: async () => undefined,
@@ -475,6 +694,7 @@ Deno.test("paid completion re-retrieves reordered Product-bound lines and fulfil
     totalMinor: 5_500,
     applicationFeeAmountMinor: 450,
     destinationAccountId: ACCOUNT_ID,
+    ticketManifest: TICKET_MANIFEST,
   });
   assertEquals(ticketCount, 3);
 });

@@ -84,7 +84,8 @@ select columns_are(
   'tickets',
   array[
     'id', 'order_id', 'order_item_id', 'event_id', 'organizer_id', 'ticket_tier_id',
-    'unit_sequence', 'status', 'issued_at', 'refunded_at', 'cancelled_at'
+    'unit_sequence', 'status', 'issued_at', 'refunded_at', 'cancelled_at',
+    'admission_label', 'credential_hash', 'used_at'
   ],
   'ticket columns are exact'
 );
@@ -227,7 +228,8 @@ select results_eq(
       'id:uuid', 'order_id:uuid', 'order_item_id:uuid', 'event_id:uuid', 'organizer_id:uuid',
       'ticket_tier_id:uuid', 'unit_sequence:integer', 'status:text',
       'issued_at:timestamp with time zone', 'refunded_at:timestamp with time zone',
-      'cancelled_at:timestamp with time zone'
+      'cancelled_at:timestamp with time zone', 'admission_label:text',
+      'credential_hash:bytea', 'used_at:timestamp with time zone'
     ]::text[]) collate "C")
   $$,
   'ticket column types are exact'
@@ -477,8 +479,8 @@ select results_eq(
       ["ticket_tiers", "ticket_tiers_sort_order_check", "CHECK (sort_order >= 1 AND sort_order <= 3)"],
       ["ticket_tiers", "ticket_tiers_status_check", "CHECK (status = ANY (ARRAY['draft'::text, 'active'::text, 'archived'::text]))"],
       ["ticket_tiers", "ticket_tiers_unit_amount_check", "CHECK (unit_amount_minor >= 1 AND unit_amount_minor <= 99999999)"],
-      ["tickets", "tickets_status_check", "CHECK (status = ANY (ARRAY['valid'::text, 'refunded'::text, 'cancelled'::text]))"],
-      ["tickets", "tickets_status_timestamp_check", "CHECK (status = 'valid'::text AND refunded_at IS NULL AND cancelled_at IS NULL OR status = 'refunded'::text AND refunded_at IS NOT NULL AND cancelled_at IS NULL OR status = 'cancelled'::text AND refunded_at IS NULL AND cancelled_at IS NOT NULL)" ]
+      ["tickets", "tickets_status_check", "CHECK (status = ANY (ARRAY['valid'::text, 'used'::text, 'refunded'::text, 'cancelled'::text]))"],
+      ["tickets", "tickets_status_timestamp_check", "CHECK (status = 'valid'::text AND used_at IS NULL AND refunded_at IS NULL AND cancelled_at IS NULL OR status = 'used'::text AND used_at IS NOT NULL AND refunded_at IS NULL AND cancelled_at IS NULL OR status = 'refunded'::text AND used_at IS NULL AND refunded_at IS NOT NULL AND cancelled_at IS NULL OR status = 'cancelled'::text AND used_at IS NULL AND refunded_at IS NULL AND cancelled_at IS NOT NULL)" ]
     ]$json$::jsonb)
   $$,
   'critical check constraints have exact definitions'
@@ -772,8 +774,10 @@ select throws_ok(
 select throws_ok(
   $$
     insert into public.tickets (
+      admission_label, credential_hash,
       order_id, order_item_id, event_id, organizer_id, ticket_tier_id, unit_sequence, status
     ) values (
+      'Fixture Admission', extensions.digest(gen_random_uuid()::text,'sha256'),
       '40000000-0000-0000-0000-000000000090',
       '50000000-0000-0000-0000-000000000090',
       '20000000-0000-0000-0000-000000000090',
@@ -943,9 +947,11 @@ select lives_ok(
 select throws_ok(
   $$
     insert into public.tickets (
+      admission_label, credential_hash,
       order_id, order_item_id, event_id, organizer_id, ticket_tier_id,
       unit_sequence, status, refunded_at
     ) values (
+      'Fixture Admission', extensions.digest(gen_random_uuid()::text,'sha256'),
       '40000000-0000-0000-0000-000000000090',
       '50000000-0000-0000-0000-000000000090',
       '20000000-0000-0000-0000-000000000090',
@@ -964,9 +970,11 @@ select throws_ok(
 select throws_ok(
   $$
     insert into public.tickets (
+      admission_label, credential_hash,
       order_id, order_item_id, event_id, organizer_id, ticket_tier_id,
       unit_sequence, status, cancelled_at
     ) values (
+      'Fixture Admission', extensions.digest(gen_random_uuid()::text,'sha256'),
       '40000000-0000-0000-0000-000000000090',
       '50000000-0000-0000-0000-000000000090',
       '20000000-0000-0000-0000-000000000090',
@@ -985,9 +993,11 @@ select throws_ok(
 select throws_ok(
   $$
     insert into public.tickets (
+      admission_label, credential_hash,
       order_id, order_item_id, event_id, organizer_id, ticket_tier_id,
       unit_sequence, status, refunded_at, cancelled_at
     ) values (
+      'Fixture Admission', extensions.digest(gen_random_uuid()::text,'sha256'),
       '40000000-0000-0000-0000-000000000090',
       '50000000-0000-0000-0000-000000000090',
       '20000000-0000-0000-0000-000000000090',
@@ -1007,9 +1017,11 @@ select throws_ok(
 select throws_ok(
   $$
     insert into public.tickets (
+      admission_label, credential_hash,
       order_id, order_item_id, event_id, organizer_id, ticket_tier_id,
       unit_sequence, status, refunded_at, cancelled_at
     ) values (
+      'Fixture Admission', extensions.digest(gen_random_uuid()::text,'sha256'),
       '40000000-0000-0000-0000-000000000090',
       '50000000-0000-0000-0000-000000000090',
       '20000000-0000-0000-0000-000000000090',
@@ -1029,9 +1041,11 @@ select throws_ok(
 select lives_ok(
   $$
     insert into public.tickets (
+      admission_label, credential_hash,
       order_id, order_item_id, event_id, organizer_id, ticket_tier_id,
       unit_sequence, status, refunded_at
     ) values (
+      'Fixture Admission', extensions.digest(gen_random_uuid()::text,'sha256'),
       '40000000-0000-0000-0000-000000000090',
       '50000000-0000-0000-0000-000000000090',
       '20000000-0000-0000-0000-000000000090',
@@ -1048,9 +1062,11 @@ select lives_ok(
 select lives_ok(
   $$
     insert into public.tickets (
+      admission_label, credential_hash,
       order_id, order_item_id, event_id, organizer_id, ticket_tier_id,
       unit_sequence, status, cancelled_at
     ) values (
+      'Fixture Admission', extensions.digest(gen_random_uuid()::text,'sha256'),
       '40000000-0000-0000-0000-000000000090',
       '50000000-0000-0000-0000-000000000090',
       '20000000-0000-0000-0000-000000000090',

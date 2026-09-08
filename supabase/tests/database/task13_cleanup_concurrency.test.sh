@@ -289,12 +289,12 @@ delete from auth.users where id = '$drift_owner_id'::uuid;"
   where id = '$order_id'::uuid;
   insert into public.tickets (
     id, order_id, order_item_id, event_id, organizer_id, ticket_tier_id,
-    unit_sequence, status
+    unit_sequence, status, admission_label, credential_hash
   ) values
-    ('$ticket_id_1', '$order_id', '$ga_item_id', '$event_id', '$owner_id', '$ga_tier_id', 1, 'valid'),
-    ('$ticket_id_2', '$order_id', '$ga_item_id', '$event_id', '$owner_id', '$ga_tier_id', 2, 'valid'),
-    ('$ticket_id_3', '$order_id', '$ga_item_id', '$event_id', '$owner_id', '$ga_tier_id', 3, 'valid'),
-    ('$ticket_id_4', '$order_id', '$ga_item_id', '$event_id', '$owner_id', '$ga_tier_id', 4, 'valid');
+    ('$ticket_id_1', '$order_id', '$ga_item_id', '$event_id', '$owner_id', '$ga_tier_id', 1, 'valid', 'General Admission', extensions.digest('$ga_item_id:1','sha256')),
+    ('$ticket_id_2', '$order_id', '$ga_item_id', '$event_id', '$owner_id', '$ga_tier_id', 2, 'valid', 'General Admission', extensions.digest('$ga_item_id:2','sha256')),
+    ('$ticket_id_3', '$order_id', '$ga_item_id', '$event_id', '$owner_id', '$ga_tier_id', 3, 'valid', 'General Admission', extensions.digest('$ga_item_id:3','sha256')),
+    ('$ticket_id_4', '$order_id', '$ga_item_id', '$event_id', '$owner_id', '$ga_tier_id', 4, 'valid', 'General Admission', extensions.digest('$ga_item_id:4','sha256'));
   select pg_catalog.pg_advisory_xact_lock($marker);
   select pg_catalog.pg_sleep(4);
   commit;" >"$temporary_directory/mutation.log" 2>&1 &

@@ -4,6 +4,29 @@ set -euo pipefail
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 supabase_cli="$repository_root/node_modules/.bin/supabase"
+
+# Explicit disposable local target; never fall through to the linked hosted gate.
+if [[ -n "${WHERETO_TICKETING_DB_URL:-}" ]]; then
+  node --input-type=module -e '
+    const url = new URL(process.env.WHERETO_TICKETING_DB_URL)
+    if (!["postgres:", "postgresql:"].includes(url.protocol) ||
+        !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) {
+      console.error("WHERETO_TICKETING_DB_URL must target a loopback disposable database.")
+      process.exit(1)
+    }
+  '
+  exec "$supabase_cli" test db --db-url "$WHERETO_TICKETING_DB_URL" \
+    "$repository_root/supabase/tests/database/core_ticket_truth_lite_schema.test.sql" \
+    "$repository_root/supabase/tests/database/core_ticket_truth_lite_fulfillment.test.sql" \
+    "$repository_root/supabase/tests/database/checkout_integrity_fulfillment.test.sql" \
+    "$repository_root/supabase/tests/database/checkout_integrity_contract_cleanup.test.sql" \
+    "$repository_root/supabase/tests/database/ticketing_schema.test.sql" \
+    "$repository_root/supabase/tests/database/payment_fulfillment.test.sql" \
+    "$repository_root/supabase/tests/database/checkout_integrity_refunds.test.sql" \
+    "$repository_root/supabase/tests/database/refunds_disputes.test.sql" \
+    "$repository_root/supabase/tests/database/webhook_review_safety.test.sql"
+fi
+
 temporary_directory="$(mktemp -d)"
 chmod 700 "$temporary_directory"
 cleanup_targets_file="$temporary_directory/cleanup-targets.json"

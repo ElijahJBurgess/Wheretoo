@@ -393,7 +393,7 @@ select results_eq(
   $$,
   $$ values (array[
     'currency', 'order_item_id', 'quantity', 'subtotal_minor',
-    'ticket_tier_id', 'unit_amount_minor'
+    'ticket_tier_id', 'tier_name', 'unit_amount_minor'
   ]::text[]) $$,
   'each reconciliation item contains only the exact safe webhook fields'
 );
@@ -472,7 +472,15 @@ begin
     'txn_' || p_payment_suffix,
     'cus_' || p_payment_suffix,
     'payment', 'paid', 'usd',
-    3001, 3001, 300, 'acct_integrityfulfillment'
+    3001, 3001, 300, 'acct_integrityfulfillment',
+    (select jsonb_agg(jsonb_build_object(
+      'order_item_id', manifest_item.id, 'unit_sequence', manifest_unit.n,
+      'admission_label', manifest_item.tier_name,
+      'credential_hash', encode(extensions.digest(manifest_item.id::text || ':' || manifest_unit.n::text, 'sha256'), 'hex'))
+      order by manifest_item.id, manifest_unit.n)
+    from public.order_items as manifest_item
+    cross join lateral generate_series(1, manifest_item.quantity) as manifest_unit(n)
+    where manifest_item.order_id = (p_order_id))
   ) as result;
   return v_result;
 end;
@@ -673,11 +681,14 @@ begin
       end
   where orders.id = v_order_id;
 
+  -- Elevated rollback-only fixture corruption: exercise pre-existing invalid states.
+  alter table public.tickets disable trigger tickets_identity_and_transition;
   update public.tickets as tickets
   set status = 'valid',
       refunded_at = null,
       cancelled_at = null
   where tickets.order_id = v_order_id;
+  alter table public.tickets enable trigger tickets_identity_and_transition;
 
   v_result := pg_temp.record_and_fulfill(
     p_event_suffix,
@@ -830,11 +841,11 @@ select results_eq(
 );
 
 insert into public.tickets (
-  order_id, order_item_id, event_id, organizer_id, ticket_tier_id, unit_sequence
+  order_id, order_item_id, event_id, organizer_id, ticket_tier_id, unit_sequence, admission_label, credential_hash
 )
 select
   orders.id, items.id, orders.event_id, orders.organizer_id,
-  items.ticket_tier_id, 1
+  items.ticket_tier_id, 1, items.tier_name, extensions.digest(items.id::text || ':1','sha256')
 from fulfillment_orders as fixture
 join public.orders as orders on orders.id = fixture.id
 join public.order_items as items on items.order_id = orders.id
@@ -878,11 +889,11 @@ select results_eq(
 );
 
 insert into public.tickets (
-  order_id, order_item_id, event_id, organizer_id, ticket_tier_id, unit_sequence
+  order_id, order_item_id, event_id, organizer_id, ticket_tier_id, unit_sequence, admission_label, credential_hash
 )
 select
   orders.id, items.id, orders.event_id, orders.organizer_id,
-  items.ticket_tier_id, sequences.unit_sequence
+  items.ticket_tier_id, sequences.unit_sequence, items.tier_name, extensions.digest(items.id::text || ':' || sequences.unit_sequence::text,'sha256')
 from fulfillment_orders as fixture
 join public.orders as orders on orders.id = fixture.id
 join public.order_items as items on items.order_id = orders.id
@@ -924,7 +935,7 @@ select results_eq(
 );
 
 insert into public.tickets (
-  order_id, order_item_id, event_id, organizer_id, ticket_tier_id, unit_sequence
+  order_id, order_item_id, event_id, organizer_id, ticket_tier_id, unit_sequence, admission_label, credential_hash
 )
 select
   orders.id,
@@ -932,7 +943,7 @@ select
   orders.event_id,
   orders.organizer_id,
   'a6300000-0000-4000-8000-000000000002'::uuid,
-  1
+  1, ga.tier_name, extensions.digest(ga.id::text || ':1','sha256')
 from fulfillment_orders as fixture
 join public.orders as orders on orders.id = fixture.id
 join public.order_items as ga
@@ -946,7 +957,7 @@ select
   'a6200000-0000-4000-8000-000000000002'::uuid,
   orders.organizer_id,
   ga.ticket_tier_id,
-  2
+  2, ga.tier_name, extensions.digest(ga.id::text || ':2','sha256')
 from fulfillment_orders as fixture
 join public.orders as orders on orders.id = fixture.id
 join public.order_items as ga
@@ -960,7 +971,7 @@ select
   orders.event_id,
   'a6100000-0000-4000-8000-000000000002'::uuid,
   vip.ticket_tier_id,
-  1
+  1, vip.tier_name, extensions.digest(vip.id::text || ':1','sha256')
 from fulfillment_orders as fixture
 join public.orders as orders on orders.id = fixture.id
 join public.order_items as vip
