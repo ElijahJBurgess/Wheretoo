@@ -5,6 +5,51 @@ import {
 } from '../e2e/support/ticketingFixture'
 
 describe('Task 14 stable buyer fixture and failure cleanup', () => {
+  it.each([0, 1])('certifies an already-refunded order without replaying payment or altering history (%s used)', async used => {
+    const order = { order_handle: 'paid', status: 'refunded', reconciliation_status: 'reconciled', failure_code: null as string | null }
+    const history = { payment: 'paid', refund: 'succeeded', used_at: used ? '2026-09-08T12:00:00Z' : null }
+    const before = JSON.stringify({ order, history })
+    const calls: string[] = []
+    await fixtureHarness.settleBrowserCheckout(async action => {
+      calls.push(action)
+      if (action === 'inspect') return { orders: [order], tickets: [{ used_count: used }], refunds: [{ order_handle: 'paid', status: 'succeeded' }] }
+      if (action === 'checkout_status') return { ok: true, livemode: false, status: 'complete', payment_status: 'paid', charge_paid: true }
+      if (action === 'deliver') {
+        order.reconciliation_status = 'requires_review'; order.failure_code = 'PAYMENT_CHARGE_REFUNDED'
+        return { status: 200, receipt: { processing_status: 'processed' } }
+      }
+      if (action !== 'recover_refund') throw new Error('Unexpected financial write')
+      return { ok: true, livemode: false, amount: 5500, reversal_amount: 5500,
+        application_fee_refund_amount: 425, order_refunded: true,
+        reconciled: order.reconciliation_status === 'reconciled', refund_count: 1,
+        policy_verified: true, ticket_count: 3, invalid_ticket_count: 3,
+        refunded_ticket_count: 3 - used, used_ticket_count: used, used_history_preserved: true }
+    }, 'event', true)
+    expect(JSON.stringify({ order, history })).toBe(before)
+    expect(calls).toEqual(['inspect', 'recover_refund'])
+  })
+
+  it('preserves and refuses an already-refunded order held for review without trying to repair it', async () => {
+    const calls: string[] = []
+    await expect(fixtureHarness.settleBrowserCheckout(async action => {
+      calls.push(action)
+      return { orders: [{ order_handle: 'paid', status: 'refunded', reconciliation_status: 'requires_review',
+        failure_code: 'PAYMENT_CHARGE_REFUNDED' }], refunds: [{ order_handle: 'paid' }], tickets: [{ used_count: 1 }] }
+    }, 'event', true)).rejects.toThrow('TASK14_CLEANUP_UNSAFE')
+    expect(calls).toEqual(['inspect'])
+  })
+
+  it('refuses failed durable refund certification without falling back to payment replay', async () => {
+    const calls: string[] = []
+    await expect(fixtureHarness.settleBrowserCheckout(async action => {
+      calls.push(action)
+      if (action === 'inspect') return { orders: [{ order_handle: 'paid', status: 'refunded', reconciliation_status: 'reconciled',
+        failure_code: null }], refunds: [{ order_handle: 'paid' }], tickets: [{ used_count: 1 }] }
+      return { ok: false }
+    }, 'event', true)).rejects.toThrow('TASK14_CLEANUP_UNSAFE')
+    expect(calls).toEqual(['inspect', 'recover_refund'])
+  })
+
   it('aborts a stalled driver request and rejects settlement within the request deadline', async () => {
     let signal: AbortSignal | undefined
     const settlement = fixtureHarness.settleBrowserCheckout(async (_action, _input, requestSignal) => {
@@ -110,6 +155,26 @@ describe('Task 14 stable buyer fixture and failure cleanup', () => {
       return { ok: true, livemode: false, amount: 5500, reversal_amount: 5500, application_fee_refund_amount: 425, order_refunded: true, reconciled: true, refund_count: 1, policy_verified: true, ticket_count: 3, invalid_ticket_count: 3, refunded_ticket_count: 3 }
     }, 'event')
     expect(created).toBe(0)
+  })
+
+  it.each([true, false])('recovers one Lite refund after enrichment failure only with preserved used history: %s', async preserved => {
+    const actions: string[] = []
+    const settlement = fixtureHarness.settleBrowserCheckout(async action => {
+      actions.push(action)
+      if (action === 'inspect') return { orders: [{ order_handle: 'paid' }], tickets: [{ used_count: 1 }], refunds: [] }
+      if (action === 'checkout_status') return { ok: true, livemode: false, status: 'complete', payment_status: 'paid', charge_paid: true }
+      if (action === 'deliver') return { status: 200, receipt: { processing_status: 'processed' } }
+      if (action === 'create_refund') throw new Error('create/enrich race')
+      if (action === 'recover_refund') return { ok: true, livemode: false, amount: 5500,
+        reversal_amount: 5500, application_fee_refund_amount: 425, order_refunded: true,
+        reconciled: true, refund_count: 1, policy_verified: true, ticket_count: 3,
+        invalid_ticket_count: 3, refunded_ticket_count: 2, used_ticket_count: 1,
+        used_history_preserved: preserved }
+      throw new Error('unexpected action')
+    }, 'event', true)
+    if (preserved) await settlement
+    else await expect(settlement).rejects.toThrow('TASK14_CLEANUP_UNSAFE')
+    expect(actions).toEqual(['inspect', 'checkout_status', 'deliver', 'create_refund', 'recover_refund'])
   })
 
   it('refuses live, ambiguous, duplicate-order and failed-refund cleanup evidence', async () => {

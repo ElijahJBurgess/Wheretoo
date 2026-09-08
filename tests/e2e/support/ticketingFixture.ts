@@ -68,6 +68,20 @@ async function settleBrowserCheckoutWithinDeadline(invoke: DriverInvoke, eventId
   if (!Array.isArray(orders) || orders.length > 1 || orders.some((order) => order.order_handle !== 'paid')) unsafe()
   if (orders!.length === 0) return
   const input = { order_handle: 'paid' }
+  if (orders![0].status === 'refunded') {
+    // The completed payment is historical after refund. Replaying it can
+    // correctly trigger Checkout Integrity review; certify the refund instead.
+    const existing = inspection.refunds as Array<Record<string, unknown>> | undefined
+    const ticketSets = inspection.tickets as Array<Record<string, unknown>> | undefined
+    const expectedUsed = liteProof ? ticketSets?.[0]?.used_count : 0
+    if (orders![0].reconciliation_status !== 'reconciled' || orders![0].failure_code !== null ||
+      !Array.isArray(existing) || existing.length !== 1 || existing[0].order_handle !== 'paid' ||
+      !Number.isInteger(expectedUsed) || Number(expectedUsed) < 0 || Number(expectedUsed) > 3) unsafe()
+    // Existing refunded-state recovery only reads and certifies durable truth.
+    const refund = await invoke('recover_refund', input)
+    if (!browserRefundRecoveryIsSafe(refund, Number(expectedUsed))) unsafe()
+    return
+  }
   const status = await invoke('checkout_status', input)
   if (status.ok !== true || status.livemode !== false) unsafe()
   const paid = status.status === 'complete' && status.payment_status === 'paid' && status.charge_paid === true

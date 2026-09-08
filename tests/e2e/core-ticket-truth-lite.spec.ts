@@ -24,11 +24,15 @@ test.describe.serial('Core Ticket Truth Lite paid launch boundary', () => {
       const bundle = await decoderBundle()
       stage = 'checkout'
       await page.goto(fixture.publicEventPath)
+      stage = 'checkout_quantities'
       await chooseTwoGeneralAdmissionAndOneVip(page)
+      stage = 'checkout_buyer_form'
       await page.getByRole('button', { name: 'Continue to checkout' }).click()
       await page.getByLabel('Your name').fill('Lite Proof Guest')
       await page.getByLabel('Email address').fill(fixture.buyerEmail)
+      stage = 'checkout_submit'
       await page.getByRole('button', { name: 'Continue to secure payment' }).click()
+      stage = 'hosted_test_payment'
       await completeHostedStripeTestPayment(page)
       stage = 'durable_payment'
       await deliverAndAssertRealPaidOrder(page, fixture)
@@ -95,7 +99,10 @@ test.describe.serial('Core Ticket Truth Lite paid launch boundary', () => {
       expect(JSON.stringify(replayed.tickets[0].ticket_snapshot) === JSON.stringify(used.tickets[0].ticket_snapshot)).toBe(true)
 
       stage = 'whole_order_refund'
-      await invokeDriver('create_refund', { order_handle: 'paid' })
+      // Creation may succeed before provider evidence enrichment returns. Do not
+      // create twice: the existing recovery path verifies that exact refund.
+      try { await invokeDriver('create_refund', { order_handle: 'paid' }) } catch { /* verified below */ }
+      stage = 'whole_order_refund_recovery'
       const refund = await invokeDriver<Record<string, unknown>>('recover_refund', { order_handle: 'paid' })
       expect(browserRefundRecoveryIsSafe(refund, 1)).toBe(true)
       const refunded = await invokeDriver<Inspection>('inspect', { event_id: fixture.eventId })
