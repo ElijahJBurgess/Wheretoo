@@ -175,7 +175,7 @@ function OrderConfirmationRoute({ confirmationToken }: { confirmationToken: stri
         </dl>
 
         {confirmedStatus === 'paid'
-          ? <Link className="ui-button ui-button--primary" to={`/tickets/${encodeURIComponent(confirmationToken)}`}>View tickets</Link>
+          ? <Link className="ui-button ui-button--primary" reloadDocument to={`/tickets/${encodeURIComponent(confirmationToken)}`}>View tickets</Link>
           : null}
         {confirmation.isTimedOut && confirmedStatus === 'processing'
           ? <Button onClick={() => void confirmation.retry()} type="button">Check again</Button>

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
@@ -45,6 +45,24 @@ describe('OrderConfirmationPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     useOrderConfirmation.mockReturnValue({ data: confirmation, isPending: false, isError: false, isTimedOut: false, retry })
+  })
+
+  it('leaves paid ticket navigation to the browser so confirmation Auth cannot survive the transition', () => {
+    useOrderConfirmation.mockReturnValue({ data: { ...confirmation, status: 'paid' }, isPending: false, isError: false, isTimedOut: false, retry })
+    const router = createMemoryRouter([
+      { path: '/orders/:confirmationToken', element: <OrderConfirmationPage /> },
+      { path: '/tickets/:collectionBearer', element: <h1>Ticket route</h1> },
+    ], { initialEntries: [`/orders/${token}`] })
+    render(<RouterProvider router={router} />)
+    let interceptedByRouter: boolean | undefined
+    document.addEventListener('click', (event) => {
+      interceptedByRouter = event.defaultPrevented
+      // Observe native navigation without asking jsdom to load a document.
+      event.preventDefault()
+    }, { once: true })
+    fireEvent.click(screen.getByRole('link', { name: 'View tickets' }))
+    expect(interceptedByRouter).toBe(false)
+    expect(router.state.location.pathname).toBe(`/orders/${token}`)
   })
 
   it('shows persisted processing truth without claiming payment success or exposing the bearer', () => {
