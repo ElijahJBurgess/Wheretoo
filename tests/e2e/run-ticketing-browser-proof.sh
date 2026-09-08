@@ -19,7 +19,6 @@ cleanup_failed=0
 project_ref=""
 run_id="$(openssl rand -hex 6)"
 driver_prefix="task17_${run_id}"
-browser_prefix="task18_${run_id}"
 proof_token="$(openssl rand -hex 32)"
 organizer_a_email="whereto-task18-a-${run_id}@example.invalid"
 organizer_b_email="whereto-task18-b-${run_id}@example.invalid"
@@ -94,34 +93,37 @@ cleanup() {
   set +e
 
   if [[ -n "$organizer_a_id" ]]; then
-    "$supabase_cli" db query --linked "select coalesce(json_agg(json_build_object('id', id, 'session_id', stripe_checkout_session_id)), '[]'::json) as orders, count(*)::integer as order_count
+    "$supabase_cli" db query --linked "select coalesce(json_agg(json_build_object('buyer_email', buyer_email)), '[]'::json) as orders, count(*)::integer as order_count
       from public.orders where organizer_id = '$organizer_a_id'::uuid and stripe_checkout_session_id is not null;" \
       >"$temporary_directory/checkout-orders.json" 2>/dev/null
     checkout_query_exit=$?
     if [[ $checkout_query_exit -ne 0 ]]; then
       cleanup_failed=1
     elif [[ $driver_deployed -eq 1 ]]; then
-      ORDERS_FILE="$temporary_directory/checkout-orders.json" node --input-type=module >"$temporary_directory/checkout-orders.txt" <<'NODE'
+      ORDERS_FILE="$temporary_directory/checkout-orders.json" PREFIX="$driver_prefix" node --input-type=module >"$temporary_directory/checkout-orders.txt" <<'NODE'
 import fs from 'node:fs'
 const payload = JSON.parse(fs.readFileSync(process.env.ORDERS_FILE, 'utf8'))
 const rows = payload.rows ?? payload
 if (!Array.isArray(rows) || rows.length !== 1) process.exit(1)
 const row = rows[0]
 if (!Array.isArray(row.orders) || !Number.isSafeInteger(row.order_count) || row.order_count !== row.orders.length) process.exit(1)
+const handles = new Set()
 for (const order of row.orders) {
-  if (typeof order !== 'object' || order === null || Object.keys(order).sort().join(',') !== 'id,session_id') process.exit(1)
-  if (!/^[0-9a-f-]{36}$/.test(order.id ?? '') || !/^cs_test_[A-Za-z0-9]+$/.test(order.session_id ?? '')) process.exit(1)
-  console.log(`${order.id}\t${order.session_id}`)
+  if (typeof order !== 'object' || order === null || Object.keys(order).sort().join(',') !== 'buyer_email') process.exit(1)
+  const match = new RegExp(`^${process.env.PREFIX}-(paid|declined)@example\\.invalid$`).exec(order.buyer_email ?? '')
+  if (match === null || handles.has(match[1])) process.exit(1)
+  handles.add(match[1])
+  console.log(match[1])
 }
 NODE
       checkout_parser_exit=$?
       if [[ $checkout_parser_exit -ne 0 ]]; then
         cleanup_failed=1
       else
-        while IFS=$'\t' read -r order_id session_id; do
-        [[ -n "$order_id" && -n "$session_id" ]] || continue
-        status_file="$temporary_directory/status-${order_id}.json"
-        driver_request "{\"action\":\"checkout_status\",\"session_id\":\"$session_id\"}" "$status_file" || {
+        while IFS= read -r order_handle; do
+        [[ "$order_handle" == paid || "$order_handle" == declined ]] || continue
+        status_file="$temporary_directory/status-${order_handle}.json"
+        driver_request "{\"action\":\"checkout_status\",\"order_handle\":\"$order_handle\"}" "$status_file" || {
           cleanup_failed=1
           continue
         }
@@ -139,26 +141,26 @@ NODE
           cleanup_failed=1
           continue
         }
-        event_id="evt_task17cleanup$(openssl rand -hex 12)"
+        event_handle="$(node --input-type=module -e 'process.stdout.write(crypto.randomUUID())')"
         event_created="$(date +%s)"
         if [[ "$checkout_state" == paid ]]; then
-          driver_request "{\"action\":\"deliver\",\"event\":{\"event_id\":\"$event_id\",\"type\":\"checkout.session.completed\",\"object\":\"checkout.session\",\"object_id\":\"$session_id\",\"created\":$event_created}}" \
-            "$temporary_directory/deliver-${order_id}.json" && \
-            validate_driver_output delivery "$temporary_directory/deliver-${order_id}.json" || cleanup_failed=1
-          driver_request "{\"action\":\"create_refund\",\"order_id\":\"$order_id\"}" \
-            "$temporary_directory/refund-${order_id}.json" && \
-            validate_driver_output refund "$temporary_directory/refund-${order_id}.json" || cleanup_failed=1
+          driver_request "{\"action\":\"deliver\",\"event\":{\"event_handle\":\"$event_handle\",\"type\":\"checkout.session.completed\",\"object\":\"checkout.session\",\"order_handle\":\"$order_handle\",\"created\":$event_created}}" \
+            "$temporary_directory/deliver-${order_handle}.json" && \
+            validate_driver_output delivery "$temporary_directory/deliver-${order_handle}.json" || cleanup_failed=1
+          driver_request "{\"action\":\"create_refund\",\"order_handle\":\"$order_handle\"}" \
+            "$temporary_directory/refund-${order_handle}.json" && \
+            validate_driver_output refund "$temporary_directory/refund-${order_handle}.json" || cleanup_failed=1
         elif [[ "$checkout_state" == open ]]; then
-          driver_request "{\"action\":\"expire_checkout\",\"session_id\":\"$session_id\"}" \
-            "$temporary_directory/expire-${order_id}.json" && \
-            validate_driver_output expiry "$temporary_directory/expire-${order_id}.json" || cleanup_failed=1
-          driver_request "{\"action\":\"deliver\",\"event\":{\"event_id\":\"$event_id\",\"type\":\"checkout.session.expired\",\"object\":\"checkout.session\",\"object_id\":\"$session_id\",\"created\":$event_created}}" \
-            "$temporary_directory/deliver-${order_id}.json" && \
-            validate_driver_output delivery "$temporary_directory/deliver-${order_id}.json" || cleanup_failed=1
+          driver_request "{\"action\":\"expire_checkout\",\"order_handle\":\"$order_handle\"}" \
+            "$temporary_directory/expire-${order_handle}.json" && \
+            validate_driver_output expiry "$temporary_directory/expire-${order_handle}.json" || cleanup_failed=1
+          driver_request "{\"action\":\"deliver\",\"event\":{\"event_handle\":\"$event_handle\",\"type\":\"checkout.session.expired\",\"object\":\"checkout.session\",\"order_handle\":\"$order_handle\",\"created\":$event_created}}" \
+            "$temporary_directory/deliver-${order_handle}.json" && \
+            validate_driver_output delivery "$temporary_directory/deliver-${order_handle}.json" || cleanup_failed=1
         elif [[ "$checkout_state" == expired ]]; then
-          driver_request "{\"action\":\"deliver\",\"event\":{\"event_id\":\"$event_id\",\"type\":\"checkout.session.expired\",\"object\":\"checkout.session\",\"object_id\":\"$session_id\",\"created\":$event_created}}" \
-            "$temporary_directory/deliver-${order_id}.json" && \
-            validate_driver_output delivery "$temporary_directory/deliver-${order_id}.json" || cleanup_failed=1
+          driver_request "{\"action\":\"deliver\",\"event\":{\"event_handle\":\"$event_handle\",\"type\":\"checkout.session.expired\",\"object\":\"checkout.session\",\"order_handle\":\"$order_handle\",\"created\":$event_created}}" \
+            "$temporary_directory/deliver-${order_handle}.json" && \
+            validate_driver_output delivery "$temporary_directory/deliver-${order_handle}.json" || cleanup_failed=1
         fi
         done <"$temporary_directory/checkout-orders.txt"
       fi
@@ -373,7 +375,7 @@ VITE_MAPBOX_ACCESS_TOKEN="$mapbox_token" \
 VITE_STRIPE_PUBLISHABLE_KEY="$stripe_publishable" \
 TEST_TASK18_FUNCTION_URL="$function_url" \
 TEST_TASK18_DRIVER_TOKEN="$proof_token" \
-TEST_TASK18_FIXTURE_PREFIX="$browser_prefix" \
+TEST_TASK18_FIXTURE_PREFIX="$driver_prefix" \
   pnpm test:e2e
 
 printf '%s\n' 'Task 18 browser proof passed; reconciliation and exact cleanup run on EXIT.'

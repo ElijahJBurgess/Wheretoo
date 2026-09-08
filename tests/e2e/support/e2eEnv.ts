@@ -262,7 +262,7 @@ export function loadTask18E2EEnv(
   if (source.TEST_TASK18_DRIVER_TOKEN!.length < 32) {
     throw new Error('TEST_TASK18_DRIVER_TOKEN must be a one-time test-driver credential.')
   }
-  if (!/^task18_[a-z0-9]{12}$/.test(source.TEST_TASK18_FIXTURE_PREFIX!)) {
+  if (!/^task17_[a-z0-9]{12}$/.test(source.TEST_TASK18_FIXTURE_PREFIX!)) {
     throw new Error('TEST_TASK18_FIXTURE_PREFIX must identify one exact disposable fixture.')
   }
 

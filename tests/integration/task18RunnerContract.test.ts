@@ -35,6 +35,7 @@ describe('Task 18 browser proof runner contract', () => {
     expect(runner).toContain('order_count !== row.orders.length')
     expect(runner).toContain('checkout_parser_exit')
     expect(runner).toContain('TEST_CONNECTED_ACCOUNT_DISPOSABLE')
+    expect(runner).toContain('TEST_TASK18_FIXTURE_PREFIX="$driver_prefix"')
     expect(runner).not.toContain('STRIPE_RESTRICTED_KEY=')
     expect(runner.indexOf('delete from public.orders')).toBeLessThan(
       runner.indexOf('delete from public.stripe_webhook_events'),

@@ -3,6 +3,19 @@ export type TicketingScenario = 'purchase' | 'visual'
 
 export const task18CheckoutTierNames = ['General admission', 'VIP'] as const
 
+type CheckoutAttemptIdentity = {
+  clientRequestId: string
+  confirmationBearer: string
+}
+
+export function checkoutAttemptMatches(
+  left: CheckoutAttemptIdentity,
+  right: CheckoutAttemptIdentity,
+): boolean {
+  return left.clientRequestId === right.clientRequestId &&
+    left.confirmationBearer === right.confirmationBearer
+}
+
 const task18EventTitles: Record<TicketingProjectName, Record<TicketingScenario, string>> = {
   'mobile-chromium': {
     purchase: 'Sunset Sessions at the Ferry Building',

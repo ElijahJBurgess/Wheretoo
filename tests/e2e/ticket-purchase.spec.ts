@@ -5,7 +5,8 @@ import {
   chooseTwoGeneralAdmissionAndOneVip,
   completeHostedStripeTestPayment,
   configureCheckoutTicketTiers,
-  controlConfirmationLifecycle,
+  deliverAndAssertRealPaidOrder,
+  expectMatchingCheckoutAttemptCleared,
   prepareTicketingJourney,
   signInCrossUser,
   signInTicketingOrganizer,
@@ -49,18 +50,16 @@ test.describe('native ticket purchase journey', () => {
     await submitAfterOneAmbiguousResponse(page, fixture)
     await expect(page).toHaveURL(/^https:\/\/checkout\.stripe\.com\//)
 
-    const lifecycle = await controlConfirmationLifecycle(page)
     await completeHostedStripeTestPayment(page)
     await expect(page.getByRole('heading', { name: 'Confirming your payment', level: 1 })).toBeVisible()
     await captureTicketingState(page, testInfo, 'payment-processing')
-    lifecycle.showRequiresReview()
-    await expect(page.getByRole('heading', { name: 'Order needs review', level: 1 })).toBeVisible({ timeout: 5_000 })
-    lifecycle.showPaid()
-    await page.reload()
+    await deliverAndAssertRealPaidOrder(page, fixture)
+    await expect(page.getByRole('heading', { name: "You're all set", level: 1 })).toBeVisible({ timeout: 5_000 })
     await expect(page.getByRole('heading', { name: "You're all set", level: 1 })).toBeVisible()
     await expect(page.getByText('General admission × 2')).toBeVisible()
     await expect(page.getByText('VIP × 1')).toBeVisible()
     await expect(page.getByText('$67.01')).toBeVisible()
+    await expectMatchingCheckoutAttemptCleared(page)
     await page.reload()
     await expect(page.getByRole('heading', { name: "You're all set", level: 1 })).toBeVisible()
     await captureTicketingState(page, testInfo, 'ticket-confirmation')
