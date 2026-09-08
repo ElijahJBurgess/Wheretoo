@@ -5,7 +5,7 @@ import { Button } from '../../components/ui/Button'
 import { Field } from '../../components/ui/Field'
 import { FormErrorSummary } from '../../components/ui/FormErrorSummary'
 import { lowercaseRfcUuidSchema } from '../tickets/ticket.schemas'
-import { getOrCreateCheckoutAttempt } from './checkout.attempt'
+import { clearCheckoutAttemptForConfirmation, getOrCreateCheckoutAttempt } from './checkout.attempt'
 import { cancelCheckout, createCheckout, isStripeCheckoutUrl } from './checkout.api'
 import { parseCheckoutCart } from './checkout.cart'
 import type { CheckoutApiErrorCode } from './checkout.api'
@@ -55,6 +55,11 @@ function publicEventPath(eventId: string): string {
 
 function assignHostedCheckout(checkoutUrl: string): void {
   window.location.assign(checkoutUrl)
+}
+
+async function cancelAndClearCheckoutAttempt(confirmationBearer: string): Promise<void> {
+  await cancelCheckout(confirmationBearer)
+  clearCheckoutAttemptForConfirmation(confirmationBearer)
 }
 
 type CheckoutStateProps = {
@@ -148,7 +153,7 @@ export function CheckoutPage({ assignCheckout = assignHostedCheckout }: Checkout
       ? cancellationRef.current
       : {
         token,
-        promise: cancellationTokenPattern.test(token) ? cancelCheckout(token) : Promise.resolve(),
+        promise: cancellationTokenPattern.test(token) ? cancelAndClearCheckoutAttempt(token) : Promise.resolve(),
       }
     cancellationRef.current = cancellation
     void cancellation.promise.catch(() => undefined)
@@ -205,7 +210,16 @@ export function CheckoutPage({ assignCheckout = assignHostedCheckout }: Checkout
       const checkoutUrl = await createCheckout(
         { ...validation.data, clientRequestId: durableAttempt.clientRequestId },
         durableAttempt.confirmationBearer,
-      )
+      ).catch(async (error: unknown) => {
+        if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'CHECKOUT_EXPIRED') {
+          try {
+            await cancelAndClearCheckoutAttempt(durableAttempt.confirmationBearer)
+          } catch {
+            // Expiry alone is ambiguous; retain identity unless cancellation verifies terminal state.
+          }
+        }
+        throw error
+      })
       if (activeAttemptRef.current !== attempt || !mountedRef.current || routeKeyRef.current !== routeKey || !isStripeCheckoutUrl(checkoutUrl)) return
       assignCheckout(checkoutUrl)
     } catch (error) {

@@ -6,14 +6,15 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PublicTicketingEvent } from '../tickets/ticket.types'
 
-const { cancelCheckout, createCheckout, refetch, useCheckoutPublicEvent } = vi.hoisted(() => ({
+const { cancelCheckout, createCheckout, invoke, refetch, useCheckoutPublicEvent } = vi.hoisted(() => ({
   cancelCheckout: vi.fn(),
   createCheckout: vi.fn(),
+  invoke: vi.fn(),
   refetch: vi.fn(),
   useCheckoutPublicEvent: vi.fn(),
 }))
-const { clearCheckoutAttempt, getOrCreateCheckoutAttempt } = vi.hoisted(() => ({
-  clearCheckoutAttempt: vi.fn(),
+const { clearCheckoutAttemptForConfirmation, getOrCreateCheckoutAttempt } = vi.hoisted(() => ({
+  clearCheckoutAttemptForConfirmation: vi.fn(),
   getOrCreateCheckoutAttempt: vi.fn(),
 }))
 
@@ -23,7 +24,12 @@ vi.mock('./checkout.api', async (importOriginal) => ({
   createCheckout,
 }))
 vi.mock('./checkout.queries', () => ({ useCheckoutPublicEvent }))
-vi.mock('./checkout.attempt', () => ({ clearCheckoutAttempt, getOrCreateCheckoutAttempt }))
+vi.mock('../../lib/supabase/client', () => ({ supabase: { functions: { invoke } } }))
+vi.mock('./checkout.attempt', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./checkout.attempt')>()),
+  clearCheckoutAttemptForConfirmation,
+  getOrCreateCheckoutAttempt,
+}))
 
 import { CheckoutPage } from './CheckoutPage'
 
@@ -34,6 +40,28 @@ const nextEventId = '10823f25-2860-4b63-968c-749e8047561d'
 const nextTierId = '18a23f25-2860-4b63-968c-749e8047561d'
 const confirmationBearer = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8'
 const clientRequestId = '10823f25-2860-4b63-968c-749e8047561d'
+const cartPath = `/events/${eventId}/checkout?item=${tierId}%3A2&item=${otherTierId}%3A1`
+const attemptStorageKey = `whereto.checkout-attempt.v1:${eventId}`
+
+async function useRealRetryState() {
+  const attempts = await vi.importActual<typeof import('./checkout.attempt')>('./checkout.attempt')
+  const api = await vi.importActual<typeof import('./checkout.api')>('./checkout.api')
+  getOrCreateCheckoutAttempt.mockImplementation(attempts.getOrCreateCheckoutAttempt)
+  clearCheckoutAttemptForConfirmation.mockImplementation(attempts.clearCheckoutAttemptForConfirmation)
+  cancelCheckout.mockImplementation(api.cancelCheckout)
+  const submission = {
+    eventId, buyerName: 'Avery Stone', buyerEmail: 'avery@example.com',
+    items: [{ tierId, quantity: 2 }, { tierId: otherTierId, quantity: 1 }],
+  }
+  return { attempts, submission, first: await attempts.getOrCreateCheckoutAttempt(submission) }
+}
+
+async function submitBuyer() {
+  const user = userEvent.setup()
+  await user.type(screen.getByLabelText('Your name'), 'Avery Stone')
+  await user.type(screen.getByLabelText('Email address'), 'avery@example.com')
+  await user.click(screen.getByRole('button', { name: 'Continue to secure payment' }))
+}
 
 const publicEvent: PublicTicketingEvent = {
   event: {
@@ -95,6 +123,8 @@ function renderCheckout(
 describe('CheckoutPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    sessionStorage.clear()
+    createCheckout.mockReset()
     useCheckoutPublicEvent.mockReturnValue({ data: publicEvent, isPending: false, isError: false, refetch })
     cancelCheckout.mockResolvedValue(undefined)
     getOrCreateCheckoutAttempt.mockResolvedValue({
@@ -242,7 +272,7 @@ describe('CheckoutPage', () => {
         { tierId, quantity: 2 },
       ],
     }, confirmationBearer)
-    expect(clearCheckoutAttempt).not.toHaveBeenCalled()
+    expect(clearCheckoutAttemptForConfirmation).not.toHaveBeenCalled()
     await waitFor(() => expect(assign).toHaveBeenCalledWith('https://checkout.stripe.com/c/pay/cs_test_123'))
     expect(screen.queryByText(/payment complete|ticket issued|order confirmed/i)).not.toBeInTheDocument()
   })
@@ -255,6 +285,102 @@ describe('CheckoutPage', () => {
     await waitFor(() => expect(router.state.location.pathname).toBe(`/events/${eventId}`))
     expect(router.state.location.search).toBe('')
     expect(cancelCheckout).toHaveBeenCalledOnce()
+  })
+
+  it('rotates the same cart only after cancellation returns validated terminal success', async () => {
+    const { first } = await useRealRetryState()
+    let resolveCancellation!: (result: unknown) => void
+    invoke.mockReturnValue(new Promise((resolve) => { resolveCancellation = resolve }))
+    createCheckout.mockResolvedValue('https://checkout.stripe.com/c/pay/cs_test_NEW')
+    const { router } = renderCheckout(`/events/${eventId}/checkout?cancel=${first.confirmationBearer}`, vi.fn())
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/events/${eventId}`))
+    expect(JSON.parse(sessionStorage.getItem(attemptStorageKey) ?? '{}')).toEqual(first)
+
+    await act(async () => { resolveCancellation({ data: { cancelled: true }, error: null }) })
+    expect(sessionStorage.getItem(attemptStorageKey)).toBeNull()
+    await act(async () => { await router.navigate(cartPath) })
+    await submitBuyer()
+
+    await waitFor(() => expect(createCheckout).toHaveBeenCalledOnce())
+    expect(createCheckout.mock.calls[0][0].clientRequestId).not.toBe(first.clientRequestId)
+    expect(createCheckout.mock.calls[0][1]).not.toBe(first.confirmationBearer)
+  })
+
+  it('preserves newer and unrelated attempts when an older cancellation finishes', async () => {
+    const { first, attempts, submission } = await useRealRetryState()
+    let resolveCancellation!: (result: unknown) => void
+    invoke.mockReturnValue(new Promise((resolve) => { resolveCancellation = resolve }))
+    const { router } = renderCheckout(`/events/${eventId}/checkout?cancel=${first.confirmationBearer}`)
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/events/${eventId}`))
+    const newer = await attempts.getOrCreateCheckoutAttempt({ ...submission, buyerName: 'Another buyer' })
+    const unrelated = await attempts.getOrCreateCheckoutAttempt({ ...submission, eventId: nextEventId })
+
+    await act(async () => { resolveCancellation({ data: { cancelled: true }, error: null }) })
+
+    expect(JSON.parse(sessionStorage.getItem(attemptStorageKey) ?? '{}')).toEqual(newer)
+    expect(JSON.parse(sessionStorage.getItem(`whereto.checkout-attempt.v1:${nextEventId}`) ?? '{}')).toEqual(unrelated)
+  })
+
+  it.each([
+    ['transport failure', { data: null, error: new Error('network unavailable') }],
+    ['unconfirmed cancellation', { data: { cancelled: false }, error: null }],
+    ['ambiguous review response', { data: { cancelled: true, status: 'requires_review' }, error: null }],
+  ])('preserves same-cart retry identity after cancellation ambiguity: %s', async (_label, response) => {
+    const { first } = await useRealRetryState()
+    invoke.mockResolvedValue(response)
+    createCheckout.mockResolvedValue('https://checkout.stripe.com/c/pay/cs_test_RETRY')
+    const { router } = renderCheckout(`/events/${eventId}/checkout?cancel=${first.confirmationBearer}`, vi.fn())
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/events/${eventId}`))
+    await act(async () => { await router.navigate(cartPath) })
+    await submitBuyer()
+
+    await waitFor(() => expect(createCheckout).toHaveBeenCalledOnce())
+    expect(createCheckout.mock.calls[0][0].clientRequestId).toBe(first.clientRequestId)
+    expect(createCheckout.mock.calls[0][1]).toBe(first.confirmationBearer)
+    expect(JSON.parse(sessionStorage.getItem(attemptStorageKey) ?? '{}')).toEqual(first)
+  })
+
+  it.each([true, false])('rotates an expired attempt only with authoritative terminal verification: %s', async (verified) => {
+    const { first } = await useRealRetryState()
+    let resolveCancellation!: (result: unknown) => void
+    invoke.mockReturnValue(new Promise((resolve) => { resolveCancellation = resolve }))
+    createCheckout.mockRejectedValueOnce({ code: 'CHECKOUT_EXPIRED' })
+      .mockResolvedValueOnce('https://checkout.stripe.com/c/pay/cs_test_RETRY')
+    renderCheckout(undefined, vi.fn())
+    await submitBuyer()
+
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith('stripe-cancel-checkout', {
+      body: { confirmationToken: first.confirmationBearer }, method: 'POST',
+    }))
+    expect(screen.getByRole('button', { name: 'Opening secure payment…' })).toBeDisabled()
+    expect(JSON.parse(sessionStorage.getItem(attemptStorageKey) ?? '{}')).toEqual(first)
+    await act(async () => {
+      resolveCancellation(verified
+        ? { data: { cancelled: true }, error: null }
+        : { data: null, error: new Error('open/null-session or unresolved payment') })
+    })
+    expect(await screen.findByRole('alert')).toHaveTextContent('This checkout window expired')
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Continue to secure payment' }))
+
+    await waitFor(() => expect(createCheckout).toHaveBeenCalledTimes(2))
+    expect(createCheckout.mock.calls[0][0].clientRequestId).toBe(first.clientRequestId)
+    expect(createCheckout.mock.calls[0][1]).toBe(first.confirmationBearer)
+    expect(createCheckout.mock.calls[1][0].clientRequestId === first.clientRequestId).toBe(!verified)
+    expect(createCheckout.mock.calls[1][1] === first.confirmationBearer).toBe(!verified)
+  })
+
+  it.each(['CHECKOUT_UNAVAILABLE', 'requires_review', 'payment_processing'])('retains the attempt without cancellation for non-terminal creation errors: %s', async (code) => {
+    const { first } = await useRealRetryState()
+    createCheckout.mockRejectedValueOnce({ code })
+      .mockResolvedValueOnce('https://checkout.stripe.com/c/pay/cs_test_RETRY')
+    renderCheckout(undefined, vi.fn())
+    await submitBuyer()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Secure checkout is unavailable')
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Continue to secure payment' }))
+    await waitFor(() => expect(createCheckout).toHaveBeenCalledTimes(2))
+    expect(createCheckout.mock.calls[1][0].clientRequestId).toBe(first.clientRequestId)
+    expect(createCheckout.mock.calls[1][1]).toBe(first.confirmationBearer)
+    expect(invoke).not.toHaveBeenCalled()
   })
 
   it('does not redirect after unmount when a deferred Checkout response resolves', async () => {
