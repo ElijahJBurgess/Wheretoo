@@ -6,15 +6,16 @@ import * as contracts from './edge/task17-transaction-driver/contracts'
 const snapshot = { orderId: '11111111-1111-4111-8111-111111111111', paymentIntentId: 'pi_Test', chargeId: 'ch_Test', transferId: 'tr_Test', applicationFeeId: 'fee_Test', connectedAccountId: 'acct_Test', refundId: 're_Test', reversalId: 'trr_Test', feeRefundId: null }
 const evidence = () => ({
   refunds: { has_more: false, data: [{ id: 're_Test', object: 'refund', livemode: false, status: 'succeeded', amount: 5500, currency: 'usd', payment_intent: 'pi_Test', charge: 'ch_Test', transfer_reversal: 'trr_Test', metadata: { order_id: snapshot.orderId, whereto_refund_policy: 'destination_v1', whereto_reverse_transfer: 'true', whereto_refund_application_fee: 'true' } }] },
-  transfer: { id: 'tr_Test', object: 'transfer', livemode: false, amount: 5500, currency: 'usd', source_transaction: 'ch_Test', destination: 'acct_Test', reversals: { has_more: false, data: [{ id: 'trr_Test', object: 'transfer_reversal', amount: 5500, currency: 'usd', source_refund: 're_Test', transfer: 'tr_Test' }] } },
-  fee: { id: 'fee_Test', object: 'application_fee', livemode: false, amount: 425, currency: 'usd', charge: 'ch_Test', account: 'acct_Test' },
+  transfer: { id: 'tr_Test', object: 'transfer', livemode: false, amount: 5500, amount_reversed: 5500, currency: 'usd', source_transaction: 'ch_Test', destination: 'acct_Test', reversals: { has_more: false, data: [{ id: 'trr_Test', object: 'transfer_reversal', amount: 5500, currency: 'usd', source_refund: 're_Test', transfer: 'tr_Test' }] } },
+  fee: { id: 'fee_Test', object: 'application_fee', livemode: false, amount: 425, amount_refunded: 425, currency: 'usd', charge: 'ch_Test', account: 'acct_Test' },
   feeRefunds: { has_more: false, data: [{ id: 'fr_Test', object: 'fee_refund', amount: 425, currency: 'usd', fee: 'fee_Test' }] },
 })
 
 describe('Task14 existing-refund recovery', () => {
-  it('reports both refund reversal relations without accepting the source-only alternative', async () => {
+  it('reports both reversal relations while a separate fee contradiction blocks enrichment', async () => {
     const value = evidence()
     Object.assign(value.refunds.data[0], { transfer_reversal: null, source_transfer_reversal: 'trr_Test' })
+    value.feeRefunds.data[0].amount = 424
     let caught: unknown
     let writes = 0
     try {
@@ -25,9 +26,37 @@ describe('Task14 existing-refund recovery', () => {
     const diagnostic = contracts.refundRecoveryDiagnostic(caught) as unknown as { evidence?: Record<string, boolean> }
     expect(diagnostic?.evidence?.refund_transfer_reversal_matches).toBe(false)
     expect(diagnostic?.evidence?.refund_source_transfer_reversal_matches).toBe(true)
+    expect(diagnostic?.evidence?.refund_canonical_reversal_matches).toBe(true)
     expect(writes).toBe(0)
     expect(Object.values(diagnostic.evidence ?? {}).every((value) => typeof value === 'boolean')).toBe(true)
     expect(JSON.stringify(diagnostic)).not.toMatch(/trr_Test|re_Test|pi_Test|ch_Test|acct_Test|fee_Test|fr_Test/)
+  })
+  it.each(['transfer', 'source'])('accepts the authoritative omitted-mode/refund and originating-transaction fee shape (%s reversal)', async (relation) => {
+    const value = evidence()
+    Object.assign(value.refunds.data[0], { livemode: undefined, transfer_reversal: relation === 'transfer' ? 'trr_Test' : null, source_transfer_reversal: relation === 'source' ? 'trr_Test' : null })
+    Object.assign(value.fee, { originating_transaction: 'ch_Test', charge: 'py_ConnectedSide' })
+    let writes = 0
+    await expect(contracts.recoverExistingRefundEvidence(snapshot, { read: async () => value, pause: async () => {}, update: async () => { writes++ } })).resolves.toMatchObject({ ok: true, reversal_amount: 5500, application_fee_refund_amount: 425 })
+    expect(writes).toBe(1)
+  })
+  it.each([
+    ['refund_mode', true], ['refund_mode', null], ['refund_mode', 'false'],
+    ['originating_transaction', 'ch_Other'], ['canonical_reversal', 'trr_Other'],
+    ['amount_reversed', 5499], ['amount_reversed', undefined], ['amount_reversed', '5500'],
+    ['amount_refunded', 424], ['amount_refunded', undefined], ['amount_refunded', '425'],
+  ])('never enriches contradictory %s evidence (%s)', async (field, badValue) => {
+    const value = evidence()
+    if (field === 'refund_mode') Object.assign(value.refunds.data[0], { livemode: badValue })
+    if (field === 'originating_transaction') Object.assign(value.fee, { originating_transaction: badValue })
+    if (field === 'canonical_reversal') Object.assign(value.refunds.data[0], { transfer_reversal: badValue, source_transfer_reversal: 'trr_Test' })
+    if (field === 'amount_reversed') Object.assign(value.transfer, { amount_reversed: badValue })
+    if (field === 'amount_refunded') Object.assign(value.fee, { amount_refunded: badValue })
+    let writes = 0
+    await expect(contracts.recoverExistingRefundEvidence(snapshot, { read: async () => value, pause: async () => {}, update: async () => { writes++ } })).rejects.toThrow('TASK14_REFUND_EVIDENCE_CONFLICT')
+    expect(writes).toBe(0)
+  })
+  it.each([[undefined, true], [false, true], [true, false], [null, false], ['false', false]])('checks metadata update response mode %s without inventing an absent field', (livemode, expected) => {
+    expect(contracts.refundModeIsTestCompatible({ livemode })).toBe(expected)
   })
   it('identifies the exact failed economic predicate without reporting provider values', async () => {
     const value = evidence()

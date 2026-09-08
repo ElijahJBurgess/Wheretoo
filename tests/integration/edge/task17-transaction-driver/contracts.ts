@@ -127,7 +127,13 @@ class RefundEvidenceConflict extends Error {
   }
 }
 
-// Observation only. Keep the acceptance checks below unchanged while diagnosing.
+// Refund omits livemode in the provider contract; surrounding objects must prove TEST.
+export function refundModeIsTestCompatible(value: unknown): boolean {
+  return record(value) &&
+    (value.livemode === undefined || value.livemode === false);
+}
+
+// Observation only; mirror the canonical recovery checks below.
 function refundEvidenceBitmap(
   snapshot: ExistingRefundSnapshot,
   refunds: RecoveryList,
@@ -160,6 +166,9 @@ function refundEvidenceBitmap(
     transfer_identity_matches: transfer.id === snapshot.transferId,
     transfer_test_mode: transfer.livemode === false,
     transfer_amount_matches: transfer.amount === 5500,
+    transfer_reversed_amount_matches:
+      Number.isSafeInteger(transfer.amount_reversed) &&
+      (transfer.amount_reversed as number) >= 5500,
     transfer_currency_matches: transfer.currency === "usd",
     transfer_charge_matches:
       id(transfer.source_transaction) === snapshot.chargeId,
@@ -169,15 +178,18 @@ function refundEvidenceBitmap(
     fee_identity_matches: fee.id === snapshot.applicationFeeId,
     fee_test_mode: fee.livemode === false,
     fee_amount_matches: fee.amount === 425,
+    fee_refunded_amount_matches: Number.isSafeInteger(fee.amount_refunded) &&
+      (fee.amount_refunded as number) >= 425,
     fee_currency_matches: fee.currency === "usd",
-    fee_charge_matches: id(fee.charge) === snapshot.chargeId,
+    fee_charge_matches:
+      id(fee.originating_transaction ?? fee.charge) === snapshot.chargeId,
     fee_account_matches: id(fee.account) === snapshot.connectedAccountId,
     refund_present: refunds.data?.length === 1,
     refund_object_matches: refund.object === "refund",
     refund_identity_valid: validId(refund.id, "re"),
     refund_identity_matches: snapshot.refundId === null ||
       refund.id === snapshot.refundId,
-    refund_test_mode: refund.livemode === false,
+    refund_test_mode: refundModeIsTestCompatible(refund),
     refund_succeeded: refund.status === "succeeded",
     refund_amount_matches: refund.amount === 5500,
     refund_currency_matches: refund.currency === "usd",
@@ -205,6 +217,9 @@ function refundEvidenceBitmap(
       id(refund.transfer_reversal) === reversal.id,
     refund_source_transfer_reversal_matches: typeof reversal.id === "string" &&
       id(refund.source_transfer_reversal) === reversal.id,
+    refund_canonical_reversal_matches: typeof reversal.id === "string" &&
+      id(refund.transfer_reversal ?? refund.source_transfer_reversal) ===
+        reversal.id,
     fee_refund_present: feeRefunds.data?.length === 1,
     fee_refund_object_matches: feeRefund.object === "fee_refund",
     fee_refund_identity_valid: validId(feeRefund.id, "fr"),
@@ -271,13 +286,17 @@ export async function recoverExistingRefundEvidence(
     if (
       transfer.object !== "transfer" || transfer.id !== snapshot.transferId ||
       transfer.livemode !== false || transfer.amount !== 5500 ||
+      !Number.isSafeInteger(transfer.amount_reversed) ||
+      (transfer.amount_reversed as number) < 5500 ||
       transfer.currency !== "usd" ||
       id(transfer.source_transaction) !== snapshot.chargeId ||
       id(transfer.destination) !== snapshot.connectedAccountId ||
       fee.object !== "application_fee" ||
       fee.id !== snapshot.applicationFeeId ||
       fee.livemode !== false || fee.amount !== 425 || fee.currency !== "usd" ||
-      id(fee.charge) !== snapshot.chargeId ||
+      !Number.isSafeInteger(fee.amount_refunded) ||
+      (fee.amount_refunded as number) < 425 ||
+      id(fee.originating_transaction ?? fee.charge) !== snapshot.chargeId ||
       id(fee.account) !== snapshot.connectedAccountId
     ) conflict();
     const refund = refunds.data[0];
@@ -289,7 +308,7 @@ export async function recoverExistingRefundEvidence(
       (refund.object !== "refund" || typeof refund.id !== "string" ||
         !/^re_[A-Za-z0-9]+$/.test(refund.id) ||
         (refundId !== null && refund.id !== refundId) ||
-        refund.livemode !== false || refund.status !== "succeeded" ||
+        !refundModeIsTestCompatible(refund) || refund.status !== "succeeded" ||
         refund.amount !== 5500 || refund.currency !== "usd" ||
         id(refund.payment_intent) !== snapshot.paymentIntentId ||
         id(refund.charge) !== snapshot.chargeId ||
@@ -308,7 +327,9 @@ export async function recoverExistingRefundEvidence(
         id(reversal.transfer) !== snapshot.transferId ||
         (refundId !== null && id(reversal.source_refund) !== refundId) ||
         (snapshot.reversalId !== null && reversal.id !== snapshot.reversalId) ||
-        (refund && id(refund.transfer_reversal) !== reversal.id))
+        (refund &&
+          id(refund.transfer_reversal ?? refund.source_transfer_reversal) !==
+            reversal.id))
     ) conflict();
     if (
       feeRefund &&

@@ -41,6 +41,7 @@ import {
   recoveredRefundStateIsSafe,
   recoverExistingRefundEvidence,
   recoveryDriverActionAllowed,
+  refundModeIsTestCompatible,
   refundRecoveryDiagnostic,
   requirePublicApiKey,
   restoreSellableFixture,
@@ -1784,7 +1785,9 @@ async function recoverRefund(
               { metadata },
               boundedRequest,
             );
-            assertTestMode(updated);
+            if (!refundModeIsTestCompatible(updated)) {
+              throw new Error("LIVE_MODE_FORBIDDEN");
+            }
             if (updated.id !== id) {
               throw new Error("STRIPE");
             }
