@@ -1655,46 +1655,11 @@ export type Database = {
           total_minor: number
         }[]
       }
-      server_get_checkout_preflight:
-        | {
-            Args: { p_event_id: string; p_tier_id: string }
-            Returns: {
-              organizer_id: string
-              stripe_account_id: string
-            }[]
-          }
-        | {
-            Args: { p_event_id: string; p_tier_ids: string[] }
-            Returns: {
-              organizer_id: string
-              stripe_account_id: string
-            }[]
-          }
-      server_get_webhook_order_snapshot: {
-        Args: { p_checkout_session_id: string; p_order_id: string }
+      server_get_checkout_preflight: {
+        Args: { p_event_id: string; p_tier_ids: string[] }
         Returns: {
-          application_fee_amount_minor: number
-          currency: string
-          destination_account_id: string
-          event_id: string
-          order_id: string
-          subtotal_minor: number
-          tier_id: string
-          total_minor: number
-        }[]
-      }
-      server_get_webhook_payment_order_snapshot: {
-        Args: { p_order_id: string }
-        Returns: {
-          application_fee_amount_minor: number
-          checkout_session_id: string
-          currency: string
-          destination_account_id: string
-          event_id: string
-          order_id: string
-          subtotal_minor: number
-          tier_id: string
-          total_minor: number
+          organizer_id: string
+          stripe_account_id: string
         }[]
       }
       server_lookup_checkout_cancellation: {
@@ -1721,19 +1686,6 @@ export type Database = {
           subtotal_minor: number
           tax_amount_minor: number
           total_minor: number
-        }[]
-      }
-      server_lookup_order_confirmation: {
-        Args: { p_token_hash: string }
-        Returns: {
-          confirmation_status: string
-          event_ends_at: string
-          event_starts_at: string
-          event_timezone: string
-          event_title: string
-          event_venue_name: string
-          order_number: string
-          tier_name: string
         }[]
       }
       server_mark_checkout_reconciliation_review: {
@@ -1850,57 +1802,34 @@ export type Database = {
           should_process: boolean
         }[]
       }
-      server_reserve_checkout:
-        | {
-            Args: {
-              p_client_request_id: string
-              p_confirmation_token_hash: string
-              p_email: string
-              p_event_id: string
-              p_items: Json
-              p_name: string
-            }
-            Returns: {
-              application_fee_amount_minor: number
-              checkout_expires_at: string
-              create_request_digest: string
-              currency: string
-              existing_checkout_session_id: string
-              expected_organizer_proceeds_minor: number
-              integration_identifier: string
-              order_id: string
-              order_items: Json
-              organizer_id: string
-              platform_product_fee_minor: number
-              quantity: number
-              stripe_account_id: string
-              stripe_fee_estimate_minor: number
-              subtotal_minor: number
-              total_minor: number
-            }[]
-          }
-        | {
-            Args: {
-              p_client_request_id: string
-              p_confirmation_token_hash: string
-              p_email: string
-              p_event_id: string
-              p_name: string
-              p_tier_id: string
-            }
-            Returns: {
-              application_fee_amount_minor: number
-              checkout_expires_at: string
-              create_request_digest: string
-              currency: string
-              existing_checkout_session_id: string
-              integration_identifier: string
-              order_id: string
-              organizer_id: string
-              stripe_account_id: string
-              subtotal_minor: number
-            }[]
-          }
+      server_reserve_checkout: {
+        Args: {
+          p_client_request_id: string
+          p_confirmation_token_hash: string
+          p_email: string
+          p_event_id: string
+          p_items: Json
+          p_name: string
+        }
+        Returns: {
+          application_fee_amount_minor: number
+          checkout_expires_at: string
+          create_request_digest: string
+          currency: string
+          existing_checkout_session_id: string
+          expected_organizer_proceeds_minor: number
+          integration_identifier: string
+          order_id: string
+          order_items: Json
+          organizer_id: string
+          platform_product_fee_minor: number
+          quantity: number
+          stripe_account_id: string
+          stripe_fee_estimate_minor: number
+          subtotal_minor: number
+          total_minor: number
+        }[]
+      }
       server_submit_event_report: {
         Args: {
           p_event_id: string
