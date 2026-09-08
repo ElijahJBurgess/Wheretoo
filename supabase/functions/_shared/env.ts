@@ -1,8 +1,11 @@
-type EnvReader = (name: string) => string | undefined;
+export type EnvReader = (name: string) => string | undefined;
 
 const defaultEnvReader: EnvReader = (name) => Deno.env.get(name);
 
-function requireEnv(name: string, read: EnvReader = defaultEnvReader): string {
+export function requireEnv(
+  name: string,
+  read: EnvReader = defaultEnvReader,
+): string {
   const value = read(name);
   if (value === undefined || value.length === 0 || value !== value.trim()) {
     throw new Error(`Missing or invalid server environment value: ${name}`);
