@@ -314,6 +314,9 @@ verify_jwt = false
 [functions.order-confirmation]
 verify_jwt = false
 
+[functions.ticket-collection]
+verify_jwt = false
+
 [functions.moderate-event-queue]
 verify_jwt = false
 

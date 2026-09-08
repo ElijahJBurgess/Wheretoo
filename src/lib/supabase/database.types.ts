@@ -1698,6 +1698,21 @@ export type Database = {
           total_minor: number
         }[]
       }
+      server_lookup_lite_ticket_collection: {
+        Args: { p_token_hash: string }
+        Returns: {
+          event_ends_at: string
+          event_id: string
+          event_starts_at: string
+          event_status: string
+          event_title: string
+          event_venue_name: string
+          items: Json
+          order_status: string
+          quantity: number
+          tickets: Json
+        }[]
+      }
       server_mark_checkout_reconciliation_review: {
         Args: {
           p_checkout_session_id: string
