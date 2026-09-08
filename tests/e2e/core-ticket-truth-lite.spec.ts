@@ -2,7 +2,7 @@
 import { randomBytes, randomUUID } from 'node:crypto'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { expect, test } from '@playwright/test'
-import { createAdmissionChecker } from '../../src/features/ticket-experience/adapters/admissionChecker'
+import { createNodeAdmissionChecker } from './support/nodeAdmissionChecker'
 import { loadTask18E2EEnv } from './support/e2eEnv'
 import { browserRefundRecoveryIsSafe } from './support/ticketingFixture'
 import { decoderBundle, decodeMountedQr } from './support/ticketExperienceJourney'
@@ -74,8 +74,8 @@ test.describe.serial('Core Ticket Truth Lite paid launch boundary', () => {
         expect(signedIn.error === null && !!signedIn.data.session).toBe(true)
       }
       // Same production checker, real authenticated endpoint transport; no fixture scan outcomes.
-      const owner = createAdmissionChecker((name, options) => clients[0].functions.invoke(name, options))
-      const other = createAdmissionChecker((name, options) => clients[1].functions.invoke(name, options))
+      const owner = createNodeAdmissionChecker(clients[0], page.url())
+      const other = createNodeAdmissionChecker(clients[1], page.url())
       stage = 'authoritative_admission'
       const check = (credential: string) => owner.checkAdmission({ eventId: fixture.eventId, credential })
       expect((await other.checkAdmission({ eventId: fixture.eventId, credential: credentials[1] })).outcome).toBe('network_error')

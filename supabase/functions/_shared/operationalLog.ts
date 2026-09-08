@@ -319,7 +319,7 @@ type RefundReconciliationEvent =
   | RefundEventFields & {
     outcome: "applied";
     resultStatus: "paid";
-    ticketStatus: "valid" | "used" | "mixed";
+    ticketStatus: "valid" | "used" | "cancelled" | "mixed";
     errorCode?: never;
   }
   | RefundEventFields & {
@@ -972,7 +972,7 @@ function validCombination(
       (source.resultStatus === "payment_processing" &&
         source.ticketStatus === "none") ||
       (source.resultStatus === "paid" &&
-        (source.ticketStatus === "valid" || source.ticketStatus === "used" || source.ticketStatus === "mixed")) ||
+        (source.ticketStatus === "valid" || source.ticketStatus === "used" || source.ticketStatus === "cancelled" || source.ticketStatus === "mixed")) ||
       (source.resultStatus === "refunded" &&
         (source.ticketStatus === "refunded" || source.ticketStatus === "used" || source.ticketStatus === "mixed"));
   }

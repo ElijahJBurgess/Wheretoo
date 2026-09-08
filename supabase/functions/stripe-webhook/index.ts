@@ -1909,7 +1909,7 @@ async function dispatchRefund(
     !(
       (durable.orderStatus === "checkout_open" && ticketStatus === "none") ||
       (durable.orderStatus === "paid" &&
-        (ticketStatus === "valid" || ticketStatus === "used" || ticketStatus === "mixed")) ||
+        (ticketStatus === "valid" || ticketStatus === "used" || ticketStatus === "cancelled" || ticketStatus === "mixed")) ||
       (durable.orderStatus === "refunded" &&
         (ticketStatus === "refunded" || ticketStatus === "used" || ticketStatus === "mixed"))
     )
@@ -1940,7 +1940,7 @@ async function dispatchRefund(
       resultStatus: "checkout_open",
       ticketStatus: "none",
     }, dependencies.operationalSink);
-  } else if (durable.orderStatus === "paid" && (ticketStatus === "valid" || ticketStatus === "used" || ticketStatus === "mixed")) {
+  } else if (durable.orderStatus === "paid" && (ticketStatus === "valid" || ticketStatus === "used" || ticketStatus === "cancelled" || ticketStatus === "mixed")) {
     emitOperationalEvent({
       contractVersion: "checkout_integrity_v1",
       operation: "refund.reconcile",

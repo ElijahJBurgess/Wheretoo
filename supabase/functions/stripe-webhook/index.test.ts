@@ -2303,6 +2303,26 @@ Deno.test("refund delivery acknowledges used history without a false durable-sta
   }
 });
 
+Deno.test("pending refund after owner cancellation keeps paid/cancelled truth and logs applied", async () => {
+  const records: Array<Record<string, unknown>> = [];
+  const response = await createStripeWebhookHandler(dependencies({
+    operationalSink: (serialized) => records.push(JSON.parse(serialized)),
+    retrieveRefund: async () => refundFixture({ status: "pending" }),
+    applyRefund: async (input) => {
+      assertEquals(input.status, "pending");
+      return refundApplyResultFromRpc([{
+        order_id: ORDER_ID, order_status: "paid", ticket_status: "cancelled",
+      }], ORDER_ID);
+    },
+  }))(request(snapshotEvent("refund.updated", { id: REFUND_ID }, { id: "evt_LiteCancelledPendingRefund" })));
+  assertEquals(response.status, 200);
+  assertEquals(records, [{
+    contractVersion: "checkout_integrity_v1", operation: "refund.reconcile", outcome: "applied",
+    orderId: ORDER_ID, stripeEventId: "evt_LiteCancelledPendingRefund", providerObjectId: REFUND_ID,
+    currency: "usd", amountMinor: 5_500, resultStatus: "paid", ticketStatus: "cancelled",
+  }]);
+});
+
 Deno.test("pending refund with unchanged payment processing state is applied without review", async () => {
   const records: Array<Record<string, unknown>> = [];
   const response = await createStripeWebhookHandler(dependencies({

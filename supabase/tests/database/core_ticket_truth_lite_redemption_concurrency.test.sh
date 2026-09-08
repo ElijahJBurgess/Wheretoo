@@ -6,8 +6,13 @@ node --input-type=module -e 'const u=new URL(process.env.WHERETO_TICKETING_DB_UR
 export PGCONNECT_TIMEOUT=5
 export PGOPTIONS='-c statement_timeout=20000'
 fixture_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/helpers" && pwd -P)"
-scratch="$(mktemp -d)"
 psql_cmd=(psql "$WHERETO_TICKETING_DB_URL" -X -qAt -v ON_ERROR_STOP=1)
+# Refuse even a matching receipt before claiming setup or cleanup ownership.
+if [[ "$("${psql_cmd[@]}" -c "select count(*) from public.stripe_webhook_events where stripe_event_id='evt_redeemrace'")" != 0 ]]; then
+  echo 'Race refused: pre-existing evt_redeemrace receipt.' >&2
+  exit 1
+fi
+scratch="$(mktemp -d)"
 event_id=a6200000-0000-4000-8000-000000000001
 owner_id=a6100000-0000-4000-8000-000000000001
 run_tag="lite_scan_${$}"

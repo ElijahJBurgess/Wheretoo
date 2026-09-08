@@ -10,6 +10,19 @@ const STRIPE_EVENT_ID = "evt_Task10Delivery";
 const SESSION_ID = "cs_test_Task10Checkout";
 const REFUND_ID = "re_Task10Refund";
 
+Deno.test("refund logs accept paid/cancelled but reject refunded/cancelled applied state", () => {
+  for (const resultStatus of ["paid", "refunded"] as const) {
+    const records: string[] = [];
+    const event = {
+      contractVersion: "checkout_integrity_v1", operation: "refund.reconcile", outcome: "applied",
+      orderId: ORDER_ID, stripeEventId: STRIPE_EVENT_ID, providerObjectId: REFUND_ID,
+      currency: "usd", amountMinor: 5_500, resultStatus, ticketStatus: "cancelled",
+    };
+    emitOperationalEvent(event as CheckoutOperationalEvent, (record) => records.push(record));
+    assertEquals(records.map((record) => JSON.parse(record)), resultStatus === "paid" ? [event] : []);
+  }
+});
+
 Deno.test("refund logs retain all-used and mixed admission outcomes", () => {
   for (const ticketStatus of ["used", "mixed"] as const) {
     const records: string[] = [];
