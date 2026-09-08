@@ -5,8 +5,10 @@ set -euo pipefail
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 supabase_cli="$repository_root/node_modules/.bin/supabase"
 driver_source="$repository_root/tests/integration/edge/task17-transaction-driver/index.ts"
+driver_contracts_source="$repository_root/tests/integration/edge/task17-transaction-driver/contracts.ts"
 driver_directory="$repository_root/supabase/functions/task17-transaction-driver"
 driver_file="$driver_directory/index.ts"
+driver_contracts_file="$driver_directory/contracts.ts"
 env_file="$repository_root/.env.local"
 temporary_directory="$(mktemp -d "${TMPDIR:-/tmp}/whereto-task18-run.XXXXXX")"
 chmod 700 "$temporary_directory"
@@ -15,6 +17,8 @@ organizer_a_id=""
 organizer_b_id=""
 driver_deployed=0
 driver_secret_configured=0
+driver_materialized=0
+driver_directory_created=0
 cleanup_failed=0
 project_ref=""
 run_id="$(openssl rand -hex 6)"
@@ -229,8 +233,12 @@ NODE
       TASK17_CONNECTED_ACCOUNT_ID TASK17_CLOSE_CONNECTED_ACCOUNT \
       --project-ref "$project_ref" >/dev/null || cleanup_failed=1
   fi
-  rm -f "$driver_file"
-  rmdir "$driver_directory" 2>/dev/null || true
+  if [[ $driver_materialized -eq 1 ]]; then
+    rm -f "$driver_file" "$driver_contracts_file"
+  fi
+  if [[ $driver_directory_created -eq 1 ]]; then
+    rmdir "$driver_directory" 2>/dev/null || true
+  fi
 
   if [[ -n "$project_ref" ]]; then
     "$supabase_cli" functions list --project-ref "$project_ref" --output json >"$temporary_directory/functions-after.json" 2>/dev/null || cleanup_failed=1
@@ -261,7 +269,8 @@ cd "$repository_root"
 
 [[ -x "$supabase_cli" ]] || { printf '%s\n' 'Missing project-local Supabase CLI.' >&2; exit 1; }
 [[ -f "$driver_source" ]] || { printf '%s\n' 'Missing committed transaction driver.' >&2; exit 1; }
-[[ ! -e "$driver_file" ]] || { printf '%s\n' 'Refusing to overwrite a materialized driver.' >&2; exit 1; }
+[[ -f "$driver_contracts_source" ]] || { printf '%s\n' 'Missing committed transaction driver contracts.' >&2; exit 1; }
+[[ ! -e "$driver_file" && ! -e "$driver_contracts_file" ]] || { printf '%s\n' 'Refusing to overwrite materialized driver files.' >&2; exit 1; }
 
 project_ref="$(tr -d '\r\n' < supabase/.temp/project-ref)"
 [[ "$project_ref" =~ ^[a-z0-9]{20}$ ]] || { printf '%s\n' 'Invalid linked project reference.' >&2; exit 1; }
@@ -343,8 +352,15 @@ organizer_b_id="$(create_user "$organizer_b_email" "$organizer_b_password" b)"
     values ('$organizer_a_id', '$connected_account_id', 'active', 'active', 'clear', 0, 0, now());
   commit;" >"$temporary_directory/setup.log" 2>&1
 
-mkdir -p "$driver_directory"
-install -m 600 "$driver_source" "$driver_file"
+if [[ ! -d "$driver_directory" ]]; then
+  mkdir -p "$driver_directory"
+  driver_directory_created=1
+fi
+driver_materialized=1
+sed 's#../../../../supabase/functions/#../#g' "$driver_source" >"$driver_file"
+cp "$driver_contracts_source" "$driver_contracts_file"
+chmod 600 "$driver_file" "$driver_contracts_file"
+pnpm exec deno check --config deno.json "$driver_file"
 cat >"$temporary_directory/driver-secrets.env" <<EOF
 TASK17_PROOF_TOKEN=$proof_token
 TASK17_FIXTURE_PREFIX=$driver_prefix

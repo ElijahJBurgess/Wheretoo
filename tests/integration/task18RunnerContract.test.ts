@@ -47,6 +47,31 @@ describe('Task 18 browser proof runner contract', () => {
     )
   })
 
+  it('materializes and tears down the self-contained driver without touching prior files', () => {
+    const runner = readFileSync(runnerPath, 'utf8')
+
+    expect(runner).toContain(
+      'driver_contracts_source="$repository_root/tests/integration/edge/task17-transaction-driver/contracts.ts"',
+    )
+    expect(runner).toContain('driver_contracts_file="$driver_directory/contracts.ts"')
+    expect(runner).toContain('driver_materialized=0')
+    expect(runner).toContain('driver_directory_created=0')
+    expect(runner).toContain('[[ -f "$driver_contracts_source" ]]')
+    expect(runner).toContain('[[ ! -e "$driver_file" && ! -e "$driver_contracts_file" ]]')
+    expect(runner).toContain(
+      "sed 's#../../../../supabase/functions/#../#g' \"$driver_source\" >\"$driver_file\"",
+    )
+    expect(runner).toContain('cp "$driver_contracts_source" "$driver_contracts_file"')
+    expect(runner).toContain('chmod 600 "$driver_file" "$driver_contracts_file"')
+    expect(runner).toContain('pnpm exec deno check --config deno.json "$driver_file"')
+    expect(runner).toContain('if [[ $driver_materialized -eq 1 ]]; then')
+    expect(runner).toContain('rm -f "$driver_file" "$driver_contracts_file"')
+    expect(runner).toContain('if [[ $driver_directory_created -eq 1 ]]; then')
+    expect(runner.indexOf('rm -f "$driver_file" "$driver_contracts_file"')).toBeLessThan(
+      runner.indexOf('rmdir "$driver_directory"'),
+    )
+  })
+
   it('documents the reviewed eight-case command without a stale incomplete verdict', () => {
     const runbook = readFileSync(runbookPath, 'utf8')
 
