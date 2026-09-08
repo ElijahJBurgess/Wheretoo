@@ -36,6 +36,7 @@ export function TicketTierList({ selectedTierId, tiers, onSelect }: TicketTierLi
                 type="radio"
                 value={tier.id}
               />
+              <span className="public-ticket-tier__indicator" aria-hidden="true" />
               <span className="public-ticket-tier__copy">
                 <span className="public-ticket-tier__header">
                   <strong>{tier.name}</strong>

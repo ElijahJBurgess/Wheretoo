@@ -60,6 +60,12 @@ function formatAddress(event: {
   return `${street}, ${event.city}, ${event.region} ${event.postal_code}`
 }
 
+function getRenderableArtwork(path: string | null): string | null {
+  if (!path) return null
+  if (/^(https?:|data:|blob:)/i.test(path)) return path
+  return null
+}
+
 type PublicEventStateProps = {
   action?: ReactNode
   description?: string
@@ -183,6 +189,8 @@ export function PublicTicketEventPage() {
     : null
   const dateAndTime = formatDateAndTime(event.starts_at, event.ends_at)
 
+  const artwork = getRenderableArtwork(event.artwork_path)
+
   return (
     <main className="public-event-layout">
       {hasRetryableStaleEvent ? (
@@ -192,10 +200,18 @@ export function PublicTicketEventPage() {
         </div>
       ) : null}
       <article aria-labelledby="public-event-title" className="public-event">
-        <div aria-label="Whereto event artwork placeholder" className="public-event__artwork" role="img">
-          <span>Whereto presents</span>
-          <strong>{event.title}</strong>
-          <small>{categoryLabels[event.category]}</small>
+        <div
+          aria-label={artwork ? `${event.title} event artwork` : 'Whereto event artwork placeholder'}
+          className="public-event__artwork"
+          role="img"
+          style={artwork ? { backgroundImage: `url("${artwork}")` } : undefined}
+        >
+          <div className="public-event__artwork-shade" />
+          <div className="public-event__artwork-copy">
+            <span>Whereto presents</span>
+            <strong>{event.title}</strong>
+            <small>{categoryLabels[event.category]}</small>
+          </div>
         </div>
         <div className="public-event__content">
           <header className="public-event__header">
