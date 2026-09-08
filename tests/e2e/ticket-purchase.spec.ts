@@ -27,8 +27,8 @@ test.describe('native ticket purchase journey', () => {
 
     await page.getByRole('button', { name: 'Continue to secure payment' }).click()
     await expect(page.getByLabel('Your name')).toBeFocused()
-    await expect(page.getByRole('alert')).toContainText('Enter your name')
-    await expect(page.getByRole('alert')).toContainText('Enter a valid email address')
+    await expect(page.locator('#buyer-name-error')).toContainText('Enter your name')
+    await expect(page.locator('#buyer-email-error')).toContainText('Enter a valid email address')
     await submitAfterOneAmbiguousResponse(page, fixture)
     await expect(page).toHaveURL(/^https:\/\/checkout\.stripe\.com\//)
 
