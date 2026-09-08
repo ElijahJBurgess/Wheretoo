@@ -494,8 +494,8 @@ Deno.test("default transport calls only the service RPC with a hash and rejects 
   const client = (data: unknown, error: unknown = null) =>
     ({
       rpc: async (name: string, args: unknown) => {
-        assertEquals(name, "server_lookup_lite_ticket_collection");
-        assertEquals(args, { p_token_hash: BEARER_HASH });
+        assertEquals(name, "server_lookup_paid_ticket_collection");
+        assertEquals(args, { p_confirmation_token_hash: BEARER_HASH });
         return { data, error };
       },
     }) as unknown as Parameters<typeof defaultFindCollection>[1];

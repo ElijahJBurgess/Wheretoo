@@ -123,8 +123,8 @@ export async function defaultFindCollection(
   client: SupabaseClient = getServiceClient(),
 ): Promise<unknown> {
   const { data, error } = await client.rpc(
-    "server_lookup_lite_ticket_collection",
-    { p_token_hash: tokenHash },
+    "server_lookup_paid_ticket_collection",
+    { p_confirmation_token_hash: tokenHash },
   );
   if (error !== null || !Array.isArray(data) || data.length !== 1) return null;
   return data[0];

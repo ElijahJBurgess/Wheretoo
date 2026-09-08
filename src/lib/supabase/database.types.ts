@@ -1698,8 +1698,8 @@ export type Database = {
           total_minor: number
         }[]
       }
-      server_lookup_lite_ticket_collection: {
-        Args: { p_token_hash: string }
+      server_lookup_paid_ticket_collection: {
+        Args: { p_confirmation_token_hash: string }
         Returns: {
           event_ends_at: string
           event_id: string

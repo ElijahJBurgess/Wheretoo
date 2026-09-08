@@ -1,6 +1,6 @@
 -- Read-only accountless access. The confirmation bearer is hashed by Edge;
 -- only the service role can obtain source/hash material for verification.
-create function public.server_lookup_lite_ticket_collection(p_token_hash text)
+create function public.server_lookup_paid_ticket_collection(p_confirmation_token_hash text)
 returns table (
   event_id uuid, event_title text, event_starts_at timestamptz,
   event_ends_at timestamptz, event_venue_name text, event_status text,
@@ -19,8 +19,8 @@ as $$
       'credential_hash', encode(t.credential_hash,'hex')
     ) order by t.order_item_id,t.unit_sequence) from public.tickets t where t.order_id=o.id)
   from public.orders o join public.events e on e.id=o.event_id
-  where p_token_hash ~ '^[a-f0-9]{64}$'
-    and o.confirmation_token_hash=p_token_hash and not o.livemode
+  where p_confirmation_token_hash ~ '^[a-f0-9]{64}$'
+    and o.confirmation_token_hash=p_confirmation_token_hash and not o.livemode
     and o.status in ('paid','refunded') and o.paid_at is not null
     and o.reconciliation_status='reconciled'
     and ((o.status='paid' and o.refunded_at is null)
@@ -67,7 +67,7 @@ as $$
     );
 $$;
 
-revoke all on function public.server_lookup_lite_ticket_collection(text) from public, anon, authenticated;
-grant execute on function public.server_lookup_lite_ticket_collection(text) to service_role;
-comment on function public.server_lookup_lite_ticket_collection(text) is
+revoke all on function public.server_lookup_paid_ticket_collection(text) from public, anon, authenticated;
+grant execute on function public.server_lookup_paid_ticket_collection(text) to service_role;
+comment on function public.server_lookup_paid_ticket_collection(text) is
   'Service-only coherent paid/refunded ticket collection. Internal source/hash facts must be verified and stripped by Edge; no PII, Stripe IDs or raw credentials.';
