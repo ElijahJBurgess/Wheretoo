@@ -251,7 +251,9 @@ export function createStripeCancelCheckoutHandler(
         cancellationOutcomeAmbiguous = true;
         throw error;
       }
-      if (session.status === "complete") {
+      const confirmedAsyncFailure = orderStatus === "payment_failed" &&
+        session.status === "complete" && session.paymentStatus === "unpaid";
+      if (session.status === "complete" && !confirmedAsyncFailure) {
         // Webhook persistence may lag Checkout completion; never downgrade it here.
         throw new CheckoutHttpError(409, "CHECKOUT_UNAVAILABLE");
       }
@@ -260,7 +262,7 @@ export function createStripeCancelCheckoutHandler(
       }
       if (alreadyReleased) {
         // A database release alone cannot prove an attached provider checkout is terminal.
-        if (session.status !== "expired") {
+        if (session.status !== "expired" && !confirmedAsyncFailure) {
           throw new CheckoutHttpError(409, "CHECKOUT_UNAVAILABLE");
         }
         emitOperationalEvent({
