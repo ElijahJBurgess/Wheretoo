@@ -41,17 +41,17 @@ async function createPaidDraft(owner: typeof organizerA, ownerId: string, suffix
   return result.data!.id
 }
 
-async function saveOneTier(owner: typeof organizerA, eventId: string, amount = 2_000) {
+async function saveTiers(owner: typeof organizerA, eventId: string, amounts = [2_000]) {
   return owner.rpc('save_ticket_tiers', {
     p_event_id: eventId,
-    p_tiers: [{
-      name: 'General admission',
-      description: 'One hosted integration ticket',
+    p_tiers: amounts.map((amount, index) => ({
+      name: `General admission ${index + 1}`,
+      description: 'Hosted integration ticket',
       unit_amount_minor: amount,
       currency: 'usd',
-      quantity_total: 1,
-      sort_order: 1,
-    }],
+      quantity_total: 3,
+      sort_order: index + 1,
+    })),
   })
 }
 
@@ -74,14 +74,17 @@ beforeAll(async () => {
 describe('hosted ticketing database boundary', () => {
   it('isolates owned tiers and rejects browser-supplied financial and ownership fields', async () => {
     const eventId = await createPaidDraft(organizerA, organizerAId, 'isolation')
-    const saved = await saveOneTier(organizerA, eventId)
+    const saved = await saveTiers(organizerA, eventId, [2_000, 3_000])
     expect(saved.error).toBeNull()
-    expect(saved.data).toHaveLength(1)
-    const tierId = saved.data![0].id
+    expect(saved.data).toHaveLength(2)
+    const [firstTier, secondTier] = saved.data!
 
     const reservationInput = {
       p_event_id: eventId,
-      p_tier_id: tierId,
+      p_items: [
+        { tier_id: firstTier.id, quantity: 2 },
+        { tier_id: secondTier.id, quantity: 1 },
+      ] as Json,
       p_name: 'Denied Browser Buyer',
       p_email: 'denied-browser@example.invalid',
       p_client_request_id: randomUUID(),
@@ -116,23 +119,26 @@ describe('hosted ticketing database boundary', () => {
 
     const unchanged = await organizerA.rpc('list_owned_ticket_tiers', { p_event_id: eventId })
     expect(unchanged.error).toBeNull()
-    expect(unchanged.data).toMatchObject([{ name: 'General admission', unit_amount_minor: 2_000 }])
+    expect(unchanged.data).toMatchObject([
+      { name: 'General admission 1', unit_amount_minor: 2_000 },
+      { name: 'General admission 2', unit_amount_minor: 3_000 },
+    ])
   })
 
-  it('blocks incomplete tier and Connect states, then publishes only the ready owned event', async () => {
+  it('blocks incomplete tier and Connect states while moderation eligibility controls the public projection', async () => {
     const noTierEvent = await createPaidDraft(organizerA, organizerAId, 'no-tier')
     const noTier = await organizerA.rpc('activate_paid_sales', { p_event_id: noTierEvent })
     expectCode(noTier.error, 'TIER_NOT_ACTIVE')
 
     const noConnectEvent = await createPaidDraft(organizerB, organizerBId, 'no-connect')
-    const noConnectTier = await saveOneTier(organizerB, noConnectEvent)
+    const noConnectTier = await saveTiers(organizerB, noConnectEvent)
     expect(noConnectTier.error).toBeNull()
     const mismatchedTierId = noConnectTier.data![0].id
     const noConnect = await organizerB.rpc('activate_paid_sales', { p_event_id: noConnectEvent })
     expectCode(noConnect.error, 'CONNECT_NOT_READY')
 
     const publicEvent = await createPaidDraft(organizerA, organizerAId, 'public')
-    const tier = await saveOneTier(organizerA, publicEvent, 2_000)
+    const tier = await saveTiers(organizerA, publicEvent, [2_000])
     expect(tier.error).toBeNull()
     const activated = await organizerA.rpc('activate_paid_sales', { p_event_id: publicEvent })
     expect(activated.error).toBeNull()
@@ -140,11 +146,7 @@ describe('hosted ticketing database boundary', () => {
 
     const projection = await anonymous.rpc('get_public_event_ticketing', { p_event_id: publicEvent })
     expect(projection.error).toBeNull()
-    expect(projection.data).toHaveLength(1)
-    expect(projection.data![0]).toEqual(expect.objectContaining({
-      event: expect.objectContaining({ id: publicEvent, admission_type: 'paid' }),
-      tiers: [expect.objectContaining({ unit_amount_minor: 2_000, currency: 'usd' })],
-    }))
+    expect(projection.data).toEqual([])
     const serialized = JSON.stringify(projection.data)
     expect(serialized).not.toMatch(/fee|stripe|destination|quantity_total|reserved_quantity|buyer_/i)
     expect(serialized).not.toContain(mismatchedTierId)

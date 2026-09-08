@@ -1,27 +1,32 @@
-import type { Database } from '../../lib/supabase/database.types'
+export type ConfirmationStatus =
+  | 'processing'
+  | 'paid'
+  | 'payment_failed'
+  | 'cancelled'
+  | 'expired'
+  | 'refunded'
+  | 'requires_review'
 
-type OrderRow = Database['public']['Tables']['orders']['Row']
-type EventRow = Database['public']['Tables']['events']['Row']
-type OrderItemRow = Database['public']['Tables']['order_items']['Row']
-
-type ConfirmationEvent = {
-  title: NonNullable<EventRow['title']>
-  startsAt: NonNullable<EventRow['starts_at']>
-  endsAt: NonNullable<EventRow['ends_at']>
-  timezone: EventRow['timezone']
-  venueName: EventRow['venue_name']
+export type OrderConfirmation = {
+  orderNumber: string
+  status: ConfirmationStatus
+  event: {
+    title: string
+    startsAt: string
+    endsAt: string
+    timezone: string
+    venueName: string | null
+  }
+  items: Array<{
+    tierName: string
+    quantity: number
+    unitAmountMinor: number
+    subtotalMinor: number
+    currency: 'usd'
+  }>
+  quantity: number
+  currency: 'usd'
+  subtotalMinor: number
+  taxAmountMinor: 0
+  totalMinor: number
 }
-
-type ConfirmationTier = { name: OrderItemRow['tier_name'] }
-type ConfirmationBase = {
-  orderNumber: OrderRow['order_number']
-  event: ConfirmationEvent
-  tier: ConfirmationTier
-}
-
-export type OrderConfirmation =
-  | (ConfirmationBase & { status: 'processing' })
-  | (ConfirmationBase & { status: 'paid' })
-  | (ConfirmationBase & { status: 'failed' })
-  | (ConfirmationBase & { status: 'expired' })
-  | (ConfirmationBase & { status: 'refunded' })

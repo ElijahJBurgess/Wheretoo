@@ -286,6 +286,29 @@ Deno.test("CORS reflects only the exact configured application origin", () => {
   );
 });
 
+// Mutation caught: omitting the independent confirmation bearer from the
+// exact-origin preflight allow-list makes browser Checkout requests fail.
+Deno.test("CORS allows the Checkout confirmation bearer only for the exact application origin", () => {
+  const allowed = getCorsHeaders(
+    new Request("https://functions.example/stripe-create-checkout", {
+      headers: { Origin: TEST_APP_ORIGIN },
+    }),
+    TEST_APP_ORIGIN,
+  );
+  const denied = getCorsHeaders(
+    new Request("https://functions.example/stripe-create-checkout", {
+      headers: { Origin: "https://attacker.test" },
+    }),
+    TEST_APP_ORIGIN,
+  );
+
+  assertEquals(
+    allowed.get("access-control-allow-headers"),
+    "authorization, content-type, x-client-info, apikey, x-whereto-confirmation-bearer",
+  );
+  assertEquals(denied.has("access-control-allow-headers"), false);
+});
+
 Deno.test("CORS preflight denies an unapproved origin and allows the exact origin", async () => {
   const allowed = handleCorsPreflight(
     new Request("https://functions.example/connect", {

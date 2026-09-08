@@ -26,9 +26,19 @@ describe('Playwright environment boundaries', () => {
       ...base,
       TEST_TASK18_FUNCTION_URL: `${base.TEST_SUPABASE_URL}/functions/v1/task17-transaction-driver`,
       TEST_TASK18_DRIVER_TOKEN: 'x'.repeat(32),
-      TEST_TASK18_FIXTURE_PREFIX: 'task18_123456789abc',
+      TEST_TASK18_FIXTURE_PREFIX: 'task17_123456789abc',
     })).toMatchObject({
-      task18FixturePrefix: 'task18_123456789abc',
+      task18FixturePrefix: 'task17_123456789abc',
     })
+  })
+
+  it('loads public buyer proof without creating or requiring organizer credentials', () => {
+    const buyer = Object.fromEntries(Object.entries(base).filter(([name]) => !name.startsWith('TEST_ORGANIZER_')))
+    expect(loadTask18E2EEnv({
+      ...buyer,
+      TEST_TASK18_FUNCTION_URL: `${base.TEST_SUPABASE_URL}/functions/v1/task17-transaction-driver`,
+      TEST_TASK18_DRIVER_TOKEN: 'x'.repeat(32),
+      TEST_TASK18_FIXTURE_PREFIX: 'task17_checkout0001',
+    })).toMatchObject({ task18FixturePrefix: 'task17_checkout0001' })
   })
 })

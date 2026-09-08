@@ -1,6 +1,8 @@
 import { Button } from '../../components/ui/Button'
 import { AsyncState } from '../../components/ui/AsyncState'
+import { useEffect } from 'react'
 import { useParams } from 'react-router-dom'
+import { clearCheckoutAttemptForConfirmation } from '../checkout/checkout.attempt'
 import type { OrderConfirmation } from './order.types'
 import { useOrderConfirmation } from './order.queries'
 
@@ -17,10 +19,15 @@ const statusCopy: Record<ConfirmationStatus, { heading: string; message: string;
     message: 'Payment confirmed. Your order is ready.',
     mark: '✓',
   },
-  failed: {
+  payment_failed: {
     heading: 'Payment could not be confirmed',
     message: 'No ticket was issued. Check your payment details before trying again.',
     mark: '!',
+  },
+  cancelled: {
+    heading: 'Checkout cancelled',
+    message: 'No payment was completed. Choose tickets again from the event page.',
+    mark: '×',
   },
   expired: {
     heading: 'Checkout expired',
@@ -32,6 +39,23 @@ const statusCopy: Record<ConfirmationStatus, { heading: string; message: string;
     message: 'This ticket is no longer valid.',
     mark: '↺',
   },
+  requires_review: {
+    heading: 'Order needs review',
+    message: 'We are reviewing this order. Keep this confirmation link for updates.',
+    mark: '!',
+  },
+}
+
+const terminalStatuses = new Set<ConfirmationStatus>([
+  'paid',
+  'payment_failed',
+  'cancelled',
+  'expired',
+  'refunded',
+])
+
+function formatMinorUsd(minor: number): string {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(minor / 100)
 }
 
 function formatSchedule(event: OrderConfirmation['event']): string {
@@ -78,6 +102,13 @@ function StandaloneState({
 
 function OrderConfirmationRoute({ confirmationToken }: { confirmationToken: string }) {
   const confirmation = useOrderConfirmation(confirmationToken)
+  const status = confirmation.data?.status
+
+  useEffect(() => {
+    if (status !== undefined && terminalStatuses.has(status)) {
+      clearCheckoutAttemptForConfirmation(confirmationToken)
+    }
+  }, [confirmationToken, status])
 
   if (confirmation.isPending) {
     return <StandaloneState description="Checking the latest persisted order status." status="loading" title="Loading order" />
@@ -96,17 +127,17 @@ function OrderConfirmationRoute({ confirmationToken }: { confirmationToken: stri
     return <StandaloneState description="This confirmation link is invalid or unavailable." status="error" title="Order not found" />
   }
 
-  const status = confirmation.data.status
-  const copy = confirmation.isTimedOut && status === 'processing'
+  const confirmedStatus = confirmation.data.status
+  const copy = confirmation.isTimedOut && confirmedStatus === 'processing'
     ? {
       heading: 'Confirmation is taking longer',
       message: 'Payment confirmation is still processing. Check again when you are ready.',
       mark: '…',
     }
-    : statusCopy[status]
+    : statusCopy[confirmedStatus]
 
   return (
-    <main className={`confirmation-layout confirmation-layout--${status}`}>
+    <main className={`confirmation-layout confirmation-layout--${confirmedStatus}`}>
       <article className="confirmation-card">
         <header className="confirmation-card__header">
           <p className="public-event__eyebrow">Order status</p>
@@ -122,12 +153,28 @@ function OrderConfirmationRoute({ confirmationToken }: { confirmationToken: stri
           <p>{confirmation.data.event.venueName ?? 'Venue to be announced'}</p>
         </section>
 
+        <section aria-labelledby="confirmation-items-title" className="confirmation-card__event">
+          <p className="confirmation-card__label">Tickets</p>
+          <h2 id="confirmation-items-title">Your order</h2>
+          <ul>
+            {confirmation.data.items.map((item) => (
+              <li key={item.tierName}>
+                <span>{item.tierName} × {item.quantity}</span>{' '}
+                <span>{formatMinorUsd(item.subtotalMinor)}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+
         <dl className="confirmation-card__facts">
-          <div><dt>Ticket</dt><dd>{confirmation.data.tier.name}</dd></div>
+          <div><dt>Quantity</dt><dd>{confirmation.data.quantity} admissions</dd></div>
+          <div><dt>Subtotal</dt><dd>{formatMinorUsd(confirmation.data.subtotalMinor)}</dd></div>
+          <div><dt>Tax</dt><dd>{formatMinorUsd(confirmation.data.taxAmountMinor)}</dd></div>
+          <div><dt>Total</dt><dd className="confirmation-card__total">{formatMinorUsd(confirmation.data.totalMinor)}</dd></div>
           <div><dt>Order</dt><dd>{confirmation.data.orderNumber}</dd></div>
         </dl>
 
-        {confirmation.isTimedOut && status === 'processing'
+        {confirmation.isTimedOut && confirmedStatus === 'processing'
           ? <Button onClick={() => void confirmation.retry()} type="button">Check again</Button>
           : null}
       </article>

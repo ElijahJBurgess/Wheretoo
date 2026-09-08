@@ -1,5 +1,5 @@
 import { defineConfig, devices } from '@playwright/test'
-import { loadE2EEnv, loadModerationE2EEnv } from './tests/e2e/support/e2eEnv'
+import { loadE2EEnv, loadModerationE2EEnv, loadTask18E2EEnv } from './tests/e2e/support/e2eEnv'
 
 const moderationProfile = process.env.WHERETO_E2E_PROFILE === 'moderation'
 const browserEnv = moderationProfile
@@ -13,7 +13,7 @@ const browserEnv = moderationProfile
         stripePublishableKey: 'pk_test_task16_disabled',
       }
     })()
-  : loadE2EEnv()
+  : process.env.WHERETO_E2E_PROFILE === 'ticketing' ? loadTask18E2EEnv() : loadE2EEnv()
 
 export default defineConfig({
   testDir: './tests/e2e',

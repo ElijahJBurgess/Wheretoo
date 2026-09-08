@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
 import { loadStripeIntegrationTestEnv } from './testEnv'
 import { createManagedStripeProofClient } from './stripeWebhookHarness'
+import * as stripeTestObjects from './stripeTestObjects'
 
 const base = {
   TEST_SUPABASE_URL: 'https://project.supabase.co',
@@ -40,6 +41,16 @@ describe('Stripe transaction proof configuration', () => {
     })).toThrow(/STRIPE_RESTRICTED_KEY/)
   })
 
+  it('rejects a live publishable key before any test object can be used', () => {
+    expect(() => loadStripeIntegrationTestEnv({
+      ...base,
+      VITE_STRIPE_PUBLISHABLE_KEY: 'pk_live_forbidden',
+      TEST_STRIPE_CREDENTIAL_MODE: 'managed_edge',
+      STRIPE_RESTRICTED_KEY: 'managed:test-mode-authenticated',
+      STRIPE_WEBHOOK_SECRET: 'managed:signature-verified',
+    })).toThrow(/VITE_STRIPE_PUBLISHABLE_KEY/)
+  })
+
   it('names both managed credential contracts when configuration is absent', () => {
     expect(() => loadStripeIntegrationTestEnv({
       ...base,
@@ -49,6 +60,77 @@ describe('Stripe transaction proof configuration', () => {
 })
 
 describe('managed proof client boundary', () => {
+  it('accepts only fixed-shape account diagnostics at the managed response boundary', async () => {
+    const contractMismatch = {
+      ok: false,
+      kind: 'ACCOUNT_CONTRACT_MISMATCH',
+      account_contract: {
+        dashboard_is_express: false,
+        recipient_configuration_only: false,
+        default_currency_is_usd: true,
+        fees_collector_is_application: true,
+        losses_collector_is_application: true,
+        requirements_collector_is_stripe: true,
+      },
+    }
+    const retrievalFailure = { ok: false, kind: 'ACCOUNT_RETRIEVE_FAILED' }
+    const readyDiagnostic = {
+      ok: true,
+      restricted_key_authenticated: true,
+      webhook_signature_verified: true,
+      livemode: false,
+      connected_account_matches: true,
+      transfers_status: 'active',
+      payouts_status: 'active',
+      requirements_status: 'clear',
+    }
+    const responses = [
+      contractMismatch,
+      retrievalFailure,
+      readyDiagnostic,
+      {
+        ok: false,
+        kind: 'ACCOUNT_CONTRACT_MISMATCH',
+        account_contract: {
+          dashboard_is_express: false,
+          recipient_configuration_only: false,
+          default_currency_is_usd: true,
+          fees_collector_is_application: true,
+          losses_collector_is_application: true,
+          requirements_collector_is_stripe: true,
+          arbitrary_provider_field: false,
+        },
+      },
+      { ok: false, kind: 'ACCOUNT_RETRIEVE_FAILED', account_id: 'acct_forbidden' },
+    ]
+    const client = createManagedStripeProofClient(
+      {
+        credentialMode: 'managed_edge',
+        supabaseUrl: base.TEST_SUPABASE_URL,
+        supabasePublishableKey: base.TEST_SUPABASE_PUBLISHABLE_KEY,
+        stripePublishableKey: base.VITE_STRIPE_PUBLISHABLE_KEY,
+        functionUrl: base.TEST_FUNCTION_URL,
+        driverToken: base.TEST_STRIPE_DRIVER_TOKEN,
+        fixturePrefix: base.TEST_STRIPE_FIXTURE_PREFIX,
+        connectedAccountId: base.TEST_CONNECTED_ACCOUNT_ID,
+        connectedAccountDisposable: true,
+        restrictedKeyProof: 'managed:test-mode-authenticated',
+        webhookSecretProof: 'managed:signature-verified',
+      },
+      async () => Response.json(responses.shift()),
+    )
+
+    await expect(client.invoke('account_diagnostic')).resolves.toEqual(contractMismatch)
+    await expect(client.invoke('account_diagnostic')).resolves.toEqual(retrievalFailure)
+    await expect(client.invoke('account_diagnostic')).resolves.toEqual(readyDiagnostic)
+    await expect(client.invoke('account_diagnostic')).rejects.toThrow(
+      'Managed Stripe diagnostic returned invalid shape',
+    )
+    await expect(client.invoke('account_diagnostic')).rejects.toThrow(
+      'Managed Stripe proof returned unsafe data',
+    )
+  })
+
   it('rejects an unenumerated driver action before making a request', async () => {
     let requests = 0
     const client = createManagedStripeProofClient(
@@ -102,12 +184,532 @@ describe('managed proof client boundary', () => {
     expect(headers?.has('x-task17-onboarding-token')).toBe(false)
   })
 
-  it('closes only the disposable Accounts v2 fixture with every applied configuration', async () => {
-    const source = await readFile(
+  it('rejects a hosted Checkout URL, credential-shaped value, or PII returned by the driver', async () => {
+    const responses = [
+      { ok: true, checkout_url: 'https://checkout.stripe.com/c/pay/redacted' },
+      { ok: true, nested: { value: 'rk_live_forbidden' } },
+      { ok: true, nested: { value: 'pk_live_forbidden' } },
+      { ok: true, buyer_email: 'buyer@example.invalid' },
+    ]
+    const client = createManagedStripeProofClient(
+      {
+        credentialMode: 'managed_edge',
+        supabaseUrl: base.TEST_SUPABASE_URL,
+        supabasePublishableKey: base.TEST_SUPABASE_PUBLISHABLE_KEY,
+        stripePublishableKey: base.VITE_STRIPE_PUBLISHABLE_KEY,
+        functionUrl: base.TEST_FUNCTION_URL,
+        driverToken: base.TEST_STRIPE_DRIVER_TOKEN,
+        fixturePrefix: base.TEST_STRIPE_FIXTURE_PREFIX,
+        connectedAccountId: base.TEST_CONNECTED_ACCOUNT_ID,
+        connectedAccountDisposable: true,
+        restrictedKeyProof: 'managed:test-mode-authenticated',
+        webhookSecretProof: 'managed:signature-verified',
+      },
+      async () => Response.json(responses.shift()),
+    )
+
+    await expect(client.invoke('setup')).rejects.toThrow('Managed Stripe proof returned unsafe data')
+    await expect(client.invoke('server_proof')).rejects.toThrow('Managed Stripe proof returned unsafe data')
+    await expect(client.invoke('checkout_status')).rejects.toThrow('Managed Stripe proof returned unsafe data')
+    await expect(client.invoke('inspect')).rejects.toThrow('Managed Stripe proof returned unsafe data')
+  })
+
+  it('rejects provider, ticket, receipt, refund, and order-item identifiers at the managed boundary', async () => {
+    const responses = [
+      { ok: true, provider: 'cs_test_forbidden' },
+      { ok: true, ticket_id: '11111111-1111-4111-8111-111111111111' },
+      { ok: true, order_item_id: '22222222-2222-4222-8222-222222222222' },
+      { ok: true, stripe_event_id: 'evt_forbidden' },
+      { ok: true, refund_id: 're_forbidden' },
+      { ok: true, order_id: '33333333-3333-4333-8333-333333333333' },
+      { ok: true, id: '44444444-4444-4444-8444-444444444444' },
+    ]
+    const client = createManagedStripeProofClient(
+      {
+        credentialMode: 'managed_edge',
+        supabaseUrl: base.TEST_SUPABASE_URL,
+        supabasePublishableKey: base.TEST_SUPABASE_PUBLISHABLE_KEY,
+        stripePublishableKey: base.VITE_STRIPE_PUBLISHABLE_KEY,
+        functionUrl: base.TEST_FUNCTION_URL,
+        driverToken: base.TEST_STRIPE_DRIVER_TOKEN,
+        fixturePrefix: base.TEST_STRIPE_FIXTURE_PREFIX,
+        connectedAccountId: base.TEST_CONNECTED_ACCOUNT_ID,
+        connectedAccountDisposable: true,
+        restrictedKeyProof: 'managed:test-mode-authenticated',
+        webhookSecretProof: 'managed:signature-verified',
+      },
+      async () => Response.json(responses.shift()),
+    )
+
+    for (
+      const action of [
+        'checkout_status',
+        'inspect',
+        'deliver',
+        'create_refund',
+        'server_proof',
+        'reconcile_payment',
+        'reconcile_events',
+      ] as const
+    ) {
+      let rejected = false
+      try {
+        await client.invoke(action)
+      } catch (error) {
+        rejected = error instanceof Error && error.message === 'Managed Stripe proof returned unsafe data'
+      }
+      expect(rejected).toBe(true)
+    }
+  })
+
+  it('maps each hosted Checkout boundary to a fixed diagnostic stage', () => {
+    const diagnose = Reflect.get(stripeTestObjects, 'hostedCheckoutBrowserDiagnostic')
+    expect(typeof diagnose).toBe('function')
+    if (typeof diagnose !== 'function') return
+
+    const mappings = [
+      ['BROWSER_LAUNCH', 'BROWSER_LAUNCH'],
+      ['CHECKOUT_URL_OPEN', 'CHECKOUT_URL_OPEN'],
+      ['HOSTED_DOCUMENT_LOAD', 'HOSTED_DOCUMENT_LOAD'],
+      ['PAYMENT_METHOD_FORM', 'PAYMENT_METHOD_FORM'],
+      ['CARD_NUMBER', 'CARD_NUMBER'],
+      ['CARD_EXPIRATION', 'CARD_EXPIRATION'],
+      ['CARD_CVC', 'CARD_CVC'],
+      ['CARDHOLDER_NAME', 'CARDHOLDER_NAME'],
+      ['POSTAL_CODE', 'POSTAL_CODE'],
+      ['OPTIONAL_SAVE_CONTROL', 'OPTIONAL_SAVE_CONTROL'],
+      ['AUXILIARY_DISCLOSURE_CONTROL', 'AUXILIARY_DISCLOSURE_CONTROL'],
+      ['PAYMENT_SUBMISSION_ACTIONABILITY', 'PAYMENT_SUBMISSION_ACTIONABILITY'],
+      ['PAYMENT_SUBMISSION_DISPATCH', 'PAYMENT_SUBMISSION_DISPATCH'],
+      ['PROVIDER_DISPOSITION', 'PROVIDER_DISPOSITION'],
+      ['PROVIDER_ACCEPTED', 'PROVIDER_DISPOSITION'],
+      ['PROVIDER_REJECTED', 'PROVIDER_DISPOSITION'],
+      ['LOCAL_RETURN_REDIRECT', 'LOCAL_RETURN_REDIRECT'],
+      ['LOCAL_RETURN_REDIRECT_OBSERVED', 'LOCAL_RETURN_REDIRECT'],
+    ] as const
+
+    for (const [checkpoint, stage] of mappings) {
+      expect(diagnose(checkpoint)).toMatchObject({ stage })
+    }
+  })
+
+  function hostedBrowserActions(options: {
+    failAt?: string
+    providerAcceptance?: boolean | boolean[]
+    hostedRejection?: boolean
+    redirect?: 'OBSERVED' | 'NOT_OBSERVED'
+    requireProviderProofBeforeRedirect?: boolean
+  } = {}) {
+    let acceptanceRead = 0
+    let providerProven = false
+    const boundary = (name: string) => async () => {
+      if (options.failAt === name) {
+        throw new Error(name === 'observeLocalReturnRedirect'
+          ? 'timed out with unsafe browser detail'
+          : 'unsafe browser detail must not escape')
+      }
+    }
+    return {
+      launchBrowser: boundary('launchBrowser'),
+      openCheckoutUrl: boundary('openCheckoutUrl'),
+      waitForHostedDocument: boundary('waitForHostedDocument'),
+      ensurePaymentMethodForm: boundary('ensurePaymentMethodForm'),
+      fillCardNumber: boundary('fillCardNumber'),
+      fillCardExpiration: boundary('fillCardExpiration'),
+      fillCardCvc: boundary('fillCardCvc'),
+      fillCardholderName: boundary('fillCardholderName'),
+      fillPostalCode: boundary('fillPostalCode'),
+      interactOptionalSaveControl: boundary('interactOptionalSaveControl'),
+      interactAuxiliaryDisclosureControl: boundary('interactAuxiliaryDisclosureControl'),
+      ensurePaymentSubmissionActionable: boundary('ensurePaymentSubmissionActionable'),
+      dispatchPaymentSubmission: boundary('dispatchPaymentSubmission'),
+      readHostedProviderRejection: async () => {
+        await boundary('readHostedProviderRejection')()
+        return options.hostedRejection ?? true
+      },
+      readProviderAcceptance: async () => {
+        await boundary('readProviderAcceptance')()
+        const configured = options.providerAcceptance ?? false
+        if (!Array.isArray(configured)) {
+          providerProven = configured
+          return configured
+        }
+        const value = configured[Math.min(acceptanceRead, configured.length - 1)] ?? false
+        acceptanceRead += 1
+        providerProven = value
+        return value
+      },
+      waitForProviderObservationRetry: boundary('waitForProviderObservationRetry'),
+      observeLocalReturnRedirect: async () => {
+        await boundary('observeLocalReturnRedirect')()
+        if (options.requireProviderProofBeforeRedirect && !providerProven) {
+          throw new Error('redirect inspected before provider proof')
+        }
+        return options.redirect ?? 'NOT_OBSERVED'
+      },
+    }
+  }
+
+  it.each([
+    ['openCheckoutUrl', 'CHECKOUT_URL_OPEN'],
+    ['waitForHostedDocument', 'HOSTED_DOCUMENT_LOAD'],
+  ])('drives the real orchestration and distinguishes %s failure', async (failAt, stage) => {
+    const run = Reflect.get(stripeTestObjects, 'runHostedCheckoutBrowserDiagnostic')
+    expect(typeof run).toBe('function')
+    if (typeof run !== 'function') return
+
+    await expect(run(hostedBrowserActions({ failAt }))).rejects.toThrow(
+      `Hosted Checkout browser diagnostic: stage=${stage} failure=BROWSER submission=NOT_ATTEMPTED provider=NOT_OBSERVED redirect=NOT_OBSERVED`,
+    )
+  })
+
+  it('separates submission actionability, dispatch, and post-dispatch failure state', async () => {
+    const run = Reflect.get(stripeTestObjects, 'runHostedCheckoutBrowserDiagnostic')
+    expect(typeof run).toBe('function')
+    if (typeof run !== 'function') return
+
+    await expect(run(hostedBrowserActions({
+      failAt: 'ensurePaymentSubmissionActionable',
+    }))).rejects.toThrow(
+      'stage=PAYMENT_SUBMISSION_ACTIONABILITY failure=BROWSER submission=NOT_ATTEMPTED',
+    )
+    await expect(run(hostedBrowserActions({
+      failAt: 'dispatchPaymentSubmission',
+    }))).rejects.toThrow(
+      'stage=PAYMENT_SUBMISSION_DISPATCH failure=BROWSER submission=NOT_ATTEMPTED',
+    )
+    await expect(run(hostedBrowserActions({
+      hostedRejection: false,
+      failAt: 'readProviderAcceptance',
+    }))).rejects.toThrow(
+      'stage=PROVIDER_DISPOSITION failure=BROWSER submission=ATTEMPTED',
+    )
+  })
+
+  it('waits for provider proof when local return arrives before accepted status', async () => {
+    const run = Reflect.get(stripeTestObjects, 'runHostedCheckoutBrowserDiagnostic')
+    expect(typeof run).toBe('function')
+    if (typeof run !== 'function') return
+
+    await expect(run(hostedBrowserActions({
+      hostedRejection: false,
+      providerAcceptance: [false, true],
+      redirect: 'OBSERVED',
+      requireProviderProofBeforeRedirect: true,
+    }))).resolves.toEqual({
+      stage: 'LOCAL_RETURN_REDIRECT',
+      failure: 'NONE',
+      submission: 'ATTEMPTED',
+      provider: 'ACCEPTED',
+      redirect: 'OBSERVED',
+    })
+  })
+
+  it('retains accepted provider proof when local return is missing', async () => {
+    const run = Reflect.get(stripeTestObjects, 'runHostedCheckoutBrowserDiagnostic')
+    expect(typeof run).toBe('function')
+    if (typeof run !== 'function') return
+
+    await expect(run(hostedBrowserActions({
+      hostedRejection: false,
+      providerAcceptance: true,
+      failAt: 'observeLocalReturnRedirect',
+    }))).rejects.toThrow(
+      'Hosted Checkout browser diagnostic: stage=LOCAL_RETURN_REDIRECT failure=TIMEOUT submission=ATTEMPTED provider=ACCEPTED redirect=NOT_OBSERVED',
+    )
+  })
+
+  it('retains rejected provider disposition with an unexpected local return', async () => {
+    const run = Reflect.get(stripeTestObjects, 'runHostedCheckoutBrowserDiagnostic')
+    expect(typeof run).toBe('function')
+    if (typeof run !== 'function') return
+
+    await expect(run(hostedBrowserActions({
+      hostedRejection: true,
+      providerAcceptance: false,
+      redirect: 'OBSERVED',
+    }))).resolves.toEqual({
+      stage: 'LOCAL_RETURN_REDIRECT',
+      failure: 'NONE',
+      submission: 'ATTEMPTED',
+      provider: 'REJECTED',
+      redirect: 'OBSERVED',
+    })
+  })
+
+  it('observes provider and redirect facts without an expected-outcome input', async () => {
+    const run = Reflect.get(stripeTestObjects, 'runHostedCheckoutBrowserDiagnostic')
+    expect(typeof run).toBe('function')
+    if (typeof run !== 'function') return
+
+    await expect(run(hostedBrowserActions({
+      hostedRejection: false,
+      providerAcceptance: true,
+      redirect: 'OBSERVED',
+    }))).resolves.toMatchObject({ provider: 'ACCEPTED', redirect: 'OBSERVED' })
+    await expect(run(hostedBrowserActions({
+      hostedRejection: true,
+      providerAcceptance: false,
+      redirect: 'NOT_OBSERVED',
+    }))).resolves.toMatchObject({ provider: 'REJECTED', redirect: 'NOT_OBSERVED' })
+  })
+
+  it('rejects a malformed external observation without retaining its value', async () => {
+    const run = Reflect.get(stripeTestObjects, 'runHostedCheckoutBrowserDiagnostic')
+    expect(typeof run).toBe('function')
+    if (typeof run !== 'function') return
+
+    const actions = hostedBrowserActions()
+    actions.readHostedProviderRejection = async () => false
+    actions.readProviderAcceptance = async () => 'unsafe observation' as never
+    await expect(run(actions)).rejects.toThrow(
+      'Hosted Checkout browser diagnostic: stage=PROVIDER_DISPOSITION failure=BROWSER submission=ATTEMPTED provider=NOT_OBSERVED redirect=NOT_OBSERVED',
+    )
+    await expect(run(actions)).rejects.not.toThrow('unsafe observation')
+  })
+
+  it('distinguishes pre-submission automation failure from post-submission observation', () => {
+    const diagnose = Reflect.get(stripeTestObjects, 'hostedCheckoutBrowserDiagnostic')
+    expect(typeof diagnose).toBe('function')
+    if (typeof diagnose !== 'function') return
+
+    expect(diagnose('CARD_CVC', new Error('timeout'))).toEqual({
+      stage: 'CARD_CVC',
+      failure: 'TIMEOUT',
+      submission: 'NOT_ATTEMPTED',
+      provider: 'NOT_OBSERVED',
+      redirect: 'NOT_OBSERVED',
+    })
+    expect(diagnose('PROVIDER_DISPOSITION', new Error('browser failed'))).toEqual({
+      stage: 'PROVIDER_DISPOSITION',
+      failure: 'BROWSER',
+      submission: 'ATTEMPTED',
+      provider: 'NOT_OBSERVED',
+      redirect: 'NOT_OBSERVED',
+    })
+  })
+
+  it('reports only fixed provider disposition and local redirect observations', () => {
+    const diagnose = Reflect.get(stripeTestObjects, 'hostedCheckoutBrowserDiagnostic')
+    expect(typeof diagnose).toBe('function')
+    if (typeof diagnose !== 'function') return
+
+    expect(diagnose('PROVIDER_ACCEPTED')).toEqual({
+      stage: 'PROVIDER_DISPOSITION',
+      failure: 'NONE',
+      submission: 'ATTEMPTED',
+      provider: 'ACCEPTED',
+      redirect: 'NOT_OBSERVED',
+    })
+    expect(diagnose('PROVIDER_REJECTED')).toEqual({
+      stage: 'PROVIDER_DISPOSITION',
+      failure: 'NONE',
+      submission: 'ATTEMPTED',
+      provider: 'REJECTED',
+      redirect: 'NOT_OBSERVED',
+    })
+    expect(diagnose('LOCAL_RETURN_REDIRECT_OBSERVED')).toEqual({
+      stage: 'LOCAL_RETURN_REDIRECT',
+      failure: 'NONE',
+      submission: 'ATTEMPTED',
+      provider: 'ACCEPTED',
+      redirect: 'OBSERVED',
+    })
+  })
+
+  it('sanitizes hosted Checkout diagnostics to exact keys and allowlisted values', () => {
+    const diagnose = Reflect.get(stripeTestObjects, 'hostedCheckoutBrowserDiagnostic')
+    const sanitize = Reflect.get(stripeTestObjects, 'toSafeHostedCheckoutBrowserError')
+    expect(typeof diagnose).toBe('function')
+    expect(typeof sanitize).toBe('function')
+    if (typeof diagnose !== 'function' || typeof sanitize !== 'function') return
+
+    const sensitiveUrl = ['https://checkout.stripe.com', '/c/pay/', 'cs_test_forbidden'].join('')
+    const raw = `${sensitiveUrl} buyer@example.invalid sk_test_forbidden 4242424242424242`
+    const diagnostic = diagnose('CARD_NUMBER', new Error(`page navigation timed out at ${raw}`))
+    const safe = sanitize(
+      new Error(`page navigation timed out at ${raw}`),
+      'CARD_NUMBER',
+    ) as Error
+    expect(Object.keys(diagnostic)).toEqual([
+      'stage',
+      'failure',
+      'submission',
+      'provider',
+      'redirect',
+    ])
+    expect(diagnostic).toEqual({
+      stage: 'CARD_NUMBER',
+      failure: 'TIMEOUT',
+      submission: 'NOT_ATTEMPTED',
+      provider: 'NOT_OBSERVED',
+      redirect: 'NOT_OBSERVED',
+    })
+    expect(diagnose(raw, new Error(raw))).toEqual({
+      stage: 'BROWSER_LAUNCH',
+      failure: 'BROWSER',
+      submission: 'NOT_ATTEMPTED',
+      provider: 'NOT_OBSERVED',
+      redirect: 'NOT_OBSERVED',
+    })
+    expect(safe.message).toBe(
+      'Hosted Checkout browser diagnostic: stage=CARD_NUMBER failure=TIMEOUT submission=NOT_ATTEMPTED provider=NOT_OBSERVED redirect=NOT_OBSERVED',
+    )
+    expect(safe.message).not.toContain(sensitiveUrl)
+    expect(safe.message).not.toContain('buyer@example.invalid')
+    expect(safe.message).not.toContain('sk_test_')
+    expect(safe.message).not.toContain('4242424242424242')
+    expect(safe).not.toHaveProperty('cause')
+  })
+
+  it.each([
+    'unsafe formatter input',
+    {
+      stage: 'unsafe formatter input',
+      failure: 'NONE',
+      submission: 'ATTEMPTED',
+      provider: 'ACCEPTED',
+      redirect: 'OBSERVED',
+    },
+    {
+      stage: 'LOCAL_RETURN_REDIRECT',
+      failure: 'NONE',
+      submission: 'ATTEMPTED',
+      provider: 'ACCEPTED',
+      redirect: 'OBSERVED',
+      unexpected: 'unsafe formatter input',
+    },
+  ])('formats malformed runtime diagnostic input as one fixed safe fallback', (malformed) => {
+    const format = Reflect.get(stripeTestObjects, 'formatHostedCheckoutBrowserDiagnostic')
+    expect(typeof format).toBe('function')
+    if (typeof format !== 'function') return
+
+    const formatted = format(malformed)
+    expect(formatted).toBe(
+      'stage=BROWSER_LAUNCH failure=BROWSER submission=NOT_ATTEMPTED provider=NOT_OBSERVED redirect=NOT_OBSERVED',
+    )
+    expect(formatted).not.toContain('unsafe formatter input')
+  })
+
+  it('copies allowlisted formatter values before interpolation', () => {
+    const format = Reflect.get(stripeTestObjects, 'formatHostedCheckoutBrowserDiagnostic')
+    expect(typeof format).toBe('function')
+    if (typeof format !== 'function') return
+
+    let stageReads = 0
+    const candidate = {
+      get stage() {
+        stageReads += 1
+        return stageReads === 1 ? 'BROWSER_LAUNCH' : 'unsafe formatter input'
+      },
+      failure: 'BROWSER',
+      submission: 'NOT_ATTEMPTED',
+      provider: 'NOT_OBSERVED',
+      redirect: 'NOT_OBSERVED',
+    }
+    const formatted = format(candidate)
+    expect(formatted).toBe(
+      'stage=BROWSER_LAUNCH failure=BROWSER submission=NOT_ATTEMPTED provider=NOT_OBSERVED redirect=NOT_OBSERVED',
+    )
+    expect(formatted).not.toContain('unsafe formatter input')
+  })
+
+  it('reports only the allowlisted checkout error code and status', async () => {
+    const toSafeError = Reflect.get(
+      stripeTestObjects,
+      'toSafeCheckoutCreationError',
+    )
+    expect(typeof toSafeError).toBe('function')
+    if (typeof toSafeError !== 'function') return
+
+    const response = Response.json({
+      error: {
+        code: 'INVALID_STRIPE_SESSION',
+        raw: 'customer@example.invalid sk_test_must_not_escape',
+      },
+    }, { status: 502 })
+    const safe = await toSafeError(response) as Error
+
+    expect(safe.message).toBe(
+      'Checkout creation failed: HTTP 502 INVALID_STRIPE_SESSION',
+    )
+    expect(safe.message).not.toContain('customer@example.invalid')
+    expect(safe.message).not.toContain('sk_test_')
+  })
+
+  it('defines the exact two-line three-admission cart and per-admission fee', () => {
+    expect(stripeTestObjects.applicationFeeMinor(5_500, 3)).toBe(425)
+    expect(Reflect.get(stripeTestObjects, 'TASK17_CART')).toEqual([
+      { label: 'ga', name: 'Task 17 General Admission', unitAmountMinor: 1_500, quantity: 2, subtotalMinor: 3_000 },
+      { label: 'vip', name: 'Task 17 VIP', unitAmountMinor: 2_500, quantity: 1, subtotalMinor: 2_500 },
+    ])
+    expect(Reflect.get(stripeTestObjects, 'TASK17_ADMISSION_QUANTITY')).toBe(3)
+    expect(Reflect.get(stripeTestObjects, 'TASK17_APPLICATION_FEE_MINOR')).toBe(425)
+  })
+
+  it('creates an independent canonical request ID and confirmation bearer for every checkout', () => {
+    const createAttempt = Reflect.get(stripeTestObjects, 'createStripeProofCheckoutAttempt')
+    expect(typeof createAttempt).toBe('function')
+    if (typeof createAttempt !== 'function') return
+
+    const first = createAttempt() as { clientRequestId: string; confirmationBearer: string }
+    const second = createAttempt() as { clientRequestId: string; confirmationBearer: string }
+    expect(first.clientRequestId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+    expect(first.confirmationBearer).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    expect(first.confirmationBearer).not.toContain(first.clientRequestId.replaceAll('-', ''))
+    expect(second).not.toEqual(first)
+  })
+
+  it('uses the shared whole-order refund helper and closes only the disposable Accounts v2 fixture', async () => {
+    const driver = await readFile(
       new URL('./edge/task17-transaction-driver/index.ts', import.meta.url),
       'utf8',
     )
-    expect(source).toContain('{ applied_configurations: connectedAccount.applied_configurations }')
-    expect(source).not.toContain('from("disputes").delete()')
+    expect(driver).toContain('createWholeOrderRefund(')
+    expect(driver).not.toContain('stripe.refunds.create(')
+    expect(driver).toContain('applied_configurations: connectedAccount.applied_configurations,')
+    expect(driver).not.toContain('from("disputes").delete()')
+  })
+
+  it('drives two bound lines, three tickets, safe confirmation, and exact cleanup accounting', async () => {
+    const [proofTest, driver] = await Promise.all([
+      readFile(new URL('./stripe-ticketing.test.ts', import.meta.url), 'utf8'),
+      readFile(new URL('./edge/task17-transaction-driver/index.ts', import.meta.url), 'utf8'),
+    ])
+    expect(proofTest).toContain("{ tierId: fixture.ga_tier_id, quantity: 2 }")
+    expect(proofTest).toContain("{ tierId: fixture.vip_tier_id, quantity: 1 }")
+    expect(proofTest).toContain("'X-Whereto-Confirmation-Bearer': attempt.confirmationBearer")
+    expect(proofTest).toContain('line_count: 2')
+    expect(proofTest).toContain('admission_count: 3')
+    expect(proofTest).toContain('ticket_count: 3')
+    expect(proofTest).toContain('unique_ticket_count: 3')
+    expect(proofTest).toContain('bindings_valid: true')
+    expect(proofTest).toContain("'deliver_paid_materialization_retry'")
+    expect(proofTest).toContain('statuses: [503, 200, 200]')
+    expect(proofTest).toContain('delivery_attempt_count: 3')
+    expect(proofTest).toContain("order_handle: 'paid'")
+    expect(proofTest).not.toContain('ticket.order_id')
+    expect(proofTest).not.toContain('ticket.id')
+    expect(proofTest).toContain('expect(safeConfirmation).not.toHaveProperty(\'ticket_id\')')
+    expect(proofTest).toContain('targeted_item_count: 4')
+    expect(proofTest).toContain('targeted_ticket_count: 3')
+    expect(proofTest).toContain('database_cleanup_required: true')
+    expect(proofTest).toContain('stable_fixture: true')
+    expect(proofTest).toContain('fixture_reusable: true')
+    expect(proofTest).toContain('auth_user_inert: true')
+    expect(proofTest).toContain('active_tier_count: 2')
+    expect(proofTest).toContain('close_connected_account: false')
+    expect(proofTest).toContain('connected_account_closed: false')
+    expect(proofTest).toContain('connected_account_preserved: true')
+    expect(proofTest).not.toContain('close_connected_account: true')
+    expect(driver).toContain('save_owned_event_requirements')
+    expect(driver).toContain('accept_current_event_policies')
+    expect(driver).toContain('publish_event')
+    expect(driver).toContain('server_get_checkout_preflight')
+    expect(driver).toContain('deliverPaidMaterializationRetry')
+    expect(driver).not.toContain('from("events").delete()')
+    expect(driver).not.toContain('from("organizers").delete()')
+    expect(driver).not.toContain('open_eligible_interval_count: 0')
+    expect(driver).toContain('line_bindings_valid: true')
   })
 })

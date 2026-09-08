@@ -2,8 +2,15 @@ import { getCorsHeaders, handleCorsPreflight } from "../_shared/cors.ts";
 import { getServiceClient } from "../_shared/database.ts";
 import { getAppBaseUrl } from "../_shared/env.ts";
 import { jsonResponse } from "../_shared/http.ts";
+import {
+  type CancellationAmbiguousOperationalErrorCode,
+  type CancellationBlockedOperationalErrorCode,
+  emitOperationalEvent,
+  type OperationalEventSink,
+} from "../_shared/operationalLog.ts";
 import { getStripe } from "../_shared/stripeClient.ts";
 import {
+  type CheckoutErrorCode,
   checkoutErrorResponse,
   CheckoutHttpError,
   defaultAnonymousRateLimit,
@@ -13,14 +20,30 @@ import {
   type RateLimitResult,
 } from "../stripe-create-checkout/index.ts";
 
+function cancellationAmbiguousOperationalErrorCode(
+  code: CheckoutErrorCode,
+): CancellationAmbiguousOperationalErrorCode {
+  switch (code) {
+    case "INVALID_STRIPE_SESSION":
+    case "STRIPE_REQUEST_FAILED":
+      return code;
+    default:
+      return "INTERNAL_ERROR";
+  }
+}
+
+function cancellationBlockedOperationalErrorCode(
+  code: CheckoutErrorCode,
+): CancellationBlockedOperationalErrorCode | null {
+  return code === "CHECKOUT_UNAVAILABLE" || code === "INVALID_STRIPE_SESSION"
+    ? code
+    : null;
+}
+
 const MAX_REQUEST_BYTES = 512;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SESSION_PATTERN = /^cs_test_[A-Za-z0-9]+$/;
-const CANCELLABLE_DATABASE_STATUSES = new Set([
-  "creating_checkout",
-  "checkout_open",
-]);
 const ORDER_STATUSES = new Set([
   "creating_checkout",
   "checkout_open",
@@ -34,9 +57,21 @@ const ORDER_STATUSES = new Set([
   "requires_review",
 ]);
 
+export type CancellationOrderStatus =
+  | "creating_checkout"
+  | "checkout_open"
+  | "payment_processing"
+  | "paid"
+  | "expired"
+  | "payment_failed"
+  | "cancelled"
+  | "partially_refunded"
+  | "refunded"
+  | "requires_review";
+
 export interface CancellationOrder {
   orderId: string;
-  status: string;
+  status: CancellationOrderStatus;
   stripeCheckoutSessionId: string | null;
 }
 
@@ -47,10 +82,12 @@ export interface StripeCancelCheckoutDependencies {
   retrieveSession(sessionId: string): Promise<unknown>;
   expireSession(sessionId: string): Promise<unknown>;
   releaseReservation(orderId: string, reason: string): Promise<void>;
+  operationalSink?: OperationalEventSink;
 }
 
 interface ValidatedCancellationSession {
   status: "open" | "complete" | "expired";
+  paymentStatus: "paid" | "unpaid";
 }
 
 async function readConfirmationToken(request: Request): Promise<string> {
@@ -102,12 +139,13 @@ function validateSession(
     value.object !== "checkout.session" || value.livemode !== false ||
     (value.status !== "open" && value.status !== "complete" &&
       value.status !== "expired") ||
+    (value.payment_status !== "paid" && value.payment_status !== "unpaid") ||
     !isRecord(value.metadata) ||
     value.metadata.order_id !== expectedOrderId
   ) {
     throw new CheckoutHttpError(502, "INVALID_STRIPE_SESSION");
   }
-  return { status: value.status };
+  return { status: value.status, paymentStatus: value.payment_status };
 }
 
 export async function defaultFindOrder(
@@ -136,7 +174,7 @@ export async function defaultFindOrder(
   }
   return {
     orderId: row.order_id,
-    status: row.status,
+    status: row.status as CancellationOrderStatus,
     stripeCheckoutSessionId: row.stripe_checkout_session_id,
   };
 }
@@ -161,6 +199,8 @@ export function createStripeCancelCheckoutHandler(
     const preflight = handleCorsPreflight(request, dependencies.appOrigin);
     if (preflight !== null) return preflight;
     const headers = getCorsHeaders(request, dependencies.appOrigin);
+    let order: CancellationOrder | null = null;
+    let cancellationOutcomeAmbiguous = false;
     try {
       if (!headers.has("access-control-allow-origin")) {
         throw new CheckoutHttpError(403, "CORS_ORIGIN_DENIED");
@@ -172,20 +212,23 @@ export function createStripeCancelCheckoutHandler(
       }
       const confirmationToken = await readConfirmationToken(request);
       const tokenHash = await hashConfirmationBearer(confirmationToken);
-      const order = await dependencies.findOrder(tokenHash);
+      order = await dependencies.findOrder(tokenHash);
       if (order === null) {
         throw new CheckoutHttpError(404, "CHECKOUT_NOT_FOUND");
       }
 
-      if (!CANCELLABLE_DATABASE_STATUSES.has(order.status)) {
-        return jsonResponse({ cancelled: true }, 200, headers);
+      const orderStatus = order.status;
+      const alreadyReleased = orderStatus === "cancelled" ||
+        orderStatus === "expired" || orderStatus === "payment_failed";
+      if (
+        orderStatus !== "creating_checkout" &&
+        orderStatus !== "checkout_open" &&
+        !alreadyReleased
+      ) {
+        throw new CheckoutHttpError(409, "CHECKOUT_UNAVAILABLE");
       }
       if (order.stripeCheckoutSessionId === null) {
-        await dependencies.releaseReservation(
-          order.orderId,
-          "CHECKOUT_CANCELLED",
-        );
-        return jsonResponse({ cancelled: true }, 200, headers);
+        throw new CheckoutHttpError(409, "CHECKOUT_UNAVAILABLE");
       }
 
       let retrieved: unknown;
@@ -194,15 +237,43 @@ export function createStripeCancelCheckoutHandler(
           order.stripeCheckoutSessionId,
         );
       } catch {
+        cancellationOutcomeAmbiguous = true;
         throw new CheckoutHttpError(502, "STRIPE_REQUEST_FAILED");
       }
-      const session = validateSession(
-        retrieved,
-        order.stripeCheckoutSessionId,
-        order.orderId,
-      );
-      if (session.status === "complete") {
+      let session: ValidatedCancellationSession;
+      try {
+        session = validateSession(
+          retrieved,
+          order.stripeCheckoutSessionId,
+          order.orderId,
+        );
+      } catch (error) {
+        cancellationOutcomeAmbiguous = true;
+        throw error;
+      }
+      const confirmedAsyncFailure = orderStatus === "payment_failed" &&
+        session.status === "complete" && session.paymentStatus === "unpaid";
+      if (session.status === "complete" && !confirmedAsyncFailure) {
         // Webhook persistence may lag Checkout completion; never downgrade it here.
+        throw new CheckoutHttpError(409, "CHECKOUT_UNAVAILABLE");
+      }
+      if (session.paymentStatus !== "unpaid") {
+        throw new CheckoutHttpError(502, "INVALID_STRIPE_SESSION");
+      }
+      if (alreadyReleased) {
+        // A database release alone cannot prove an attached provider checkout is terminal.
+        if (session.status !== "expired" && !confirmedAsyncFailure) {
+          throw new CheckoutHttpError(409, "CHECKOUT_UNAVAILABLE");
+        }
+        emitOperationalEvent({
+          contractVersion: "checkout_integrity_v1",
+          operation: "checkout.cancel",
+          outcome: "no_transition",
+          orderId: order.orderId,
+          providerObjectId: order.stripeCheckoutSessionId,
+          priorStatus: orderStatus,
+          resultStatus: orderStatus,
+        }, dependencies.operationalSink);
         return jsonResponse({ cancelled: true }, 200, headers);
       }
       if (session.status === "open") {
@@ -212,23 +283,77 @@ export function createStripeCancelCheckoutHandler(
             order.stripeCheckoutSessionId,
           );
         } catch {
+          cancellationOutcomeAmbiguous = true;
           throw new CheckoutHttpError(502, "STRIPE_REQUEST_FAILED");
         }
-        const result = validateSession(
-          expired,
-          order.stripeCheckoutSessionId,
-          order.orderId,
-        );
-        if (result.status !== "expired") {
+        let result: ValidatedCancellationSession;
+        try {
+          result = validateSession(
+            expired,
+            order.stripeCheckoutSessionId,
+            order.orderId,
+          );
+        } catch (error) {
+          cancellationOutcomeAmbiguous = true;
+          throw error;
+        }
+        if (result.status !== "expired" || result.paymentStatus !== "unpaid") {
           throw new CheckoutHttpError(502, "INVALID_STRIPE_SESSION");
         }
       }
-      await dependencies.releaseReservation(
-        order.orderId,
-        "CHECKOUT_CANCELLED",
-      );
+      try {
+        await dependencies.releaseReservation(
+          order.orderId,
+          "CHECKOUT_CANCELLED",
+        );
+      } catch (error) {
+        cancellationOutcomeAmbiguous = true;
+        throw error;
+      }
+      emitOperationalEvent({
+        contractVersion: "checkout_integrity_v1",
+        operation: "checkout.cancel",
+        outcome: "cancelled",
+        orderId: order.orderId,
+        providerObjectId: order.stripeCheckoutSessionId,
+        priorStatus: orderStatus,
+        resultStatus: "cancelled",
+      }, dependencies.operationalSink);
       return jsonResponse({ cancelled: true }, 200, headers);
     } catch (error) {
+      const safeError = error instanceof CheckoutHttpError
+        ? error
+        : new CheckoutHttpError(500, "INTERNAL_ERROR");
+      if (order !== null) {
+        if (cancellationOutcomeAmbiguous) {
+          emitOperationalEvent({
+            contractVersion: "checkout_integrity_v1",
+            operation: "checkout.cancel",
+            outcome: "ambiguous",
+            orderId: order.orderId,
+            providerObjectId: order.stripeCheckoutSessionId ?? undefined,
+            priorStatus: order.status,
+            errorCode: cancellationAmbiguousOperationalErrorCode(
+              safeError.code,
+            ),
+          }, dependencies.operationalSink);
+        } else {
+          const blockedErrorCode = cancellationBlockedOperationalErrorCode(
+            safeError.code,
+          );
+          if (blockedErrorCode !== null) {
+            emitOperationalEvent({
+              contractVersion: "checkout_integrity_v1",
+              operation: "checkout.cancel",
+              outcome: "blocked",
+              orderId: order.orderId,
+              providerObjectId: order.stripeCheckoutSessionId ?? undefined,
+              priorStatus: order.status,
+              errorCode: blockedErrorCode,
+            }, dependencies.operationalSink);
+          }
+        }
+      }
       return checkoutErrorResponse(error, headers);
     }
   };

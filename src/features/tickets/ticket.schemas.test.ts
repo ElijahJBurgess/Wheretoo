@@ -72,15 +72,42 @@ describe('ticketTiersInputSchema', () => {
     >(true)
     assertGeneratedDatabaseSurface<IsExact<PublicTicketTier['currency'], 'usd'>>(true)
     assertGeneratedDatabaseSurface<
-      IsExact<keyof OrderConfirmation, 'event' | 'orderNumber' | 'status' | 'tier'>
+      IsExact<
+        keyof OrderConfirmation,
+        | 'currency'
+        | 'event'
+        | 'items'
+        | 'orderNumber'
+        | 'quantity'
+        | 'status'
+        | 'subtotalMinor'
+        | 'taxAmountMinor'
+        | 'totalMinor'
+      >
     >(true)
     assertGeneratedDatabaseSurface<
-      IsExact<OrderConfirmation['status'], 'processing' | 'paid' | 'failed' | 'expired' | 'refunded'>
+      IsExact<
+        OrderConfirmation['status'],
+        | 'processing'
+        | 'paid'
+        | 'payment_failed'
+        | 'cancelled'
+        | 'expired'
+        | 'refunded'
+        | 'requires_review'
+      >
     >(true)
     assertGeneratedDatabaseSurface<
       IsExact<keyof OrderConfirmation['event'], 'endsAt' | 'startsAt' | 'timezone' | 'title' | 'venueName'>
     >(true)
-    assertGeneratedDatabaseSurface<IsExact<keyof OrderConfirmation['tier'], 'name'>>(true)
+    assertGeneratedDatabaseSurface<
+      IsExact<
+        keyof OrderConfirmation['items'][number],
+        'currency' | 'quantity' | 'subtotalMinor' | 'tierName' | 'unitAmountMinor'
+      >
+    >(true)
+    assertGeneratedDatabaseSurface<IsExact<OrderConfirmation['currency'], 'usd'>>(true)
+    assertGeneratedDatabaseSurface<IsExact<OrderConfirmation['taxAmountMinor'], 0>>(true)
 
     expect(true).toBe(true)
   })

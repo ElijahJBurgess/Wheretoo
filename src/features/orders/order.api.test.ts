@@ -15,9 +15,17 @@ const confirmation = {
     timezone: 'America/Los_Angeles',
     venueName: 'Civic Center Plaza',
   },
-  tier: { name: 'General admission' },
+  items: [
+    { tierName: 'General admission', quantity: 2, unitAmountMinor: 2500, subtotalMinor: 5000, currency: 'usd' },
+    { tierName: 'VIP', quantity: 1, unitAmountMinor: 5000, subtotalMinor: 5000, currency: 'usd' },
+  ],
   orderNumber: 'WT-260901-0042',
   status: 'paid',
+  quantity: 3,
+  currency: 'usd',
+  subtotalMinor: 10000,
+  taxAmountMinor: 0,
+  totalMinor: 10000,
 } as const
 
 describe('order confirmation API', () => {
@@ -30,7 +38,7 @@ describe('order confirmation API', () => {
     await expect(fingerprintConfirmationToken(`${token}=`)).rejects.toEqual(new OrderApiError('ORDER_NOT_FOUND'))
   })
 
-  it('posts only the bearer and accepts the exact minimal confirmation projection', async () => {
+  it('posts only the bearer and accepts the exact multi-item confirmation projection', async () => {
     invoke.mockResolvedValue({ data: confirmation, error: null })
 
     await expect(getOrderConfirmation(token)).resolves.toEqual(confirmation)
@@ -40,11 +48,22 @@ describe('order confirmation API', () => {
     })
   })
 
-  it('rejects response disclosure or impossible status with a safe error', async () => {
+  it('accepts each exact confirmation lifecycle status', async () => {
+    for (const status of ['processing', 'paid', 'payment_failed', 'cancelled', 'expired', 'refunded', 'requires_review'] as const) {
+      invoke.mockResolvedValueOnce({ data: { ...confirmation, status }, error: null })
+      await expect(getOrderConfirmation(token)).resolves.toMatchObject({ status })
+    }
+  })
+
+  it('rejects response disclosure, unsafe money, or impossible status with a safe error', async () => {
     for (const data of [
       { ...confirmation, buyerEmail: 'buyer@example.invalid' },
-      { ...confirmation, status: 'requires_review' },
+      { ...confirmation, status: 'failed' },
       { ...confirmation, event: { ...confirmation.event, stripeChargeId: 'ch_private' } },
+      { ...confirmation, items: [{ ...confirmation.items[0], ticketId: 'private' }] },
+      { ...confirmation, items: [{ ...confirmation.items[0], subtotalMinor: 1 }], subtotalMinor: 1, totalMinor: 1, quantity: 2 },
+      { ...confirmation, taxAmountMinor: 1, totalMinor: 10001 },
+      { ...confirmation, totalMinor: Number.MAX_SAFE_INTEGER + 1 },
     ]) {
       invoke.mockResolvedValueOnce({ data, error: null })
       await expect(getOrderConfirmation(token)).rejects.toEqual(new OrderApiError('ORDER_UNAVAILABLE'))

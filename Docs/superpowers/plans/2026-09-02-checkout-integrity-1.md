@@ -1224,7 +1224,7 @@ git commit -m "test: prove linked checkout cart contracts"
 
 - [ ] **Step 1: Write harness/runner RED**
 
-Assert setup creates GA/VIP, checkout request is `2 + 1` with an independently random bearer header, status/reconciliation sees two lines/three admissions, refund uses both required flags, and cleanup accounts for all item/ticket rows. Simulate test failure and prove switch, temporary function, secrets, local materialization, database fixture, and disposable connected account cleanup still run.
+Assert setup creates GA/VIP, checkout request is `2 + 1` with an independently random bearer header, status/reconciliation sees two lines/three admissions, refund uses both required flags, and cleanup accounts for all item/ticket rows. Simulate test failure and prove the switch is restored, temporary function/secrets/materialization are removed, the Whereto fixture returns to its inert audit tombstone, and the connected TEST account is preserved. Account retirement is success-only after postflight cleanup and tombstone certification.
 
 - [ ] **Step 2: Observe RED without real Stripe**
 
@@ -1282,6 +1282,7 @@ git commit -m "test: expand real Stripe checkout proof"
 
 **Files:**
 - Evidence only in an ignored secure temporary directory; do not commit generated evidence, Checkout URLs, IDs, screenshots containing PII, or credentials.
+- Targeted harness correction: `supabase/migrations/20260902010550_add_scoped_checkout_fixture_moderation.sql`, `supabase/tests/database/checkout_integrity_fixture_moderation.test.sql`, the committed Task 13 runner/driver contract files, and the two Task 13 verification documents. This correction adds no product checkout behavior and grants no fixture staff role.
 
 **Interfaces:**
 - Deploy order: webhook, order confirmation, cancellation, checkout creation.
@@ -1340,13 +1341,16 @@ whole-order refund succeeds
 transfer reversal equals refunded order amount
 application-fee refund equals persisted application fee
 database/Stripe reconciliation passes
-fixture cleanup and zero residue pass
+fixture cleanup leaves zero harmful runtime/financial residue
+immutable moderation and eligibility history remains intact
+the inert audit tombstone passes final certification
 prior checkout-switch state is restored
+the disposable TEST account is retired only after all preceding checks pass
 ```
 
 - [ ] **Step 5: Rerun security/reconciliation checks**
 
-Run the read-only queries from `Docs/runbooks/checkout-integrity-operations.md`, the nonprinting tracked/staged credential gate, and function/temporary-secret absence checks. Expected: no unexplained mismatch/review/stale reservation, no deployed temporary driver, no temporary secrets, no local materialization, and no credential artifact.
+Run the read-only queries from `Docs/runbooks/checkout-integrity-operations.md`, the nonprinting tracked/staged credential gate, and function/temporary-secret absence checks. Expected: no unexplained mismatch/review/stale reservation, no deployed temporary driver, no temporary secrets, no local materialization, no credential artifact, no fixture staff role, and no active tier, Connect binding, public projection, open eligible interval, order, ticket, refund, receipt, or fulfillment residue. The retained inert event/organizer/Auth shell and immutable audit history are expected and required.
 
 - [ ] **Step 6: Independent payment-critical review**
 
@@ -1497,11 +1501,20 @@ pnpm typecheck:functions
 pnpm test:integration:ticketing-db
 ```
 
-After all checks pass, the database owner sets `checkout_creation_enabled = true` in linked development and verifies one new cart request reaches the new overload. Re-disabling it must still leave webhook/cancel/expiry/refund/confirmation operational.
+After all checks pass, keep `checkout_creation_enabled = false` in linked
+development and verify the new overload through the rollback-only database
+contract and the bounded, guarded TEST-mode proof. Passing these checks is not
+authorization to enable sales. Any later enablement requires a separate,
+explicit owner decision after the full release gate; disabling creation must
+continue to leave webhook/cancel/expiry/refund/confirmation operational.
 
 - [ ] **Step 7: Record forward-fix rollback procedure**
 
-If a defect appears after any multi-item order/Session exists: disable new creation, keep lifecycle processing on, do not revert migration 7 or deploy singular code, add a forward migration/release, reconcile existing orders, rerun the affected gates, then re-enable.
+If a defect appears after any multi-item order/Session exists: disable new
+creation, keep lifecycle processing on, do not revert migration 7 or deploy
+singular code, add a forward migration/release, reconcile existing orders, and
+rerun the affected gates. Re-enablement remains a separate owner-authorized
+launch decision.
 
 ---
 

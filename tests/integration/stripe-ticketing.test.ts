@@ -1,6 +1,18 @@
 import { randomUUID } from 'node:crypto'
-import { chromium, type Locator, type Page } from '@playwright/test'
+import { chromium, type Browser, type Locator, type Page } from '@playwright/test'
 import { describe, expect, it } from 'vitest'
+import {
+  createStripeProofCheckoutAttempt,
+  formatHostedCheckoutBrowserDiagnostic,
+  type HostedCheckoutBrowserDiagnostic,
+  runHostedCheckoutBrowserDiagnostic,
+  TASK17_ADMISSION_QUANTITY,
+  TASK17_APPLICATION_FEE_MINOR,
+  TASK17_CART,
+  TASK17_ORGANIZER_PROCEEDS_MINOR,
+  TASK17_SUBTOTAL_MINOR,
+  toSafeCheckoutCreationError,
+} from './stripeTestObjects'
 import { createManagedStripeProofClient } from './stripeWebhookHarness'
 import { loadStripeIntegrationTestEnv } from './testEnv'
 
@@ -8,48 +20,123 @@ const env = loadStripeIntegrationTestEnv()
 const proof = createManagedStripeProofClient(env)
 
 type OrderRow = {
-  id: string
-  buyer_email: string
+  order_handle: 'paid' | 'declined'
   status: string
   failure_code: string | null
-  stripe_checkout_session_id: string | null
+  reconciliation_status: string
+  subtotal_minor: number
+  total_minor: number
+  application_fee_amount_minor: number
+  expected_organizer_proceeds_minor: number
+}
+
+type OrderItemRow = {
+  order_handle: 'paid' | 'declined'
+  tier_label: 'ga' | 'vip'
+  tier_name: string
+  unit_amount_minor: number
+  quantity: number
+  subtotal_minor: number
+  currency: string
+}
+
+type TicketSet = {
+  order_handle: 'paid' | 'declined'
+  ticket_count: number
+  unique_ticket_count: number
+  valid_count: number
+  refunded_count: number
+  bindings_valid: boolean
+  sequences_valid: boolean
+  refunded_timestamps_valid: boolean
 }
 
 type Inspection = {
   ok: boolean
   orders: OrderRow[]
-  items: Array<{ order_id: string }>
-  tickets: Array<{ order_id: string; status: string }>
-  refunds: Array<{ order_id: string; status: string }>
+  items: OrderItemRow[]
+  tickets: TicketSet[]
+  refunds: Array<{
+    order_handle: 'paid' | 'declined'
+    status: string
+    amount_minor: number
+    reverse_transfer: boolean
+    refund_application_fee: boolean
+    transfer_reversal_amount_minor: number
+    application_fee_refund_amount_minor: number
+    policy_verified: boolean
+    policy_failure_code: string | null
+  }>
   receipts: Array<{
-    stripe_event_id: string
+    event_type: string
     processing_status: string
     delivery_attempt_count: number
     error_code: string | null
   }>
   inventory: Array<{
-    ticket_tier_id: string
+    tier_label: 'ga' | 'vip'
     quantity_total: number
     reserved_quantity: number
     available_quantity: number
   }>
 }
 
-function eventDescriptor(type: string, object: string, objectId: string) {
+type Setup = {
+  ok: boolean
+  event_id: string
+  ga_tier_id: string
+  vip_tier_id: string
+  items: Array<{
+    label: 'ga' | 'vip'
+    tier_id: string
+    name: string
+    unit_amount_minor: number
+    quantity: number
+    subtotal_minor: number
+    currency: 'usd'
+  }>
+  quantity: number
+  subtotal_minor: number
+  total_minor: number
+  application_fee_minor: number
+  organizer_proceeds_minor: number
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function eventDescriptor(
+  type: 'checkout.session.completed' | 'checkout.session.expired' | 'refund.updated',
+  object: 'checkout.session' | 'refund',
+  orderHandle: 'paid' | 'declined',
+) {
   return {
-    event_id: `evt_task17${randomUUID().replaceAll('-', '')}`,
+    event_handle: randomUUID(),
     type,
     object,
-    object_id: objectId,
+    order_handle: orderHandle,
     created: Math.floor(Date.now() / 1_000),
   }
 }
 
+function isHostedTestCheckoutUrl(value: unknown): value is string {
+  if (typeof value !== 'string') return false
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' && url.hostname === 'checkout.stripe.com' &&
+      url.username === '' && url.password === '' && url.search === '' &&
+      /^\/c\/pay\/cs_test_[A-Za-z0-9]+$/.test(url.pathname)
+  } catch {
+    return false
+  }
+}
+
 async function createCheckout(
-  eventId: string,
-  tierId: string,
-  email: string,
-): Promise<{ checkoutUrl: string }> {
+  fixture: Setup,
+  orderHandle: 'paid' | 'declined',
+): Promise<{ checkoutUrl: string; confirmationBearer: string }> {
+  const attempt = createStripeProofCheckoutAttempt()
   const response = await fetch(`${env.supabaseUrl}/functions/v1/stripe-create-checkout`, {
     method: 'POST',
     headers: {
@@ -57,19 +144,25 @@ async function createCheckout(
       authorization: `Bearer ${env.supabasePublishableKey}`,
       'content-type': 'application/json',
       origin: 'http://127.0.0.1:3000',
+      'X-Whereto-Confirmation-Bearer': attempt.confirmationBearer,
     },
     body: JSON.stringify({
-      eventId,
-      tierId,
-      guestName: 'Task 17 Buyer',
-      guestEmail: email,
-      clientRequestId: randomUUID(),
+      eventId: fixture.event_id,
+      buyerName: 'Task 17 Buyer',
+      buyerEmail: `${env.fixturePrefix}-${orderHandle}@example.invalid`,
+      clientRequestId: attempt.clientRequestId,
+      items: [
+        { tierId: fixture.ga_tier_id, quantity: 2 },
+        { tierId: fixture.vip_tier_id, quantity: 1 },
+      ],
     }),
   })
-  expect(response.status).toBe(200)
-  const value = await response.json() as { checkoutUrl?: unknown }
-  expect(value.checkoutUrl).toEqual(expect.stringMatching(/^https:\/\/checkout\.stripe\.com\//))
-  return { checkoutUrl: value.checkoutUrl as string }
+  if (!response.ok) throw await toSafeCheckoutCreationError(response)
+  const value: unknown = await response.json()
+  if (!isRecord(value) || Object.keys(value).length !== 1 || !isHostedTestCheckoutUrl(value.checkoutUrl)) {
+    throw new Error('Checkout creation returned an unsafe response')
+  }
+  return { checkoutUrl: value.checkoutUrl, confirmationBearer: attempt.confirmationBearer }
 }
 
 async function visibleTextbox(page: Page, name: string): Promise<Locator> {
@@ -83,52 +176,151 @@ async function visibleTextbox(page: Page, name: string): Promise<Locator> {
   throw new Error(`Timed out waiting for hosted Checkout field: ${name}`)
 }
 
-async function exerciseHostedCheckout(url: string, cardNumber: string, outcome: 'paid' | 'declined') {
-  const browser = await chromium.launch({ headless: true })
-  try {
-    const page = await browser.newPage()
-    await page.goto(url)
-    const card = page.getByRole('radio', { name: 'Card' })
-    if (!(await card.isChecked())) await card.check({ force: true })
-    const cardNumberInput = await visibleTextbox(page, 'Card number')
-    await cardNumberInput.fill(cardNumber)
-    await (await visibleTextbox(page, 'Expiration')).fill('1234')
-    await (await visibleTextbox(page, 'CVC')).fill('123')
-    await (await visibleTextbox(page, 'Cardholder name')).fill('Task Seventeen')
-    await (await visibleTextbox(page, 'ZIP')).fill('94103')
-    const save = page.getByRole('checkbox', { name: 'Save my information for faster checkout' }).filter({ visible: true }).first()
-    if (await save.isChecked()) await save.uncheck()
-    const disclosure = page.getByRole('checkbox', { name: 'I am an AI agent acting on behalf of someone else' }).filter({ visible: true }).first()
-    await disclosure.evaluate((element: HTMLInputElement) => element.click())
-    expect(await disclosure.isChecked()).toBe(true)
-    await page.getByRole('button', { name: 'Pay', exact: true }).filter({ visible: true }).first().click()
-    if (outcome === 'paid') {
-      await page.waitForURL((value) => value.origin === 'http://127.0.0.1:3000', { timeout: 30_000 })
-    } else {
-      const alert = page.getByRole('alert')
-      await alert.waitFor({ timeout: 30_000 })
-      expect((await alert.textContent())?.toLowerCase()).toContain('declined')
-    }
-  } finally {
-    await browser.close()
+async function exerciseHostedCheckout(
+  url: string,
+  cardNumber: string,
+  readProviderAcceptance: () => Promise<boolean>,
+): Promise<HostedCheckoutBrowserDiagnostic> {
+  let browser: Browser | undefined
+  let page: Page | undefined
+  let payButton: Locator | undefined
+
+  const currentPage = () => {
+    if (page === undefined) throw new Error('Hosted Checkout page unavailable')
+    return page
   }
+
+  try {
+    return await runHostedCheckoutBrowserDiagnostic({
+      launchBrowser: async () => {
+        browser = await chromium.launch({ headless: true })
+      },
+      openCheckoutUrl: async () => {
+        if (browser === undefined) throw new Error('Hosted Checkout browser unavailable')
+        page = await browser.newPage()
+        const response = await page.goto(url, { waitUntil: 'commit' })
+        if (response === null) throw new Error('Hosted Checkout response unavailable')
+      },
+      waitForHostedDocument: async () => {
+        await currentPage().waitForLoadState('domcontentloaded')
+      },
+      ensurePaymentMethodForm: async () => {
+        const card = currentPage().getByRole('radio', { name: 'Card' })
+        if (!(await card.isChecked())) await card.check({ force: true })
+      },
+      fillCardNumber: async () => {
+        await (await visibleTextbox(currentPage(), 'Card number')).fill(cardNumber)
+      },
+      fillCardExpiration: async () => {
+        await (await visibleTextbox(currentPage(), 'Expiration')).fill('1234')
+      },
+      fillCardCvc: async () => {
+        await (await visibleTextbox(currentPage(), 'CVC')).fill('123')
+      },
+      fillCardholderName: async () => {
+        await (await visibleTextbox(currentPage(), 'Cardholder name')).fill('Task Seventeen')
+      },
+      fillPostalCode: async () => {
+        await (await visibleTextbox(currentPage(), 'ZIP')).fill('94103')
+      },
+      interactOptionalSaveControl: async () => {
+        const save = currentPage().getByRole('checkbox', {
+          name: 'Save my information for faster checkout',
+        }).filter({ visible: true }).first()
+        if (await save.isChecked()) await save.uncheck()
+      },
+      interactAuxiliaryDisclosureControl: async () => {
+        const disclosure = currentPage().getByRole('checkbox', {
+          name: 'I am an AI agent acting on behalf of someone else',
+        }).filter({ visible: true }).first()
+        await disclosure.evaluate((element: HTMLInputElement) => element.click())
+        expect(await disclosure.isChecked()).toBe(true)
+      },
+      ensurePaymentSubmissionActionable: async () => {
+        payButton = currentPage().getByRole('button', {
+          name: 'Pay',
+          exact: true,
+        }).filter({ visible: true }).first()
+        await payButton.click({ trial: true })
+      },
+      dispatchPaymentSubmission: async () => {
+        if (payButton === undefined) throw new Error('Hosted Checkout submit control unavailable')
+        await payButton.click({ noWaitAfter: true })
+      },
+      readHostedProviderRejection: async () => {
+        const alert = currentPage().getByRole('alert')
+        if (!(await alert.isVisible())) return false
+        return (await alert.textContent())?.toLowerCase().includes('declined') === true
+      },
+      readProviderAcceptance,
+      waitForProviderObservationRetry: async () => {
+        await currentPage().waitForTimeout(100)
+      },
+      observeLocalReturnRedirect: async (provider) => {
+        if (provider === 'ACCEPTED') {
+          await currentPage().waitForURL(
+            (value) => value.origin === 'http://127.0.0.1:3000',
+            { timeout: 30_000 },
+          )
+          return 'OBSERVED'
+        }
+        try {
+          return new URL(currentPage().url()).origin === 'http://127.0.0.1:3000'
+            ? 'OBSERVED'
+            : 'NOT_OBSERVED'
+        } catch {
+          throw new Error('Hosted Checkout return location invalid')
+        }
+      },
+    })
+  } finally {
+    await browser?.close().catch(() => undefined)
+  }
+}
+
+async function readAcceptedCheckoutStatus(orderHandle: 'paid' | 'declined'): Promise<boolean> {
+  const status = await proof.invoke<Record<string, unknown>>('checkout_status', {
+    order_handle: orderHandle,
+  })
+  return status.ok === true && status.livemode === false &&
+    status.status === 'complete' && status.payment_status === 'paid' &&
+    status.charge_paid === true
 }
 
 async function inspect(eventId: string): Promise<Inspection> {
   return await proof.invoke<Inspection>('inspect', { event_id: eventId })
 }
 
-async function waitForOrder(eventId: string, email: string): Promise<OrderRow> {
+async function waitForOrder(eventId: string, orderHandle: 'paid' | 'declined'): Promise<OrderRow> {
   for (let attempt = 0; attempt < 20; attempt += 1) {
-    const order = (await inspect(eventId)).orders.find((candidate) => candidate.buyer_email === email)
-    if (order?.stripe_checkout_session_id) return order
+    const orders = (await inspect(eventId)).orders.filter((order) => order.order_handle === orderHandle)
+    if (orders.length === 1) return orders[0]
+    if (orders.length > 1) throw new Error('Checkout created multiple orders for one proof handle')
     await new Promise((resolve) => setTimeout(resolve, 250))
   }
-  throw new Error(`Timed out waiting for Task 17 order: ${email}`)
+  throw new Error('Timed out waiting for Task 17 order')
+}
+
+async function confirmation(confirmationBearer: string): Promise<Record<string, unknown>> {
+  const response = await fetch(`${env.supabaseUrl}/functions/v1/order-confirmation`, {
+    method: 'POST',
+    headers: {
+      apikey: env.supabasePublishableKey,
+      authorization: `Bearer ${env.supabasePublishableKey}`,
+      'content-type': 'application/json',
+      origin: 'http://127.0.0.1:3000',
+    },
+    body: JSON.stringify({ confirmationToken: confirmationBearer }),
+  })
+  expect(response.status).toBe(200)
+  const value: unknown = await response.json()
+  if (!isRecord(value)) throw new Error('Confirmation returned an unsafe response')
+  return value
 }
 
 describe('real Stripe test-mode ticket transaction', () => {
-  it('drives every signed delivery and reconciles exact Stripe and Supabase truth', async () => {
+  it.skipIf(process.env.TASK13_BROWSER_DIAGNOSTIC_ONLY === '1')(
+    'drives every signed delivery and reconciles exact Stripe and Supabase truth', async () => {
     const server = await proof.invoke<Record<string, unknown>>('server_proof')
     expect(server).toMatchObject({
       ok: true,
@@ -141,79 +333,168 @@ describe('real Stripe test-mode ticket transaction', () => {
       requirements_status: 'clear',
     })
 
-    const fixture = await proof.invoke<{
-      ok: boolean
-      event_id: string
-      tier_id: string
-      subtotal_minor: number
-      application_fee_minor: number
-    }>('setup')
+    const fixture = await proof.invoke<Setup>('setup')
     expect(fixture).toMatchObject({
       ok: true,
-      subtotal_minor: 3_001,
-      application_fee_minor: 200,
+      quantity: TASK17_ADMISSION_QUANTITY,
+      subtotal_minor: TASK17_SUBTOTAL_MINOR,
+      total_minor: TASK17_SUBTOTAL_MINOR,
+      application_fee_minor: TASK17_APPLICATION_FEE_MINOR,
+      organizer_proceeds_minor: TASK17_ORGANIZER_PROCEEDS_MINOR,
+      items: TASK17_CART.map((item) => ({
+        label: item.label,
+        name: item.name,
+        unit_amount_minor: item.unitAmountMinor,
+        quantity: item.quantity,
+        subtotal_minor: item.subtotalMinor,
+        currency: 'usd',
+      })),
     })
+    expect(Object.keys(fixture).some((key) => /secret|bearer|url/i.test(key))).toBe(false)
+    expect(new Set([fixture.ga_tier_id, fixture.vip_tier_id]).size).toBe(2)
 
-    const paidEmail = `${env.fixturePrefix}-paid@example.invalid`
-    const paidCheckout = await createCheckout(fixture.event_id, fixture.tier_id, paidEmail)
-    const paidOrder = await waitForOrder(fixture.event_id, paidEmail)
-    await exerciseHostedCheckout(paidCheckout.checkoutUrl, '4242424242424242', 'paid')
+    expect((await inspect(fixture.event_id)).orders).not.toContainEqual(
+      expect.objectContaining({ order_handle: 'paid' }),
+    )
+    const paidCheckout = await createCheckout(fixture, 'paid')
+    await waitForOrder(fixture.event_id, 'paid')
+    expect(await exerciseHostedCheckout(
+      paidCheckout.checkoutUrl,
+      '4242424242424242',
+      () => readAcceptedCheckoutStatus('paid'),
+    )).toEqual({
+      stage: 'LOCAL_RETURN_REDIRECT',
+      failure: 'NONE',
+      submission: 'ATTEMPTED',
+      provider: 'ACCEPTED',
+      redirect: 'OBSERVED',
+    })
     await expect(proof.invoke('checkout_status', {
-      session_id: paidOrder.stripe_checkout_session_id,
+      order_handle: 'paid',
     })).resolves.toMatchObject({
       ok: true,
       livemode: false,
       status: 'complete',
       payment_status: 'paid',
-      amount_total: 3_001,
-      application_fee_amount: 200,
+      amount_total: TASK17_SUBTOTAL_MINOR,
+      application_fee_amount: TASK17_APPLICATION_FEE_MINOR,
       charge_paid: true,
+      line_bindings_valid: true,
+      line_count: 2,
+      admission_count: 3,
+      lines: TASK17_CART.map((item) => ({
+        tier_name: item.name,
+        unit_amount_minor: item.unitAmountMinor,
+        quantity: item.quantity,
+        subtotal_minor: item.subtotalMinor,
+        currency: 'usd',
+        binding: 'order_item',
+      })),
     })
 
     const paidEvent = eventDescriptor(
       'checkout.session.completed',
       'checkout.session',
-      paidOrder.stripe_checkout_session_id!,
+      'paid',
     )
-    const paidFirst = await proof.invoke<{ status: number }>('deliver', { event: paidEvent })
-    const paidDuplicate = await proof.invoke<{
-      status: number
-      receipt: { delivery_attempt_count: number; processing_status: string }
-    }>('deliver', { event: paidEvent })
-    expect([paidFirst.status, paidDuplicate.status]).toEqual([200, 200])
-    expect(paidDuplicate.receipt).toMatchObject({
-      delivery_attempt_count: 2,
-      processing_status: 'processed',
-    })
+    const paidDelivery = await proof.invoke<{
+      statuses: [number, number, number]
+      receipt: {
+        event_type: string
+        delivery_attempt_count: number
+        processing_status: string
+        error_code: string | null
+      }
+    }>('deliver_paid_materialization_retry', { event: paidEvent })
     let state = await inspect(fixture.event_id)
-    expect(state.orders.find((order) => order.id === paidOrder.id)?.status).toBe('paid')
-    expect(state.items.filter((item) => item.order_id === paidOrder.id)).toHaveLength(1)
-    expect(state.tickets.filter((ticket) => ticket.order_id === paidOrder.id)).toHaveLength(1)
+    const paidItems = state.items.filter((item) => item.order_handle === 'paid')
+    const paidTickets = state.tickets.find((tickets) => tickets.order_handle === 'paid')
+    expect(paidDelivery).toMatchObject({
+      statuses: [503, 200, 200],
+      receipt: {
+        event_type: 'checkout.session.completed',
+        delivery_attempt_count: 3,
+        processing_status: 'processed',
+        error_code: null,
+      },
+    })
+    expect(state.orders.find((order) => order.order_handle === 'paid')).toMatchObject({
+      status: 'paid',
+      reconciliation_status: 'reconciled',
+      failure_code: null,
+    })
+    expect(paidItems).toHaveLength(2)
+    expect(paidItems.map((item) => item.quantity).sort()).toEqual([1, 2])
+    expect(paidTickets).toMatchObject({
+      ticket_count: 3,
+      unique_ticket_count: 3,
+      valid_count: 3,
+      refunded_count: 0,
+      bindings_valid: true,
+      sequences_valid: true,
+      refunded_timestamps_valid: true,
+    })
 
-    const declinedEmail = `${env.fixturePrefix}-declined@example.invalid`
-    const declinedCheckout = await createCheckout(fixture.event_id, fixture.tier_id, declinedEmail)
-    const declinedOrder = await waitForOrder(fixture.event_id, declinedEmail)
-    await exerciseHostedCheckout(declinedCheckout.checkoutUrl, '4000000000000002', 'declined')
+    const safeConfirmation = await confirmation(paidCheckout.confirmationBearer)
+    expect(safeConfirmation).not.toHaveProperty('ticket_id')
+    expect(safeConfirmation).not.toHaveProperty('ticketIds')
+    expect(safeConfirmation).toMatchObject({
+      status: 'paid',
+      quantity: 3,
+      currency: 'usd',
+      subtotalMinor: TASK17_SUBTOTAL_MINOR,
+      taxAmountMinor: 0,
+      totalMinor: TASK17_SUBTOTAL_MINOR,
+      items: TASK17_CART.map((item) => ({
+        tierName: item.name,
+        unitAmountMinor: item.unitAmountMinor,
+        quantity: item.quantity,
+        subtotalMinor: item.subtotalMinor,
+        currency: 'usd',
+      })),
+    })
+    expect((safeConfirmation.items as unknown[]).every((item) =>
+      isRecord(item) && !Object.keys(item).some((key) => /(^|_)(id|token|bearer)$/i.test(key))
+    )).toBe(true)
+
+    expect(state.orders).not.toContainEqual(expect.objectContaining({ order_handle: 'declined' }))
+    const declinedCheckout = await createCheckout(fixture, 'declined')
+    await waitForOrder(fixture.event_id, 'declined')
+    expect(await exerciseHostedCheckout(
+      declinedCheckout.checkoutUrl,
+      '4000000000000002',
+      () => readAcceptedCheckoutStatus('declined'),
+    )).toEqual({
+      stage: 'LOCAL_RETURN_REDIRECT',
+      failure: 'NONE',
+      submission: 'ATTEMPTED',
+      provider: 'REJECTED',
+      redirect: 'NOT_OBSERVED',
+    })
     await expect(proof.invoke('checkout_status', {
-      session_id: declinedOrder.stripe_checkout_session_id,
+      order_handle: 'declined',
     })).resolves.toMatchObject({
       ok: true,
       livemode: false,
       status: 'open',
       payment_status: 'unpaid',
       charge_paid: false,
+      line_bindings_valid: true,
+      line_count: 2,
+      admission_count: 3,
     })
     state = await inspect(fixture.event_id)
-    expect(state.orders.find((order) => order.id === declinedOrder.id)?.status).toBe('checkout_open')
-    expect(state.tickets.filter((ticket) => ticket.order_id === declinedOrder.id)).toHaveLength(0)
+    expect(state.orders.find((order) => order.order_handle === 'declined')?.status).toBe('checkout_open')
+    expect(state.items.filter((item) => item.order_handle === 'declined')).toHaveLength(2)
+    expect(state.tickets.find((tickets) => tickets.order_handle === 'declined')?.ticket_count).toBe(0)
 
     await expect(proof.invoke('expire_checkout', {
-      session_id: declinedOrder.stripe_checkout_session_id,
+      order_handle: 'declined',
     })).resolves.toMatchObject({ ok: true, livemode: false, status: 'expired' })
     const expiredEvent = eventDescriptor(
       'checkout.session.expired',
       'checkout.session',
-      declinedOrder.stripe_checkout_session_id!,
+      'declined',
     )
     const retry = await proof.invoke<{
       statuses: number[]
@@ -225,19 +506,21 @@ describe('real Stripe test-mode ticket transaction', () => {
       processing_status: 'processed',
     })
     state = await inspect(fixture.event_id)
-    expect(state.orders.find((order) => order.id === declinedOrder.id)).toMatchObject({
+    expect(state.orders.find((order) => order.order_handle === 'declined')).toMatchObject({
       status: 'payment_failed',
       failure_code: 'CHECKOUT_EXPIRED',
     })
-    expect(state.tickets.filter((ticket) => ticket.order_id === declinedOrder.id)).toHaveLength(0)
-    expect(state.inventory).toEqual([
-      expect.objectContaining({
-        ticket_tier_id: fixture.tier_id,
-        quantity_total: 10,
-        reserved_quantity: 1,
-        available_quantity: 9,
-      }),
-    ])
+    expect(state.tickets.find((tickets) => tickets.order_handle === 'declined')?.ticket_count).toBe(0)
+    expect(state.inventory.find((tier) => tier.tier_label === 'ga')).toMatchObject({
+      quantity_total: 10,
+      reserved_quantity: 2,
+      available_quantity: 8,
+    })
+    expect(state.inventory.find((tier) => tier.tier_label === 'vip')).toMatchObject({
+      quantity_total: 10,
+      reserved_quantity: 1,
+      available_quantity: 9,
+    })
 
     await expect(proof.invoke('invalid_signature')).resolves.toMatchObject({
       ok: true,
@@ -248,19 +531,26 @@ describe('real Stripe test-mode ticket transaction', () => {
     const refund = await proof.invoke<{
       ok: boolean
       livemode: boolean
-      refund_id: string
+      status: string
       amount: number
+      reverse_transfer: boolean
+      refund_application_fee: boolean
       reversal_amount: number
       application_fee_refund_amount: number
-    }>('create_refund', { order_id: paidOrder.id })
+      expected_application_fee_amount: number
+    }>('create_refund', { order_handle: 'paid' })
     expect(refund).toMatchObject({
       ok: true,
       livemode: false,
-      amount: 3_001,
-      reversal_amount: 3_001,
-      application_fee_refund_amount: 200,
+      status: 'succeeded',
+      amount: TASK17_SUBTOTAL_MINOR,
+      reverse_transfer: true,
+      refund_application_fee: true,
+      reversal_amount: TASK17_SUBTOTAL_MINOR,
+      application_fee_refund_amount: TASK17_APPLICATION_FEE_MINOR,
+      expected_application_fee_amount: TASK17_APPLICATION_FEE_MINOR,
     })
-    const refundEvent = eventDescriptor('refund.updated', 'refund', refund.refund_id)
+    const refundEvent = eventDescriptor('refund.updated', 'refund', 'paid')
     const refundFirst = await proof.invoke<{ status: number }>('deliver', { event: refundEvent })
     const refundDuplicate = await proof.invoke<{
       status: number
@@ -272,26 +562,48 @@ describe('real Stripe test-mode ticket transaction', () => {
       processing_status: 'processed',
     })
     state = await inspect(fixture.event_id)
-    expect(state.orders.find((order) => order.id === paidOrder.id)?.status).toBe('refunded')
-    expect(state.tickets.filter((ticket) => ticket.order_id === paidOrder.id)).toEqual([
-      expect.objectContaining({ status: 'refunded' }),
-    ])
-    expect(state.refunds.filter((candidate) => candidate.order_id === paidOrder.id)).toEqual([
-      expect.objectContaining({ status: 'succeeded' }),
+    expect(state.orders.find((order) => order.order_handle === 'paid')?.status).toBe('refunded')
+    expect(state.tickets.find((tickets) => tickets.order_handle === 'paid')).toMatchObject({
+      ticket_count: 3,
+      unique_ticket_count: 3,
+      valid_count: 0,
+      refunded_count: 3,
+      bindings_valid: true,
+      sequences_valid: true,
+      refunded_timestamps_valid: true,
+    })
+    expect(state.refunds.filter((candidate) => candidate.order_handle === 'paid')).toEqual([
+      expect.objectContaining({
+        status: 'succeeded',
+        amount_minor: TASK17_SUBTOTAL_MINOR,
+        reverse_transfer: true,
+        refund_application_fee: true,
+        transfer_reversal_amount_minor: TASK17_SUBTOTAL_MINOR,
+        application_fee_refund_amount_minor: TASK17_APPLICATION_FEE_MINOR,
+        policy_verified: true,
+        policy_failure_code: null,
+      }),
     ])
 
-    await expect(proof.invoke('reconcile_payment', { order_id: paidOrder.id })).resolves.toMatchObject({
+    await expect(proof.invoke('reconcile_payment', { order_handle: 'paid' })).resolves.toMatchObject({
       ok: true,
       livemode: false,
       connected_account_matches: true,
       persisted_ids_match: true,
-      total_minor: 3_001,
-      application_fee_actual: 200,
-      transfer_less_application_fee: 2_801,
+      cross_object_relations_match: true,
+      destination_charge: true,
+      line_bindings_valid: true,
+      line_count: 2,
+      admission_count: 3,
+      total_minor: TASK17_SUBTOTAL_MINOR,
+      application_fee_actual: TASK17_APPLICATION_FEE_MINOR,
+      transfer_less_application_fee: TASK17_ORGANIZER_PROCEEDS_MINOR,
+      balance_transaction_amount: TASK17_SUBTOTAL_MINOR,
     })
-    await expect(proof.invoke('reconcile_events', { order_id: paidOrder.id })).resolves.toMatchObject({
+    await expect(proof.invoke('reconcile_events', { order_handle: 'paid' })).resolves.toMatchObject({
       ok: true,
       livemode: false,
+      has_more: false,
       matching_types: expect.arrayContaining([
         'checkout.session.completed',
         'refund.created',
@@ -299,19 +611,74 @@ describe('real Stripe test-mode ticket transaction', () => {
       ]),
     })
 
-    await expect(proof.invoke('cleanup')).resolves.toMatchObject({
+    await expect(proof.invoke('cleanup', {
+      close_connected_account: false,
+    })).resolves.toMatchObject({
       ok: true,
-      event_count: 0,
-      organizer_count: 0,
-      connect_count: 0,
-      order_count: 0,
-      tier_count: 0,
-      receipt_count: 0,
-      ticket_count: 0,
+      stable_fixture: true,
+      fixture_reusable: true,
+      event_count: 1,
+      organizer_count: 1,
+      auth_user_inert: true,
+      event_sellable: false,
+      public_projection_count: 0,
+      active_tier_count: 2,
+      connect_count: 1,
+      order_count: 2,
+      tier_count: 2,
+      receipt_count: expect.any(Number),
+      ticket_count: 3,
       dispute_count: 0,
-      refund_count: 0,
-      item_count: 0,
-      connected_account_closed: true,
+      refund_count: 1,
+      item_count: 4,
+      database_cleanup_required: true,
+      targeted_order_count: 2,
+      targeted_tier_count: 2,
+      targeted_receipt_count: expect.any(Number),
+      targeted_ticket_count: 3,
+      targeted_refund_count: 1,
+      targeted_item_count: 4,
+      archived_price_count: 4,
+      archived_product_count: 4,
+      connected_account_closed: false,
+      connected_account_preserved: true,
     })
-  }, 180_000)
+    }, 180_000,
+  )
+
+  it.skipIf(process.env.TASK13_BROWSER_DIAGNOSTIC_ONLY !== '1')(
+    'runs one guaranteed-decline hosted browser diagnostic',
+    async () => {
+      await expect(proof.invoke('server_proof')).resolves.toMatchObject({
+        ok: true,
+        livemode: false,
+        connected_account_matches: true,
+      })
+      const fixture = await proof.invoke<Setup>('setup')
+      expect(fixture).toMatchObject({
+        ok: true,
+        quantity: TASK17_ADMISSION_QUANTITY,
+        subtotal_minor: TASK17_SUBTOTAL_MINOR,
+      })
+
+      const checkout = await createCheckout(fixture, 'declined')
+      await waitForOrder(fixture.event_id, 'declined')
+      const diagnostic = await exerciseHostedCheckout(
+        checkout.checkoutUrl,
+        '4000000000000002',
+        () => readAcceptedCheckoutStatus('declined'),
+      )
+      expect(diagnostic).toEqual({
+        stage: 'LOCAL_RETURN_REDIRECT',
+        failure: 'NONE',
+        submission: 'ATTEMPTED',
+        provider: 'REJECTED',
+        redirect: 'NOT_OBSERVED',
+      })
+      console.info(
+        `Task 13 hosted browser diagnostic: ${formatHostedCheckoutBrowserDiagnostic(diagnostic)}`,
+      )
+    },
+    90_000,
+  )
 })

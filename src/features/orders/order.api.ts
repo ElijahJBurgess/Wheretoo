@@ -5,6 +5,18 @@ import type { OrderConfirmation } from './order.types'
 const bearerPattern = /^[A-Za-z0-9_-]{43}$/
 const hex = (bytes: Uint8Array) => Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
 
+const safeMoneySchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
+const confirmationItemSchema = z.object({
+  tierName: z.string().min(1),
+  quantity: z.number().int().min(1).max(10),
+  unitAmountMinor: safeMoneySchema.min(1),
+  subtotalMinor: safeMoneySchema.min(1),
+  currency: z.literal('usd'),
+}).strict().refine(
+  (item) => Number.isSafeInteger(item.unitAmountMinor * item.quantity) &&
+    item.subtotalMinor === item.unitAmountMinor * item.quantity,
+)
+
 const confirmationSchema = z.object({
   event: z.object({
     title: z.string().min(1),
@@ -13,10 +25,25 @@ const confirmationSchema = z.object({
     timezone: z.string(),
     venueName: z.string().nullable(),
   }).strict(),
-  tier: z.object({ name: z.string().min(1) }).strict(),
+  items: z.array(confirmationItemSchema).min(1).max(10),
   orderNumber: z.string().min(1).max(64),
-  status: z.enum(['processing', 'paid', 'failed', 'expired', 'refunded']),
-}).strict()
+  status: z.enum(['processing', 'paid', 'payment_failed', 'cancelled', 'expired', 'refunded', 'requires_review']),
+  quantity: z.number().int().min(1).max(10),
+  currency: z.literal('usd'),
+  subtotalMinor: safeMoneySchema.min(1),
+  taxAmountMinor: z.literal(0),
+  totalMinor: safeMoneySchema.min(1),
+}).strict().superRefine((confirmation, context) => {
+  const quantity = confirmation.items.reduce((sum, item) => sum + item.quantity, 0)
+  const subtotalMinor = confirmation.items.reduce((sum, item) => sum + item.subtotalMinor, 0)
+  if (
+    !Number.isSafeInteger(quantity) || !Number.isSafeInteger(subtotalMinor) ||
+    quantity !== confirmation.quantity || subtotalMinor !== confirmation.subtotalMinor ||
+    confirmation.totalMinor !== confirmation.subtotalMinor + confirmation.taxAmountMinor
+  ) {
+    context.addIssue({ code: 'custom', message: 'Incoherent confirmation totals' })
+  }
+})
 
 export type OrderApiErrorCode = 'ORDER_NOT_FOUND' | 'ORDER_UNAVAILABLE'
 

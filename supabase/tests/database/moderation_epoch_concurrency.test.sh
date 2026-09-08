@@ -5,6 +5,9 @@ set -euo pipefail
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd -P)"
 supabase_cli="$repository_root/node_modules/.bin/supabase"
 temporary_directory="$(mktemp -d)"
+cleanup_targets_file="$temporary_directory/cleanup-targets.json"
+checkout_switch_state_file="$temporary_directory/checkout-switch-prior"
+checkout_switch_captured=0
 reservation_pid=""
 removal_pid=""
 run_id="$(openssl rand -hex 10)"
@@ -36,6 +39,33 @@ sanitize_log() {
   rg -o 'ERROR: +[0-9A-Z]+|ASSERT_[A-Z0-9_]+|EVENT_NOT_SELLABLE|MODERATION_[A-Z_]+' "$1" | head -n 8 >&2 || true
 }
 
+assert_linked_development() {
+  local project_ref
+  project_ref="$(tr -d '\r\n' <"$repository_root/supabase/.temp/project-ref")" || return 1
+  if [[ ! "$project_ref" =~ ^[a-z]{20}$ ]]; then
+    echo "The linked project reference is missing or malformed." >&2
+    return 1
+  fi
+  "$supabase_cli" projects list --output json >"$temporary_directory/projects.json" || return 1
+  PROJECT_REF="$project_ref" PROJECTS_FILE="$temporary_directory/projects.json" node --input-type=module <<'NODE'
+import fs from 'node:fs'
+const projects = JSON.parse(fs.readFileSync(process.env.PROJECTS_FILE, 'utf8'))
+const linked = projects.filter((project) => project.linked === true)
+if (linked.length !== 1 || linked[0].id !== process.env.PROJECT_REF || linked[0].status !== 'ACTIVE_HEALTHY') process.exit(1)
+NODE
+  [[ $? -eq 0 ]] || return 1
+  "$supabase_cli" db query --linked --output-format json \
+    "select environment as policy_environment from private.organizer_policy_release_settings where singleton_id;" \
+    >"$temporary_directory/environment.json" || return 1
+  ENVIRONMENT_FILE="$temporary_directory/environment.json" node --input-type=module <<'NODE'
+import fs from 'node:fs'
+const payload = JSON.parse(fs.readFileSync(process.env.ENVIRONMENT_FILE, 'utf8'))
+const row = payload.rows?.[0] ?? payload.result?.[0]
+if (row?.policy_environment !== 'development') process.exit(1)
+NODE
+  [[ $? -eq 0 ]] || return 1
+}
+
 run_query() {
   local phase="$1"
   local sql="$2"
@@ -47,11 +77,85 @@ run_query() {
   fi
 }
 
-cleanup_sql="begin;
+capture_checkout_switch() {
+  "$supabase_cli" db query --linked --output-format json \
+    "select checkout_creation_enabled as enabled from private.checkout_runtime_control where singleton;" \
+    >"$temporary_directory/checkout-switch-read.json"
+  CHECKOUT_SWITCH_READ_FILE="$temporary_directory/checkout-switch-read.json" \
+  CHECKOUT_SWITCH_STATE_FILE="$checkout_switch_state_file" node --input-type=module <<'NODE'
+import fs from 'node:fs'
+const payload = JSON.parse(fs.readFileSync(process.env.CHECKOUT_SWITCH_READ_FILE, 'utf8'))
+const row = payload.rows?.[0] ?? payload.result?.[0]
+if (typeof row?.enabled !== 'boolean') process.exit(1)
+fs.writeFileSync(process.env.CHECKOUT_SWITCH_STATE_FILE, `${row.enabled}\n`, { mode: 0o600 })
+NODE
+  chmod 600 "$checkout_switch_state_file"
+  checkout_switch_captured=1
+}
+
+restore_checkout_switch() {
+  [[ $checkout_switch_captured -eq 1 && -f "$checkout_switch_state_file" ]] || return 0
+  local prior_state
+  prior_state="$(tr -d '\r\n' <"$checkout_switch_state_file")"
+  [[ "$prior_state" == true || "$prior_state" == false ]] || return 1
+  "$supabase_cli" db query --linked --output-format json "with restored as (
+      update private.checkout_runtime_control
+      set checkout_creation_enabled = $prior_state, updated_at = statement_timestamp()
+      where singleton
+      returning checkout_creation_enabled
+    ) select checkout_creation_enabled = $prior_state as restored from restored;" \
+    >"$temporary_directory/checkout-switch-restore.json"
+  grep -q '"restored": true' "$temporary_directory/checkout-switch-restore.json" || return 1
+  [[ "${WHERETO_TEST_FORCE_SWITCH_RESTORE_FAILURE:-}" != "1" ]]
+}
+
+capture_cleanup_targets() {
+  local read_file="$temporary_directory/cleanup-targets-read.json"
+  local next_file="$temporary_directory/cleanup-targets-next.json"
+  "$supabase_cli" db query --linked --output-format json "select jsonb_build_object(
+      'order_ids', coalesce((select jsonb_agg(id order by id) from public.orders where event_id = '$event_id'::uuid), '[]'::jsonb)
+    ) as targets;" >"$read_file" || { rm -f -- "$read_file" "$next_file"; return 1; }
+  CLEANUP_TARGETS_READ_FILE="$read_file" \
+  CLEANUP_TARGETS_FILE="$next_file" node --input-type=module <<'NODE'
+import fs from 'node:fs'
+const payload = JSON.parse(fs.readFileSync(process.env.CLEANUP_TARGETS_READ_FILE, 'utf8'))
+const row = payload.rows?.[0] ?? payload.result?.[0]
+const targets = row?.targets
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+if (!targets || !Array.isArray(targets.order_ids) || targets.order_ids.some((id) => typeof id !== 'string' || !uuid.test(id))) process.exit(1)
+fs.writeFileSync(process.env.CLEANUP_TARGETS_FILE, JSON.stringify(targets), { mode: 0o600 })
+NODE
+  [[ $? -eq 0 ]] || { rm -f -- "$read_file" "$next_file"; return 1; }
+  chmod 600 "$next_file" || { rm -f -- "$read_file" "$next_file"; return 1; }
+  mv -f -- "$next_file" "$cleanup_targets_file" || { rm -f -- "$read_file" "$next_file"; return 1; }
+  rm -f -- "$read_file" || return 1
+}
+
+load_order_ids_sql() {
+  CLEANUP_TARGETS_FILE="$cleanup_targets_file" node --input-type=module <<'NODE'
+import fs from 'node:fs'
+const { order_ids: ids } = JSON.parse(fs.readFileSync(process.env.CLEANUP_TARGETS_FILE, 'utf8'))
+if (!Array.isArray(ids)) process.exit(1)
+process.stdout.write(ids.length === 0 ? 'array[]::uuid[]' : `array[${ids.map((id) => `'${id}'::uuid`).join(',')}]`)
+NODE
+}
+
+prepare_cleanup_targets() {
+  order_ids_sql=""
+  capture_cleanup_targets || return 1
+  order_ids_sql="$(load_order_ids_sql)" || { order_ids_sql=""; return 1; }
+  [[ -n "$order_ids_sql" ]] || return 1
+}
+
+build_cleanup_sql() {
+  printf '%s\n' "begin;
 set local session_replication_role = replica;
-delete from public.order_items where order_id in (select id from public.orders where event_id = '$event_id'::uuid);
-delete from public.orders where event_id = '$event_id'::uuid;
-delete from public.ticket_tiers where event_id = '$event_id'::uuid;
+delete from public.refunds where order_id = any($order_ids_sql);
+delete from public.disputes where order_id = any($order_ids_sql);
+delete from public.tickets where organizer_id = '$owner_id'::uuid;
+delete from public.order_items where order_id = any($order_ids_sql) or ticket_tier_id = '$tier_id'::uuid;
+delete from public.orders where id = any($order_ids_sql);
+delete from public.ticket_tiers where id = '$tier_id'::uuid;
 delete from public.organizer_stripe_accounts where organizer_id = '$owner_id'::uuid;
 delete from private.event_public_eligibility_intervals where event_id = '$event_id'::uuid;
 delete from private.event_reports where event_id = '$event_id'::uuid;
@@ -60,12 +164,14 @@ delete from private.event_moderation_evaluations where event_id = '$event_id'::u
 delete from private.event_moderation_actions where event_id = '$event_id'::uuid;
 delete from private.event_policy_acceptances where event_id = '$event_id'::uuid;
 delete from private.event_policy_legacy_exemptions where event_id = '$event_id'::uuid;
+delete from private.event_legacy_history_resolutions where event_id = '$event_id'::uuid;
 delete from private.event_risk_disclosures where event_id = '$event_id'::uuid;
 delete from private.staff_roles where user_id = '$staff_id'::uuid;
 delete from public.events where id = '$event_id'::uuid;
 delete from public.organizers where id = '$owner_id'::uuid;
 delete from auth.users where id in ('$owner_id'::uuid, '$staff_id'::uuid);
 commit;"
+}
 
 cleanup() {
   local original_status=$?
@@ -73,28 +179,78 @@ cleanup() {
   set +e
   [[ -n "$reservation_pid" ]] && wait "$reservation_pid"
   [[ -n "$removal_pid" ]] && wait "$removal_pid"
-  "$supabase_cli" db query --linked "$cleanup_sql" >"$temporary_directory/cleanup.log" 2>&1
-  local cleanup_status=$?
-  if [[ $cleanup_status -eq 0 ]]; then
+  local cleanup_status=0
+  restore_checkout_switch
+  local switch_restore_status=$?
+  if [[ $switch_restore_status -ne 0 ]]; then
+    echo "CHECKOUT_SWITCH_RESTORE_FAILED: stop checkout work and restore the checkout control from the controlled deployment configuration." >&2
+    cleanup_status=1
+  fi
+  if prepare_cleanup_targets; then
+    local capture_targets_status=0
+  else
+    local capture_targets_status=$?
+    echo "Fresh epoch cleanup targets could not be captured; refusing destructive cleanup." >&2
+    cleanup_status=1
+  fi
+  local database_cleanup_status=1
+  if [[ $capture_targets_status -eq 0 ]]; then
+    "$supabase_cli" db query --linked "$(build_cleanup_sql)" >"$temporary_directory/cleanup.log" 2>&1
+    database_cleanup_status=$?
+    [[ $database_cleanup_status -eq 0 ]] || cleanup_status=1
+  fi
+  if [[ $capture_targets_status -eq 0 && $database_cleanup_status -eq 0 ]]; then
     "$supabase_cli" db query --linked "
       do \$assert\$
       begin
         if exists (select 1 from auth.users where id in ('$owner_id', '$staff_id'))
+           or exists (select 1 from public.organizers where id = '$owner_id')
            or exists (select 1 from public.events where id = '$event_id')
-           or exists (select 1 from public.orders where event_id = '$event_id') then
+           or exists (select 1 from public.ticket_tiers where id = '$tier_id')
+           or exists (select 1 from public.orders where id = any($order_ids_sql))
+           or exists (select 1 from public.order_items where order_id = any($order_ids_sql) or ticket_tier_id = '$tier_id')
+           or exists (select 1 from public.tickets where organizer_id = '$owner_id')
+           or exists (select 1 from public.refunds where order_id = any($order_ids_sql))
+           or exists (select 1 from public.disputes where order_id = any($order_ids_sql))
+           or exists (select 1 from public.organizer_stripe_accounts where organizer_id = '$owner_id')
+           or exists (select 1 from private.event_public_eligibility_intervals where event_id = '$event_id')
+           or exists (select 1 from private.event_reports where event_id = '$event_id')
+           or exists (select 1 from private.moderation_review_requests where event_id = '$event_id')
+           or exists (select 1 from private.event_moderation_evaluations where event_id = '$event_id')
+           or exists (select 1 from private.event_moderation_actions where event_id = '$event_id')
+           or exists (select 1 from private.event_policy_acceptances where event_id = '$event_id')
+           or exists (select 1 from private.event_policy_legacy_exemptions where event_id = '$event_id')
+           or exists (select 1 from private.event_legacy_history_resolutions where event_id = '$event_id')
+           or exists (select 1 from private.event_risk_disclosures where event_id = '$event_id')
+           or exists (select 1 from private.staff_roles where user_id = '$staff_id') then
           raise exception using errcode = 'P0001', message = 'ASSERT_EPOCH_CLEANUP_RESIDUE';
         end if;
       end
       \$assert\$;
     " >"$temporary_directory/residue.log" 2>&1
-    cleanup_status=$?
+    local residue_status=$?
+    [[ $residue_status -eq 0 ]] || cleanup_status=1
   fi
   [[ $cleanup_status -eq 0 ]] || sanitize_log "$temporary_directory/cleanup.log"
   find "$temporary_directory" -type f -delete
   rmdir "$temporary_directory"
-  [[ $original_status -eq 0 ]] || exit "$original_status"
-  exit "$cleanup_status"
+  [[ $cleanup_status -eq 0 ]] || exit "$cleanup_status"
+  exit "$original_status"
 }
+
+if ! assert_linked_development; then
+  echo "Direct linked fixture runner requires one ACTIVE_HEALTHY development project." >&2
+  find "$temporary_directory" -type f -delete
+  rmdir "$temporary_directory"
+  exit 1
+fi
+if [[ "${WHERETO_TEST_GATE_ONLY:-}" == "1" ]]; then
+  echo "Linked development gate passed without mutation."
+  find "$temporary_directory" -type f -delete
+  rmdir "$temporary_directory"
+  exit 0
+fi
+
 trap cleanup EXIT
 
 wait_for_marker() {
@@ -127,7 +283,11 @@ wait_for_marker() {
   return 1
 }
 
-run_query pre-cleanup "$cleanup_sql"
+if ! prepare_cleanup_targets; then
+  echo "Fresh epoch cleanup targets could not be captured; refusing fixture setup." >&2
+  exit 1
+fi
+run_query pre-cleanup "$(build_cleanup_sql)"
 run_query setup "
   begin;
   insert into auth.users (id, email) values
@@ -180,6 +340,17 @@ run_query setup "
   commit;
 "
 
+capture_checkout_switch
+run_query enable-checkout-for-epoch-fixture "
+  update private.checkout_runtime_control
+  set checkout_creation_enabled = true, updated_at = statement_timestamp()
+  where singleton;
+"
+
+if [[ "${WHERETO_TEST_ABORT_AFTER_CHECKOUT_SWITCH:-}" == "1" ]]; then
+  exit 86
+fi
+
 case_json="$("$supabase_cli" db query --linked --output-format json "
   begin;
   select set_config('request.jwt.claim.sub', '$staff_id', true);
@@ -201,7 +372,7 @@ NODE
   set local statement_timeout = '30s';
   set local role service_role;
   select * from public.server_reserve_checkout(
-    '$event_id', '$tier_id', 'Task 15 Buyer',
+    '$event_id', jsonb_build_array(jsonb_build_object('tier_id', '$tier_id', 'quantity', 1)), 'Task 15 Buyer',
     'whereto-task15-buyer-${run_id}@example.invalid', '$request_id', repeat('a', 64)
   );
   select pg_catalog.pg_advisory_xact_lock($marker);
@@ -263,7 +434,7 @@ run_query option-a "
   begin
     begin
       perform * from public.server_reserve_checkout(
-        '$event_id', '$tier_id', 'Blocked Buyer',
+        '$event_id', jsonb_build_array(jsonb_build_object('tier_id', '$tier_id', 'quantity', 1)), 'Blocked Buyer',
         'whereto-task15-blocked-${run_id}@example.invalid',
         '$(new_uuid)', repeat('b', 64)
       );

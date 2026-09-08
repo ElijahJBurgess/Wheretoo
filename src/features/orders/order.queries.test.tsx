@@ -15,7 +15,12 @@ const token = 'tzGJcJWwoS-3IzLlK9cZV3QHHbC6-vv2d3a-Kl3nHng'
 const fingerprint = '59c3bb1da17d73b082ec3cda686cf96a0df6f352b91d227a64cf9084daa51282'
 const processing = {
   event: { title: 'Night Market', startsAt: '2026-09-01T02:00:00Z', endsAt: '2026-09-01T05:00:00Z', timezone: 'America/Los_Angeles', venueName: 'Civic Center Plaza' },
-  tier: { name: 'General admission' }, orderNumber: 'WT-42', status: 'processing' as const,
+  items: [
+    { tierName: 'General admission', quantity: 2, unitAmountMinor: 2500, subtotalMinor: 5000, currency: 'usd' as const },
+    { tierName: 'VIP', quantity: 1, unitAmountMinor: 5000, subtotalMinor: 5000, currency: 'usd' as const },
+  ],
+  orderNumber: 'WT-42', status: 'processing' as const, quantity: 3, currency: 'usd' as const,
+  subtotalMinor: 10000, taxAmountMinor: 0 as const, totalMinor: 10000,
 }
 
 function createWrapper(client: QueryClient) {

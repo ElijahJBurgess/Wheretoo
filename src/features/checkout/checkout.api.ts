@@ -1,4 +1,5 @@
 import { supabase } from '../../lib/supabase/client'
+import { isCanonicalCheckoutBearer } from './checkout.attempt'
 import { checkoutInputSchema, type CheckoutInput } from './checkout.schemas'
 
 const safeCheckoutCodes = new Set([
@@ -66,23 +67,28 @@ export function isStripeCheckoutUrl(value: string): boolean {
   }
 }
 
-async function invokeCheckoutFunction(name: 'stripe-create-checkout' | 'stripe-cancel-checkout', body: Record<string, string>): Promise<unknown> {
-  const { data, error } = await supabase.functions.invoke(name, { body, method: 'POST' })
+async function invokeCheckoutFunction(
+  name: 'stripe-create-checkout' | 'stripe-cancel-checkout',
+  body: Record<string, unknown>,
+  headers?: Record<string, string>,
+): Promise<unknown> {
+  const options = headers === undefined ? { body, method: 'POST' as const } : { body, headers, method: 'POST' as const }
+  const { data, error } = await supabase.functions.invoke(name, options)
   if (error !== null) throw new CheckoutApiError(await safeErrorCode(error))
   return data
 }
 
-export async function createCheckout(input: CheckoutInput): Promise<string> {
+export async function createCheckout(input: CheckoutInput, confirmationBearer: string): Promise<string> {
   const parsed = checkoutInputSchema.safeParse(input)
-  if (!parsed.success) throw new CheckoutApiError('CHECKOUT_UNAVAILABLE')
+  if (!parsed.success || !isCanonicalCheckoutBearer(confirmationBearer)) {
+    throw new CheckoutApiError('CHECKOUT_UNAVAILABLE')
+  }
 
-  const data = await invokeCheckoutFunction('stripe-create-checkout', {
-    eventId: parsed.data.eventId,
-    tierId: parsed.data.tierId,
-    guestName: parsed.data.buyerName,
-    guestEmail: parsed.data.buyerEmail,
-    clientRequestId: parsed.data.clientRequestId,
-  })
+  const data = await invokeCheckoutFunction(
+    'stripe-create-checkout',
+    parsed.data,
+    { 'X-Whereto-Confirmation-Bearer': confirmationBearer },
+  )
   if (!isRecord(data) || Object.keys(data).length !== 1 || typeof data.checkoutUrl !== 'string' || !isStripeCheckoutUrl(data.checkoutUrl)) {
     throw new CheckoutApiError('CHECKOUT_UNAVAILABLE')
   }
@@ -90,7 +96,7 @@ export async function createCheckout(input: CheckoutInput): Promise<string> {
 }
 
 export async function cancelCheckout(confirmationToken: string): Promise<void> {
-  if (!/^[A-Za-z0-9_-]{43}$/.test(confirmationToken)) throw new CheckoutApiError('CHECKOUT_UNAVAILABLE')
+  if (!isCanonicalCheckoutBearer(confirmationToken)) throw new CheckoutApiError('CHECKOUT_UNAVAILABLE')
   const data = await invokeCheckoutFunction('stripe-cancel-checkout', { confirmationToken })
   if (!isRecord(data) || Object.keys(data).length !== 1 || data.cancelled !== true) {
     throw new CheckoutApiError('CHECKOUT_UNAVAILABLE')

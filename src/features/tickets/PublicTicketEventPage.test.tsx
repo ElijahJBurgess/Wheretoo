@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -63,7 +63,7 @@ const publicEvent: PublicTicketingEvent = {
     description: 'Early access and a reserved lounge.',
     unit_amount_minor: 7_500,
     currency: 'usd',
-    availability_status: 'sold_out',
+    availability_status: 'available',
   }],
 }
 const freePublicEvent = {
@@ -116,27 +116,28 @@ describe('PublicTicketEventPage', () => {
     expect(screen.queryByRole('button', { name: 'Continue to checkout' })).not.toBeInTheDocument()
   })
 
-  it('requires exactly one available tier and navigates with its exact ID', async () => {
+  it('navigates with a bounded two-tier cart containing only public tier IDs and quantities', async () => {
     const user = userEvent.setup()
     const { router } = renderPage()
     const checkout = screen.getByRole('button', { name: 'Continue to checkout' })
 
     expect(checkout).toBeDisabled()
-    expect(screen.getByRole('radio', { name: /General admission/i })).not.toBeChecked()
-    expect(screen.getByRole('radio', { name: /VIP/i })).toBeDisabled()
-    expect(screen.getByText('Sold out')).toBeInTheDocument()
+    expect(screen.getByRole('spinbutton', { name: 'General admission quantity' })).toHaveValue(0)
+    expect(screen.getByRole('spinbutton', { name: 'VIP quantity' })).toHaveValue(0)
 
-    await user.click(screen.getByRole('radio', { name: /General admission/i }))
+    await user.type(screen.getByRole('spinbutton', { name: 'General admission quantity' }), '2')
+    await user.type(screen.getByRole('spinbutton', { name: 'VIP quantity' }), '1')
     await user.click(checkout)
 
     expect(router.state.location.pathname).toBe(`/events/${eventId}/checkout`)
-    expect(router.state.location.search).toBe(`?tier=${tierId}`)
+    expect(router.state.location.search).toBe(`?item=6b849fa0-4d5e-4faa-bf31-b169cb1bd7fe%3A1&item=${tierId}%3A2`)
+    expect(router.state.location.search).not.toMatch(/price|fee|currency|stripe|destination/i)
   })
 
   it('clears a selection after its exact tier becomes unavailable, even if it later returns', async () => {
     const user = userEvent.setup()
     const { router } = renderPage()
-    await user.click(screen.getByRole('radio', { name: /General admission/i }))
+    await user.type(screen.getByRole('spinbutton', { name: 'General admission quantity' }), '1')
     expect(screen.getByRole('button', { name: 'Continue to checkout' })).toBeEnabled()
 
     usePublicTicketingEvent.mockReturnValue({
@@ -158,13 +159,13 @@ describe('PublicTicketEventPage', () => {
     await act(async () => { await router.navigate(`/events/${eventId}?refresh=available-again`) })
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Continue to checkout' })).toBeDisabled())
-    expect(screen.getByRole('radio', { name: /General admission/i })).not.toBeChecked()
+    expect(screen.getByRole('spinbutton', { name: 'General admission quantity' })).toHaveValue(0)
   })
 
   it('preserves a selected available tier when unrelated tiers are added, reordered, or change availability', async () => {
     const user = userEvent.setup()
     const { router } = renderPage()
-    await user.click(screen.getByRole('radio', { name: /General admission/i }))
+    await user.type(screen.getByRole('spinbutton', { name: 'General admission quantity' }), '1')
 
     usePublicTicketingEvent.mockReturnValue({
       data: {
@@ -187,14 +188,14 @@ describe('PublicTicketEventPage', () => {
     })
     await act(async () => { await router.navigate(`/events/${eventId}?refresh=unrelated-tier-update`) })
 
-    expect(screen.getByRole('radio', { name: /General admission/i })).toBeChecked()
+    expect(screen.getByRole('spinbutton', { name: 'General admission quantity' })).toHaveValue(1)
     expect(screen.getByRole('button', { name: 'Continue to checkout' })).toBeEnabled()
   })
 
   it('clears selected-tier availability urgently before a rapid sold-out to available update', async () => {
     const user = userEvent.setup()
     const { router } = renderPage()
-    await user.click(screen.getByRole('radio', { name: /General admission/i }))
+    await user.type(screen.getByRole('spinbutton', { name: 'General admission quantity' }), '1')
     startTransition.mockImplementation(() => undefined)
 
     usePublicTicketingEvent.mockReturnValue({
@@ -208,7 +209,7 @@ describe('PublicTicketEventPage', () => {
     usePublicTicketingEvent.mockReturnValue({ data: publicEvent, isPending: false, isError: false, refetch: vi.fn() })
     await act(async () => { await router.navigate(`/events/${eventId}?refresh=rapid-available`) })
 
-    expect(screen.getByRole('radio', { name: /General admission/i })).not.toBeChecked()
+    expect(screen.getByRole('spinbutton', { name: 'General admission quantity' })).toHaveValue(0)
     expect(screen.getByRole('button', { name: 'Continue to checkout' })).toBeDisabled()
   })
 
@@ -274,7 +275,7 @@ describe('PublicTicketEventPage', () => {
     renderPage()
 
     expect(screen.getByRole('heading', { name: 'Night Market' })).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('Showing the last event details we received')
+    expect(screen.getByText(/Showing the last event details we received/).closest('[role="status"]')).not.toBeNull()
     expect(screen.queryByRole('heading', { name: 'Event could not load' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Report this event' })).not.toBeInTheDocument()
 
@@ -308,6 +309,33 @@ describe('PublicTicketEventPage', () => {
     renderPage()
 
     expect(screen.getByText('Tickets are currently unavailable')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Continue to checkout' })).toBeDisabled()
+  })
+
+  it('keeps an aggregate-overflow cart on the event with live feedback', async () => {
+    const user = userEvent.setup()
+    const { router } = renderPage()
+    const gaQuantity = screen.getByRole('spinbutton', { name: 'General admission quantity' })
+    await user.clear(gaQuantity)
+    await user.type(gaQuantity, '10')
+    const vipQuantity = screen.getByRole('spinbutton', { name: 'VIP quantity' })
+    await user.clear(vipQuantity)
+    await user.type(vipQuantity, '1')
+
+    expect(screen.getByRole('status')).toHaveTextContent('11 tickets selected. Maximum 10.')
+    expect(screen.getByRole('button', { name: 'Continue to checkout' })).toBeDisabled()
+    expect(router.state.location.pathname).toBe(`/events/${eventId}`)
+  })
+
+  it('does not silently omit an invalid entered quantity from an otherwise valid cart', () => {
+    renderPage()
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'General admission quantity' }), {
+      target: { value: '-1' },
+    })
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'VIP quantity' }), {
+      target: { value: '1' },
+    })
+
     expect(screen.getByRole('button', { name: 'Continue to checkout' })).toBeDisabled()
   })
 })

@@ -5,6 +5,12 @@ import { getServiceClient } from "../_shared/database.ts";
 import { getAppBaseUrl } from "../_shared/env.ts";
 import { jsonResponse } from "../_shared/http.ts";
 import {
+  type CheckoutCreateFailureStage,
+  type CheckoutCreateProviderResult,
+  emitOperationalEvent,
+  type OperationalEventSink,
+} from "../_shared/operationalLog.ts";
+import {
   getStripe,
   STRIPE_REQUEST_ATTEMPT_ENVELOPE_SECONDS,
 } from "../_shared/stripeClient.ts";
@@ -28,6 +34,7 @@ const STRIPE_MINIMUM_CHECKOUT_LIFETIME_SECONDS = 30 * 60;
 
 export type CheckoutErrorCode =
   | "CHECKOUT_ALREADY_EXISTS"
+  | "CHECKOUT_DISABLED"
   | "CHECKOUT_EXPIRED"
   | "CHECKOUT_NOT_FOUND"
   | "CHECKOUT_UNAVAILABLE"
@@ -36,6 +43,7 @@ export type CheckoutErrorCode =
   | "CORS_ORIGIN_DENIED"
   | "EVENT_NOT_SELLABLE"
   | "INTERNAL_ERROR"
+  | "IDEMPOTENCY_CONFLICT"
   | "INVALID_REQUEST"
   | "INVALID_STRIPE_SESSION"
   | "METHOD_NOT_ALLOWED"
@@ -62,30 +70,48 @@ export interface RateLimitResult {
 
 export interface CreateCheckoutInput {
   eventId: string;
-  tierId: string;
-  guestName: string;
-  guestEmail: string;
+  buyerName: string;
+  buyerEmail: string;
   clientRequestId: string;
+  items: CheckoutItemInput[];
+}
+
+export interface CheckoutItemInput {
+  tierId: string;
+  quantity: number;
+}
+
+export interface ReservationItemSnapshot {
+  orderItemId: string;
+  ticketTierId: string;
+  tierName: string;
+  unitAmountMinor: number;
+  quantity: number;
+  subtotalMinor: number;
+  currency: "usd";
 }
 
 export interface ReservationSnapshot {
   orderId: string;
   organizerId: string;
+  quantity: number;
   subtotalMinor: number;
   currency: "usd";
   applicationFeeAmountMinor: number;
+  totalMinor: number;
   stripeAccountId: string;
   checkoutExpiresAt: string;
   existingCheckoutSessionId: string | null;
   integrationIdentifier: string;
   createRequestDigest: string;
+  items: ReservationItemSnapshot[];
 }
 
 export interface StripeCreateCheckoutDependencies {
   appOrigin: string;
   appBaseUrl: string;
   rateLimit(request: Request): Promise<RateLimitResult>;
-  refreshConnect(eventId: string, tierId: string): Promise<void>;
+  refreshConnect(eventId: string, tierIds: string[]): Promise<void>;
   reserveCheckout(
     input: CreateCheckoutInput,
     tokenHash: string,
@@ -106,6 +132,7 @@ export interface StripeCreateCheckoutDependencies {
   ): Promise<void>;
   releaseReservation(orderId: string, reason: string): Promise<void>;
   nowEpochSeconds(): number;
+  operationalSink?: OperationalEventSink;
 }
 
 type FailureReleaseOrigin =
@@ -168,18 +195,6 @@ async function sha256(bytes: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(await crypto.subtle.digest("SHA-256", digestInput));
 }
 
-export async function deriveConfirmationToken(
-  canonicalClientRequestId: string,
-): Promise<{ clearToken: string; tokenHash: string }> {
-  const clearBytes = await sha256(
-    new TextEncoder().encode(canonicalClientRequestId),
-  );
-  return {
-    clearToken: encodeBase64Url(clearBytes),
-    tokenHash: hex(await sha256(clearBytes)),
-  };
-}
-
 export async function hashConfirmationBearer(
   confirmationToken: string,
 ): Promise<string> {
@@ -216,6 +231,7 @@ async function readJsonObject(
   if (
     contentType !== "application/json" ||
     !Number.isSafeInteger(declaredLength) ||
+    declaredLength < 0 ||
     declaredLength > MAX_REQUEST_BYTES
   ) {
     throw new CheckoutHttpError(400, "INVALID_REQUEST");
@@ -249,61 +265,172 @@ function parseCreateInput(value: Record<string, unknown>): CreateCheckoutInput {
   if (
     !exactKeys(value, [
       "eventId",
-      "tierId",
-      "guestName",
-      "guestEmail",
+      "buyerName",
+      "buyerEmail",
       "clientRequestId",
+      "items",
     ]) ||
     typeof value.eventId !== "string" ||
-    typeof value.tierId !== "string" ||
-    typeof value.guestName !== "string" ||
-    typeof value.guestEmail !== "string" ||
-    typeof value.clientRequestId !== "string"
+    typeof value.buyerName !== "string" ||
+    typeof value.buyerEmail !== "string" ||
+    typeof value.clientRequestId !== "string" ||
+    !Array.isArray(value.items) || value.items.length < 1 ||
+    value.items.length > 10
   ) {
     throw new CheckoutHttpError(400, "INVALID_REQUEST");
   }
 
   const eventId = value.eventId.toLowerCase();
-  const tierId = value.tierId.toLowerCase();
   const clientRequestId = value.clientRequestId.toLowerCase();
-  const guestName = value.guestName.trim();
-  const guestEmail = value.guestEmail.trim().toLowerCase();
+  const buyerName = value.buyerName.trim();
+  const buyerEmail = value.buyerEmail.trim().toLowerCase();
   if (
-    !UUID_PATTERN.test(eventId) || !UUID_PATTERN.test(tierId) ||
-    !UUID_V4_PATTERN.test(clientRequestId) || guestName.length < 1 ||
-    guestName.length > 120 || guestEmail.length > 320 ||
-    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestEmail)
+    !UUID_PATTERN.test(eventId) || !UUID_V4_PATTERN.test(clientRequestId) ||
+    buyerName.length < 1 || buyerName.length > 120 ||
+    buyerEmail.length > 320 ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(buyerEmail)
   ) {
     throw new CheckoutHttpError(400, "INVALID_REQUEST");
   }
 
-  return { eventId, tierId, guestName, guestEmail, clientRequestId };
+  let aggregateQuantity = 0;
+  const seenTierIds = new Set<string>();
+  const items = value.items.map((item): CheckoutItemInput => {
+    const quantity = isRecord(item) ? item.quantity : undefined;
+    if (
+      !isRecord(item) || !exactKeys(item, ["tierId", "quantity"]) ||
+      typeof item.tierId !== "string" ||
+      typeof quantity !== "number" || !Number.isSafeInteger(quantity) ||
+      quantity < 1 || quantity > 10
+    ) {
+      throw new CheckoutHttpError(400, "INVALID_REQUEST");
+    }
+    const tierId = item.tierId.toLowerCase();
+    if (!UUID_PATTERN.test(tierId) || seenTierIds.has(tierId)) {
+      throw new CheckoutHttpError(400, "INVALID_REQUEST");
+    }
+    seenTierIds.add(tierId);
+    aggregateQuantity += quantity;
+    if (aggregateQuantity > 10) {
+      throw new CheckoutHttpError(400, "INVALID_REQUEST");
+    }
+    return { tierId, quantity };
+  });
+  items.sort((left, right) => left.tierId.localeCompare(right.tierId));
+
+  return { eventId, buyerName, buyerEmail, clientRequestId, items };
 }
 
-function requireInteger(value: unknown): number {
-  if (!Number.isSafeInteger(value) || (value as number) <= 0) {
+function requireInteger(value: unknown, allowZero = false): number {
+  if (
+    !Number.isSafeInteger(value) ||
+    (allowZero ? (value as number) < 0 : (value as number) <= 0)
+  ) {
     throw new CheckoutHttpError(500, "INTERNAL_ERROR");
   }
   return value as number;
+}
+
+function reservationItemFromRpc(value: unknown): ReservationItemSnapshot {
+  if (
+    !isRecord(value) ||
+    !exactKeys(value, [
+      "order_item_id",
+      "ticket_tier_id",
+      "tier_name",
+      "unit_amount_minor",
+      "quantity",
+      "subtotal_minor",
+      "currency",
+    ])
+  ) {
+    throw new CheckoutHttpError(500, "INTERNAL_ERROR");
+  }
+  const unitAmountMinor = requireInteger(value.unit_amount_minor);
+  const quantity = requireInteger(value.quantity);
+  const subtotalMinor = requireInteger(value.subtotal_minor);
+  if (
+    typeof value.order_item_id !== "string" ||
+    !UUID_PATTERN.test(value.order_item_id) ||
+    typeof value.ticket_tier_id !== "string" ||
+    !UUID_PATTERN.test(value.ticket_tier_id) ||
+    typeof value.tier_name !== "string" || value.tier_name.length < 1 ||
+    value.tier_name.length > 120 ||
+    value.tier_name.trim() !== value.tier_name ||
+    value.currency !== "usd" || quantity > 10 ||
+    unitAmountMinor * quantity !== subtotalMinor ||
+    !Number.isSafeInteger(unitAmountMinor * quantity)
+  ) {
+    throw new CheckoutHttpError(500, "INTERNAL_ERROR");
+  }
+  return {
+    orderItemId: value.order_item_id,
+    ticketTierId: value.ticket_tier_id,
+    tierName: value.tier_name,
+    unitAmountMinor,
+    quantity,
+    subtotalMinor,
+    currency: "usd",
+  };
 }
 
 function reservationFromRpc(value: unknown): ReservationSnapshot {
   if (!isRecord(value)) throw new CheckoutHttpError(500, "INTERNAL_ERROR");
   const orderId = value.order_id;
   const organizerId = value.organizer_id;
+  const quantity = requireInteger(value.quantity);
   const subtotalMinor = requireInteger(value.subtotal_minor);
   const applicationFeeAmountMinor = requireInteger(
     value.application_fee_amount_minor,
+    true,
   );
+  const platformProductFeeMinor = requireInteger(
+    value.platform_product_fee_minor,
+    true,
+  );
+  const stripeFeeEstimateMinor = requireInteger(
+    value.stripe_fee_estimate_minor,
+    true,
+  );
+  const expectedOrganizerProceedsMinor = requireInteger(
+    value.expected_organizer_proceeds_minor,
+  );
+  const totalMinor = requireInteger(value.total_minor);
   const stripeAccountId = value.stripe_account_id;
   const checkoutExpiresAt = value.checkout_expires_at;
   const existingCheckoutSessionId = value.existing_checkout_session_id;
   const integrationIdentifier = value.integration_identifier;
   const createRequestDigest = value.create_request_digest;
   if (
+    !Array.isArray(value.order_items) || value.order_items.length < 1 ||
+    value.order_items.length > 10
+  ) {
+    throw new CheckoutHttpError(500, "INTERNAL_ERROR");
+  }
+  const items = value.order_items.map(reservationItemFromRpc);
+  const itemIds = new Set(items.map((item) => item.orderItemId));
+  const tierIds = new Set(items.map((item) => item.ticketTierId));
+  const summedQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
+  const summedSubtotal = items.reduce(
+    (sum, item) => sum + item.subtotalMinor,
+    0,
+  );
+  if (
     typeof orderId !== "string" || !UUID_PATTERN.test(orderId) ||
     typeof organizerId !== "string" || !UUID_PATTERN.test(organizerId) ||
     value.currency !== "usd" || applicationFeeAmountMinor >= subtotalMinor ||
+    platformProductFeeMinor + stripeFeeEstimateMinor !==
+      applicationFeeAmountMinor ||
+    !Number.isSafeInteger(platformProductFeeMinor + stripeFeeEstimateMinor) ||
+    expectedOrganizerProceedsMinor !==
+      subtotalMinor - applicationFeeAmountMinor ||
+    totalMinor !== subtotalMinor || quantity > 10 ||
+    !Number.isSafeInteger(summedQuantity) || summedQuantity !== quantity ||
+    !Number.isSafeInteger(summedSubtotal) || summedSubtotal !== subtotalMinor ||
+    itemIds.size !== items.length || tierIds.size !== items.length ||
+    items.some((item, index) =>
+      index > 0 && items[index - 1].ticketTierId >= item.ticketTierId
+    ) ||
     typeof stripeAccountId !== "string" ||
     !ACCOUNT_PATTERN.test(stripeAccountId) ||
     typeof checkoutExpiresAt !== "string" ||
@@ -321,15 +448,56 @@ function reservationFromRpc(value: unknown): ReservationSnapshot {
   return {
     orderId,
     organizerId,
+    quantity,
     subtotalMinor,
     currency: "usd",
     applicationFeeAmountMinor,
+    totalMinor,
     stripeAccountId,
     checkoutExpiresAt,
     existingCheckoutSessionId,
     integrationIdentifier,
     createRequestDigest,
+    items,
   };
+}
+
+function validatedReservationSnapshot(value: unknown): ReservationSnapshot {
+  if (!isRecord(value) || !Array.isArray(value.items)) {
+    throw new CheckoutHttpError(500, "INTERNAL_ERROR");
+  }
+  return reservationFromRpc({
+    order_id: value.orderId,
+    organizer_id: value.organizerId,
+    quantity: value.quantity,
+    subtotal_minor: value.subtotalMinor,
+    currency: value.currency,
+    application_fee_amount_minor: value.applicationFeeAmountMinor,
+    platform_product_fee_minor: value.applicationFeeAmountMinor,
+    stripe_fee_estimate_minor: 0,
+    expected_organizer_proceeds_minor: (value.subtotalMinor as number) -
+      (value.applicationFeeAmountMinor as number),
+    total_minor: value.totalMinor,
+    stripe_account_id: value.stripeAccountId,
+    checkout_expires_at: value.checkoutExpiresAt,
+    existing_checkout_session_id: value.existingCheckoutSessionId,
+    integration_identifier: value.integrationIdentifier,
+    create_request_digest: value.createRequestDigest,
+    order_items: value.items.map((item) => {
+      if (!isRecord(item)) {
+        throw new CheckoutHttpError(500, "INTERNAL_ERROR");
+      }
+      return {
+        order_item_id: item.orderItemId,
+        ticket_tier_id: item.ticketTierId,
+        tier_name: item.tierName,
+        unit_amount_minor: item.unitAmountMinor,
+        quantity: item.quantity,
+        subtotal_minor: item.subtotalMinor,
+        currency: item.currency,
+      };
+    }),
+  });
 }
 
 function rpcFailure(error: { message?: string } | null): never {
@@ -342,6 +510,12 @@ function rpcFailure(error: { message?: string } | null): never {
   }
   if (code === "CHECKOUT_EXPIRED") {
     throw new CheckoutHttpError(410, "CHECKOUT_EXPIRED");
+  }
+  if (code === "IDEMPOTENCY_CONFLICT") {
+    throw new CheckoutHttpError(409, "IDEMPOTENCY_CONFLICT");
+  }
+  if (code === "CHECKOUT_DISABLED") {
+    throw new CheckoutHttpError(503, "CHECKOUT_DISABLED");
   }
   if (code === "CONNECT_NOT_READY") {
     throw new CheckoutHttpError(409, "CONNECT_NOT_READY");
@@ -372,9 +546,9 @@ function rpcFailure(error: { message?: string } | null): never {
 
 function expectedMetadata(expected: ExpectedSession): Record<string, string> {
   return {
-    order_id: expected.reservation.orderId,
+    contract_version: "checkout_integrity_v1",
     event_id: expected.input.eventId,
-    tier_id: expected.input.tierId,
+    order_id: expected.reservation.orderId,
   };
 }
 
@@ -401,21 +575,62 @@ function validStripeCheckoutUrl(value: unknown): value is string {
   }
 }
 
-function validateOptionalPaymentIntent(
+function validatePaymentIntent(
   value: unknown,
   expected: ExpectedSession,
 ): boolean {
-  if (value === null || value === undefined) return true;
+  // Stripe may not create the PaymentIntent until the hosted payment flow starts.
+  // If it is already present, its destination and money must still match exactly.
+  if (value === null) return true;
   if (!isRecord(value)) return false;
   const transferData = value.transfer_data;
   return value.livemode === false &&
     value.currency === expected.reservation.currency &&
-    value.amount === expected.reservation.subtotalMinor &&
+    value.amount === expected.reservation.totalMinor &&
     value.application_fee_amount ===
       expected.reservation.applicationFeeAmountMinor &&
     isRecord(transferData) &&
     transferData.destination === expected.reservation.stripeAccountId &&
     isExactMetadata(value.metadata, expectedMetadata(expected));
+}
+
+function validateBoundLineItems(
+  lineItems: Record<string, unknown>,
+  expected: ExpectedSession,
+): boolean {
+  if (!Array.isArray(lineItems.data) || lineItems.has_more !== false) {
+    return false;
+  }
+  const expectedByOrderItemId = new Map(
+    expected.reservation.items.map((item) => [item.orderItemId, item]),
+  );
+  if (lineItems.data.length !== expectedByOrderItemId.size) return false;
+  const seen = new Set<string>();
+  for (const value of lineItems.data) {
+    if (!isRecord(value) || !isRecord(value.price)) return false;
+    const price = value.price;
+    if (!isRecord(price.product) || !isRecord(price.product.metadata)) {
+      return false;
+    }
+    const productMetadata = price.product.metadata;
+    if (!exactKeys(productMetadata, ["whereto_order_item_id"])) return false;
+    const orderItemId = productMetadata.whereto_order_item_id;
+    if (typeof orderItemId !== "string" || seen.has(orderItemId)) return false;
+    const item = expectedByOrderItemId.get(orderItemId);
+    if (item === undefined) return false;
+    seen.add(orderItemId);
+    if (
+      price.livemode !== false || price.product.livemode !== false ||
+      value.quantity !== item.quantity || value.currency !== item.currency ||
+      value.amount_subtotal !== item.subtotalMinor ||
+      value.amount_total !== item.subtotalMinor ||
+      price.currency !== item.currency || price.type !== "one_time" ||
+      price.unit_amount !== item.unitAmountMinor
+    ) {
+      return false;
+    }
+  }
+  return seen.size === expectedByOrderItemId.size;
 }
 
 function validateSession(
@@ -430,9 +645,6 @@ function validateSession(
   if (!isRecord(lineItems) || !Array.isArray(lineItems.data)) {
     throw new CheckoutHttpError(502, "INVALID_STRIPE_SESSION");
   }
-  const items = lineItems.data;
-  const item = items[0];
-  const price = isRecord(item) ? item.price : null;
   const expectedExpiry = expected.stripeExpiresAt;
   const metadata = expectedMetadata(expected);
 
@@ -445,8 +657,8 @@ function validateSession(
     value.payment_status !== "unpaid" ||
     value.currency !== expected.reservation.currency ||
     value.amount_subtotal !== expected.reservation.subtotalMinor ||
-    value.amount_total !== expected.reservation.subtotalMinor ||
-    value.customer_email !== expected.input.guestEmail ||
+    value.amount_total !== expected.reservation.totalMinor ||
+    value.customer_email !== expected.input.buyerEmail ||
     value.expires_at !== expectedExpiry ||
     value.client_reference_id !== expected.reservation.orderId ||
     value.success_url !== expected.successUrl ||
@@ -456,15 +668,9 @@ function validateSession(
       expected.reservation.integrationIdentifier ||
     !isExactMetadata(value.metadata, metadata) ||
     !isRecord(automaticTax) || automaticTax.enabled !== false ||
-    !validStripeCheckoutUrl(value.url) || items.length !== 1 ||
-    lineItems.has_more !== false || !isRecord(item) || item.quantity !== 1 ||
-    item.currency !== expected.reservation.currency ||
-    item.amount_subtotal !== expected.reservation.subtotalMinor ||
-    item.amount_total !== expected.reservation.subtotalMinor ||
-    !isRecord(price) || price.currency !== expected.reservation.currency ||
-    price.type !== "one_time" ||
-    price.unit_amount !== expected.reservation.subtotalMinor ||
-    !validateOptionalPaymentIntent(value.payment_intent, expected)
+    !validStripeCheckoutUrl(value.url) ||
+    !validateBoundLineItems(lineItems, expected) ||
+    !validatePaymentIntent(value.payment_intent, expected)
   ) {
     throw new CheckoutHttpError(502, "INVALID_STRIPE_SESSION");
   }
@@ -483,7 +689,7 @@ function createParams(
   const metadata = expectedMetadata(expected);
   return {
     mode: "payment",
-    customer_email: expected.input.guestEmail,
+    customer_email: expected.input.buyerEmail,
     expires_at: expected.stripeExpiresAt,
     success_url: expected.successUrl,
     cancel_url: expected.cancelUrl,
@@ -495,15 +701,18 @@ function createParams(
       transfer_data: { destination: expected.reservation.stripeAccountId },
       metadata,
     },
-    line_items: [{
-      quantity: 1,
+    line_items: expected.reservation.items.map((item) => ({
+      quantity: item.quantity,
       price_data: {
-        currency: expected.reservation.currency,
-        unit_amount: expected.reservation.subtotalMinor,
-        product_data: { name: "Whereto event ticket" },
+        currency: item.currency,
+        unit_amount: item.unitAmountMinor,
+        product_data: {
+          name: item.tierName,
+          metadata: { whereto_order_item_id: item.orderItemId },
+        },
       },
-    }],
-    expand: ["line_items"],
+    })),
+    expand: ["line_items.data.price.product", "payment_intent"],
   };
 }
 
@@ -534,7 +743,7 @@ export async function defaultAnonymousRateLimit(
 
 export async function defaultRefreshConnect(
   eventId: string,
-  tierId: string,
+  tierIds: string[],
   client = getServiceClient(),
   runtime?: {
     repository: Pick<
@@ -549,7 +758,7 @@ export async function defaultRefreshConnect(
 ): Promise<void> {
   const { data, error } = await client.rpc("server_get_checkout_preflight", {
     p_event_id: eventId,
-    p_tier_id: tierId,
+    p_tier_ids: tierIds,
   });
   if (error !== null) rpcFailure(error);
   if (
@@ -604,17 +813,21 @@ export async function defaultRefreshConnect(
   }
 }
 
-async function defaultReserveCheckout(
+export async function defaultReserveCheckout(
   input: CreateCheckoutInput,
   tokenHash: string,
+  client = getServiceClient(),
 ): Promise<ReservationSnapshot | null> {
-  const { data, error } = await getServiceClient().rpc(
+  const { data, error } = await client.rpc(
     "server_reserve_checkout",
     {
       p_event_id: input.eventId,
-      p_tier_id: input.tierId,
-      p_name: input.guestName,
-      p_email: input.guestEmail,
+      p_items: input.items.map((item) => ({
+        tier_id: item.tierId,
+        quantity: item.quantity,
+      })),
+      p_name: input.buyerName,
+      p_email: input.buyerEmail,
       p_client_request_id: input.clientRequestId,
       p_confirmation_token_hash: tokenHash,
     },
@@ -682,20 +895,33 @@ async function canonicalRequestDigest(
   if (!Number.isSafeInteger(epoch)) {
     throw new CheckoutHttpError(500, "INTERNAL_ERROR");
   }
+  const orderItemsJsonb = `[${
+    reservation.items.map((item) =>
+      `{"currency": ${
+        JSON.stringify(item.currency)
+      }, "quantity": ${item.quantity}, "tier_name": ${
+        JSON.stringify(item.tierName)
+      }, "order_item_id": ${
+        JSON.stringify(item.orderItemId)
+      }, "subtotal_minor": ${item.subtotalMinor}, "ticket_tier_id": ${
+        JSON.stringify(item.ticketTierId)
+      }, "unit_amount_minor": ${item.unitAmountMinor}}`
+    ).join(", ")
+  }]`;
   const canonical = [
-    "whereto-checkout-v2",
+    "whereto-checkout-cart-v1",
     reservation.orderId,
     input.eventId,
-    input.tierId,
     input.clientRequestId,
     tokenHash,
-    input.guestEmail,
+    input.buyerEmail,
     reservation.currency,
     String(reservation.subtotalMinor),
     String(reservation.applicationFeeAmountMinor),
     reservation.stripeAccountId,
     String(epoch),
     reservation.integrationIdentifier,
+    orderItemsJsonb,
   ].join(String.fromCharCode(31));
   return hex(await sha256(new TextEncoder().encode(canonical)));
 }
@@ -706,19 +932,44 @@ function isDefinitiveStripeNonCreation(error: unknown): boolean {
       error.rawType === "invalid_request_error");
 }
 
+function providerResultForStripeFailure(
+  error: unknown,
+): CheckoutCreateProviderResult {
+  if (!isRecord(error) || typeof error.type !== "string") {
+    return "runtime_failure";
+  }
+  if (
+    error.type === "StripeConnectionError" ||
+    error.type === "StripeConnectionClosedError"
+  ) return "network_failure";
+  if (
+    [
+      "StripeAPIError",
+      "StripeAuthenticationError",
+      "StripeCardError",
+      "StripeIdempotencyError",
+      "StripeInvalidGrantError",
+      "StripeInvalidRequestError",
+      "StripePermissionError",
+      "StripeRateLimitError",
+    ].includes(error.type)
+  ) return "provider_error_response";
+  return "runtime_failure";
+}
+
 async function releaseAfterFailure(
   dependencies: StripeCreateCheckoutDependencies,
   reservation: ReservationSnapshot,
   origin: FailureReleaseOrigin,
   sessionValue?: unknown,
-): Promise<void> {
+): Promise<boolean> {
   if (sessionValue === undefined) {
-    if (origin !== "definitive-create-noncreation") return;
+    if (origin !== "definitive-create-noncreation") return false;
     await dependencies.releaseReservation(
       reservation.orderId,
       "CHECKOUT_CREATION_FAILED",
     );
-    return;
+    return true;
   }
   if (
     !isRecord(sessionValue) || sessionValue.object !== "checkout.session" ||
@@ -727,34 +978,42 @@ async function releaseAfterFailure(
     (reservation.existingCheckoutSessionId !== null &&
       sessionValue.id !== reservation.existingCheckoutSessionId)
   ) {
-    return;
+    return false;
   }
   if (sessionValue.status === "complete") {
     // Completion truth belongs to the webhook. A retry must not downgrade the
     // still-open database order during the interval before fulfillment lands.
-    return;
+    return false;
   }
   if (sessionValue.status === "open") {
     let expired: unknown;
     try {
       expired = await dependencies.expireSession(sessionValue.id);
     } catch {
-      return;
+      return false;
     }
     if (
       !isRecord(expired) || expired.object !== "checkout.session" ||
       expired.livemode !== false || expired.id !== sessionValue.id ||
       expired.status !== "expired"
     ) {
-      return;
+      return false;
     }
   } else if (sessionValue.status !== "expired") {
-    return;
+    return false;
   }
   await dependencies.releaseReservation(
     reservation.orderId,
     "CHECKOUT_CREATION_FAILED",
   );
+  return true;
+}
+
+function operationalSessionId(value: unknown): string | undefined {
+  return isRecord(value) && typeof value.id === "string" &&
+      SESSION_PATTERN.test(value.id)
+    ? value.id
+    : undefined;
 }
 
 export function createStripeCreateCheckoutHandler(
@@ -767,6 +1026,10 @@ export function createStripeCreateCheckoutHandler(
     let reservation: ReservationSnapshot | undefined;
     let sessionValue: unknown;
     let failureReleaseOrigin: FailureReleaseOrigin | undefined;
+    let eventId: string | undefined;
+    let stripeCreateOutcomeUnknown = false;
+    let failureStage: CheckoutCreateFailureStage = "request_validation";
+    let providerResult: CheckoutCreateProviderResult = "not_attempted";
     try {
       if (!headers.has("access-control-allow-origin")) {
         throw new CheckoutHttpError(403, "CORS_ORIGIN_DENIED");
@@ -777,18 +1040,34 @@ export function createStripeCreateCheckoutHandler(
         throw new CheckoutHttpError(429, "RATE_LIMITED");
       }
       const input = parseCreateInput(await readJsonObject(request));
+      const confirmationBearer = request.headers.get(
+        "X-Whereto-Confirmation-Bearer",
+      );
+      if (confirmationBearer === null) {
+        throw new CheckoutHttpError(400, "INVALID_REQUEST");
+      }
+      const confirmationTokenHash = await hashConfirmationBearer(
+        confirmationBearer,
+      );
+      failureStage = "connect_validation";
       try {
-        await dependencies.refreshConnect(input.eventId, input.tierId);
+        await dependencies.refreshConnect(
+          input.eventId,
+          input.items.map((item) => item.tierId),
+        );
       } catch (error) {
         if (error instanceof CheckoutHttpError) throw error;
         throw new CheckoutHttpError(409, "CONNECT_NOT_READY");
       }
-      const confirmation = await deriveConfirmationToken(input.clientRequestId);
+      failureStage = "reservation";
       try {
-        reservation = await dependencies.reserveCheckout(
+        const reserved = await dependencies.reserveCheckout(
           input,
-          confirmation.tokenHash,
-        ) ?? undefined;
+          confirmationTokenHash,
+        );
+        reservation = reserved === null
+          ? undefined
+          : validatedReservationSnapshot(reserved);
       } catch (error) {
         if (error instanceof CheckoutHttpError) throw error;
         if (error instanceof Error) rpcFailure({ message: error.message });
@@ -797,12 +1076,14 @@ export function createStripeCreateCheckoutHandler(
       if (reservation === undefined) {
         throw new CheckoutHttpError(410, "CHECKOUT_EXPIRED");
       }
+      eventId = input.eventId;
 
+      failureStage = "request_integrity";
       if (
         await canonicalRequestDigest(
           reservation,
           input,
-          confirmation.tokenHash,
+          confirmationTokenHash,
         ) !== reservation.createRequestDigest
       ) {
         throw new CheckoutHttpError(500, "INTERNAL_ERROR");
@@ -811,28 +1092,52 @@ export function createStripeCreateCheckoutHandler(
       const expected: ExpectedSession = {
         reservation,
         input,
-        successUrl:
-          `${dependencies.appBaseUrl}/orders/${confirmation.clearToken}`,
+        successUrl: `${dependencies.appBaseUrl}/orders/${confirmationBearer}`,
         cancelUrl:
-          `${dependencies.appBaseUrl}/events/${input.eventId}/checkout?cancel=${confirmation.clearToken}`,
+          `${dependencies.appBaseUrl}/events/${input.eventId}/checkout?cancel=${confirmationBearer}`,
         stripeExpiresAt: Date.parse(reservation.checkoutExpiresAt) / 1_000,
       };
       let validated: ValidatedSession;
       if (reservation.existingCheckoutSessionId !== null) {
+        failureStage = "stripe_session_retrieval";
         try {
           sessionValue = await dependencies.retrieveSession(
             reservation.existingCheckoutSessionId,
-            { expand: ["line_items", "payment_intent"] },
+            {
+              expand: [
+                "line_items.data.price.product",
+                "payment_intent",
+              ],
+            },
           );
-        } catch {
+          providerResult = "session_returned";
+        } catch (error) {
+          providerResult = providerResultForStripeFailure(error);
           throw new CheckoutHttpError(502, "STRIPE_REQUEST_FAILED");
         }
+        failureStage = "stripe_session_response";
         try {
           validated = validateSession(sessionValue, expected);
         } catch (error) {
           failureReleaseOrigin = "attached-session";
           throw error;
         }
+        emitOperationalEvent({
+          contractVersion: "checkout_integrity_v1",
+          operation: "checkout.create",
+          outcome: "reused",
+          orderId: reservation.orderId,
+          eventId: input.eventId,
+          providerObjectId: validated.id,
+          itemCount: reservation.items.length,
+          aggregateQuantity: reservation.quantity,
+          currency: reservation.currency,
+          subtotalMinor: reservation.subtotalMinor,
+          totalMinor: reservation.totalMinor,
+          applicationFeeAmountMinor: reservation.applicationFeeAmountMinor,
+          priorStatus: "checkout_open",
+          resultStatus: "checkout_open",
+        }, dependencies.operationalSink);
         return jsonResponse({ checkoutUrl: validated.url }, 200, headers);
       }
 
@@ -845,16 +1150,23 @@ export function createStripeCreateCheckoutHandler(
       }
 
       const params = createParams(expected);
+      failureStage = "stripe_session_creation";
       try {
         sessionValue = await dependencies.createSession(params, {
-          idempotencyKey: `whereto-checkout-v1:${reservation.orderId}`,
+          idempotencyKey:
+            `whereto-checkout-integrity-v1:${reservation.orderId}`,
         });
+        providerResult = "session_returned";
       } catch (error) {
+        providerResult = providerResultForStripeFailure(error);
         if (isDefinitiveStripeNonCreation(error)) {
           failureReleaseOrigin = "definitive-create-noncreation";
+        } else {
+          stripeCreateOutcomeUnknown = true;
         }
         throw new CheckoutHttpError(502, "STRIPE_REQUEST_FAILED");
       }
+      failureStage = "stripe_session_response";
       try {
         validated = validateSession(sessionValue, expected);
       } catch (error) {
@@ -865,6 +1177,7 @@ export function createStripeCreateCheckoutHandler(
         failureReleaseOrigin = "created-session";
         throw new CheckoutHttpError(502, "INVALID_STRIPE_SESSION");
       }
+      failureStage = "session_attachment";
       try {
         await dependencies.attachSession(
           reservation.orderId,
@@ -875,30 +1188,107 @@ export function createStripeCreateCheckoutHandler(
         failureReleaseOrigin = "created-session";
         throw error;
       }
+      emitOperationalEvent({
+        contractVersion: "checkout_integrity_v1",
+        operation: "checkout.create",
+        outcome: "created",
+        orderId: reservation.orderId,
+        eventId: input.eventId,
+        providerObjectId: validated.id,
+        itemCount: reservation.items.length,
+        aggregateQuantity: reservation.quantity,
+        currency: reservation.currency,
+        subtotalMinor: reservation.subtotalMinor,
+        totalMinor: reservation.totalMinor,
+        applicationFeeAmountMinor: reservation.applicationFeeAmountMinor,
+        resultStatus: "checkout_open",
+      }, dependencies.operationalSink);
       return jsonResponse({ checkoutUrl: validated.url }, 200, headers);
     } catch (error) {
+      let responseError = checkoutError(error);
       if (reservation !== undefined && failureReleaseOrigin !== undefined) {
+        let cleanupComplete = false;
         try {
-          await releaseAfterFailure(
+          cleanupComplete = await releaseAfterFailure(
             dependencies,
             reservation,
             failureReleaseOrigin,
             sessionValue,
           );
         } catch {
-          return checkoutErrorResponse(
-            new CheckoutHttpError(500, "INTERNAL_ERROR"),
-            headers,
-          );
+          responseError = new CheckoutHttpError(500, "INTERNAL_ERROR");
         }
+        if (
+          failureReleaseOrigin !== "definitive-create-noncreation" &&
+          !cleanupComplete
+        ) stripeCreateOutcomeUnknown = true;
       }
-      return checkoutErrorResponse(error, headers);
+      if (stripeCreateOutcomeUnknown) {
+        const uncertainErrorCode =
+          responseError.code === "STRIPE_REQUEST_FAILED" ||
+            responseError.code === "INVALID_STRIPE_SESSION"
+            ? responseError.code
+            : "INTERNAL_ERROR";
+        emitOperationalEvent({
+          contractVersion: "checkout_integrity_v1",
+          operation: "checkout.create",
+          outcome: "uncertain",
+          orderId: reservation?.orderId,
+          eventId,
+          providerObjectId: operationalSessionId(sessionValue),
+          itemCount: reservation?.items.length,
+          aggregateQuantity: reservation?.quantity,
+          currency: reservation?.currency,
+          subtotalMinor: reservation?.subtotalMinor,
+          totalMinor: reservation?.totalMinor,
+          applicationFeeAmountMinor: reservation?.applicationFeeAmountMinor,
+          errorCode: uncertainErrorCode,
+          failureStage,
+          providerResult,
+        }, dependencies.operationalSink);
+      } else {
+        emitOperationalEvent({
+          contractVersion: "checkout_integrity_v1",
+          operation: "checkout.create",
+          outcome: "failed",
+          orderId: reservation?.orderId,
+          eventId,
+          providerObjectId: operationalSessionId(sessionValue),
+          itemCount: reservation?.items.length,
+          aggregateQuantity: reservation?.quantity,
+          currency: reservation?.currency,
+          subtotalMinor: reservation?.subtotalMinor,
+          totalMinor: reservation?.totalMinor,
+          applicationFeeAmountMinor: reservation?.applicationFeeAmountMinor,
+          errorCode: responseError.code,
+          failureStage,
+          providerResult,
+        }, dependencies.operationalSink);
+      }
+      return checkoutErrorResponse(responseError, headers);
     }
   };
 }
 
-export function handler(request: Request): Promise<Response> {
-  return createStripeCreateCheckoutHandler(defaultDependencies())(request);
+export async function handler(request: Request): Promise<Response> {
+  try {
+    return await createStripeCreateCheckoutHandler(defaultDependencies())(
+      request,
+    );
+  } catch {
+    emitOperationalEvent({
+      contractVersion: "checkout_integrity_v1",
+      operation: "checkout.create",
+      outcome: "failed",
+      errorCode: "INTERNAL_ERROR",
+      failureStage: "runtime_bootstrap",
+      providerResult: "not_attempted",
+    });
+    return checkoutErrorResponse(
+      new CheckoutHttpError(500, "INTERNAL_ERROR"),
+      new Headers({ "cache-control": "no-store" }),
+    );
+  }
 }
 
 if (import.meta.main) Deno.serve(handler);

@@ -3,6 +3,11 @@ import type { ConnectStatusProjection } from "../_shared/contracts.ts";
 import { getServiceClient } from "../_shared/database.ts";
 import { getStripeWebhookSecrets } from "../_shared/env.ts";
 import { jsonResponse } from "../_shared/http.ts";
+import {
+  emitOperationalEvent,
+  type OperationalEventSink,
+  type WebhookMismatchOperationalErrorCode,
+} from "../_shared/operationalLog.ts";
 import { getStripe } from "../_shared/stripeClient.ts";
 import {
   ACCOUNT_INCLUDE,
@@ -22,6 +27,9 @@ const TRANSFER_PATTERN = /^tr_[A-Za-z0-9]+$/;
 const APPLICATION_FEE_PATTERN = /^fee_[A-Za-z0-9]+$/;
 const BALANCE_TRANSACTION_PATTERN = /^txn_[A-Za-z0-9]+$/;
 const CUSTOMER_PATTERN = /^cus_[A-Za-z0-9]+$/;
+const LINE_ITEM_PATTERN = /^li_[A-Za-z0-9]+$/;
+const PRICE_PATTERN = /^price_[A-Za-z0-9]+$/;
+const PRODUCT_PATTERN = /^prod_[A-Za-z0-9]+$/;
 const REFUND_PATTERN = /^re_[A-Za-z0-9]+$/;
 const DISPUTE_PATTERN = /^(du|dp)_[A-Za-z0-9]+$/;
 const ACCOUNT_PATTERN = /^acct_[A-Za-z0-9]+$/;
@@ -69,16 +77,46 @@ export interface ReceiptInput {
   payloadSha256: string;
 }
 
+export interface OrderItemSnapshot {
+  orderItemId: string;
+  tierId: string;
+  currency: "usd";
+  unitAmountMinor: number;
+  quantity: number;
+  subtotalMinor: number;
+}
+
 export interface OrderSnapshot {
   orderId: string;
   checkoutSessionId: string;
   eventId: string;
-  tierId: string;
   currency: "usd";
   subtotalMinor: number;
   totalMinor: number;
   applicationFeeAmountMinor: number;
   destinationAccountId: string;
+  items: OrderItemSnapshot[];
+}
+
+export type CheckoutReconciliationCode =
+  | "CHECKOUT_LINE_COUNT_MISMATCH"
+  | "CHECKOUT_ITEM_BINDING_MISSING"
+  | "CHECKOUT_ITEM_BINDING_DUPLICATE"
+  | "CHECKOUT_ITEM_BINDING_UNKNOWN"
+  | "CHECKOUT_LINE_TIER_MISMATCH"
+  | "CHECKOUT_LINE_QUANTITY_MISMATCH"
+  | "CHECKOUT_LINE_AMOUNT_MISMATCH"
+  | "CHECKOUT_LINE_CURRENCY_MISMATCH"
+  | "CHECKOUT_AGGREGATE_MISMATCH";
+
+export interface CheckoutReconciliationReviewSnapshot {
+  stripeEventId: string;
+  orderId: string;
+  checkoutSessionId: string;
+  failureCode:
+    | CheckoutReconciliationCode
+    | "PAYMENT_OBJECT_ALREADY_USED"
+    | "PAYMENT_SNAPSHOT_MISMATCH";
 }
 
 export interface PaymentSnapshot {
@@ -104,6 +142,12 @@ export interface FulfillmentSnapshot extends PaymentSnapshot {
   customerId: string | null;
 }
 
+export interface FulfillmentApplyResult {
+  orderId: string;
+  orderStatus: "paid" | "partially_refunded" | "refunded" | "requires_review";
+  ticketCount: number;
+}
+
 export interface PaymentFailureSnapshot extends PaymentSnapshot {
   failureCode: "ASYNC_PAYMENT_FAILED" | "CHECKOUT_EXPIRED";
 }
@@ -121,7 +165,7 @@ export interface RefundSnapshot {
   stripeRefundId: string;
   paymentIntentId: string;
   chargeId: string;
-  transferReversalId: string;
+  transferReversalId: string | null;
   applicationFeeRefundId: string | null;
   amountMinor: number;
   currency: "usd";
@@ -129,6 +173,26 @@ export interface RefundSnapshot {
   reason: string | null;
   reverseTransfer: boolean;
   refundApplicationFee: boolean;
+  transferReversalAmountMinor: number;
+  applicationFeeRefundAmountMinor: number;
+  policyVerified: boolean;
+  policyFailureCode: "REFUND_POLICY_MISMATCH" | null;
+}
+
+export interface RefundApplyResult {
+  orderId: string;
+  orderStatus:
+    | "creating_checkout"
+    | "checkout_open"
+    | "payment_processing"
+    | "paid"
+    | "expired"
+    | "payment_failed"
+    | "cancelled"
+    | "partially_refunded"
+    | "refunded"
+    | "requires_review";
+  ticketStatus: "valid" | "cancelled" | "refunded" | "mixed" | null;
 }
 
 export interface DisputeSnapshot {
@@ -184,12 +248,18 @@ export interface StripeWebhookDependencies {
     refreshSequence: number,
     projection: ConnectStatusProjection,
   ): Promise<boolean>;
-  fulfillPaidOrder(snapshot: FulfillmentSnapshot): Promise<void>;
+  fulfillPaidOrder(
+    snapshot: FulfillmentSnapshot,
+  ): Promise<FulfillmentApplyResult>;
   markPaymentProcessing(snapshot: PaymentSnapshot): Promise<void>;
   markPaymentFailed(snapshot: PaymentFailureSnapshot): Promise<void>;
   markPaymentRequiresReview(snapshot: PaymentReviewSnapshot): Promise<void>;
-  applyRefund(snapshot: RefundSnapshot): Promise<void>;
+  markCheckoutReconciliationReview(
+    snapshot: CheckoutReconciliationReviewSnapshot,
+  ): Promise<void>;
+  applyRefund(snapshot: RefundSnapshot): Promise<RefundApplyResult>;
   applyDispute(snapshot: DisputeSnapshot): Promise<void>;
+  operationalSink?: OperationalEventSink;
 }
 
 interface NormalizedEvent {
@@ -208,8 +278,60 @@ class PermanentWebhookError extends Error {
   }
 }
 
+class CheckoutReconciliationError extends PermanentWebhookError {
+  constructor(readonly checkoutCode: CheckoutReconciliationCode) {
+    super(checkoutCode);
+    this.name = "CheckoutReconciliationError";
+  }
+}
+
+function safeWebhookErrorCode(
+  code: string,
+): WebhookMismatchOperationalErrorCode {
+  switch (code) {
+    case "CHECKOUT_AGGREGATE_MISMATCH":
+    case "CHECKOUT_ITEM_BINDING_DUPLICATE":
+    case "CHECKOUT_ITEM_BINDING_MISSING":
+    case "CHECKOUT_ITEM_BINDING_UNKNOWN":
+    case "CHECKOUT_LINE_AMOUNT_MISMATCH":
+    case "CHECKOUT_LINE_COUNT_MISMATCH":
+    case "CHECKOUT_LINE_CURRENCY_MISMATCH":
+    case "CHECKOUT_LINE_QUANTITY_MISMATCH":
+    case "CHECKOUT_LINE_TIER_MISMATCH":
+    case "CHECKOUT_RECONCILIATION_REVIEW_MISMATCH":
+    case "DISPUTE_RECOVERY_MISMATCH":
+    case "DISPUTE_SNAPSHOT_MISMATCH":
+    case "INVALID_EVENT_ENVELOPE":
+    case "INVALID_STRIPE_ACCOUNT":
+    case "LIVE_MODE_FORBIDDEN":
+    case "ORDER_NOT_FOUND":
+    case "PAYMENT_BINDING_MISMATCH":
+    case "PAYMENT_NOT_PAID":
+    case "PAYMENT_OBJECT_ALREADY_USED":
+    case "PAYMENT_SNAPSHOT_MISMATCH":
+    case "REFUND_POLICY_MISMATCH":
+    case "REFUND_SNAPSHOT_MISMATCH":
+    case "REFUND_TOTAL_INVALID":
+    case "STRIPE_OBJECT_INVALID":
+    case "WEBHOOK_EVENT_MISMATCH":
+    case "WEBHOOK_RECEIPT_INVALID":
+    case "WEBHOOK_RECEIPT_MISMATCH":
+      return code;
+    default:
+      return "INTERNAL_ERROR";
+  }
+}
+
 function permanent(code: string): never {
   throw new PermanentWebhookError(code);
+}
+
+function retryableProviderSnapshot(): never {
+  throw new Error("STRIPE_OBJECT_GRAPH_INCOMPLETE");
+}
+
+function checkoutMismatch(code: CheckoutReconciliationCode): never {
+  throw new CheckoutReconciliationError(code);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -262,6 +384,15 @@ function expandedId(
   return requireId(value.id, pattern);
 }
 
+function requiredMaterializedId(
+  value: unknown,
+  pattern: RegExp,
+  expectedObject?: string,
+): string {
+  if (value === null || value === undefined) retryableProviderSnapshot();
+  return expandedId(value, pattern, expectedObject);
+}
+
 function metadataOrderId(value: unknown): string {
   if (!isRecord(value)) permanent("PAYMENT_SNAPSHOT_MISMATCH");
   return requireId(value.order_id, UUID_PATTERN, "PAYMENT_SNAPSHOT_MISMATCH");
@@ -273,10 +404,10 @@ function validateMetadata(
 ): void {
   if (
     !isRecord(value) ||
-    !exactKeys(value, ["order_id", "event_id", "tier_id"]) ||
+    !exactKeys(value, ["contract_version", "event_id", "order_id"]) ||
+    value.contract_version !== "checkout_integrity_v1" ||
     value.order_id !== order.orderId ||
-    value.event_id !== order.eventId ||
-    value.tier_id !== order.tierId
+    value.event_id !== order.eventId
   ) {
     permanent("PAYMENT_SNAPSHOT_MISMATCH");
   }
@@ -408,6 +539,7 @@ function rpcPermanentCode(error: { message?: string } | null): string | null {
     code === "PAYMENT_SNAPSHOT_MISMATCH" ||
     code === "WEBHOOK_RECEIPT_MISMATCH" ||
     code === "PAYMENT_OBJECT_ALREADY_USED" ||
+    code === "CHECKOUT_RECONCILIATION_REVIEW_MISMATCH" ||
     code === "PAYMENT_NOT_PAID" ||
     code === "REFUND_SNAPSHOT_MISMATCH" ||
     code === "REFUND_TOTAL_INVALID" ||
@@ -469,6 +601,10 @@ function orderSnapshotFromRpc(
   if (!Array.isArray(value)) throw new Error("invalid database response");
   if (value.length === 0) return null;
   const row = parseRpcSingle(value);
+  if (!Array.isArray(row.order_items)) {
+    throw new Error("invalid database response");
+  }
+  const orderItems = row.order_items;
   if (
     typeof row.order_id !== "string" || !UUID_PATTERN.test(row.order_id) ||
     (
@@ -477,31 +613,63 @@ function orderSnapshotFromRpc(
         !SESSION_PATTERN.test(row.checkout_session_id))
     ) ||
     typeof row.event_id !== "string" || !UUID_PATTERN.test(row.event_id) ||
-    typeof row.tier_id !== "string" || !UUID_PATTERN.test(row.tier_id) ||
     row.currency !== "usd" || !Number.isSafeInteger(row.subtotal_minor) ||
     !Number.isSafeInteger(row.total_minor) ||
     !Number.isSafeInteger(row.application_fee_amount_minor) ||
     typeof row.destination_account_id !== "string" ||
-    !ACCOUNT_PATTERN.test(row.destination_account_id)
+    !ACCOUNT_PATTERN.test(row.destination_account_id) ||
+    orderItems.length === 0 || orderItems.length > 3
   ) throw new Error("invalid database response");
+  const items = orderItems.map((item): OrderItemSnapshot => {
+    if (
+      !isRecord(item) ||
+      !exactKeys(item, [
+        "currency",
+        "order_item_id",
+        "quantity",
+        "subtotal_minor",
+        "ticket_tier_id",
+        "unit_amount_minor",
+      ]) ||
+      typeof item.order_item_id !== "string" ||
+      !UUID_PATTERN.test(item.order_item_id) ||
+      typeof item.ticket_tier_id !== "string" ||
+      !UUID_PATTERN.test(item.ticket_tier_id) ||
+      item.currency !== "usd" ||
+      !Number.isSafeInteger(item.unit_amount_minor) ||
+      (item.unit_amount_minor as number) <= 0 ||
+      !Number.isSafeInteger(item.quantity) ||
+      (item.quantity as number) <= 0 || (item.quantity as number) > 10 ||
+      !Number.isSafeInteger(item.subtotal_minor) ||
+      (item.subtotal_minor as number) <= 0
+    ) throw new Error("invalid database response");
+    return {
+      orderItemId: item.order_item_id,
+      tierId: item.ticket_tier_id,
+      currency: "usd",
+      unitAmountMinor: item.unit_amount_minor as number,
+      quantity: item.quantity as number,
+      subtotalMinor: item.subtotal_minor as number,
+    };
+  });
   return {
     orderId: row.order_id,
     checkoutSessionId: typeof row.checkout_session_id === "string"
       ? row.checkout_session_id
       : fallbackSessionId ?? permanent("PAYMENT_SNAPSHOT_MISMATCH"),
     eventId: row.event_id,
-    tierId: row.tier_id,
     currency: "usd",
     subtotalMinor: row.subtotal_minor as number,
     totalMinor: row.total_minor as number,
     applicationFeeAmountMinor: row.application_fee_amount_minor as number,
     destinationAccountId: row.destination_account_id,
+    items,
   };
 }
 
 async function defaultGetOrderSnapshot(orderId: string, sessionId: string) {
   const { data, error } = await getServiceClient().rpc(
-    "server_get_webhook_order_snapshot",
+    "server_get_checkout_integrity_order_snapshot",
     { p_order_id: orderId, p_checkout_session_id: sessionId },
   );
   if (error !== null) throwRpc(error);
@@ -510,7 +678,7 @@ async function defaultGetOrderSnapshot(orderId: string, sessionId: string) {
 
 async function defaultGetPaymentOrderSnapshot(orderId: string) {
   const { data, error } = await getServiceClient().rpc(
-    "server_get_webhook_payment_order_snapshot",
+    "server_get_checkout_integrity_payment_snapshot",
     { p_order_id: orderId },
   );
   if (error !== null) throwRpc(error);
@@ -520,6 +688,104 @@ async function defaultGetPaymentOrderSnapshot(orderId: string) {
 async function domainRpc(name: string, params: Record<string, unknown>) {
   const { error } = await getServiceClient().rpc(name, params);
   if (error !== null) throwRpc(error);
+}
+
+export function fulfillmentApplyResultFromRpc(
+  value: unknown,
+  expectedOrderId: string,
+): FulfillmentApplyResult {
+  if (!Array.isArray(value) || value.length !== 1) {
+    permanent("CHECKOUT_RECONCILIATION_REVIEW_MISMATCH");
+  }
+  const row = value[0];
+  if (
+    !isRecord(row) || Object.getPrototypeOf(row) !== Object.prototype ||
+    !exactKeys(row, ["order_id", "order_status", "ticket_count"]) ||
+    row.order_id !== expectedOrderId || !UUID_PATTERN.test(expectedOrderId) ||
+    (row.order_status !== "paid" &&
+      row.order_status !== "partially_refunded" &&
+      row.order_status !== "refunded" &&
+      row.order_status !== "requires_review") ||
+    !Number.isSafeInteger(row.ticket_count) ||
+    (row.ticket_count as number) < 0 ||
+    (row.ticket_count as number) > 10
+  ) permanent("CHECKOUT_RECONCILIATION_REVIEW_MISMATCH");
+  return {
+    orderId: row.order_id,
+    orderStatus: row.order_status,
+    ticketCount: row.ticket_count as number,
+  };
+}
+
+export function refundApplyResultFromRpc(
+  value: unknown,
+  expectedOrderId: string,
+): RefundApplyResult {
+  if (!Array.isArray(value) || value.length !== 1) {
+    throw new Error("REFUND_RESULT_INVALID");
+  }
+  const row = value[0];
+  if (
+    !isRecord(row) || Object.getPrototypeOf(row) !== Object.prototype ||
+    !exactKeys(row, ["order_id", "order_status", "ticket_status"])
+  ) throw new Error("REFUND_RESULT_INVALID");
+  for (const field of ["order_id", "order_status", "ticket_status"]) {
+    const descriptor = Object.getOwnPropertyDescriptor(row, field);
+    if (descriptor === undefined || !("value" in descriptor)) {
+      throw new Error("REFUND_RESULT_INVALID");
+    }
+  }
+  if (
+    row.order_id !== expectedOrderId || !UUID_PATTERN.test(expectedOrderId) ||
+    (row.order_status !== "creating_checkout" &&
+      row.order_status !== "checkout_open" &&
+      row.order_status !== "payment_processing" &&
+      row.order_status !== "paid" &&
+      row.order_status !== "expired" &&
+      row.order_status !== "payment_failed" &&
+      row.order_status !== "cancelled" &&
+      row.order_status !== "partially_refunded" &&
+      row.order_status !== "refunded" &&
+      row.order_status !== "requires_review") ||
+    (row.ticket_status !== null && row.ticket_status !== "valid" &&
+      row.ticket_status !== "cancelled" && row.ticket_status !== "refunded" &&
+      row.ticket_status !== "mixed")
+  ) throw new Error("REFUND_RESULT_INVALID");
+  return {
+    orderId: row.order_id,
+    orderStatus: row.order_status,
+    ticketStatus: row.ticket_status,
+  };
+}
+
+async function defaultApplyRefund(
+  value: RefundSnapshot,
+): Promise<RefundApplyResult> {
+  const { data, error } = await getServiceClient().rpc(
+    "server_apply_verified_refund",
+    {
+      p_stripe_event_id: value.stripeEventId,
+      p_order_id: value.orderId,
+      p_stripe_refund_id: value.stripeRefundId,
+      p_payment_intent_id: value.paymentIntentId,
+      p_charge_id: value.chargeId,
+      p_transfer_reversal_id: value.transferReversalId,
+      p_application_fee_refund_id: value.applicationFeeRefundId,
+      p_amount_minor: value.amountMinor,
+      p_currency: value.currency,
+      p_status: value.status,
+      p_reason: value.reason,
+      p_reverse_transfer: value.reverseTransfer,
+      p_refund_application_fee: value.refundApplicationFee,
+      p_transfer_reversal_amount_minor: value.transferReversalAmountMinor,
+      p_application_fee_refund_amount_minor:
+        value.applicationFeeRefundAmountMinor,
+      p_policy_verified: value.policyVerified,
+      p_policy_failure_code: value.policyFailureCode,
+    },
+  );
+  if (error !== null) throwRpc(error);
+  return refundApplyResultFromRpc(data, value.orderId);
 }
 
 export function createDefaultStripeWebhookDependencies(): StripeWebhookDependencies {
@@ -565,25 +831,31 @@ export function createDefaultStripeWebhookDependencies(): StripeWebhookDependenc
       );
       return true;
     },
-    fulfillPaidOrder: (value) =>
-      domainRpc("server_fulfill_paid_order", {
-        p_stripe_event_id: value.stripeEventId,
-        p_order_id: value.orderId,
-        p_checkout_session_id: value.checkoutSessionId,
-        p_payment_intent_id: value.paymentIntentId,
-        p_charge_id: value.chargeId,
-        p_transfer_id: value.transferId,
-        p_application_fee_id: value.applicationFeeId,
-        p_balance_transaction_id: value.balanceTransactionId,
-        p_customer_id: value.customerId,
-        p_mode: value.mode,
-        p_payment_status: value.paymentStatus,
-        p_currency: value.currency,
-        p_subtotal_minor: value.subtotalMinor,
-        p_total_minor: value.totalMinor,
-        p_application_fee_amount_minor: value.applicationFeeAmountMinor,
-        p_destination_account_id: value.destinationAccountId,
-      }),
+    fulfillPaidOrder: async (value) => {
+      const { data, error } = await getServiceClient().rpc(
+        "server_fulfill_paid_order",
+        {
+          p_stripe_event_id: value.stripeEventId,
+          p_order_id: value.orderId,
+          p_checkout_session_id: value.checkoutSessionId,
+          p_payment_intent_id: value.paymentIntentId,
+          p_charge_id: value.chargeId,
+          p_transfer_id: value.transferId,
+          p_application_fee_id: value.applicationFeeId,
+          p_balance_transaction_id: value.balanceTransactionId,
+          p_customer_id: value.customerId,
+          p_mode: value.mode,
+          p_payment_status: value.paymentStatus,
+          p_currency: value.currency,
+          p_subtotal_minor: value.subtotalMinor,
+          p_total_minor: value.totalMinor,
+          p_application_fee_amount_minor: value.applicationFeeAmountMinor,
+          p_destination_account_id: value.destinationAccountId,
+        },
+      );
+      if (error !== null) throwRpc(error);
+      return fulfillmentApplyResultFromRpc(data, value.orderId);
+    },
     markPaymentProcessing: (value) =>
       domainRpc("server_mark_payment_processing", paymentRpcParams(value)),
     markPaymentFailed: (value) =>
@@ -601,22 +873,14 @@ export function createDefaultStripeWebhookDependencies(): StripeWebhookDependenc
         p_customer_id: value.customerId,
         p_failure_code: value.failureCode,
       }),
-    applyRefund: (value) =>
-      domainRpc("server_apply_verified_refund", {
-        p_stripe_event_id: value.stripeEventId,
+    markCheckoutReconciliationReview: (value) =>
+      domainRpc("server_mark_checkout_reconciliation_review", {
         p_order_id: value.orderId,
-        p_stripe_refund_id: value.stripeRefundId,
-        p_payment_intent_id: value.paymentIntentId,
-        p_charge_id: value.chargeId,
-        p_transfer_reversal_id: value.transferReversalId,
-        p_application_fee_refund_id: value.applicationFeeRefundId,
-        p_amount_minor: value.amountMinor,
-        p_currency: value.currency,
-        p_status: value.status,
-        p_reason: value.reason,
-        p_reverse_transfer: value.reverseTransfer,
-        p_refund_application_fee: value.refundApplicationFee,
+        p_checkout_session_id: value.checkoutSessionId,
+        p_stripe_event_id: value.stripeEventId,
+        p_failure_code: value.failureCode,
       }),
+    applyRefund: defaultApplyRefund,
     applyDispute: (value) =>
       domainRpc("server_apply_verified_dispute", {
         p_stripe_event_id: value.stripeEventId,
@@ -652,7 +916,11 @@ function paymentRpcParams(value: PaymentSnapshot): Record<string, unknown> {
 function validatePaymentIntent(
   value: unknown,
   order: OrderSnapshot,
-): { id: string; charge: Record<string, unknown> | null } {
+): { id: string; status: string; charge: Record<string, unknown> | null } {
+  if (typeof value === "string") {
+    requireId(value, PAYMENT_INTENT_PATTERN, "PAYMENT_SNAPSHOT_MISMATCH");
+    retryableProviderSnapshot();
+  }
   if (
     !isRecord(value) || value.object !== "payment_intent" ||
     value.livemode !== false
@@ -670,14 +938,41 @@ function validatePaymentIntent(
   if (
     value.amount !== order.totalMinor || value.currency !== order.currency ||
     value.application_fee_amount !== order.applicationFeeAmountMinor ||
-    transferData.destination !== order.destinationAccountId
+    transferData.destination !== order.destinationAccountId ||
+    typeof value.status !== "string" ||
+    ![
+      "requires_payment_method",
+      "requires_confirmation",
+      "requires_action",
+      "processing",
+      "requires_capture",
+      "canceled",
+      "succeeded",
+    ].includes(value.status)
+  ) permanent("PAYMENT_SNAPSHOT_MISMATCH");
+  if (
+    value.status === "succeeded" &&
+    (
+      !Number.isSafeInteger(value.amount_received) ||
+      value.amount_received !== order.totalMinor ||
+      !Number.isSafeInteger(value.amount_capturable) ||
+      value.amount_capturable !== 0
+    )
   ) permanent("PAYMENT_SNAPSHOT_MISMATCH");
   validateMetadata(value.metadata, order);
   if (value.latest_charge === null || value.latest_charge === undefined) {
-    return { id, charge: null };
+    return { id, status: value.status, charge: null };
+  }
+  if (typeof value.latest_charge === "string") {
+    requireId(
+      value.latest_charge,
+      CHARGE_PATTERN,
+      "PAYMENT_SNAPSHOT_MISMATCH",
+    );
+    retryableProviderSnapshot();
   }
   if (!isRecord(value.latest_charge)) permanent("PAYMENT_SNAPSHOT_MISMATCH");
-  return { id, charge: value.latest_charge };
+  return { id, status: value.status, charge: value.latest_charge };
 }
 
 function validateCharge(
@@ -697,8 +992,11 @@ function validateCharge(
   if (
     !isRecord(value) || value.object !== "charge" || value.livemode !== false ||
     value.paid !== true || value.amount !== order.totalMinor ||
+    !Number.isSafeInteger(value.amount_captured) ||
+    value.amount_captured !== order.totalMinor || value.captured !== true ||
+    value.status !== "succeeded" ||
     value.currency !== order.currency ||
-    expandedId(
+    requiredMaterializedId(
         value.payment_intent,
         PAYMENT_INTENT_PATTERN,
         "payment_intent",
@@ -717,13 +1015,17 @@ function validateCharge(
   ) permanent("PAYMENT_SNAPSHOT_MISMATCH");
   return {
     id: requireId(value.id, CHARGE_PATTERN, "PAYMENT_SNAPSHOT_MISMATCH"),
-    transferId: expandedId(value.transfer, TRANSFER_PATTERN, "transfer"),
-    applicationFeeId: expandedId(
+    transferId: requiredMaterializedId(
+      value.transfer,
+      TRANSFER_PATTERN,
+      "transfer",
+    ),
+    applicationFeeId: requiredMaterializedId(
       value.application_fee,
       APPLICATION_FEE_PATTERN,
       "application_fee",
     ),
-    balanceTransactionId: expandedId(
+    balanceTransactionId: requiredMaterializedId(
       value.balance_transaction,
       BALANCE_TRANSACTION_PATTERN,
       "balance_transaction",
@@ -735,58 +1037,230 @@ function validateCharge(
   };
 }
 
+function validateCheckoutLines(
+  session: Record<string, unknown>,
+  order: OrderSnapshot,
+): void {
+  const lineItems = isRecord(session.line_items)
+    ? session.line_items
+    : checkoutMismatch("CHECKOUT_LINE_COUNT_MISMATCH");
+  const rows = Array.isArray(lineItems.data)
+    ? lineItems.data
+    : checkoutMismatch("CHECKOUT_LINE_COUNT_MISMATCH");
+  if (
+    lineItems.has_more !== false || rows.length !== order.items.length
+  ) checkoutMismatch("CHECKOUT_LINE_COUNT_MISMATCH");
+
+  const expectedByOrderItemId = new Map<string, OrderItemSnapshot>();
+  const expectedTierIds = new Set<string>();
+  for (const item of order.items) {
+    if (expectedByOrderItemId.has(item.orderItemId)) {
+      checkoutMismatch("CHECKOUT_ITEM_BINDING_DUPLICATE");
+    }
+    if (expectedTierIds.has(item.tierId)) {
+      checkoutMismatch("CHECKOUT_LINE_TIER_MISMATCH");
+    }
+    if (
+      !Number.isSafeInteger(item.unitAmountMinor * item.quantity) ||
+      item.subtotalMinor !== item.unitAmountMinor * item.quantity
+    ) checkoutMismatch("CHECKOUT_LINE_AMOUNT_MISMATCH");
+    expectedByOrderItemId.set(item.orderItemId, item);
+    expectedTierIds.add(item.tierId);
+  }
+
+  const seenOrderItemIds = new Set<string>();
+  const seenLineIds = new Set<string>();
+  const seenPriceIds = new Set<string>();
+  const seenProductIds = new Set<string>();
+  let subtotal = 0;
+  let total = 0;
+  for (const value of rows) {
+    if (!isRecord(value) || !isRecord(value.price)) {
+      checkoutMismatch("CHECKOUT_ITEM_BINDING_MISSING");
+    }
+    const price = value.price;
+    const product = isRecord(price.product)
+      ? price.product
+      : checkoutMismatch("CHECKOUT_ITEM_BINDING_MISSING");
+    const productMetadata = isRecord(product.metadata)
+      ? product.metadata
+      : checkoutMismatch("CHECKOUT_ITEM_BINDING_MISSING");
+    if (
+      product.object !== "product" || product.livemode !== false ||
+      !exactKeys(productMetadata, ["whereto_order_item_id"]) ||
+      typeof productMetadata.whereto_order_item_id !== "string" ||
+      !UUID_PATTERN.test(productMetadata.whereto_order_item_id)
+    ) checkoutMismatch("CHECKOUT_ITEM_BINDING_MISSING");
+
+    const lineId = typeof value.id === "string" &&
+        LINE_ITEM_PATTERN.test(value.id)
+      ? value.id
+      : checkoutMismatch("CHECKOUT_ITEM_BINDING_MISSING");
+    const priceId = typeof price.id === "string" && PRICE_PATTERN.test(price.id)
+      ? price.id
+      : checkoutMismatch("CHECKOUT_ITEM_BINDING_MISSING");
+    const productId = typeof product.id === "string" &&
+        PRODUCT_PATTERN.test(product.id)
+      ? product.id
+      : checkoutMismatch("CHECKOUT_ITEM_BINDING_MISSING");
+    const orderItemId = productMetadata.whereto_order_item_id;
+    if (
+      seenLineIds.has(lineId) || seenPriceIds.has(priceId) ||
+      seenProductIds.has(productId) || seenOrderItemIds.has(orderItemId)
+    ) checkoutMismatch("CHECKOUT_ITEM_BINDING_DUPLICATE");
+    const item = expectedByOrderItemId.get(orderItemId);
+    if (item === undefined) checkoutMismatch("CHECKOUT_ITEM_BINDING_UNKNOWN");
+
+    seenLineIds.add(lineId);
+    seenPriceIds.add(priceId);
+    seenProductIds.add(productId);
+    seenOrderItemIds.add(orderItemId);
+
+    if (value.quantity !== item.quantity) {
+      checkoutMismatch("CHECKOUT_LINE_QUANTITY_MISMATCH");
+    }
+    if (
+      value.currency !== item.currency || price.currency !== item.currency
+    ) checkoutMismatch("CHECKOUT_LINE_CURRENCY_MISMATCH");
+    if (
+      price.object !== "price" || price.livemode !== false ||
+      price.type !== "one_time" || price.unit_amount !== item.unitAmountMinor ||
+      value.amount_subtotal !== item.subtotalMinor ||
+      value.amount_total !== item.subtotalMinor
+    ) checkoutMismatch("CHECKOUT_LINE_AMOUNT_MISMATCH");
+    subtotal += value.amount_subtotal as number;
+    total += value.amount_total as number;
+    if (!Number.isSafeInteger(subtotal) || !Number.isSafeInteger(total)) {
+      checkoutMismatch("CHECKOUT_AGGREGATE_MISMATCH");
+    }
+  }
+
+  if (seenOrderItemIds.size !== expectedByOrderItemId.size) {
+    checkoutMismatch("CHECKOUT_ITEM_BINDING_MISSING");
+  }
+  if (
+    session.currency !== order.currency ||
+    session.amount_subtotal !== order.subtotalMinor ||
+    session.amount_total !== order.totalMinor ||
+    subtotal !== order.subtotalMinor || total !== order.totalMinor ||
+    subtotal !== session.amount_subtotal || total !== session.amount_total
+  ) checkoutMismatch("CHECKOUT_AGGREGATE_MISMATCH");
+}
+
+async function markCheckoutReview(
+  event: NormalizedEvent,
+  order: OrderSnapshot,
+  failureCode:
+    | CheckoutReconciliationCode
+    | "PAYMENT_OBJECT_ALREADY_USED"
+    | "PAYMENT_SNAPSHOT_MISMATCH",
+  dependencies: StripeWebhookDependencies,
+): Promise<void> {
+  await dependencies.markCheckoutReconciliationReview({
+    stripeEventId: event.id,
+    orderId: order.orderId,
+    checkoutSessionId: order.checkoutSessionId,
+    failureCode,
+  });
+  emitOperationalEvent({
+    contractVersion: "checkout_integrity_v1",
+    operation: "webhook.reconciliation",
+    outcome: "mismatch",
+    orderId: order.orderId,
+    stripeEventId: event.id,
+    providerObjectId: order.checkoutSessionId,
+    itemCount: order.items.length,
+    aggregateQuantity: order.items.reduce(
+      (sum, item) => sum + item.quantity,
+      0,
+    ),
+    currency: order.currency,
+    subtotalMinor: order.subtotalMinor,
+    totalMinor: order.totalMinor,
+    errorCode: failureCode,
+  }, dependencies.operationalSink);
+}
+
+async function reviewKnownCheckoutValidationFailure(
+  error: unknown,
+  event: NormalizedEvent,
+  order: OrderSnapshot,
+  dependencies: StripeWebhookDependencies,
+): Promise<boolean> {
+  const failureCode = error instanceof CheckoutReconciliationError
+    ? error.checkoutCode
+    : error instanceof PermanentWebhookError &&
+        (error.code === "PAYMENT_SNAPSHOT_MISMATCH" ||
+          error.code === "STRIPE_OBJECT_INVALID") &&
+        event.type === "checkout.session.completed"
+    ? "PAYMENT_SNAPSHOT_MISMATCH"
+    : null;
+  if (failureCode === null) return false;
+  await markCheckoutReview(event, order, failureCode, dependencies);
+  return true;
+}
+
 async function currentSessionSnapshot(
   event: NormalizedEvent,
   dependencies: StripeWebhookDependencies,
-): Promise<{
-  payment: PaymentSnapshot;
-  paymentIntent: { id: string; charge: Record<string, unknown> | null } | null;
-  order: OrderSnapshot;
-  raw: Record<string, unknown>;
-}> {
+): Promise<
+  {
+    payment: PaymentSnapshot;
+    paymentIntent: {
+      id: string;
+      status: string;
+      charge: Record<string, unknown> | null;
+    } | null;
+    order: OrderSnapshot;
+    raw: Record<string, unknown>;
+  } | null
+> {
   const sessionId = requireId(
     event.objectId,
     SESSION_PATTERN,
     "PAYMENT_SNAPSHOT_MISMATCH",
   );
   const value = await dependencies.retrieveSession(sessionId, {
-    expand: ["line_items", "payment_intent.latest_charge"],
+    expand: [
+      "line_items.data.price.product",
+      "payment_intent.latest_charge",
+    ],
   });
-  if (
-    !isRecord(value) || value.object !== "checkout.session" ||
-    value.id !== sessionId || value.livemode !== false ||
-    value.mode !== "payment" ||
-    (value.payment_status !== "paid" && value.payment_status !== "unpaid")
-  ) permanent("PAYMENT_SNAPSHOT_MISMATCH");
+  if (!isRecord(value) || value.id !== sessionId) {
+    permanent("PAYMENT_SNAPSHOT_MISMATCH");
+  }
   const orderId = metadataOrderId(value.metadata);
   const order = await dependencies.getOrderSnapshot(orderId, sessionId);
   if (order === null) permanent("PAYMENT_SNAPSHOT_MISMATCH");
-  validateMetadata(value.metadata, order);
-  const lineItems = isRecord(value.line_items)
-    ? value.line_items
-    : permanent("PAYMENT_SNAPSHOT_MISMATCH");
-  const rows = Array.isArray(lineItems.data)
-    ? lineItems.data
-    : permanent("PAYMENT_SNAPSHOT_MISMATCH");
-  const item = rows[0];
-  const price = isRecord(item) && isRecord(item.price)
-    ? item.price
-    : permanent("PAYMENT_SNAPSHOT_MISMATCH");
-  if (
-    rows.length !== 1 || lineItems.has_more !== false || !isRecord(item) ||
-    item.quantity !== 1 || item.currency !== order.currency ||
-    item.amount_subtotal !== order.subtotalMinor ||
-    item.amount_total !== order.totalMinor ||
-    price.currency !== order.currency ||
-    price.unit_amount !== order.subtotalMinor ||
-    value.currency !== order.currency ||
-    value.amount_subtotal !== order.subtotalMinor ||
-    value.amount_total !== order.totalMinor ||
-    value.client_reference_id !== order.orderId
-  ) permanent("PAYMENT_SNAPSHOT_MISMATCH");
-  let paymentIntent = null;
-  if (value.payment_intent !== null && value.payment_intent !== undefined) {
-    paymentIntent = validatePaymentIntent(value.payment_intent, order);
+  let paymentIntent: {
+    id: string;
+    status: string;
+    charge: Record<string, unknown> | null;
+  } | null = null;
+  try {
+    if (
+      value.object !== "checkout.session" || value.livemode !== false ||
+      value.mode !== "payment" ||
+      (value.payment_status !== "paid" && value.payment_status !== "unpaid")
+    ) permanent("PAYMENT_SNAPSHOT_MISMATCH");
+    validateMetadata(value.metadata, order);
+    if (value.client_reference_id !== order.orderId) {
+      permanent("PAYMENT_SNAPSHOT_MISMATCH");
+    }
+    validateCheckoutLines(value, order);
+    if (value.payment_intent !== null && value.payment_intent !== undefined) {
+      paymentIntent = validatePaymentIntent(value.payment_intent, order);
+    }
+  } catch (error) {
+    if (
+      await reviewKnownCheckoutValidationFailure(
+        error,
+        event,
+        order,
+        dependencies,
+      )
+    ) return null;
+    throw error;
   }
   return {
     payment: {
@@ -813,15 +1287,40 @@ async function dispatchCheckout(
   dependencies: StripeWebhookDependencies,
 ): Promise<void> {
   const current = await currentSessionSnapshot(event, dependencies);
+  if (current === null) return;
   if (event.type === "checkout.session.completed") {
-    if (current.raw.status !== "complete") {
-      permanent("PAYMENT_SNAPSHOT_MISMATCH");
-    }
-    if (current.payment.paymentStatus === "unpaid") {
-      if (current.paymentIntent === null) {
+    try {
+      if (current.raw.status !== "complete") {
         permanent("PAYMENT_SNAPSHOT_MISMATCH");
       }
+      if (current.paymentIntent === null) retryableProviderSnapshot();
+      if (
+        current.payment.paymentStatus === "unpaid" &&
+        current.paymentIntent.status !== "processing"
+      ) permanent("PAYMENT_SNAPSHOT_MISMATCH");
+    } catch (error) {
+      if (
+        await reviewKnownCheckoutValidationFailure(
+          error,
+          event,
+          current.order,
+          dependencies,
+        )
+      ) return;
+      throw error;
+    }
+    if (current.payment.paymentStatus === "unpaid") {
       await dependencies.markPaymentProcessing(current.payment);
+      emitOperationalEvent({
+        contractVersion: "checkout_integrity_v1",
+        operation: "webhook.lifecycle",
+        outcome: "processing",
+        orderId: current.order.orderId,
+        stripeEventId: event.id,
+        providerObjectId: current.order.checkoutSessionId,
+        priorStatus: "checkout_open",
+        resultStatus: "payment_processing",
+      }, dependencies.operationalSink);
       return;
     }
   } else if (event.type === "checkout.session.async_payment_succeeded") {
@@ -829,6 +1328,10 @@ async function dispatchCheckout(
       current.raw.status !== "complete" ||
       current.payment.paymentStatus !== "paid"
     ) permanent("PAYMENT_SNAPSHOT_MISMATCH");
+    if (current.paymentIntent === null) retryableProviderSnapshot();
+    if (current.paymentIntent.status !== "succeeded") {
+      permanent("PAYMENT_SNAPSHOT_MISMATCH");
+    }
   } else {
     if (current.payment.paymentStatus !== "unpaid") {
       permanent("PAYMENT_SNAPSHOT_MISMATCH");
@@ -845,16 +1348,48 @@ async function dispatchCheckout(
         ? "CHECKOUT_EXPIRED"
         : "ASYNC_PAYMENT_FAILED",
     });
+    emitOperationalEvent({
+      contractVersion: "checkout_integrity_v1",
+      operation: "webhook.lifecycle",
+      outcome: "failed",
+      orderId: current.order.orderId,
+      stripeEventId: event.id,
+      providerObjectId: current.order.checkoutSessionId,
+      resultStatus: event.type === "checkout.session.expired"
+        ? "expired"
+        : "payment_failed",
+      errorCode: event.type === "checkout.session.expired"
+        ? "CHECKOUT_EXPIRED"
+        : "ASYNC_PAYMENT_FAILED",
+    }, dependencies.operationalSink);
     return;
   }
-  if (current.paymentIntent === null || current.paymentIntent.charge === null) {
-    permanent("PAYMENT_SNAPSHOT_MISMATCH");
+  let charge: ReturnType<typeof validateCharge>;
+  try {
+    if (
+      current.paymentIntent === null || current.paymentIntent.charge === null
+    ) {
+      retryableProviderSnapshot();
+    }
+    if (current.paymentIntent.status !== "succeeded") {
+      permanent("PAYMENT_SNAPSHOT_MISMATCH");
+    }
+    charge = validateCharge(
+      current.paymentIntent.charge,
+      current.order,
+      current.paymentIntent.id,
+    );
+  } catch (error) {
+    if (
+      await reviewKnownCheckoutValidationFailure(
+        error,
+        event,
+        current.order,
+        dependencies,
+      )
+    ) return;
+    throw error;
   }
-  const charge = validateCharge(
-    current.paymentIntent.charge,
-    current.order,
-    current.paymentIntent.id,
-  );
   if (charge.amountRefunded > 0 || charge.refunded || charge.disputed) {
     await dependencies.markPaymentRequiresReview({
       ...current.payment,
@@ -868,17 +1403,72 @@ async function dispatchCheckout(
         ? "PAYMENT_CHARGE_DISPUTED"
         : "PAYMENT_CHARGE_REFUNDED",
     });
+    emitOperationalEvent({
+      contractVersion: "checkout_integrity_v1",
+      operation: "webhook.reconciliation",
+      outcome: "review",
+      orderId: current.order.orderId,
+      stripeEventId: event.id,
+      providerObjectId: current.order.checkoutSessionId,
+      currency: current.order.currency,
+      subtotalMinor: current.order.subtotalMinor,
+      totalMinor: current.order.totalMinor,
+      resultStatus: "requires_review",
+      errorCode: charge.disputed
+        ? "PAYMENT_CHARGE_DISPUTED"
+        : "PAYMENT_CHARGE_REFUNDED",
+    }, dependencies.operationalSink);
     return;
   }
-  await dependencies.fulfillPaidOrder({
-    ...current.payment,
-    paymentIntentId: current.paymentIntent.id,
-    chargeId: charge.id,
-    transferId: charge.transferId,
-    applicationFeeId: charge.applicationFeeId,
-    balanceTransactionId: charge.balanceTransactionId,
-    customerId: charge.customerId,
-  });
+  try {
+    const expectedTicketCount = current.order.items.reduce(
+      (sum, item) => sum + item.quantity,
+      0,
+    );
+    const fulfillment = await dependencies.fulfillPaidOrder({
+      ...current.payment,
+      paymentIntentId: current.paymentIntent.id,
+      chargeId: charge.id,
+      transferId: charge.transferId,
+      applicationFeeId: charge.applicationFeeId,
+      balanceTransactionId: charge.balanceTransactionId,
+      customerId: charge.customerId,
+    });
+    if (
+      fulfillment.orderId !== current.order.orderId ||
+      fulfillment.orderStatus !== "paid" ||
+      fulfillment.ticketCount !== expectedTicketCount
+    ) permanent("CHECKOUT_RECONCILIATION_REVIEW_MISMATCH");
+    emitOperationalEvent({
+      contractVersion: "checkout_integrity_v1",
+      operation: "webhook.fulfillment",
+      outcome: "fulfilled",
+      orderId: current.order.orderId,
+      stripeEventId: event.id,
+      providerObjectId: current.order.checkoutSessionId,
+      itemCount: current.order.items.length,
+      aggregateQuantity: expectedTicketCount,
+      currency: current.order.currency,
+      subtotalMinor: current.order.subtotalMinor,
+      totalMinor: current.order.totalMinor,
+      applicationFeeAmountMinor: current.order.applicationFeeAmountMinor,
+      actualTicketCount: fulfillment.ticketCount,
+      resultStatus: "paid",
+    }, dependencies.operationalSink);
+  } catch (error) {
+    const code = error instanceof PermanentWebhookError
+      ? error.code
+      : error instanceof Error
+      ? error.message
+      : null;
+    if (code !== "PAYMENT_OBJECT_ALREADY_USED") throw error;
+    await markCheckoutReview(
+      event,
+      current.order,
+      "PAYMENT_OBJECT_ALREADY_USED",
+      dependencies,
+    );
+  }
 }
 
 async function validatePaymentBinding(
@@ -954,15 +1544,32 @@ async function validatePaymentBinding(
   };
 }
 
-function policyAmount(value: unknown): number {
+function policyAmount(value: unknown): number | null {
   if (typeof value !== "string" || !/^(0|[1-9][0-9]*)$/.test(value)) {
-    permanent("REFUND_POLICY_MISMATCH");
+    return null;
   }
   const amount = Number(value);
   if (!Number.isSafeInteger(amount) || amount < 0) {
-    permanent("REFUND_POLICY_MISMATCH");
+    return null;
   }
-  return amount;
+  return amount as number;
+}
+
+function evidenceId(
+  value: unknown,
+  pattern: RegExp,
+  object: string,
+): string | null {
+  if (typeof value === "string") return pattern.test(value) ? value : null;
+  if (
+    !isRecord(value) || value.object !== object ||
+    typeof value.id !== "string" || !pattern.test(value.id)
+  ) return null;
+  return value.id;
+}
+
+function isPermanentStripeEvidenceMismatch(error: unknown): boolean {
+  return isRecord(error) && error.type === "StripeInvalidRequestError";
 }
 
 async function validateRefundPolicy(
@@ -971,13 +1578,16 @@ async function validateRefundPolicy(
   refundId: string,
   dependencies: StripeWebhookDependencies,
 ): Promise<{
-  transferReversalId: string;
+  transferReversalId: string | null;
   applicationFeeRefundId: string | null;
+  transferReversalAmountMinor: number;
+  applicationFeeRefundAmountMinor: number;
+  reverseTransfer: boolean;
   refundApplicationFee: boolean;
+  policyVerified: boolean;
+  policyFailureCode: "REFUND_POLICY_MISMATCH" | null;
 }> {
-  const metadata = isRecord(refund.metadata)
-    ? refund.metadata
-    : permanent("REFUND_POLICY_MISMATCH");
+  const metadata = isRecord(refund.metadata) ? refund.metadata : {};
   const keys = [
     "order_id",
     "whereto_refund_policy",
@@ -987,114 +1597,136 @@ async function validateRefundPolicy(
     "whereto_application_fee_refund_id",
     "whereto_application_fee_refund_amount",
   ];
-  if (
-    !exactKeys(metadata, keys) ||
-    metadata.order_id !== binding.order.orderId ||
-    metadata.whereto_refund_policy !== "destination_v1" ||
-    metadata.whereto_reverse_transfer !== "true" ||
-    (metadata.whereto_refund_application_fee !== "true" &&
-      metadata.whereto_refund_application_fee !== "false")
-  ) permanent("REFUND_POLICY_MISMATCH");
+  const reverseTransfer = metadata.whereto_reverse_transfer === "true";
+  const refundApplicationFee =
+    metadata.whereto_refund_application_fee === "true";
+  let verified = exactKeys(metadata, keys) &&
+    metadata.order_id === binding.order.orderId &&
+    metadata.whereto_refund_policy === "destination_v1" && reverseTransfer &&
+    refundApplicationFee;
 
-  const transferReversalId = expandedId(
-    refund.transfer_reversal ?? refund.source_transfer_reversal,
+  const reversalValue = refund.transfer_reversal ??
+    refund.source_transfer_reversal;
+  const transferReversalId = evidenceId(
+    reversalValue,
     TRANSFER_REVERSAL_PATTERN,
     "transfer_reversal",
   );
-  const reversalAmount = policyAmount(
-    metadata.whereto_transfer_reversal_amount,
-  );
-  if (reversalAmount <= 0) permanent("REFUND_POLICY_MISMATCH");
-  const transfer = await dependencies.retrieveTransfer(
-    binding.payment.transferId,
-  );
-  if (
-    !isRecord(transfer) || transfer.object !== "transfer" ||
-    transfer.id !== binding.payment.transferId || transfer.livemode !== false ||
-    transfer.currency !== binding.order.currency ||
-    expandedId(transfer.destination, ACCOUNT_PATTERN, "account") !==
-      binding.order.destinationAccountId ||
-    expandedId(transfer.source_transaction, CHARGE_PATTERN, "charge") !==
-      binding.payment.chargeId ||
-    !Number.isSafeInteger(transfer.amount) ||
-    !Number.isSafeInteger(transfer.amount_reversed) ||
-    (transfer.amount as number) <= 0 ||
-    (transfer.amount_reversed as number) < reversalAmount ||
-    reversalAmount > (transfer.amount as number)
-  ) permanent("REFUND_POLICY_MISMATCH");
-  const reversal = await dependencies.retrieveTransferReversal(
-    binding.payment.transferId,
-    transferReversalId,
-  );
-  if (
-    !isRecord(reversal) || reversal.object !== "transfer_reversal" ||
-    reversal.id !== transferReversalId || reversal.amount !== reversalAmount ||
-    reversal.currency !== binding.order.currency ||
-    expandedId(reversal.transfer, TRANSFER_PATTERN, "transfer") !==
-      binding.payment.transferId ||
-    expandedId(reversal.source_refund, REFUND_PATTERN, "refund") !== refundId
-  ) permanent("REFUND_POLICY_MISMATCH");
+  let reversalAmount = 0;
+  if (transferReversalId === null) {
+    verified = false;
+  } else {
+    let transfer: unknown;
+    let reversal: unknown;
+    try {
+      transfer = await dependencies.retrieveTransfer(
+        binding.payment.transferId,
+      );
+      reversal = await dependencies.retrieveTransferReversal(
+        binding.payment.transferId,
+        transferReversalId,
+      );
+    } catch (error) {
+      if (!isPermanentStripeEvidenceMismatch(error)) throw error;
+      verified = false;
+    }
+    if (
+      isRecord(transfer) && transfer.object === "transfer" &&
+      transfer.id === binding.payment.transferId &&
+      transfer.livemode === false &&
+      transfer.currency === binding.order.currency &&
+      transfer.destination === binding.order.destinationAccountId &&
+      transfer.source_transaction === binding.payment.chargeId &&
+      Number.isSafeInteger(transfer.amount) &&
+      Number.isSafeInteger(transfer.amount_reversed) &&
+      isRecord(reversal) && reversal.object === "transfer_reversal" &&
+      reversal.id === transferReversalId &&
+      Number.isSafeInteger(reversal.amount) &&
+      (reversal.amount as number) > 0 &&
+      reversal.currency === binding.order.currency &&
+      reversal.transfer === binding.payment.transferId &&
+      reversal.source_refund === refundId &&
+      (transfer.amount_reversed as number) >= (reversal.amount as number) &&
+      (transfer.amount as number) >= (reversal.amount as number)
+    ) {
+      reversalAmount = reversal.amount as number;
+    } else verified = false;
+  }
 
-  const applicationFee = await dependencies.retrieveApplicationFee(
-    binding.payment.applicationFeeId,
-  );
-  if (
-    !isRecord(applicationFee) || applicationFee.object !== "application_fee" ||
+  let applicationFee: unknown;
+  try {
+    applicationFee = await dependencies.retrieveApplicationFee(
+      binding.payment.applicationFeeId,
+    );
+  } catch (error) {
+    if (!isPermanentStripeEvidenceMismatch(error)) throw error;
+    verified = false;
+  }
+  const applicationFeeInvalid = !isRecord(applicationFee) ||
+    applicationFee.object !== "application_fee" ||
     applicationFee.id !== binding.payment.applicationFeeId ||
     applicationFee.livemode !== false ||
     applicationFee.amount !== binding.order.applicationFeeAmountMinor ||
     applicationFee.currency !== binding.order.currency ||
-    expandedId(
+    evidenceId(
         applicationFee.originating_transaction ?? applicationFee.charge,
         CHARGE_PATTERN,
-        "originating_transaction",
+        "charge",
       ) !==
       binding.payment.chargeId ||
-    !Number.isSafeInteger(applicationFee.amount_refunded)
-  ) permanent("REFUND_POLICY_MISMATCH");
+    !Number.isSafeInteger(applicationFee.amount_refunded);
+  if (applicationFeeInvalid) verified = false;
+  const applicationFeeAmountRefunded = !applicationFeeInvalid &&
+      isRecord(applicationFee)
+    ? applicationFee.amount_refunded as number
+    : 0;
 
-  const refundApplicationFee =
-    metadata.whereto_refund_application_fee === "true";
-  const feeRefundAmount = policyAmount(
-    metadata.whereto_application_fee_refund_amount,
-  );
-  if (!refundApplicationFee) {
+  const feeRefundId = typeof metadata.whereto_application_fee_refund_id ===
+        "string" && FEE_REFUND_PATTERN.test(
+        metadata.whereto_application_fee_refund_id,
+      )
+    ? metadata.whereto_application_fee_refund_id
+    : null;
+  let feeRefundAmount = 0;
+  if (feeRefundId === null || applicationFeeInvalid) {
+    verified = false;
+  } else {
+    let feeRefund: unknown;
+    try {
+      feeRefund = await dependencies.retrieveApplicationFeeRefund(
+        binding.payment.applicationFeeId,
+        feeRefundId,
+      );
+    } catch (error) {
+      if (!isPermanentStripeEvidenceMismatch(error)) throw error;
+      verified = false;
+    }
     if (
-      metadata.whereto_application_fee_refund_id !== "none" ||
-      feeRefundAmount !== 0
-    ) permanent("REFUND_POLICY_MISMATCH");
-    return {
-      transferReversalId,
-      applicationFeeRefundId: null,
-      refundApplicationFee,
-    };
+      isRecord(feeRefund) && feeRefund.object === "fee_refund" &&
+      feeRefund.id === feeRefundId && Number.isSafeInteger(feeRefund.amount) &&
+      (feeRefund.amount as number) > 0 &&
+      feeRefund.currency === binding.order.currency &&
+      feeRefund.fee === binding.payment.applicationFeeId &&
+      applicationFeeAmountRefunded >= (feeRefund.amount as number)
+    ) feeRefundAmount = feeRefund.amount as number;
+    else verified = false;
   }
-
-  const feeRefundId = requireId(
-    metadata.whereto_application_fee_refund_id,
-    FEE_REFUND_PATTERN,
-    "REFUND_POLICY_MISMATCH",
-  );
   if (
-    feeRefundAmount <= 0 ||
-    feeRefundAmount > binding.order.applicationFeeAmountMinor ||
-    (applicationFee.amount_refunded as number) < feeRefundAmount
-  ) permanent("REFUND_POLICY_MISMATCH");
-  const feeRefund = await dependencies.retrieveApplicationFeeRefund(
-    binding.payment.applicationFeeId,
-    feeRefundId,
-  );
-  if (
-    !isRecord(feeRefund) || feeRefund.object !== "fee_refund" ||
-    feeRefund.id !== feeRefundId || feeRefund.amount !== feeRefundAmount ||
-    feeRefund.currency !== binding.order.currency ||
-    expandedId(feeRefund.fee, APPLICATION_FEE_PATTERN, "application_fee") !==
-      binding.payment.applicationFeeId
-  ) permanent("REFUND_POLICY_MISMATCH");
+    policyAmount(metadata.whereto_transfer_reversal_amount) !==
+      reversalAmount ||
+    policyAmount(metadata.whereto_application_fee_refund_amount) !==
+      feeRefundAmount ||
+    reversalAmount !== refund.amount
+  ) verified = false;
   return {
     transferReversalId,
     applicationFeeRefundId: feeRefundId,
+    transferReversalAmountMinor: reversalAmount,
+    applicationFeeRefundAmountMinor: feeRefundAmount,
+    reverseTransfer,
     refundApplicationFee,
+    policyVerified: verified,
+    policyFailureCode: verified ? null : "REFUND_POLICY_MISMATCH",
   };
 }
 
@@ -1146,28 +1778,13 @@ async function dispatchRefund(
     !Number.isSafeInteger(binding.charge.amount) ||
     (binding.charge.amount as number) < amount
   ) permanent("REFUND_SNAPSHOT_MISMATCH");
-  let policy: {
-    transferReversalId: string;
-    applicationFeeRefundId: string | null;
-    refundApplicationFee: boolean;
-  };
-  try {
-    policy = await validateRefundPolicy(
-      refund,
-      binding,
-      refundId,
-      dependencies,
-    );
-  } catch (error) {
-    if (!(error instanceof PermanentWebhookError)) throw error;
-    await dependencies.markPaymentRequiresReview({
-      ...binding.payment,
-      stripeEventId: event.id,
-      failureCode: "REFUND_POLICY_MISMATCH",
-    });
-    return;
-  }
-  await dependencies.applyRefund({
+  const policy = await validateRefundPolicy(
+    refund,
+    binding,
+    refundId,
+    dependencies,
+  );
+  const durable = await dependencies.applyRefund({
     stripeEventId: event.id,
     orderId: binding.order.orderId,
     stripeRefundId: refundId,
@@ -1179,9 +1796,119 @@ async function dispatchRefund(
     currency,
     status,
     reason: typeof refund.reason === "string" ? refund.reason : null,
-    reverseTransfer: true,
+    reverseTransfer: policy.reverseTransfer,
     refundApplicationFee: policy.refundApplicationFee,
+    transferReversalAmountMinor: policy.transferReversalAmountMinor,
+    applicationFeeRefundAmountMinor: policy.applicationFeeRefundAmountMinor,
+    policyVerified: policy.policyVerified,
+    policyFailureCode: policy.policyFailureCode,
   });
+  const ticketStatus = durable.ticketStatus ?? "none";
+  if (durable.orderStatus === "requires_review") {
+    emitOperationalEvent({
+      contractVersion: "checkout_integrity_v1",
+      operation: "refund.reconcile",
+      outcome: "review",
+      orderId: durable.orderId,
+      stripeEventId: event.id,
+      providerObjectId: refundId,
+      currency,
+      amountMinor: amount,
+      resultStatus: "requires_review",
+      ticketStatus,
+      errorCode: policy.policyVerified
+        ? "REFUND_DURABLE_STATE_REVIEW"
+        : "REFUND_POLICY_MISMATCH",
+    }, dependencies.operationalSink);
+  } else if (durable.orderStatus === "payment_processing") {
+    if (ticketStatus === "none") {
+      emitOperationalEvent({
+        contractVersion: "checkout_integrity_v1",
+        operation: "refund.reconcile",
+        outcome: "applied",
+        orderId: durable.orderId,
+        stripeEventId: event.id,
+        providerObjectId: refundId,
+        currency,
+        amountMinor: amount,
+        resultStatus: "payment_processing",
+        ticketStatus: "none",
+      }, dependencies.operationalSink);
+    } else {
+      emitOperationalEvent({
+        contractVersion: "checkout_integrity_v1",
+        operation: "refund.reconcile",
+        outcome: "review",
+        orderId: durable.orderId,
+        stripeEventId: event.id,
+        providerObjectId: refundId,
+        currency,
+        amountMinor: amount,
+        resultStatus: "payment_processing",
+        ticketStatus,
+        errorCode: "REFUND_DURABLE_STATE_REVIEW",
+      }, dependencies.operationalSink);
+    }
+  } else if (
+    !(
+      (durable.orderStatus === "checkout_open" && ticketStatus === "none") ||
+      (durable.orderStatus === "paid" && ticketStatus === "valid") ||
+      (durable.orderStatus === "refunded" && ticketStatus === "refunded")
+    )
+  ) {
+    emitOperationalEvent({
+      contractVersion: "checkout_integrity_v1",
+      operation: "refund.reconcile",
+      outcome: "review",
+      orderId: durable.orderId,
+      stripeEventId: event.id,
+      providerObjectId: refundId,
+      currency,
+      amountMinor: amount,
+      resultStatus: durable.orderStatus,
+      ticketStatus: durable.ticketStatus ?? "none",
+      errorCode: "REFUND_DURABLE_STATE_REVIEW",
+    }, dependencies.operationalSink);
+  } else if (durable.orderStatus === "checkout_open") {
+    emitOperationalEvent({
+      contractVersion: "checkout_integrity_v1",
+      operation: "refund.reconcile",
+      outcome: "applied",
+      orderId: durable.orderId,
+      stripeEventId: event.id,
+      providerObjectId: refundId,
+      currency,
+      amountMinor: amount,
+      resultStatus: "checkout_open",
+      ticketStatus: "none",
+    }, dependencies.operationalSink);
+  } else if (durable.orderStatus === "paid") {
+    emitOperationalEvent({
+      contractVersion: "checkout_integrity_v1",
+      operation: "refund.reconcile",
+      outcome: "applied",
+      orderId: durable.orderId,
+      stripeEventId: event.id,
+      providerObjectId: refundId,
+      currency,
+      amountMinor: amount,
+      resultStatus: "paid",
+      ticketStatus: "valid",
+    }, dependencies.operationalSink);
+  } else {
+    emitOperationalEvent({
+      contractVersion: "checkout_integrity_v1",
+      operation: "refund.reconcile",
+      outcome: "applied",
+      orderId: durable.orderId,
+      stripeEventId: event.id,
+      providerObjectId: refundId,
+      currency,
+      amountMinor: amount,
+      resultStatus: "refunded",
+      ticketStatus: "refunded",
+    }, dependencies.operationalSink);
+  }
 }
 
 function isPermanentStripeMutationFailure(error: unknown): boolean {
@@ -1381,6 +2108,12 @@ export function createStripeWebhookHandler(
     if (request.method !== "POST") return webhookResponse(405);
     const signature = request.headers.get("stripe-signature");
     if (signature === null || signature.length === 0) {
+      emitOperationalEvent({
+        contractVersion: "checkout_integrity_v1",
+        operation: "webhook.delivery",
+        outcome: "signature_failed",
+        errorCode: "INVALID_WEBHOOK",
+      }, dependencies.operationalSink);
       return webhookResponse(400);
     }
 
@@ -1399,6 +2132,12 @@ export function createStripeWebhookHandler(
     try {
       eventValue = await dependencies.verifyEvent(raw, signature);
     } catch {
+      emitOperationalEvent({
+        contractVersion: "checkout_integrity_v1",
+        operation: "webhook.delivery",
+        outcome: "signature_failed",
+        errorCode: "INVALID_WEBHOOK",
+      }, dependencies.operationalSink);
       return webhookResponse(400);
     }
 
@@ -1406,6 +2145,12 @@ export function createStripeWebhookHandler(
     try {
       event = normalizeEvent(eventValue);
     } catch {
+      emitOperationalEvent({
+        contractVersion: "checkout_integrity_v1",
+        operation: "webhook.reconciliation",
+        outcome: "mismatch",
+        errorCode: "INVALID_EVENT_ENVELOPE",
+      }, dependencies.operationalSink);
       return webhookResponse(400);
     }
 
@@ -1419,9 +2164,36 @@ export function createStripeWebhookHandler(
         stripeCreatedAt: event.createdAt,
         payloadSha256: await sha256Hex(raw),
       });
-      if (!receipt.shouldProcess) return webhookResponse();
+      if (!receipt.shouldProcess) {
+        emitOperationalEvent({
+          contractVersion: "checkout_integrity_v1",
+          operation: "webhook.delivery",
+          outcome: "duplicate",
+          stripeEventId: event.id,
+          providerObjectId: event.objectId,
+        }, dependencies.operationalSink);
+        return webhookResponse();
+      }
     } catch (error) {
-      if (error instanceof PermanentWebhookError) return webhookResponse();
+      if (error instanceof PermanentWebhookError) {
+        emitOperationalEvent({
+          contractVersion: "checkout_integrity_v1",
+          operation: "webhook.reconciliation",
+          outcome: "mismatch",
+          stripeEventId: event.id,
+          providerObjectId: event.objectId,
+          errorCode: safeWebhookErrorCode(error.code),
+        }, dependencies.operationalSink);
+        return webhookResponse();
+      }
+      emitOperationalEvent({
+        contractVersion: "checkout_integrity_v1",
+        operation: "webhook.delivery",
+        outcome: "retry",
+        stripeEventId: event.id,
+        providerObjectId: event.objectId,
+        errorCode: "TRANSIENT_PROCESSING_FAILURE",
+      }, dependencies.operationalSink);
       return webhookResponse(503);
     }
 
@@ -1441,8 +2213,24 @@ export function createStripeWebhookHandler(
       if (error instanceof PermanentWebhookError) {
         try {
           await dependencies.finalizeReceipt(event.id, "processed", error.code);
+          emitOperationalEvent({
+            contractVersion: "checkout_integrity_v1",
+            operation: "webhook.reconciliation",
+            outcome: "mismatch",
+            stripeEventId: event.id,
+            providerObjectId: event.objectId,
+            errorCode: safeWebhookErrorCode(error.code),
+          }, dependencies.operationalSink);
           return webhookResponse();
         } catch {
+          emitOperationalEvent({
+            contractVersion: "checkout_integrity_v1",
+            operation: "webhook.delivery",
+            outcome: "retry",
+            stripeEventId: event.id,
+            providerObjectId: event.objectId,
+            errorCode: "TRANSIENT_PROCESSING_FAILURE",
+          }, dependencies.operationalSink);
           return webhookResponse(503);
         }
       }
@@ -1456,6 +2244,14 @@ export function createStripeWebhookHandler(
         // A non-2xx response keeps Stripe's delivery retryable even if the
         // receipt update itself is temporarily unavailable.
       }
+      emitOperationalEvent({
+        contractVersion: "checkout_integrity_v1",
+        operation: "webhook.delivery",
+        outcome: "retry",
+        stripeEventId: event.id,
+        providerObjectId: event.objectId,
+        errorCode: "TRANSIENT_PROCESSING_FAILURE",
+      }, dependencies.operationalSink);
       return webhookResponse(503);
     }
   };

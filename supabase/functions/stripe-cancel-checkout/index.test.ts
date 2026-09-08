@@ -2,6 +2,7 @@
 import { assertEquals } from "@std/assert";
 import {
   type CancellationOrder,
+  type CancellationOrderStatus,
   createStripeCancelCheckoutHandler,
   defaultFindOrder,
   type StripeCancelCheckoutDependencies,
@@ -23,18 +24,23 @@ function request(body: unknown = { confirmationToken: TOKEN }): Request {
 }
 
 function order(
-  status = "checkout_open",
+  status: CancellationOrderStatus = "checkout_open",
   sessionId: string | null = SESSION_ID,
 ): CancellationOrder {
   return { orderId: ORDER_ID, status, stripeCheckoutSessionId: sessionId };
 }
 
-function session(status: string, livemode = false): Record<string, unknown> {
+function session(
+  status: string,
+  livemode = false,
+  paymentStatus: string = "unpaid",
+): Record<string, unknown> {
   return {
     id: SESSION_ID,
     object: "checkout.session",
     livemode,
     status,
+    payment_status: paymentStatus,
     metadata: { order_id: ORDER_ID },
   };
 }
@@ -49,8 +55,9 @@ function dependencies(
     retrieveSession: async () => session("open"),
     expireSession: async () => session("expired"),
     releaseReservation: async () => undefined,
+    operationalSink: () => undefined,
     ...overrides,
-  };
+  } as StripeCancelCheckoutDependencies;
 }
 
 Deno.test("cancellation hashes the bearer token, verifies an open test Session, expires it, then releases inventory", async () => {
@@ -146,8 +153,10 @@ Deno.test("cancellation never downgrades a complete Session while its webhook ma
     },
   }))(request());
 
-  assertEquals(response.status, 200);
-  assertEquals(await response.json(), { cancelled: true });
+  assertEquals(response.status, 409);
+  assertEquals(await response.json(), {
+    error: { code: "CHECKOUT_UNAVAILABLE" },
+  });
   assertEquals(expired, false);
   assertEquals(released, false);
 });
@@ -171,34 +180,287 @@ Deno.test("cancellation idempotently releases an already-expired Session without
   assertEquals(released, true);
 });
 
-Deno.test("cancellation treats a terminal database retry as safe without contacting Stripe", async () => {
+Deno.test("cancellation refuses terminal database retries without an attached Session", async () => {
   for (
     const status of [
       "cancelled",
       "expired",
       "payment_failed",
+    ] as const
+  ) {
+    let stripeTouched = false;
+    const response = await createStripeCancelCheckoutHandler(dependencies({
+      findOrder: async () => order(status, null),
+      retrieveSession: async () => {
+        stripeTouched = true;
+        return session("open");
+      },
+      releaseReservation: async () => {
+        stripeTouched = true;
+      },
+    }))(request());
+    assertEquals(response.status, 409);
+    assertEquals(await response.json(), {
+      error: { code: "CHECKOUT_UNAVAILABLE" },
+    });
+    assertEquals(stripeTouched, false);
+  }
+});
+
+for (const status of ["cancelled", "expired", "payment_failed"] as const) {
+  Deno.test(`cancellation rejects ambiguous complete Session states for ${status}`, async () => {
+    for (
+      const paymentStatus of status === "payment_failed"
+        ? ["paid"]
+        : ["paid", "unpaid"]
+    ) {
+      const calls: string[] = [];
+      const response = await createStripeCancelCheckoutHandler(dependencies({
+        findOrder: async () => order(status),
+        retrieveSession: async (sessionId) => {
+          calls.push("retrieve");
+          assertEquals(sessionId, SESSION_ID);
+          return session("complete", false, paymentStatus);
+        },
+        expireSession: async () => {
+          calls.push("expire");
+          return session("expired");
+        },
+        releaseReservation: async () => {
+          calls.push("release");
+        },
+      }))(request());
+
+      assertEquals(response.status, 409);
+      assertEquals(await response.json(), {
+        error: { code: "CHECKOUT_UNAVAILABLE" },
+      });
+      assertEquals(calls, ["retrieve"]);
+    }
+  });
+
+  Deno.test(`cancellation acknowledges ${status} with exact expired unpaid provider evidence`, async () => {
+    const calls: string[] = [];
+    const records: Array<Record<string, unknown>> = [];
+    const response = await createStripeCancelCheckoutHandler(dependencies({
+      findOrder: async () => order(status),
+      retrieveSession: async (sessionId) => {
+        calls.push("retrieve");
+        assertEquals(sessionId, SESSION_ID);
+        return session("expired");
+      },
+      expireSession: async () => {
+        calls.push("expire");
+        return session("expired");
+      },
+      releaseReservation: async () => {
+        calls.push("release");
+      },
+      operationalSink: (serialized) => records.push(JSON.parse(serialized)),
+    }))(request());
+
+    assertEquals(response.status, 200);
+    assertEquals(await response.json(), { cancelled: true });
+    assertEquals(calls, ["retrieve"]);
+    assertEquals(records, [{
+      contractVersion: "checkout_integrity_v1",
+      operation: "checkout.cancel",
+      outcome: "no_transition",
+      orderId: ORDER_ID,
+      providerObjectId: SESSION_ID,
+      priorStatus: status,
+      resultStatus: status,
+    }]);
+  });
+}
+
+Deno.test("cancellation acknowledges confirmed async payment failure with a complete unpaid Session without mutation", async () => {
+  const calls: string[] = [];
+  const records: Array<Record<string, unknown>> = [];
+  const response = await createStripeCancelCheckoutHandler(dependencies({
+    findOrder: async (tokenHash) => {
+      assertEquals(tokenHash, TOKEN_HASH);
+      return order("payment_failed");
+    },
+    retrieveSession: async (sessionId) => {
+      calls.push("retrieve");
+      assertEquals(sessionId, SESSION_ID);
+      return session("complete", false, "unpaid");
+    },
+    expireSession: async () => {
+      calls.push("expire");
+      return session("expired");
+    },
+    releaseReservation: async () => {
+      calls.push("release");
+    },
+    operationalSink: (serialized) => records.push(JSON.parse(serialized)),
+  }))(request());
+
+  assertEquals(response.status, 200);
+  assertEquals(await response.json(), { cancelled: true });
+  assertEquals(calls, ["retrieve"]);
+  assertEquals(records, [{
+    contractVersion: "checkout_integrity_v1",
+    operation: "checkout.cancel",
+    outcome: "no_transition",
+    orderId: ORDER_ID,
+    providerObjectId: SESSION_ID,
+    priorStatus: "payment_failed",
+    resultStatus: "payment_failed",
+  }]);
+});
+
+Deno.test("terminal database cancellation fails closed on open, paid, unbound, live, malformed, or unavailable provider evidence", async () => {
+  const cases = [
+    { evidence: session("open"), status: 409, code: "CHECKOUT_UNAVAILABLE" },
+    {
+      evidence: session("complete", true),
+      status: 502,
+      code: "INVALID_STRIPE_SESSION",
+    },
+    {
+      evidence: { ...session("complete"), metadata: { order_id: "wrong" } },
+      status: 502,
+      code: "INVALID_STRIPE_SESSION",
+    },
+    {
+      evidence: { ...session("complete"), payment_status: undefined },
+      status: 502,
+      code: "INVALID_STRIPE_SESSION",
+    },
+    {
+      evidence: session("expired", false, "paid"),
+      status: 502,
+      code: "INVALID_STRIPE_SESSION",
+    },
+    {
+      evidence: session("expired", true),
+      status: 502,
+      code: "INVALID_STRIPE_SESSION",
+    },
+    {
+      evidence: { ...session("expired"), metadata: { order_id: "wrong" } },
+      status: 502,
+      code: "INVALID_STRIPE_SESSION",
+    },
+    {
+      evidence: { ...session("expired"), id: "cs_test_wrong" },
+      status: 502,
+      code: "INVALID_STRIPE_SESSION",
+    },
+    {
+      evidence: { ...session("expired"), payment_status: undefined },
+      status: 502,
+      code: "INVALID_STRIPE_SESSION",
+    },
+    { evidence: null, status: 502, code: "INVALID_STRIPE_SESSION" },
+    {
+      evidence: new Error("unsafe provider transport detail"),
+      status: 502,
+      code: "STRIPE_REQUEST_FAILED",
+    },
+  ];
+  for (
+    const terminalStatus of ["cancelled", "expired", "payment_failed"] as const
+  ) {
+    for (const scenario of cases) {
+      const calls: string[] = [];
+      const response = await createStripeCancelCheckoutHandler(dependencies({
+        findOrder: async () => order(terminalStatus),
+        retrieveSession: async () => {
+          calls.push("retrieve");
+          if (scenario.evidence instanceof Error) throw scenario.evidence;
+          return scenario.evidence;
+        },
+        expireSession: async () => {
+          calls.push("expire");
+          return session("expired");
+        },
+        releaseReservation: async () => {
+          calls.push("release");
+        },
+      }))(request());
+      assertEquals(response.status, scenario.status);
+      assertEquals(await response.json(), { error: { code: scenario.code } });
+      assertEquals(calls, ["retrieve"]);
+    }
+  }
+});
+
+Deno.test("cancellation refuses paid, processing, refund, and review orders without contacting Stripe or releasing inventory", async () => {
+  for (
+    const status of [
       "payment_processing",
       "paid",
       "partially_refunded",
       "refunded",
       "requires_review",
-    ]
+    ] as const
   ) {
-    let stripeTouched = false;
+    let touched = false;
     const response = await createStripeCancelCheckoutHandler(dependencies({
       findOrder: async () => order(status),
       retrieveSession: async () => {
-        stripeTouched = true;
+        touched = true;
         return session("open");
       },
+      releaseReservation: async () => {
+        touched = true;
+      },
     }))(request());
-    assertEquals(response.status, 200);
-    assertEquals(await response.json(), { cancelled: true });
-    assertEquals(stripeTouched, false);
+    assertEquals(response.status, 409, status);
+    assertEquals(await response.json(), {
+      error: { code: "CHECKOUT_UNAVAILABLE" },
+    }, status);
+    assertEquals(touched, false, status);
   }
 });
 
-Deno.test("cancellation releases a token-bound creating order that has no Stripe Session", async () => {
+Deno.test("cancellation requires authoritative unpaid state before expiring and releasing the whole order", async () => {
+  for (
+    const unsafe of [
+      session("open", false, "paid"),
+      session("expired", false, "paid"),
+      { ...session("open"), payment_status: "no_payment_required" },
+      (() => {
+        const value = session("open");
+        delete value.payment_status;
+        return value;
+      })(),
+    ]
+  ) {
+    let mutated = false;
+    const response = await createStripeCancelCheckoutHandler(dependencies({
+      retrieveSession: async () => unsafe,
+      expireSession: async () => {
+        mutated = true;
+        return session("expired");
+      },
+      releaseReservation: async () => {
+        mutated = true;
+      },
+    }))(request());
+    assertEquals(response.status, 502);
+    assertEquals(mutated, false);
+  }
+});
+
+Deno.test("cancellation releases one multi-item order boundary only after open unpaid becomes expired unpaid", async () => {
+  const released: Array<[string, string]> = [];
+  const response = await createStripeCancelCheckoutHandler(dependencies({
+    retrieveSession: async () => session("open", false, "unpaid"),
+    expireSession: async () => session("expired", false, "unpaid"),
+    releaseReservation: async (orderId, reason) => {
+      released.push([orderId, reason]);
+    },
+  }))(request());
+
+  assertEquals(response.status, 200);
+  assertEquals(released, [[ORDER_ID, "CHECKOUT_CANCELLED"]]);
+});
+
+Deno.test("cancellation retains a token-bound creating order when no exact Stripe Session is attached", async () => {
   let released = false;
   const response = await createStripeCancelCheckoutHandler(dependencies({
     findOrder: async () => order("creating_checkout", null),
@@ -209,8 +471,11 @@ Deno.test("cancellation releases a token-bound creating order that has no Stripe
       released = true;
     },
   }))(request());
-  assertEquals(response.status, 200);
-  assertEquals(released, true);
+  assertEquals(response.status, 409);
+  assertEquals(await response.json(), {
+    error: { code: "CHECKOUT_UNAVAILABLE" },
+  });
+  assertEquals(released, false);
 });
 
 Deno.test("cancellation enforces strict input, rate limiting, and exact-origin CORS", async () => {
@@ -262,4 +527,73 @@ Deno.test("default cancellation resolves its bearer through the narrow service-o
   assertEquals(await defaultFindOrder(TOKEN_HASH, client), order());
   assertEquals(capturedName, "server_lookup_checkout_cancellation");
   assertEquals(capturedArgs, { p_token_hash: TOKEN_HASH });
+});
+
+Deno.test("cancellation emits truthful transition, no-transition, blocked, and ambiguous outcomes", async () => {
+  const records: Array<Record<string, unknown>> = [];
+  const operationalSink = (serialized: string) => {
+    records.push(JSON.parse(serialized));
+  };
+
+  const cancelled = await createStripeCancelCheckoutHandler(dependencies({
+    operationalSink,
+  }))(request());
+  const noTransition = await createStripeCancelCheckoutHandler(dependencies({
+    operationalSink,
+    findOrder: async () => order("expired"),
+    retrieveSession: async () => session("expired"),
+  }))(request());
+  const blocked = await createStripeCancelCheckoutHandler(dependencies({
+    operationalSink,
+    findOrder: async () => order("paid"),
+  }))(request());
+  const ambiguous = await createStripeCancelCheckoutHandler(dependencies({
+    operationalSink,
+    retrieveSession: async () => {
+      throw new Error("fixture provider error with unsafe detail");
+    },
+  }))(request());
+
+  assertEquals(
+    [cancelled.status, noTransition.status, blocked.status, ambiguous.status],
+    [200, 200, 409, 502],
+  );
+  assertEquals(records, [
+    {
+      contractVersion: "checkout_integrity_v1",
+      operation: "checkout.cancel",
+      outcome: "cancelled",
+      orderId: ORDER_ID,
+      providerObjectId: SESSION_ID,
+      priorStatus: "checkout_open",
+      resultStatus: "cancelled",
+    },
+    {
+      contractVersion: "checkout_integrity_v1",
+      operation: "checkout.cancel",
+      outcome: "no_transition",
+      orderId: ORDER_ID,
+      providerObjectId: SESSION_ID,
+      priorStatus: "expired",
+      resultStatus: "expired",
+    },
+    {
+      contractVersion: "checkout_integrity_v1",
+      operation: "checkout.cancel",
+      outcome: "blocked",
+      orderId: ORDER_ID,
+      providerObjectId: SESSION_ID,
+      priorStatus: "paid",
+      errorCode: "CHECKOUT_UNAVAILABLE",
+    },
+    {
+      contractVersion: "checkout_integrity_v1",
+      operation: "checkout.cancel",
+      outcome: "ambiguous",
+      orderId: ORDER_ID,
+      providerObjectId: SESSION_ID,
+      priorStatus: "checkout_open",
+      errorCode: "STRIPE_REQUEST_FAILED",
+    },
+  ]);
 });

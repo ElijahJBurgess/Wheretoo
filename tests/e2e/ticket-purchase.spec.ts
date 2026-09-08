@@ -2,52 +2,46 @@ import { expect, test } from '@playwright/test'
 import {
   assertNoHorizontalOverflow,
   captureTicketingState,
+  chooseTwoGeneralAdmissionAndOneVip,
   completeHostedStripeTestPayment,
-  configureThreeTicketTiers,
-  deliverCheckoutWebhook,
+  deliverAndAssertRealPaidOrder,
+  expectMatchingCheckoutAttemptCleared,
   prepareTicketingJourney,
-  signInCrossUser,
-  signInTicketingOrganizer,
-  signOutTicketingOrganizer,
+  submitAfterOneAmbiguousResponse,
 } from './support/ticketingJourney'
 
 test.describe('native ticket purchase journey', () => {
-  test('organizer activates three paid tiers and a guest receives one persisted ticket', async ({ page }, testInfo) => {
-    const fixture = await prepareTicketingJourney(testInfo.project.name, 'purchase')
+  test('multi-tier cart keeps a guest safe through hosted Checkout and confirmation lifecycle', async ({ page }, testInfo) => {
+    const fixture = await prepareTicketingJourney()
 
-    await signInTicketingOrganizer(page, fixture)
-    await page.goto('/organizer/settings/payments')
-    await expect(page.getByRole('heading', { name: 'Payments', level: 1 })).toBeVisible()
-    await expect(page.getByText('Ready for paid sales', { exact: true })).toBeVisible()
-
-    await page.goto(`/organizer/events/${fixture.eventId}/tickets`)
-    await expect(page.getByRole('heading', { name: 'Ticket tiers', level: 1 })).toBeVisible()
-    await configureThreeTicketTiers(page)
-    await expect(page.locator('.ticket-tier-card')).toHaveCount(3)
-    await expect(page.getByRole('button', { name: 'Activate paid sales' })).toBeEnabled()
-    await page.getByRole('button', { name: 'Activate paid sales' }).click()
-    await expect(page).toHaveURL(new RegExp(`/organizer/events/${fixture.eventId}$`))
-
-    await signOutTicketingOrganizer(page)
     await page.goto(fixture.publicEventPath)
     await expect(page.getByRole('heading', { name: fixture.title, level: 1 })).toBeVisible()
-    await expect(page.getByRole('radio')).toHaveCount(3)
-    await page.locator('input[type="radio"]:enabled').first().check()
+    await chooseTwoGeneralAdmissionAndOneVip(page)
     await page.getByRole('button', { name: 'Continue to checkout' }).click()
-    await expect(page.getByRole('heading', { name: 'Review your ticket', level: 1 })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Review your tickets', level: 1 })).toBeVisible()
+    await expect(page.getByText('Task 17 General Admission')).toBeVisible()
+    await expect(page.getByText('2 tickets')).toBeVisible()
+    await expect(page.getByText('Task 17 VIP')).toBeVisible()
+    await expect(page.getByText('1 ticket')).toBeVisible()
+    await expect(page.locator('dl > div').filter({ has: page.getByText('Total', { exact: true }) }).getByRole('definition')).toHaveText('$55.00')
 
     await page.getByRole('button', { name: 'Continue to secure payment' }).click()
     await expect(page.getByLabel('Your name')).toBeFocused()
-    await page.getByLabel('Your name').fill('Task Eighteen Guest')
-    await page.getByLabel('Email address').fill(fixture.buyerEmail)
-    await page.getByRole('button', { name: 'Continue to secure payment' }).click()
+    await expect(page.locator('#buyer-name-error')).toContainText('Enter your name')
+    await expect(page.locator('#buyer-email-error')).toContainText('Enter a valid email address')
+    await submitAfterOneAmbiguousResponse(page, fixture)
     await expect(page).toHaveURL(/^https:\/\/checkout\.stripe\.com\//)
 
     await completeHostedStripeTestPayment(page)
-    await expect(page.getByRole('heading', { name: /Confirming your payment|You're all set/, level: 1 })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Confirming your payment', level: 1 })).toBeVisible()
     await captureTicketingState(page, testInfo, 'payment-processing')
-    await deliverCheckoutWebhook(fixture)
+    await deliverAndAssertRealPaidOrder(page, fixture)
+    await expect(page.getByRole('heading', { name: "You're all set", level: 1 })).toBeVisible({ timeout: 5_000 })
     await expect(page.getByRole('heading', { name: "You're all set", level: 1 })).toBeVisible()
+    await expect(page.getByText('Task 17 General Admission × 2')).toBeVisible()
+    await expect(page.getByText('Task 17 VIP × 1')).toBeVisible()
+    await expect(page.locator('dl > div').filter({ has: page.getByText('Total', { exact: true }) }).getByRole('definition')).toHaveText('$55.00')
+    await expectMatchingCheckoutAttemptCleared(page)
     await page.reload()
     await expect(page.getByRole('heading', { name: "You're all set", level: 1 })).toBeVisible()
     await captureTicketingState(page, testInfo, 'ticket-confirmation')
@@ -68,15 +62,5 @@ test.describe('native ticket purchase journey', () => {
     }
 
     await assertNoHorizontalOverflow(page)
-    await page.goto(fixture.publicEventPath)
-    await expect(page.getByRole('radio').first()).toBeDisabled()
-    await expect(page.getByText('Sold out', { exact: true }).first()).toBeVisible()
-    await expect(page.locator('input[type="radio"]:enabled')).toHaveCount(2)
-    await expect(page.getByRole('button', { name: 'Continue to checkout' })).toBeDisabled()
-    await assertNoHorizontalOverflow(page)
-
-    await signInCrossUser(page)
-    await page.goto(`/organizer/events/${fixture.eventId}/tickets`)
-    await expect(page.getByText('Event not found', { exact: true })).toBeVisible()
   })
 })

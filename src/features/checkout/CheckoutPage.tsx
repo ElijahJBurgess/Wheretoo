@@ -5,9 +5,11 @@ import { Button } from '../../components/ui/Button'
 import { Field } from '../../components/ui/Field'
 import { FormErrorSummary } from '../../components/ui/FormErrorSummary'
 import { lowercaseRfcUuidSchema } from '../tickets/ticket.schemas'
+import { clearCheckoutAttemptForConfirmation, getOrCreateCheckoutAttempt } from './checkout.attempt'
 import { cancelCheckout, createCheckout, isStripeCheckoutUrl } from './checkout.api'
+import { parseCheckoutCart } from './checkout.cart'
 import type { CheckoutApiErrorCode } from './checkout.api'
-import { checkoutInputSchema } from './checkout.schemas'
+import { checkoutCanonicalSubmissionSchema } from './checkout.schemas'
 import { useCheckoutPublicEvent } from './checkout.queries'
 
 const cancellationTokenPattern = /^[A-Za-z0-9_-]{43}$/
@@ -55,6 +57,11 @@ function assignHostedCheckout(checkoutUrl: string): void {
   window.location.assign(checkoutUrl)
 }
 
+async function cancelAndClearCheckoutAttempt(confirmationBearer: string): Promise<void> {
+  await cancelCheckout(confirmationBearer)
+  clearCheckoutAttemptForConfirmation(confirmationBearer)
+}
+
 type CheckoutStateProps = {
   action: ReactNode
   description?: string
@@ -86,11 +93,13 @@ export function CheckoutPage({ assignCheckout = assignHostedCheckout }: Checkout
   const { eventId: routeEventId = '' } = useParams()
   const eventIdResult = lowercaseRfcUuidSchema.safeParse(routeEventId)
   const eventId = eventIdResult.success ? eventIdResult.data : ''
-  const cancelToken = new URLSearchParams(location.search).get('cancel')
-  const tierIdResult = lowercaseRfcUuidSchema.safeParse(new URLSearchParams(location.search).get('tier') ?? '')
-  const tierId = tierIdResult.success ? tierIdResult.data : ''
-  const checkoutIdentity = `${eventId}:${tierId}`
+  const searchParams = new URLSearchParams(location.search)
+  const cancelToken = searchParams.get('cancel')
+  const checkoutIdentity = `${eventId}:${location.search}`
   const eventQuery = useCheckoutPublicEvent(eventId)
+  const cartItems = eventQuery.data === undefined || eventQuery.data === null
+    ? null
+    : parseCheckoutCart(location.search, eventQuery.data.tiers.map((tier) => tier.id))
   const [buyerName, setBuyerName] = useState('')
   const [buyerEmail, setBuyerEmail] = useState('')
   const [fieldErrors, setFieldErrors] = useState<{ buyerName?: string; buyerEmail?: string }>({})
@@ -144,7 +153,7 @@ export function CheckoutPage({ assignCheckout = assignHostedCheckout }: Checkout
       ? cancellationRef.current
       : {
         token,
-        promise: cancellationTokenPattern.test(token) ? cancelCheckout(token) : Promise.resolve(),
+        promise: cancellationTokenPattern.test(token) ? cancelAndClearCheckoutAttempt(token) : Promise.resolve(),
       }
     cancellationRef.current = cancellation
     void cancellation.promise.catch(() => undefined)
@@ -153,22 +162,28 @@ export function CheckoutPage({ assignCheckout = assignHostedCheckout }: Checkout
 
   useEffect(() => {
     if (cancelToken !== null || !eventIdResult.success) return
-    if (!tierIdResult.success || (eventQuery.data !== undefined && (
-      eventQuery.data === null || !eventQuery.data.tiers.some((tier) => tier.id === tierId && tier.availability_status === 'available')
-    ))) {
+    if (eventQuery.data === undefined) return
+    if (eventQuery.data === null || cartItems === null) {
       navigate(eventId ? publicEventPath(eventId) : '/', { replace: true })
+      return
     }
-  }, [cancelToken, eventId, eventIdResult.success, eventQuery.data, navigate, tierId, tierIdResult.success])
+    const tiers = eventQuery.data.tiers
+    if (cartItems.some((item) => !tiers.some((tier) =>
+      tier.id === item.tierId && tier.availability_status === 'available'))) {
+      navigate(publicEventPath(eventId), { replace: true })
+    }
+  }, [cancelToken, cartItems, eventId, eventIdResult.success, eventQuery.data, navigate])
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (submissionLockRef.current || !eventIdResult.success || !tierIdResult.success) return
-    const validation = checkoutInputSchema.omit({ clientRequestId: true }).safeParse({
+    if (submissionLockRef.current || !eventIdResult.success || eventQuery.data === undefined || eventQuery.data === null) return
+    const items = cartItems
+    if (items === null) return
+    const validation = checkoutCanonicalSubmissionSchema.safeParse({
       eventId,
-      tierId,
       buyerName,
       buyerEmail,
-      quantity: 1,
+      items,
     })
     if (!validation.success) {
       const errors: { buyerName?: string; buyerEmail?: string } = {}
@@ -186,12 +201,25 @@ export function CheckoutPage({ assignCheckout = assignHostedCheckout }: Checkout
     const attempt = Symbol('checkout-attempt')
     activeAttemptRef.current = attempt
     const routeKey = location.key
-    const clientRequestId = crypto.randomUUID().toLowerCase()
     setFieldErrors({})
     setServerError(null)
     setIsSubmitting(true)
     try {
-      const checkoutUrl = await createCheckout({ ...validation.data, clientRequestId })
+      const durableAttempt = await getOrCreateCheckoutAttempt(validation.data)
+      if (activeAttemptRef.current !== attempt || !mountedRef.current || routeKeyRef.current !== routeKey) return
+      const checkoutUrl = await createCheckout(
+        { ...validation.data, clientRequestId: durableAttempt.clientRequestId },
+        durableAttempt.confirmationBearer,
+      ).catch(async (error: unknown) => {
+        if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'CHECKOUT_EXPIRED') {
+          try {
+            await cancelAndClearCheckoutAttempt(durableAttempt.confirmationBearer)
+          } catch {
+            // Expiry alone is ambiguous; retain identity unless cancellation verifies terminal state.
+          }
+        }
+        throw error
+      })
       if (activeAttemptRef.current !== attempt || !mountedRef.current || routeKeyRef.current !== routeKey || !isStripeCheckoutUrl(checkoutUrl)) return
       assignCheckout(checkoutUrl)
     } catch (error) {
@@ -211,17 +239,24 @@ export function CheckoutPage({ assignCheckout = assignHostedCheckout }: Checkout
   if (cancelToken !== null) {
     return <CheckoutState action={<Link className="ui-button ui-button--secondary" to={eventId ? publicEventPath(eventId) : '/'}>Return to event</Link>} status="loading" title="Cancelling checkout" />
   }
-  if (!eventIdResult.success || !tierIdResult.success || (eventQuery.isPending || eventQuery.data === undefined) && !eventQuery.isError) {
+  if (!eventIdResult.success || (eventQuery.isPending || eventQuery.data === undefined) && !eventQuery.isError) {
     return <CheckoutState action={<Link className="ui-button ui-button--secondary" to={eventId ? publicEventPath(eventId) : '/'}>Return to event</Link>} status="loading" title="Loading checkout" />
   }
   if (eventQuery.isError || eventQuery.data === null) {
     return <CheckoutState action={<Link className="ui-button ui-button--secondary" to={publicEventPath(eventId)}>Return to event</Link>} description="Check your connection, then return to the event and try again." status="error" title="Checkout could not load" />
   }
 
-  const selectedTier = eventQuery.data.tiers.find((tier) => tier.id === tierId && tier.availability_status === 'available')
-  if (selectedTier === undefined) {
-    return <CheckoutState action={<Link className="ui-button ui-button--secondary" to={publicEventPath(eventId)}>Return to event</Link>} description="Choose an available ticket to continue." status="empty" title="This ticket is unavailable" />
+  const items = cartItems
+  const selectedLines = items?.flatMap((item) => {
+    const tier = eventQuery.data?.tiers.find((candidate) =>
+      candidate.id === item.tierId && candidate.availability_status === 'available')
+    return tier === undefined ? [] : [{ ...item, tier }]
+  }) ?? []
+  if (items === null || selectedLines.length !== items.length) {
+    return <CheckoutState action={<Link className="ui-button ui-button--secondary" to={publicEventPath(eventId)}>Return to event</Link>} description="Choose available tickets to continue." status="empty" title="This cart is unavailable" />
   }
+
+  const totalMinor = selectedLines.reduce((sum, line) => sum + line.quantity * line.tier.unit_amount_minor, 0)
 
   const errors = [fieldErrors.buyerName, fieldErrors.buyerEmail, serverError].filter((value): value is string => value !== undefined && value !== null)
   const disabled = isSubmitting
@@ -231,16 +266,20 @@ export function CheckoutPage({ assignCheckout = assignHostedCheckout }: Checkout
       <section aria-labelledby="checkout-title" className="checkout-page">
         <header className="checkout-page__header">
           <p className="public-event__eyebrow">Guest checkout</p>
-          <h1 id="checkout-title">Review your ticket</h1>
+          <h1 id="checkout-title">Review your tickets</h1>
           <p>Secure payment is completed with Stripe.</p>
         </header>
         <section aria-label="Ticket summary" className="checkout-summary">
           <p className="checkout-summary__event">{eventQuery.data.event.title}</p>
-          <dl>
-            <div><dt>Ticket</dt><dd>{selectedTier.name}</dd></div>
-            <div><dt>Quantity</dt><dd>1</dd></div>
-            <div><dt>Total</dt><dd>{formatMinorUsd(selectedTier.unit_amount_minor)}</dd></div>
-          </dl>
+          <ul className="checkout-summary__items">
+            {selectedLines.map((line) => (
+              <li key={line.tier.id}>
+                <span>{line.tier.name}</span>
+                <span>{line.quantity} {line.quantity === 1 ? 'ticket' : 'tickets'}</span>
+              </li>
+            ))}
+          </ul>
+          <dl><div><dt>Total</dt><dd>{formatMinorUsd(totalMinor)}</dd></div></dl>
         </section>
         <form className="checkout-form" noValidate onSubmit={(event) => void submit(event)}>
           <FormErrorSummary errors={errors} title="Check your details" />

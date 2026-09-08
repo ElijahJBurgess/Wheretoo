@@ -12,17 +12,29 @@ const MAX_REQUEST_BYTES = 512;
 const SAFE_STATUSES = new Set([
   "processing",
   "paid",
-  "failed",
+  "payment_failed",
+  "cancelled",
   "expired",
   "refunded",
+  "requires_review",
 ]);
 
 type ConfirmationStatus =
   | "processing"
   | "paid"
-  | "failed"
+  | "payment_failed"
+  | "cancelled"
   | "expired"
-  | "refunded";
+  | "refunded"
+  | "requires_review";
+
+type ConfirmationItem = {
+  tierName: string;
+  quantity: number;
+  unitAmountMinor: number;
+  subtotalMinor: number;
+  currency: "usd";
+};
 
 export interface OrderConfirmationProjection {
   event: {
@@ -32,9 +44,14 @@ export interface OrderConfirmationProjection {
     timezone: string;
     venueName: string | null;
   };
-  tier: { name: string };
+  items: ConfirmationItem[];
   orderNumber: string;
   status: ConfirmationStatus;
+  quantity: number;
+  currency: "usd";
+  subtotalMinor: number;
+  taxAmountMinor: 0;
+  totalMinor: number;
 }
 
 export interface OrderConfirmationDependencies {
@@ -105,13 +122,28 @@ function isTimestamp(value: unknown): value is string {
     Number.isFinite(Date.parse(value));
 }
 
+function hasExactKeys(
+  value: Record<string, unknown>,
+  expected: string[],
+): boolean {
+  const keys = Object.keys(value);
+  return keys.length === expected.length &&
+    expected.every((key) => keys.includes(key));
+}
+
+function isSafeInteger(value: unknown, minimum: number): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) &&
+    value >= minimum;
+}
+
 export async function defaultFindConfirmation(
   tokenHash: string,
   client: SupabaseClient = getServiceClient(),
 ): Promise<OrderConfirmationProjection | null> {
-  const { data, error } = await client.rpc("server_lookup_order_confirmation", {
-    p_token_hash: tokenHash,
-  });
+  const { data, error } = await client.rpc(
+    "server_lookup_checkout_integrity_confirmation",
+    { p_token_hash: tokenHash },
+  );
   if (error !== null || !Array.isArray(data)) {
     throw new ConfirmationError(500, "INTERNAL_ERROR");
   }
@@ -121,17 +153,81 @@ export async function defaultFindConfirmation(
   }
 
   const row = data[0];
+  const rowKeys = [
+    "event_title",
+    "event_starts_at",
+    "event_ends_at",
+    "event_timezone",
+    "event_venue_name",
+    "items",
+    "order_number",
+    "confirmation_status",
+    "quantity",
+    "currency",
+    "subtotal_minor",
+    "tax_amount_minor",
+    "total_minor",
+  ];
   if (
+    !hasExactKeys(row, rowKeys) ||
     typeof row.event_title !== "string" || row.event_title.length === 0 ||
     !isTimestamp(row.event_starts_at) || !isTimestamp(row.event_ends_at) ||
     typeof row.event_timezone !== "string" ||
     (row.event_venue_name !== null &&
       typeof row.event_venue_name !== "string") ||
-    typeof row.tier_name !== "string" || row.tier_name.length === 0 ||
+    !Array.isArray(row.items) || row.items.length === 0 ||
+    row.items.length > 10 ||
     typeof row.order_number !== "string" || row.order_number.length === 0 ||
     typeof row.confirmation_status !== "string" ||
-    !SAFE_STATUSES.has(row.confirmation_status)
+    !SAFE_STATUSES.has(row.confirmation_status) ||
+    !isSafeInteger(row.quantity, 1) || row.quantity > 10 ||
+    row.currency !== "usd" ||
+    !isSafeInteger(row.subtotal_minor, 1) ||
+    row.tax_amount_minor !== 0 ||
+    !isSafeInteger(row.total_minor, 1) ||
+    row.total_minor !== row.subtotal_minor
   ) {
+    throw new ConfirmationError(500, "INTERNAL_ERROR");
+  }
+
+  const itemKeys = [
+    "tier_name",
+    "quantity",
+    "unit_amount_minor",
+    "subtotal_minor",
+    "currency",
+  ];
+  const items: ConfirmationItem[] = [];
+  let quantity = 0;
+  let subtotalMinor = 0;
+  for (const item of row.items) {
+    if (
+      !isRecord(item) || !hasExactKeys(item, itemKeys) ||
+      typeof item.tier_name !== "string" || item.tier_name.length === 0 ||
+      !isSafeInteger(item.quantity, 1) || item.quantity > 10 ||
+      !isSafeInteger(item.unit_amount_minor, 1) ||
+      !isSafeInteger(item.subtotal_minor, 1) ||
+      item.currency !== "usd" ||
+      item.unit_amount_minor * item.quantity !== item.subtotal_minor
+    ) {
+      throw new ConfirmationError(500, "INTERNAL_ERROR");
+    }
+    quantity += item.quantity;
+    subtotalMinor += item.subtotal_minor;
+    if (
+      !Number.isSafeInteger(quantity) || !Number.isSafeInteger(subtotalMinor)
+    ) {
+      throw new ConfirmationError(500, "INTERNAL_ERROR");
+    }
+    items.push({
+      tierName: item.tier_name,
+      quantity: item.quantity,
+      unitAmountMinor: item.unit_amount_minor,
+      subtotalMinor: item.subtotal_minor,
+      currency: "usd",
+    });
+  }
+  if (quantity !== row.quantity || subtotalMinor !== row.subtotal_minor) {
     throw new ConfirmationError(500, "INTERNAL_ERROR");
   }
 
@@ -143,9 +239,14 @@ export async function defaultFindConfirmation(
       timezone: row.event_timezone,
       venueName: row.event_venue_name,
     },
-    tier: { name: row.tier_name },
+    items,
     orderNumber: row.order_number,
     status: row.confirmation_status as ConfirmationStatus,
+    quantity: row.quantity,
+    currency: "usd",
+    subtotalMinor: row.subtotal_minor,
+    taxAmountMinor: 0,
+    totalMinor: row.total_minor,
   };
 }
 

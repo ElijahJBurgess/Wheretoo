@@ -6,11 +6,16 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PublicTicketingEvent } from '../tickets/ticket.types'
 
-const { cancelCheckout, createCheckout, refetch, useCheckoutPublicEvent } = vi.hoisted(() => ({
+const { cancelCheckout, createCheckout, invoke, refetch, useCheckoutPublicEvent } = vi.hoisted(() => ({
   cancelCheckout: vi.fn(),
   createCheckout: vi.fn(),
+  invoke: vi.fn(),
   refetch: vi.fn(),
   useCheckoutPublicEvent: vi.fn(),
+}))
+const { clearCheckoutAttemptForConfirmation, getOrCreateCheckoutAttempt } = vi.hoisted(() => ({
+  clearCheckoutAttemptForConfirmation: vi.fn(),
+  getOrCreateCheckoutAttempt: vi.fn(),
 }))
 
 vi.mock('./checkout.api', async (importOriginal) => ({
@@ -19,6 +24,12 @@ vi.mock('./checkout.api', async (importOriginal) => ({
   createCheckout,
 }))
 vi.mock('./checkout.queries', () => ({ useCheckoutPublicEvent }))
+vi.mock('../../lib/supabase/client', () => ({ supabase: { functions: { invoke } } }))
+vi.mock('./checkout.attempt', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./checkout.attempt')>()),
+  clearCheckoutAttemptForConfirmation,
+  getOrCreateCheckoutAttempt,
+}))
 
 import { CheckoutPage } from './CheckoutPage'
 
@@ -27,6 +38,30 @@ const tierId = '900a9142-9111-4f87-84d5-b8545a94c7fb'
 const otherTierId = '6b849fa0-4d5e-4faa-bf31-b169cb1bd7fe'
 const nextEventId = '10823f25-2860-4b63-968c-749e8047561d'
 const nextTierId = '18a23f25-2860-4b63-968c-749e8047561d'
+const confirmationBearer = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8'
+const clientRequestId = '10823f25-2860-4b63-968c-749e8047561d'
+const cartPath = `/events/${eventId}/checkout?item=${tierId}%3A2&item=${otherTierId}%3A1`
+const attemptStorageKey = `whereto.checkout-attempt.v1:${eventId}`
+
+async function useRealRetryState() {
+  const attempts = await vi.importActual<typeof import('./checkout.attempt')>('./checkout.attempt')
+  const api = await vi.importActual<typeof import('./checkout.api')>('./checkout.api')
+  getOrCreateCheckoutAttempt.mockImplementation(attempts.getOrCreateCheckoutAttempt)
+  clearCheckoutAttemptForConfirmation.mockImplementation(attempts.clearCheckoutAttemptForConfirmation)
+  cancelCheckout.mockImplementation(api.cancelCheckout)
+  const submission = {
+    eventId, buyerName: 'Avery Stone', buyerEmail: 'avery@example.com',
+    items: [{ tierId, quantity: 2 }, { tierId: otherTierId, quantity: 1 }],
+  }
+  return { attempts, submission, first: await attempts.getOrCreateCheckoutAttempt(submission) }
+}
+
+async function submitBuyer() {
+  const user = userEvent.setup()
+  await user.type(screen.getByLabelText('Your name'), 'Avery Stone')
+  await user.type(screen.getByLabelText('Email address'), 'avery@example.com')
+  await user.click(screen.getByRole('button', { name: 'Continue to secure payment' }))
+}
 
 const publicEvent: PublicTicketingEvent = {
   event: {
@@ -58,11 +93,18 @@ const publicEvent: PublicTicketingEvent = {
     unit_amount_minor: 2_500,
     currency: 'usd',
     availability_status: 'available',
+  }, {
+    id: otherTierId,
+    name: 'VIP',
+    description: 'Early entry and lounge access.',
+    unit_amount_minor: 7_500,
+    currency: 'usd',
+    availability_status: 'available',
   }],
 }
 
 function renderCheckout(
-  initialEntry = `/events/${eventId}/checkout?tier=${tierId}`,
+  initialEntry = `/events/${eventId}/checkout?item=${tierId}%3A2&item=${otherTierId}%3A1`,
   assignCheckout?: (url: string) => void,
   strict = false,
 ) {
@@ -81,21 +123,30 @@ function renderCheckout(
 describe('CheckoutPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    sessionStorage.clear()
+    createCheckout.mockReset()
     useCheckoutPublicEvent.mockReturnValue({ data: publicEvent, isPending: false, isError: false, refetch })
     cancelCheckout.mockResolvedValue(undefined)
+    getOrCreateCheckoutAttempt.mockResolvedValue({
+      contractVersion: 'checkout_integrity_v1',
+      submissionFingerprint: confirmationBearer,
+      clientRequestId,
+      confirmationBearer,
+    })
   })
 
-  it('reviews exactly the persisted selected available tier with fixed quantity one', () => {
+  it('reviews multiple canonical cart lines and derives one public-data total', () => {
     renderCheckout()
 
-    expect(screen.getByRole('heading', { name: 'Review your ticket' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Review your tickets' })).toBeInTheDocument()
     expect(screen.getByText('Night Market')).toBeInTheDocument()
     expect(screen.getByText('General admission')).toBeInTheDocument()
-    expect(screen.getByText('$25.00')).toBeInTheDocument()
-    expect(screen.getByText('Quantity')).toBeInTheDocument()
-    expect(screen.getByText('1')).toBeInTheDocument()
+    expect(screen.getByText('2 tickets')).toBeInTheDocument()
+    expect(screen.getByText('VIP')).toBeInTheDocument()
+    expect(screen.getByText('1 ticket')).toBeInTheDocument()
+    expect(screen.getByText('$125.00')).toBeInTheDocument()
     expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument()
-    expect(screen.queryByText(/platform fee|destination|stripe account|order id/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/platform fee|destination|stripe account|order id|request id|confirmation bearer/i)).not.toBeInTheDocument()
   })
 
   it('gives the standalone loading state one semantic heading and a live loading role', () => {
@@ -119,8 +170,9 @@ describe('CheckoutPage', () => {
 
   it.each([
     `/events/${eventId}/checkout`,
-    `/events/${eventId}/checkout?tier=not-a-uuid`,
-    `/events/${eventId}/checkout?tier=${otherTierId}`,
+    `/events/${eventId}/checkout?item=not-a-uuid%3A1`,
+    `/events/${eventId}/checkout?item=${tierId}%3A11`,
+    `/events/${eventId}/checkout?item=18a23f25-2860-4b63-968c-749e8047561d%3A1`,
   ])('safely returns invalid or missing tier selections to the public event: %s', async (path) => {
     const { router } = renderCheckout(path)
     await waitFor(() => expect(router.state.location.pathname).toBe(`/events/${eventId}`))
@@ -164,7 +216,7 @@ describe('CheckoutPage', () => {
     fireEvent.click(action)
     fireEvent.click(action)
 
-    expect(createCheckout).toHaveBeenCalledOnce()
+    await waitFor(() => expect(createCheckout).toHaveBeenCalledOnce())
     expect(action).toBeDisabled()
     expect(screen.getByLabelText('Your name')).toBeDisabled()
     resolveCheckout('https://checkout.stripe.com/c/pay/cs_test_123')
@@ -183,6 +235,24 @@ describe('CheckoutPage', () => {
     expect(screen.queryByText(/TIER_SOLD_OUT|raw/i)).not.toBeInTheDocument()
   })
 
+  it('reuses the durable attempt after an ambiguous rejection instead of minting submit-local values', async () => {
+    const user = userEvent.setup()
+    createCheckout
+      .mockRejectedValueOnce(new TypeError('network failed'))
+      .mockResolvedValueOnce('https://checkout.stripe.com/c/pay/cs_test_123')
+    renderCheckout(undefined, vi.fn())
+    await user.type(screen.getByLabelText('Your name'), 'Avery Stone')
+    await user.type(screen.getByLabelText('Email address'), 'avery@example.com')
+
+    await user.click(screen.getByRole('button', { name: 'Continue to secure payment' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Secure checkout is unavailable')
+    await user.click(screen.getByRole('button', { name: 'Continue to secure payment' }))
+
+    await waitFor(() => expect(createCheckout).toHaveBeenCalledTimes(2))
+    expect(createCheckout.mock.calls[1]).toEqual(createCheckout.mock.calls[0])
+    expect(getOrCreateCheckoutAttempt).toHaveBeenCalledTimes(2)
+  })
+
   it('redirects only after a valid hosted Checkout URL and never creates paid client state', async () => {
     const user = userEvent.setup()
     const assign = vi.fn()
@@ -192,13 +262,17 @@ describe('CheckoutPage', () => {
     await user.type(screen.getByLabelText('Email address'), 'avery@example.com')
     await user.click(screen.getByRole('button', { name: 'Continue to secure payment' }))
 
-    expect(createCheckout).toHaveBeenCalledWith(expect.objectContaining({
+    expect(createCheckout).toHaveBeenCalledWith({
       eventId,
-      tierId,
       buyerName: 'Avery Stone',
       buyerEmail: 'avery@example.com',
-      quantity: 1,
-    }))
+      clientRequestId,
+      items: [
+        { tierId: otherTierId, quantity: 1 },
+        { tierId, quantity: 2 },
+      ],
+    }, confirmationBearer)
+    expect(clearCheckoutAttemptForConfirmation).not.toHaveBeenCalled()
     await waitFor(() => expect(assign).toHaveBeenCalledWith('https://checkout.stripe.com/c/pay/cs_test_123'))
     expect(screen.queryByText(/payment complete|ticket issued|order confirmed/i)).not.toBeInTheDocument()
   })
@@ -211,6 +285,102 @@ describe('CheckoutPage', () => {
     await waitFor(() => expect(router.state.location.pathname).toBe(`/events/${eventId}`))
     expect(router.state.location.search).toBe('')
     expect(cancelCheckout).toHaveBeenCalledOnce()
+  })
+
+  it('rotates the same cart only after cancellation returns validated terminal success', async () => {
+    const { first } = await useRealRetryState()
+    let resolveCancellation!: (result: unknown) => void
+    invoke.mockReturnValue(new Promise((resolve) => { resolveCancellation = resolve }))
+    createCheckout.mockResolvedValue('https://checkout.stripe.com/c/pay/cs_test_NEW')
+    const { router } = renderCheckout(`/events/${eventId}/checkout?cancel=${first.confirmationBearer}`, vi.fn())
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/events/${eventId}`))
+    expect(JSON.parse(sessionStorage.getItem(attemptStorageKey) ?? '{}')).toEqual(first)
+
+    await act(async () => { resolveCancellation({ data: { cancelled: true }, error: null }) })
+    expect(sessionStorage.getItem(attemptStorageKey)).toBeNull()
+    await act(async () => { await router.navigate(cartPath) })
+    await submitBuyer()
+
+    await waitFor(() => expect(createCheckout).toHaveBeenCalledOnce())
+    expect(createCheckout.mock.calls[0][0].clientRequestId).not.toBe(first.clientRequestId)
+    expect(createCheckout.mock.calls[0][1]).not.toBe(first.confirmationBearer)
+  })
+
+  it('preserves newer and unrelated attempts when an older cancellation finishes', async () => {
+    const { first, attempts, submission } = await useRealRetryState()
+    let resolveCancellation!: (result: unknown) => void
+    invoke.mockReturnValue(new Promise((resolve) => { resolveCancellation = resolve }))
+    const { router } = renderCheckout(`/events/${eventId}/checkout?cancel=${first.confirmationBearer}`)
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/events/${eventId}`))
+    const newer = await attempts.getOrCreateCheckoutAttempt({ ...submission, buyerName: 'Another buyer' })
+    const unrelated = await attempts.getOrCreateCheckoutAttempt({ ...submission, eventId: nextEventId })
+
+    await act(async () => { resolveCancellation({ data: { cancelled: true }, error: null }) })
+
+    expect(JSON.parse(sessionStorage.getItem(attemptStorageKey) ?? '{}')).toEqual(newer)
+    expect(JSON.parse(sessionStorage.getItem(`whereto.checkout-attempt.v1:${nextEventId}`) ?? '{}')).toEqual(unrelated)
+  })
+
+  it.each([
+    ['transport failure', { data: null, error: new Error('network unavailable') }],
+    ['unconfirmed cancellation', { data: { cancelled: false }, error: null }],
+    ['ambiguous review response', { data: { cancelled: true, status: 'requires_review' }, error: null }],
+  ])('preserves same-cart retry identity after cancellation ambiguity: %s', async (_label, response) => {
+    const { first } = await useRealRetryState()
+    invoke.mockResolvedValue(response)
+    createCheckout.mockResolvedValue('https://checkout.stripe.com/c/pay/cs_test_RETRY')
+    const { router } = renderCheckout(`/events/${eventId}/checkout?cancel=${first.confirmationBearer}`, vi.fn())
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/events/${eventId}`))
+    await act(async () => { await router.navigate(cartPath) })
+    await submitBuyer()
+
+    await waitFor(() => expect(createCheckout).toHaveBeenCalledOnce())
+    expect(createCheckout.mock.calls[0][0].clientRequestId).toBe(first.clientRequestId)
+    expect(createCheckout.mock.calls[0][1]).toBe(first.confirmationBearer)
+    expect(JSON.parse(sessionStorage.getItem(attemptStorageKey) ?? '{}')).toEqual(first)
+  })
+
+  it.each([true, false])('rotates an expired attempt only with authoritative terminal verification: %s', async (verified) => {
+    const { first } = await useRealRetryState()
+    let resolveCancellation!: (result: unknown) => void
+    invoke.mockReturnValue(new Promise((resolve) => { resolveCancellation = resolve }))
+    createCheckout.mockRejectedValueOnce({ code: 'CHECKOUT_EXPIRED' })
+      .mockResolvedValueOnce('https://checkout.stripe.com/c/pay/cs_test_RETRY')
+    renderCheckout(undefined, vi.fn())
+    await submitBuyer()
+
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith('stripe-cancel-checkout', {
+      body: { confirmationToken: first.confirmationBearer }, method: 'POST',
+    }))
+    expect(screen.getByRole('button', { name: 'Opening secure payment…' })).toBeDisabled()
+    expect(JSON.parse(sessionStorage.getItem(attemptStorageKey) ?? '{}')).toEqual(first)
+    await act(async () => {
+      resolveCancellation(verified
+        ? { data: { cancelled: true }, error: null }
+        : { data: null, error: new Error('open/null-session or unresolved payment') })
+    })
+    expect(await screen.findByRole('alert')).toHaveTextContent('This checkout window expired')
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Continue to secure payment' }))
+
+    await waitFor(() => expect(createCheckout).toHaveBeenCalledTimes(2))
+    expect(createCheckout.mock.calls[0][0].clientRequestId).toBe(first.clientRequestId)
+    expect(createCheckout.mock.calls[0][1]).toBe(first.confirmationBearer)
+    expect(createCheckout.mock.calls[1][0].clientRequestId === first.clientRequestId).toBe(!verified)
+    expect(createCheckout.mock.calls[1][1] === first.confirmationBearer).toBe(!verified)
+  })
+
+  it.each(['CHECKOUT_UNAVAILABLE', 'requires_review', 'payment_processing'])('retains the attempt without cancellation for non-terminal creation errors: %s', async (code) => {
+    const { first } = await useRealRetryState()
+    createCheckout.mockRejectedValueOnce({ code })
+      .mockResolvedValueOnce('https://checkout.stripe.com/c/pay/cs_test_RETRY')
+    renderCheckout(undefined, vi.fn())
+    await submitBuyer()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Secure checkout is unavailable')
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Continue to secure payment' }))
+    await waitFor(() => expect(createCheckout).toHaveBeenCalledTimes(2))
+    expect(createCheckout.mock.calls[1][0].clientRequestId).toBe(first.clientRequestId)
+    expect(createCheckout.mock.calls[1][1]).toBe(first.confirmationBearer)
+    expect(invoke).not.toHaveBeenCalled()
   })
 
   it('does not redirect after unmount when a deferred Checkout response resolves', async () => {
@@ -255,7 +425,9 @@ describe('CheckoutPage', () => {
       data: {
         ...publicEvent,
         event: { ...publicEvent.event, id: queriedEventId, title: queriedEventId === nextEventId ? 'Later Market' : 'Night Market' },
-        tiers: [{ ...publicEvent.tiers[0], id: queriedEventId === nextEventId ? nextTierId : tierId }],
+        tiers: queriedEventId === nextEventId
+          ? [{ ...publicEvent.tiers[0], id: nextTierId }]
+          : publicEvent.tiers,
       },
       isPending: false,
       isError: false,
@@ -266,7 +438,7 @@ describe('CheckoutPage', () => {
     await user.type(screen.getByLabelText('Email address'), 'avery@example.com')
     await user.click(screen.getByRole('button', { name: 'Continue to secure payment' }))
 
-    await act(async () => { await router.navigate(`/events/${nextEventId}/checkout?tier=${nextTierId}`) })
+    await act(async () => { await router.navigate(`/events/${nextEventId}/checkout?item=${nextTierId}%3A1`) })
     expect(screen.getByText('Later Market')).toBeInTheDocument()
     resolveCheckout('https://checkout.stripe.com/c/pay/cs_test_123')
 
@@ -280,7 +452,9 @@ describe('CheckoutPage', () => {
       data: {
         ...publicEvent,
         event: { ...publicEvent.event, id: queriedEventId, title: queriedEventId === nextEventId ? 'Later Market' : 'Night Market' },
-        tiers: [{ ...publicEvent.tiers[0], id: queriedEventId === nextEventId ? nextTierId : tierId }],
+        tiers: queriedEventId === nextEventId
+          ? [{ ...publicEvent.tiers[0], id: nextTierId }]
+          : publicEvent.tiers,
       },
       isPending: false,
       isError: false,
@@ -292,7 +466,7 @@ describe('CheckoutPage', () => {
     await user.type(screen.getByLabelText('Your name'), 'Avery Stone')
     await user.type(screen.getByLabelText('Email address'), 'avery@example.com')
 
-    await act(async () => { await router.navigate(`/events/${nextEventId}/checkout?tier=${nextTierId}`) })
+    await act(async () => { await router.navigate(`/events/${nextEventId}/checkout?item=${nextTierId}%3A1`) })
 
     expect(screen.getByText('Later Market')).toBeInTheDocument()
     expect(screen.getByLabelText('Your name')).toHaveValue('')
@@ -314,7 +488,9 @@ describe('CheckoutPage', () => {
       data: {
         ...publicEvent,
         event: { ...publicEvent.event, id: queriedEventId, title: queriedEventId === nextEventId ? 'Later Market' : 'Night Market' },
-        tiers: [{ ...publicEvent.tiers[0], id: queriedEventId === nextEventId ? nextTierId : tierId }],
+        tiers: queriedEventId === nextEventId
+          ? [{ ...publicEvent.tiers[0], id: nextTierId }]
+          : publicEvent.tiers,
       },
       isPending: false,
       isError: false,
@@ -326,7 +502,7 @@ describe('CheckoutPage', () => {
     await user.click(screen.getByRole('button', { name: 'Continue to secure payment' }))
     expect(screen.getByRole('button', { name: 'Opening secure payment…' })).toBeDisabled()
 
-    await act(async () => { await router.navigate(`/events/${nextEventId}/checkout?tier=${nextTierId}`) })
+    await act(async () => { await router.navigate(`/events/${nextEventId}/checkout?item=${nextTierId}%3A1`) })
     expect(screen.getByLabelText('Your name')).toHaveValue('')
     expect(screen.getByLabelText('Email address')).toHaveValue('')
     expect(screen.getByRole('button', { name: 'Continue to secure payment' })).toBeEnabled()

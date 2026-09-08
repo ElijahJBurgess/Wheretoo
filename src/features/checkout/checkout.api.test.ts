@@ -9,6 +9,8 @@ import { CheckoutApiError, cancelCheckout, createCheckout } from './checkout.api
 const eventId = 'eb0fd9d5-d7d5-45dd-a99f-0c8a191bdc6f'
 const tierId = '900a9142-9111-4f87-84d5-b8545a94c7fb'
 const requestId = '6b849fa0-4d5e-4faa-bf31-b169cb1bd7fe'
+const confirmationBearer = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8'
+const nonCanonicalBearer = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh9'
 const confirmationToken = 'tzGJcJWwoS-3IzLlK9cZV3QHHbC6-vv2d3a-Kl3nHng'
 
 describe('checkout API', () => {
@@ -19,23 +21,36 @@ describe('checkout API', () => {
 
     await expect(createCheckout({
       eventId,
-      tierId,
       buyerName: ' Avery Stone ',
       buyerEmail: ' AVERY@EXAMPLE.COM ',
       clientRequestId: requestId,
-      quantity: 1,
-    })).resolves.toBe('https://checkout.stripe.com/c/pay/cs_test_123')
+      items: [{ tierId, quantity: 2 }],
+    }, confirmationBearer)).resolves.toBe('https://checkout.stripe.com/c/pay/cs_test_123')
 
     expect(invoke).toHaveBeenCalledWith('stripe-create-checkout', {
       body: {
         eventId,
-        tierId,
-        guestName: 'Avery Stone',
-        guestEmail: 'avery@example.com',
+        buyerName: 'Avery Stone',
+        buyerEmail: 'avery@example.com',
         clientRequestId: requestId,
+        items: [{ tierId, quantity: 2 }],
       },
+      headers: { 'X-Whereto-Confirmation-Bearer': confirmationBearer },
       method: 'POST',
     })
+  })
+
+  it('rejects a non-canonical creation bearer before invoking checkout', async () => {
+    invoke.mockResolvedValue({ data: { checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_123' }, error: null })
+
+    await expect(createCheckout({
+      eventId,
+      buyerName: 'Avery Stone',
+      buyerEmail: 'avery@example.com',
+      clientRequestId: requestId,
+      items: [{ tierId, quantity: 1 }],
+    }, nonCanonicalBearer)).rejects.toEqual(new CheckoutApiError('CHECKOUT_UNAVAILABLE'))
+    expect(invoke).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -52,12 +67,11 @@ describe('checkout API', () => {
 
     await expect(createCheckout({
       eventId,
-      tierId,
       buyerName: 'Avery Stone',
       buyerEmail: 'avery@example.com',
       clientRequestId: requestId,
-      quantity: 1,
-    })).rejects.toEqual(new CheckoutApiError('CHECKOUT_UNAVAILABLE'))
+      items: [{ tierId, quantity: 1 }],
+    }, confirmationBearer)).rejects.toEqual(new CheckoutApiError('CHECKOUT_UNAVAILABLE'))
   })
 
   it('accepts the documented Stripe Checkout URL path with an opaque fragment without inspecting it', async () => {
@@ -66,12 +80,11 @@ describe('checkout API', () => {
 
     await expect(createCheckout({
       eventId,
-      tierId,
       buyerName: 'Avery Stone',
       buyerEmail: 'avery@example.com',
       clientRequestId: requestId,
-      quantity: 1,
-    })).resolves.toBe(checkoutUrl)
+      items: [{ tierId, quantity: 1 }],
+    }, confirmationBearer)).resolves.toBe(checkoutUrl)
   })
 
   it('maps only documented server codes and suppresses raw function failures', async () => {
@@ -82,12 +95,11 @@ describe('checkout API', () => {
 
     await expect(createCheckout({
       eventId,
-      tierId,
       buyerName: 'Avery Stone',
       buyerEmail: 'avery@example.com',
       clientRequestId: requestId,
-      quantity: 1,
-    })).rejects.toEqual(new CheckoutApiError('TIER_SOLD_OUT'))
+      items: [{ tierId, quantity: 1 }],
+    }, confirmationBearer)).rejects.toEqual(new CheckoutApiError('TIER_SOLD_OUT'))
 
     invoke.mockResolvedValue({ data: null, error: new Error('raw Stripe account error') })
     await expect(cancelCheckout(confirmationToken)).rejects.toEqual(new CheckoutApiError('CHECKOUT_UNAVAILABLE'))
@@ -102,5 +114,12 @@ describe('checkout API', () => {
       body: { confirmationToken },
       method: 'POST',
     })
+  })
+
+  it('rejects a non-canonical cancellation bearer before invoking checkout', async () => {
+    invoke.mockResolvedValue({ data: { cancelled: true }, error: null })
+
+    await expect(cancelCheckout(nonCanonicalBearer)).rejects.toEqual(new CheckoutApiError('CHECKOUT_UNAVAILABLE'))
+    expect(invoke).not.toHaveBeenCalled()
   })
 })
