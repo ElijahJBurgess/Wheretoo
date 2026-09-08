@@ -1,4 +1,4 @@
--- Forward-only Task 15 cleanup. Keep the reviewed cart fulfillment body intact.
+-- Forward-only Task 15 cleanup. Preserve cart guards and canonical eligibility.
 -- Remove only its legacy digest alternative before dropping the obsolete helpers.
 
 create or replace function private.fulfill_paid_order(
@@ -338,9 +338,8 @@ begin
       v_order.status in ('creating_checkout', 'checkout_open')
       and v_order.reservation_expires_at <= statement_timestamp()
     )
-    or v_event.status is distinct from 'published'
+    or not private.event_has_current_public_eligibility(v_event.id)
     or v_event.admission_type is distinct from 'paid'
-    or v_event.moderation_status not in ('clear', 'flagged')
     or exists (
       select 1
       from public.order_items as items
