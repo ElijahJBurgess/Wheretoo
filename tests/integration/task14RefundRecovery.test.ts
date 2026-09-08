@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import * as contracts from './edge/task17-transaction-driver/contracts'
 
 const snapshot = { orderId: '11111111-1111-4111-8111-111111111111', paymentIntentId: 'pi_Test', chargeId: 'ch_Test', transferId: 'tr_Test', applicationFeeId: 'fee_Test', connectedAccountId: 'acct_Test', refundId: 're_Test', reversalId: 'trr_Test', feeRefundId: null }
@@ -10,6 +12,35 @@ const evidence = () => ({
 })
 
 describe('Task14 existing-refund recovery', () => {
+  it('admits exactly the three cancelled review tickets, never valid or already-refunded tickets', () => {
+    const runner = readFileSync(new URL('./run-stripe-ticketing-proof.sh', import.meta.url), 'utf8')
+    // Execute the actual portable SQL predicates against an in-memory database;
+    // do not mock an admission result or contact the linked PostgreSQL instance.
+    const predicates = runner.match(/\(select count\(\*\) from public\.tickets where order_id = candidate\.order_id(?: and status = '[a-z]+')?\) = 3/g)
+    expect(predicates?.length).toBe(2)
+    const actual = JSON.parse(execFileSync(process.execPath, ['--disable-warning=ExperimentalWarning', '--input-type=module', '-e', `
+      import { DatabaseSync } from 'node:sqlite'
+      import { readFileSync } from 'node:fs'
+      const predicates = JSON.parse(readFileSync(0, 'utf8'))
+      const db = new DatabaseSync(':memory:')
+      db.exec("attach ':memory:' as public; create table public.tickets (order_id text, status text)")
+      const result = []
+      for (const statuses of [
+        ['cancelled', 'cancelled', 'cancelled'], ['cancelled', 'cancelled'],
+        ['cancelled', 'cancelled', 'valid'], ['refunded', 'refunded', 'refunded'],
+        ['invalid', 'invalid', 'invalid'], ['cancelled', 'cancelled', 'cancelled', 'cancelled'],
+      ]) {
+        db.exec('delete from public.tickets')
+        const insert = db.prepare('insert into public.tickets values (?, ?)')
+        for (const status of statuses) insert.run('fixture-order', status)
+        insert.run('unrelated-order', 'cancelled')
+        result.push(db.prepare("select " + predicates.join(' and ') + " as admitted from (select 'fixture-order' as order_id) as candidate").get().admitted)
+      }
+      db.close()
+      process.stdout.write(JSON.stringify(result))
+    `], { input: JSON.stringify(predicates), encoding: 'utf8' }))
+    expect(actual).toEqual([1, 0, 0, 0, 0, 0])
+  })
   it('recovery-only driver permits only existing refund recovery and non-retiring cleanup', () => {
     expect(contracts.recoveryDriverActionAllowed('1', 'recover_refund')).toBe(true)
     expect(contracts.recoveryDriverActionAllowed('1', 'cleanup')).toBe(true)

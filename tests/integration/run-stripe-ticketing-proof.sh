@@ -799,7 +799,7 @@ if [ "$TASK13_CLEANUP_ONLY" -eq 1 ] || [ "$TASK14_REFUND_RECOVERY_ONLY" -eq 1 ];
           and not exists (select 1 from public.refunds where order_id = candidate.order_id))
         or ($TASK14_REFUND_RECOVERY_ONLY = 1
           and (select count(*) from public.tickets where order_id = candidate.order_id) = 3
-          and (select count(*) from public.tickets where order_id = candidate.order_id and status = 'invalid') = 3
+          and (select count(*) from public.tickets where order_id = candidate.order_id and status = 'cancelled') = 3
           and (select count(*) from public.refunds where order_id = candidate.order_id) = 1
           and (select count(*) from public.refunds as refunds join public.orders as orders on orders.id = refunds.order_id
             where orders.id = candidate.order_id and refunds.status = 'succeeded' and refunds.currency = 'usd'
