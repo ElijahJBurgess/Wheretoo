@@ -376,6 +376,10 @@ VITE_STRIPE_PUBLISHABLE_KEY="$stripe_publishable" \
 TEST_TASK18_FUNCTION_URL="$function_url" \
 TEST_TASK18_DRIVER_TOKEN="$proof_token" \
 TEST_TASK18_FIXTURE_PREFIX="$driver_prefix" \
-  pnpm test:e2e
+  pnpm exec playwright test --config playwright.config.ts \
+    tests/e2e/organizer-publish.spec.ts \
+    tests/e2e/organizer-publish.visual.spec.ts \
+    tests/e2e/ticket-purchase.spec.ts \
+    tests/e2e/ticket-purchase.visual.spec.ts
 
 printf '%s\n' 'Task 18 browser proof passed; reconciliation and exact cleanup run on EXIT.'
