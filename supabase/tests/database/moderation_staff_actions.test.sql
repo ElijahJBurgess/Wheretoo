@@ -167,7 +167,7 @@ insert into private.event_moderation_actions (
   'previously_public', 'no_violation', 29
 );
 update private.event_public_eligibility_intervals
-set ended_at = now(), ended_action_id = '48000000-0000-4000-8000-000000000003'
+set ended_at = statement_timestamp(), ended_action_id = '48000000-0000-4000-8000-000000000003'
 where event_id = '28000000-0000-4000-8000-000000000003'
   and public_eligibility_version = 0;
 update public.events
@@ -177,7 +177,8 @@ insert into private.event_public_eligibility_intervals (
   event_id, public_eligibility_version, eligibility_state, started_at,
   started_action_id, transition_reason
 ) values (
-  '28000000-0000-4000-8000-000000000003', 1, 'eligible', now(),
+  '28000000-0000-4000-8000-000000000003', 1, 'eligible',
+  (select ended_at from private.event_public_eligibility_intervals where event_id = '28000000-0000-4000-8000-000000000003' and public_eligibility_version = 0),
   '48000000-0000-4000-8000-000000000003', 'moderation_restore'
 );
 

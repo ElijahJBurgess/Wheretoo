@@ -2,6 +2,13 @@
 set -eu
 umask 077
 
+CORE_TICKET_LITE_PROOF=${CORE_TICKET_LITE_PROOF-0}
+case "$CORE_TICKET_LITE_PROOF" in 0|1) ;; *) exit 78 ;; esac
+if [ "$CORE_TICKET_LITE_PROOF" = 1 ] && [ "${CORE_TICKET_LITE_SHARED_APPROVED-}" != 1 ]; then
+  printf '%s\n' 'Shared proof requires owner approval.' >&2
+  exit 78
+fi
+
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
 DRIVER_SOURCE="$SCRIPT_DIR/edge/task17-transaction-driver/index.ts"
@@ -63,6 +70,12 @@ NODE
 }
 
 run_task14_browser_project() {
+  if [ "${CORE_TICKET_LITE_PROOF-0}" = 1 ]; then
+    PLAYWRIGHT_NO_COPY_PROMPT=1 pnpm exec playwright test --config playwright.config.ts \
+      tests/e2e/core-ticket-truth-lite.spec.ts --project="$TASK14_BROWSER_PROJECT" \
+      --output="test-results/e2e/core-ticket-lite"
+    return
+  fi
   pnpm exec playwright test --config playwright.config.ts \
     tests/e2e/ticket-purchase.visual.spec.ts --project="$TASK14_BROWSER_PROJECT" \
     --output="test-results/e2e/task14/$TASK14_BROWSER_PROJECT/visual"
@@ -73,6 +86,7 @@ run_task14_browser_project() {
 
 task14_fixture_action() {
   TASK14_ACTION="$1" TASK14_FIXTURE_FILE="$TASK14_FIXTURE_FILE" \
+    CORE_TICKET_LITE_PROOF="$CORE_TICKET_LITE_PROOF" \
     TEST_FUNCTION_URL="$TEST_FUNCTION_URL" TEST_STRIPE_DRIVER_TOKEN="$PROOF_TOKEN" \
     TEST_SUPABASE_PUBLISHABLE_KEY="$TEST_SUPABASE_PUBLISHABLE_KEY" \
     TEST_STRIPE_FIXTURE_PREFIX="$TEST_STRIPE_FIXTURE_PREFIX" \
@@ -99,7 +113,7 @@ try {
     fs.writeFileSync(process.env.TASK14_FIXTURE_FILE, JSON.stringify({ eventId: fixture.eventId }), { mode: 0o600 })
   } else if (process.env.TASK14_ACTION === 'settle') {
     const fixture = JSON.parse(fs.readFileSync(process.env.TASK14_FIXTURE_FILE, 'utf8'))
-    await settleBrowserCheckout(invoke, fixture.eventId)
+    await settleBrowserCheckout(invoke, fixture.eventId, process.env.CORE_TICKET_LITE_PROOF === '1')
   } else throw new Error('TASK14_ACTION_INVALID')
 } catch {
   process.stderr.write('Task 14 fixture/financial boundary verification: fail\n')
@@ -147,6 +161,7 @@ write_driver_request_config() {
   task17_config_file=$1
   task17_request_body=$2
   {
+    printf 'connect-timeout = 10\nmax-time = 30\n'
     printf 'url = "%s"\n' "$TEST_FUNCTION_URL"
     printf 'request = "POST"\n'
     printf 'header = "content-type: application/json"\n'
@@ -293,6 +308,15 @@ cleanup() {
   fi
 
   if [ "$DRIVER_DEPLOYED" -eq 1 ] && [ -n "$CURL_CONFIG" ] && [ -f "$CURL_CONFIG" ]; then
+    if [ "$CORE_TICKET_LITE_PROOF" = 1 ]; then
+      case "$TEST_STRIPE_FIXTURE_PREFIX" in task17_????????????) ;; *) TEARDOWN_FAILURE=1 ;; esac
+      sed "s/__TASK17_FIXTURE_PREFIX__/$TEST_STRIPE_FIXTURE_PREFIX/g" \
+        "$SCRIPT_DIR/sql/core-ticket-lite-cleanup-auxiliary.sql" > "$TEMP_DIR/lite-aux-cleanup.sql"
+      if ! pnpm exec supabase db query --linked --file "$TEMP_DIR/lite-aux-cleanup.sql" > "$TEMP_DIR/lite-aux-cleanup.log" 2>&1; then
+        printf '%s\n' 'Lite auxiliary exact-ID cleanup failed; retained targets require owner recovery.' >&2
+        TEARDOWN_FAILURE=1
+      fi
+    fi
     write_cleanup_config
     curl --silent --show-error --fail-with-body --config "$CURL_CONFIG" > "$CLEANUP_RESPONSE"
     cleanup_status=$?
@@ -333,9 +357,10 @@ cleanup() {
       ' "$CLEANUP_RESPONSE" 2>/dev/null || true
     fi
     cleanup_contract_status=0
-    if [ "$cleanup_status" -ne 0 ] || ! env TASK13_CLEANUP_ONLY="$TASK13_CLEANUP_ONLY" node -e '
+    if [ "$cleanup_status" -ne 0 ] || ! env TASK13_CLEANUP_ONLY="$TASK13_CLEANUP_ONLY" CORE_TICKET_LITE_PROOF="$CORE_TICKET_LITE_PROOF" node -e '
       const fs = require("node:fs");
       const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      if (process.env.CORE_TICKET_LITE_PROOF === "1" && value.provider_cleanup_verified !== true) process.exit(1);
       const lifecycleMatches = value.connected_account_closed === false &&
         value.connected_account_preserved === true;
       const absent = value.event_count === 0 && value.organizer_count === 0 &&
@@ -928,7 +953,7 @@ else
   from classified
   order by classified.prefix;" > "$stable_fixture_file"
 chmod 600 "$stable_fixture_file"
-TEST_STRIPE_FIXTURE_PREFIX=$(STABLE_FIXTURE_FILE="$stable_fixture_file" TASK14_BROWSER_PROJECT="$TASK14_BROWSER_PROJECT" node --input-type=module <<'NODE'
+TEST_STRIPE_FIXTURE_PREFIX=$(STABLE_FIXTURE_FILE="$stable_fixture_file" TASK14_BROWSER_PROJECT="$TASK14_BROWSER_PROJECT" CORE_TICKET_LITE_PROOF="$CORE_TICKET_LITE_PROOF" LITE_RANDOM_SUFFIX="$(openssl rand -hex 6)" node --input-type=module <<'NODE'
 import fs from 'node:fs'
 const payload = JSON.parse(fs.readFileSync(process.env.STABLE_FIXTURE_FILE, 'utf8'))
 const rows = Array.isArray(payload.rows)
@@ -936,15 +961,17 @@ const rows = Array.isArray(payload.rows)
   : Array.isArray(payload.result)
     ? payload.result
     : null
-// Browser proof may reuse the audit tombstone, but must never seed a new fixture.
-if (process.env.TASK14_BROWSER_PROJECT && rows?.length !== 1) {
+// The existing browser proof only reuses a tombstone. Approved Lite may seed one random namespace.
+if (process.env.CORE_TICKET_LITE_PROOF !== '1' && process.env.TASK14_BROWSER_PROJECT && rows?.length !== 1) {
   process.stderr.write('Task 14 requires exactly one existing stable fixture.\n')
   process.exit(1)
 }
 if (rows === null || rows.length > 1) process.exit(1)
 if (rows.length === 1 && rows[0]?.stable_fixture_safe !== true &&
   rows[0]?.stable_fixture_recoverable !== true) process.exit(1)
-const prefix = rows.length === 0 ? 'task17_checkout0001' : rows[0]?.stable_fixture_candidate
+const prefix = rows.length === 0
+  ? process.env.CORE_TICKET_LITE_PROOF === '1' ? `task17_${process.env.LITE_RANDOM_SUFFIX}` : 'task17_checkout0001'
+  : rows[0]?.stable_fixture_candidate
 if (typeof prefix !== 'string' || !/^task17_[a-z0-9]{12}$/.test(prefix)) process.exit(1)
 process.stdout.write(prefix)
 NODE
@@ -996,6 +1023,22 @@ pnpm exec supabase functions list --project-ref "$PROJECT_REF" --output json > "
   exit 1
 }
 pnpm exec supabase secrets list --project-ref "$PROJECT_REF" --output json > "$pre_secrets"
+if [ "$CORE_TICKET_LITE_PROOF" = 1 ]; then
+  CORE_FUNCTIONS_FILE="$pre_functions" CORE_SECRETS_FILE="$pre_secrets" node --input-type=module <<'NODE'
+import fs from 'node:fs'
+const functionPayload = JSON.parse(fs.readFileSync(process.env.CORE_FUNCTIONS_FILE, 'utf8'))
+const secretPayload = JSON.parse(fs.readFileSync(process.env.CORE_SECRETS_FILE, 'utf8'))
+const functions = Array.isArray(functionPayload) ? functionPayload : functionPayload.functions
+const secrets = Array.isArray(secretPayload) ? secretPayload : secretPayload.secrets
+// CLI lists names/digests only. Never retrieve or change the credential secret value.
+if (!Array.isArray(secrets) || secrets.filter(item => item.name === 'TICKET_CREDENTIAL_SECRET').length !== 1 ||
+    !Array.isArray(functions) || ['ticket-collection', 'ticket-admission', 'stripe-webhook', 'stripe-create-checkout', 'order-confirmation']
+      .some(slug => functions.filter(item => item.slug === slug && item.status === 'ACTIVE').length !== 1)) {
+  process.stderr.write('Lite production functions or configured credential secret are missing. Stop for deployment approval.\n')
+  process.exit(1)
+}
+NODE
+fi
 [ "$(temporary_secret_count "$pre_secrets")" = 0 ] || {
   printf '%s\n' 'Task 17 temporary secrets already exist; refusing to replace them.' >&2
   exit 1

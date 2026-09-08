@@ -1033,7 +1033,7 @@ select throws_ok(
 select lives_ok(
   $$
     update private.event_public_eligibility_intervals
-    set ended_at = now(), ended_action_id = '62000000-0000-0000-0000-000000000040'
+    set ended_at = statement_timestamp(), ended_action_id = '62000000-0000-0000-0000-000000000040'
     where event_id = '62000000-0000-0000-0000-000000000010'
       and public_eligibility_version = 0
   $$,

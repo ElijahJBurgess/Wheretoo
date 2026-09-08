@@ -39,7 +39,8 @@ describe('Task14 existing-refund recovery', () => {
     if (variant === 'missing_order_payment') { order.stripe_payment_intent_id = ''; refund.stripe_payment_intent_id = '' }
     if (variant === 'missing_order_transfer') order.stripe_transfer_id = ''
     const client = { from: (table: string) => {
-      const result = { error: null, data: table === 'orders' ? scope : table === 'events' ? { id: 'fixture', organizer_id: 'owner' } : [refund] }
+      const result = { error: null, data: table === 'orders' ? scope : table === 'events' ? { id: 'fixture', organizer_id: 'owner' }
+        : table === 'tickets' ? [1, 2, 3].map(id => ({ id: String(id), status: 'refunded', used_at: null })) : [refund] }
       const query = { select: () => query, eq: () => query, single: async () => result, then: (resolve: (value: unknown) => unknown) => resolve(result) }
       return query
     } }

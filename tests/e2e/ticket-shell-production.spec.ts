@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { decoderBundle, decodeMountedQr } from './support/ticketExperienceJourney'
 
 const productionOrigin = 'http://127.0.0.1:3001'
 const sentinelBearer = 'a'.repeat(42) + 'A'
@@ -20,6 +21,33 @@ const developmentBodySentinels = [
   'wh_test_collection_',
   'wh_test_admit_',
 ] as const
+
+test('local production collection renders one individually decoded QR at a time', async ({ page }) => {
+  const eventId = '10000000-0000-4000-8000-000000000001'
+  const credentials = ['a', 'b', 'c'].map(character => `wta1_${character.repeat(42)}A`)
+  await page.route('**/*', async route => {
+    if (new URL(route.request().url()).origin === productionOrigin) return route.continue()
+    if (route.request().url() !== edgeUrl) return route.abort()
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ kind: 'ready', collection: {
+      collectionLabel: 'Local synthetic collection', eventId,
+      tickets: credentials.map((admissionCredential, index) => ({
+        selector: `20000000-0000-4000-8000-00000000000${index + 1}`, eventId,
+        eventName: 'Local synthetic event', startsAt: '2099-01-01T01:00:00Z', endsAt: '2099-01-01T04:00:00Z',
+        venueName: 'Local synthetic venue', admissionLabel: index < 2 ? 'GA' : 'VIP',
+        position: index + 1, totalInCollection: 3, status: 'valid', admissionCredential,
+      })),
+    } }) })
+  })
+  const bundle = await decoderBundle()
+  await page.goto(`/tickets/${sentinelBearer}`)
+  await expect(page.locator('.ticket-collection__list a')).toHaveCount(3)
+  await expect(page.getByTestId('admission-qr')).toHaveCount(0)
+  const paths = await page.locator('.ticket-collection__list a').evaluateAll(links => links.map(link => link.getAttribute('href')!))
+  for (const [index, path] of paths.entries()) {
+    await page.goto(path)
+    expect(await decodeMountedQr(page, bundle) === credentials[index]).toBe(true)
+  }
+})
 
 test('production preview fails closed without exposing ticket shell development tooling', async ({ browser }, testInfo) => {
   const context = await browser.newContext()

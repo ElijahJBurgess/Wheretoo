@@ -116,14 +116,15 @@ set publicly_authorized_revision = 1,
     public_eligibility_version = 1
 where id = '29000000-0000-4000-8000-000000000001';
 update private.event_public_eligibility_intervals
-set ended_at = now(), ended_action_id = '49000000-0000-4000-8000-000000000001'
+set ended_at = statement_timestamp(), ended_action_id = '49000000-0000-4000-8000-000000000001'
 where event_id = '29000000-0000-4000-8000-000000000001'
   and public_eligibility_version = 0;
 insert into private.event_public_eligibility_intervals (
   event_id, public_eligibility_version, eligibility_state, started_at,
   started_action_id, transition_reason
 ) values (
-  '29000000-0000-4000-8000-000000000001', 1, 'eligible', now(),
+  '29000000-0000-4000-8000-000000000001', 1, 'eligible',
+  (select ended_at from private.event_public_eligibility_intervals where event_id = '29000000-0000-4000-8000-000000000001' and public_eligibility_version = 0),
   '49000000-0000-4000-8000-000000000001', 'policy_authorization'
 );
 

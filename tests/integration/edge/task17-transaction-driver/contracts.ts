@@ -78,7 +78,13 @@ export function recoveryDriverActionAllowed(
 ): boolean {
   return mode !== "1" || ["recover_refund", "cleanup"].includes(action);
 }
-export function recoveredRefundStateIsSafe(state: RecoveryRecord): boolean {
+export function recoveredRefundStateIsSafe(
+  state: RecoveryRecord,
+  expectedUsed = 0,
+): boolean {
+  if (!Number.isInteger(expectedUsed) || expectedUsed < 0 || expectedUsed > 3) {
+    return false;
+  }
   const expected: Record<string, RecoveryRecord> = {
     orders: { status: "refunded", reconciliation_status: "reconciled" },
     refunds: {
@@ -95,10 +101,13 @@ export function recoveredRefundStateIsSafe(state: RecoveryRecord): boolean {
       ticket_count: 3,
       unique_ticket_count: 3,
       valid_count: 0,
-      refunded_count: 3,
+      refunded_count: 3 - expectedUsed,
       bindings_valid: true,
       sequences_valid: true,
       refunded_timestamps_valid: true,
+      ...(expectedUsed === 0
+        ? {}
+        : { used_count: expectedUsed, used_timestamps_valid: true }),
     },
   };
   return Object.entries(expected).every(([key, fields]) => {
@@ -112,9 +121,12 @@ export function recoveredRefundStateIsSafe(state: RecoveryRecord): boolean {
 export function certifyRecoveredRefund(
   state: RecoveryRecord,
   receipt?: RecoveryRecord,
+  expectedUsed = 0,
+  usedHistoryPreserved = false,
 ) {
   if (
-    !recoveredRefundStateIsSafe(state) ||
+    !recoveredRefundStateIsSafe(state, expectedUsed) ||
+    (expectedUsed > 0 && !usedHistoryPreserved) ||
     (receipt !== undefined &&
       (receipt.processing_status !== "processed" ||
         (receipt.error_code !== null &&
@@ -133,7 +145,10 @@ export function certifyRecoveredRefund(
     policy_verified: true,
     ticket_count: 3,
     invalid_ticket_count: 3,
-    refunded_ticket_count: 3,
+    refunded_ticket_count: 3 - expectedUsed,
+    ...(expectedUsed === 0
+      ? {}
+      : { used_ticket_count: expectedUsed, used_history_preserved: true }),
   };
 }
 export type ExistingRefundSnapshot = {

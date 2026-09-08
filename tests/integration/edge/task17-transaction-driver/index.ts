@@ -62,6 +62,9 @@ const actions = new Set([
   "server_proof",
   "setup",
   "inspect",
+  "prepare_lite_admission",
+  "verify_rendered_credential",
+  "deliver_lite_paid_replay",
   "checkout_status",
   "deliver",
   "deliver_paid_materialization_retry",
@@ -1028,11 +1031,104 @@ async function fixturePreflight(
   };
 }
 
+async function prepareLiteAdmission(
+  input: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  if (
+    ![input.owner_password, input.other_password].every((value) =>
+      typeof value === "string" && /^[a-f0-9]{64}Aa1!$/.test(value)
+    )
+  ) throw new Error("INPUT");
+  if ((await serverProof()).ok !== true) throw new Error("STRIPE");
+  const client = getServiceClient();
+  const owner = await fixtureOrganizer();
+  if (!owner || !await fixtureAuthUser(owner.id)) throw new Error("INPUT");
+  const reset = await client.auth.admin.updateUserById(owner.id, {
+    password: input.owner_password as string,
+    ban_duration: "none",
+  });
+  if (reset.error) throw new Error("FIXTURE_AUTH_FAILED");
+  const email = `${fixturePrefix()}-admission@example.invalid`;
+  let other = await findExactFixtureAuthUser(email, loadFixtureAuthPage);
+  if (!other) {
+    const created = await client.auth.admin.createUser({
+      email,
+      password: input.other_password as string,
+      email_confirm: true,
+    });
+    if (created.error || !created.data.user.email) {
+      throw new Error("FIXTURE_AUTH_FAILED");
+    }
+    other = { id: created.data.user.id };
+  } else {
+    const updated = await client.auth.admin.updateUserById(other.id, {
+      password: input.other_password as string,
+      ban_duration: "none",
+    });
+    if (updated.error) throw new Error("FIXTURE_AUTH_FAILED");
+  }
+  const secondary = await client.from("organizers").upsert({
+    id: other.id,
+    display_name: `${fixturePrefix()} admission`,
+  }, { onConflict: "id" });
+  if (secondary.error) throw new Error("DATABASE");
+  const title = `${fixturePrefix()} wrong-event`;
+  const existing = await client.from("events").select("id,status").eq(
+    "organizer_id",
+    owner.id,
+  ).eq("title", title).maybeSingle();
+  if (existing.error || (existing.data && existing.data.status !== "draft")) {
+    throw new Error("INPUT");
+  }
+  const wrongEventId = existing.data?.id ?? crypto.randomUUID();
+  if (!existing.data) {
+    const created = await client.from("events").insert({
+      ...activeEventPayload(),
+      id: wrongEventId,
+      organizer_id: owner.id,
+      title,
+      status: "draft",
+      moderation_status: "not_evaluated",
+    });
+    if (created.error) throw new Error("DATABASE");
+  }
+  return { ok: true, wrong_event_id: wrongEventId };
+}
+
+async function verifyRenderedCredential(
+  input: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  if (
+    typeof input.ticket_id !== "string" || !uuidPattern.test(input.ticket_id) ||
+    typeof input.credential !== "string" ||
+    !/^wta1_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/.test(input.credential)
+  ) throw new Error("INPUT");
+  const order = await proofOrder("paid");
+  const ticket = await getServiceClient().from("tickets").select(
+    "credential_hash",
+  ).eq("id", input.ticket_id).eq("order_id", order.id).single();
+  if (ticket.error) throw new Error("INPUT");
+  const digest = hex(
+    await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(input.credential),
+    ),
+  );
+  return { ok: true, matches: ticket.data.credential_hash === `\\x${digest}` };
+}
+
 async function inspect(eventId: unknown): Promise<Record<string, unknown>> {
   if (typeof eventId !== "string" || !uuidPattern.test(eventId)) {
     throw new Error("INPUT");
   }
   const client = getServiceClient();
+  const organizer = await fixtureOrganizer();
+  const scopedEvent = await client.from("events").select("id").eq("id", eventId)
+    .eq("organizer_id", organizer?.id ?? "").eq(
+      "title",
+      `${fixturePrefix()} transaction`,
+    ).maybeSingle();
+  if (scopedEvent.error || !scopedEvent.data) throw new Error("INPUT");
   const { data: orders, error: orderError } = await client.from("orders")
     .select(
       "id,buyer_email,status,failure_code,reconciliation_status,stripe_checkout_session_id,stripe_payment_intent_id,stripe_charge_id,stripe_transfer_id,stripe_application_fee_id,stripe_balance_transaction_id,subtotal_minor,total_minor,application_fee_amount_minor,expected_organizer_proceeds_minor",
@@ -1056,7 +1152,7 @@ async function inspect(eventId: unknown): Promise<Record<string, unknown>> {
   const ticketResult = orderIds.length === 0
     ? { data: [], error: null }
     : await client.from("tickets").select(
-      "id,order_id,order_item_id,ticket_tier_id,unit_sequence,status,refunded_at",
+      "id,order_id,order_item_id,ticket_tier_id,unit_sequence,status,refunded_at,used_at,credential_hash,admission_label",
     ).in("order_id", orderIds);
   const refundResult = orderIds.length === 0
     ? { data: [], error: null }
@@ -1164,8 +1260,38 @@ async function inspect(eventId: unknown): Promise<Record<string, unknown>> {
       )).size,
       valid_count:
         orderTickets.filter((ticket) => ticket.status === "valid").length,
-      refunded_count:
-        orderTickets.filter((ticket) => ticket.status === "refunded").length,
+      used_count:
+        orderTickets.filter((ticket) => ticket.status === "used").length,
+      used_timestamps_valid: orderTickets.every((ticket) =>
+        ticket.status === "used"
+          ? typeof ticket.used_at === "string"
+          : ticket.used_at === null
+      ),
+      source_count: new Set(orderTickets.map((ticket) =>
+        `${ticket.order_item_id}:${ticket.unit_sequence}`
+      )).size,
+      unique_hash_count: new Set(orderTickets.map((ticket) =>
+        ticket.credential_hash
+      )).size,
+      hashes_valid: orderTickets.every((ticket) =>
+        /^\\x[0-9a-f]{64}$/.test(ticket.credential_hash)
+      ),
+      labels_valid: orderTickets.every((ticket) =>
+        orderItems.some((item) =>
+          item.id === ticket.order_item_id &&
+          item.tier_name === ticket.admission_label
+        )
+      ),
+      ticket_snapshot: [...orderTickets].sort((a, b) =>
+        a.id.localeCompare(b.id)
+      ).map((ticket, index) => ({
+        position: index + 1,
+        status: ticket.status,
+        used_at: ticket.used_at,
+      })),
+      refunded_count: orderTickets.filter((ticket) =>
+        ticket.status === "refunded"
+      ).length,
       bindings_valid: bindingsValid,
       sequences_valid: sequencesValid,
       refunded_timestamps_valid: orderTickets.every((ticket) =>
@@ -1736,11 +1862,42 @@ async function recoverRefund(
       return { order, fixture, existing };
     },
   );
+  const beforeTickets = await client.from("tickets").select("id,status,used_at")
+    .eq("order_id", order.id);
+  if (beforeTickets.error || beforeTickets.data.length !== 3) {
+    throw new Error("DATABASE");
+  }
+  const usedBefore = beforeTickets.data.filter((ticket) =>
+    ticket.status === "used"
+  );
+  async function certify(
+    state: Record<string, unknown>,
+    receipt?: Record<string, unknown>,
+  ) {
+    const after = await client.from("tickets").select("id,status,used_at").eq(
+      "order_id",
+      order.id,
+    );
+    if (after.error) throw new Error("DATABASE");
+    const historyPreserved = usedBefore.every((ticket) =>
+      typeof ticket.used_at === "string" &&
+      after.data.some((current) =>
+        current.id === ticket.id && current.status === "used" &&
+        current.used_at === ticket.used_at
+      )
+    );
+    return certifyRecoveredRefund(
+      state,
+      receipt,
+      usedBefore.length,
+      historyPreserved,
+    );
+  }
   if (order.status === "refunded") {
     // Resume certification only; do not retrieve, enrich, or redeliver to Stripe.
     return await runRefundRecoveryStage(
       "durable_verification",
-      async () => certifyRecoveredRefund(await inspect(fixture.data.id)),
+      async () => await certify(await inspect(fixture.data.id)),
     );
   }
   const stripe = getStripe();
@@ -1850,7 +2007,7 @@ async function recoverRefund(
     )
       .eq("stripe_event_id", descriptor.event_id).single();
     if (receipt.error) throw new Error("STRIPE");
-    return certifyRecoveredRefund(state, receipt.data);
+    return await certify(state, receipt.data);
   });
 }
 
@@ -1858,6 +2015,31 @@ async function cleanup(
   publicClient: SupabaseClient,
 ): Promise<Record<string, unknown>> {
   const client = getServiceClient();
+  const secondary = await findExactFixtureAuthUser(
+    `${fixturePrefix()}-admission@example.invalid`,
+    loadFixtureAuthPage,
+  );
+  if (secondary) {
+    // The runner first removes only the captured auxiliary draft/organizer rows.
+    const remaining = await client.from("organizers").select("id").eq(
+      "id",
+      secondary.id,
+    ).maybeSingle();
+    if (remaining.error || remaining.data) {
+      throw new Error("FIXTURE_CLEANUP_UNSAFE");
+    }
+    await deleteAndVerifyFixtureAuthUser(
+      { ...secondary, email: `${fixturePrefix()}-admission@example.invalid` },
+      async (id) => {
+        const result = await client.auth.admin.deleteUser(id);
+        if (result.error) {
+          throw new Error("DATABASE_DELETE_AUTH");
+        }
+      },
+      loadFixtureAuthUserById,
+      loadFixtureAuthPage,
+    );
+  }
   const organizer = await fixtureOrganizer();
   const authUser = await fixtureAuthUser(organizer?.id);
   if (organizer === null) {
@@ -1887,6 +2069,7 @@ async function cleanup(
       auth_user_absent: true,
       connected_account_closed: false,
       connected_account_preserved: true,
+      provider_cleanup_verified: true,
     };
   }
   if (authUser === null) throw new Error("DATABASE_DELETE_AUTH");
@@ -2204,6 +2387,7 @@ async function cleanup(
     ...tombstoneState,
     tier_count: tombstoneState.active_tier_count,
     database_cleanup_required: !auditTombstoneIsSafe(tombstoneState),
+    provider_cleanup_verified: true,
     targeted_order_count: orderIds.length,
     targeted_tier_count: deletedTierCount,
     targeted_receipt_count: receiptIds.size,
@@ -2293,6 +2477,35 @@ Deno.serve(async (request) => {
       return json(await setup(publicClientFromRequest(request)));
     }
     if (action === "inspect") return json(await inspect(input.event_id));
+    if (action === "prepare_lite_admission") {
+      return json(await prepareLiteAdmission(input));
+    }
+    if (action === "verify_rendered_credential") {
+      return json(await verifyRenderedCredential(input));
+    }
+    if (action === "deliver_lite_paid_replay") {
+      const order = await proofOrder("paid");
+      const read = async () => {
+        const result = await getServiceClient().from("tickets").select(
+          "id,order_item_id,unit_sequence,credential_hash,admission_label,status,used_at",
+        ).eq("order_id", order.id).order("id");
+        if (result.error || result.data.length !== 3) {
+          throw new Error("DATABASE");
+        }
+        return JSON.stringify(result.data);
+      };
+      const before = await read();
+      const event = await eventDescriptor(input.event);
+      if (
+        event.type !== "checkout.session.completed" ||
+        input.order_handle !== "paid"
+      ) throw new Error("INPUT");
+      const delivered = await deliver(input.event);
+      return json({
+        status: delivered.status,
+        original_set_unchanged: before === await read(),
+      });
+    }
     if (action === "checkout_status") {
       return json(await checkoutStatus(input.order_handle));
     }

@@ -8,8 +8,8 @@ export default defineConfig({
     environment: 'node',
     include: ['tests/integration/**/*.test.ts'],
     exclude: stripeTransactionProofEnabled
-      ? configDefaults.exclude
-      : [...configDefaults.exclude, 'tests/integration/stripe-ticketing.test.ts'],
+      ? [...configDefaults.exclude, 'tests/integration/edge/**']
+      : [...configDefaults.exclude, 'tests/integration/edge/**', 'tests/integration/stripe-ticketing.test.ts'],
     fileParallelism: false,
     testTimeout: 60_000,
     hookTimeout: 30_000,

@@ -1,6 +1,34 @@
 import { readFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
+import { build } from 'vite'
 import { expect, type Page, type TestInfo } from '@playwright/test'
 import type * as QrArtifactDecoderModule from './qrArtifactDecoder'
+
+export async function decoderBundle() {
+  const result = await build({ configFile: false, logLevel: 'silent', build: { write: false,
+    lib: { entry: fileURLToPath(new URL('./qrArtifactDecoder.ts', import.meta.url)), name: 'LiteQrDecoder', formats: ['iife'] }, minify: true,
+  } })
+  const output = Array.isArray(result) ? result[0] : result
+  if (!output || !('output' in output)) throw new Error('QR_DECODER_BUNDLE')
+  const chunk = output.output.find(item => item.type === 'chunk')
+  if (!chunk || chunk.type !== 'chunk') throw new Error('QR_DECODER_BUNDLE')
+  return chunk.code
+}
+
+export async function decodeMountedQr(page: Page, bundle: string): Promise<string> {
+  const canvas = page.getByTestId('admission-qr').locator('canvas')
+  await expect(canvas).toHaveCount(1)
+  await expect(canvas).toHaveAttribute('data-qr-ready', 'true')
+  // Test helper exists only in memory. No served production test route is needed.
+  await page.evaluate(`${bundle};globalThis.__liteDecodeQr = LiteQrDecoder.decodeQrArtifact;`)
+  const value = await page.evaluate(async () => {
+    const image = document.querySelector<HTMLCanvasElement>('[data-testid="admission-qr"] canvas')
+    const decode = (globalThis as unknown as { __liteDecodeQr(value: string): Promise<string | null> }).__liteDecodeQr
+    return image ? await decode(image.toDataURL('image/png')) : null
+  })
+  if (typeof value !== 'string' || !/^wta1_[A-Za-z0-9_-]{43}$/.test(value)) throw new Error('QR_DECODE_FAILED')
+  return value
+}
 
 const sensitivePrefixes = ['wh_test_admit_', 'wh_test_collection_', 'WH-TEST-ADMIT-QR-'] as const
 

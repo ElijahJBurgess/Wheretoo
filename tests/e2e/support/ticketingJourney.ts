@@ -12,7 +12,7 @@ const unsafeVisibleEvidence = /(?:https:\/\/checkout\.stripe\.com\/|\b(?:bearer|
 
 export type TicketingJourneyFixture = Awaited<ReturnType<typeof prepareStableBuyerFixture>>
 
-async function invokeDriver<T>(action: string, input: Record<string, unknown> = {}): Promise<T> {
+export async function invokeDriver<T>(action: string, input: Record<string, unknown> = {}): Promise<T> {
   const response = await fetch(env.task18FunctionUrl, {
     method: 'POST',
     headers: {
