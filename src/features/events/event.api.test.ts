@@ -33,6 +33,7 @@ const {
 vi.mock('../../lib/supabase/client', () => ({ supabase: { from, rpc } }))
 
 import {
+  cancelOwnedEvent,
   eventRowToFormValues,
   getOwnedEvent,
   listOwnedEvents,
@@ -40,7 +41,9 @@ import {
   saveEventDraft,
   saveEventRevision,
 } from './event.api'
-import { eventKeys, useOwnedEvent, usePublishEvent, useSaveEventDraft, useSaveEventRevision } from './event.queries'
+import { eventKeys, useCancelOwnedEvent, useOwnedEvent, usePublishEvent, useSaveEventDraft, useSaveEventRevision } from './event.queries'
+import { moderationKeys } from '../moderation/moderation.queries'
+import { ticketKeys } from '../tickets/ticket.queries'
 
 const event: EventRow = {
   id: 'event-returned',
@@ -141,6 +144,21 @@ describe('owned event API', () => {
     expect(select).toHaveBeenCalledWith('*')
     expect(firstEq).toHaveBeenCalledWith('organizer_id', 'organizer-1')
     expect(order).toHaveBeenCalledWith('created_at', { ascending: false })
+  })
+
+  it('cancels once through the owner RPC and returns authoritative event state', async () => {
+    const cancelled = { ...event, status: 'cancelled' }
+    rpc.mockResolvedValue({ data: cancelled, error: null })
+    await expect(cancelOwnedEvent(event.id)).resolves.toEqual(cancelled)
+    expect(rpc).toHaveBeenCalledExactlyOnceWith('cancel_owned_event', { p_event_id: event.id })
+    expect(update).not.toHaveBeenCalled()
+  })
+
+  it('rejects cancellation errors and absent server results for safe retry', async () => {
+    const error = { code: '42501', message: 'Event cancellation forbidden' }
+    rpc.mockResolvedValueOnce({ data: null, error }).mockResolvedValueOnce({ data: null, error: null })
+    await expect(cancelOwnedEvent(event.id)).rejects.toBe(error)
+    await expect(cancelOwnedEvent(event.id)).rejects.toThrow('Cancelled event was not returned')
   })
 
   it('loads by both event ID and organizer ID and hides empty/RLS results', async () => {
@@ -381,6 +399,27 @@ describe('event query cache contracts', () => {
       createElement(QueryClientProvider, { client: queryClient }, children)
     return { queryClient, wrapper }
   }
+
+  it('cancellation refreshes owner detail, list, public event and sales caches and supports explicit retry', async () => {
+    const cancelled = { ...event, status: 'cancelled' }
+    rpc.mockRejectedValueOnce(new Error('connection interrupted')).mockResolvedValue({ data: cancelled, error: null })
+    const { queryClient, wrapper } = setupQueryClient()
+    const keys = [eventKeys.ownedList(event.organizer_id), eventKeys.detail(event.organizer_id, event.id),
+      moderationKeys.publicEvent(event.id), ticketKeys.public(event.id)]
+    for (const key of keys) queryClient.setQueryData(key, 'stale')
+    queryClient.setQueryData(eventKeys.ownedList('unrelated'), 'unchanged')
+    const { result } = renderHook(() => useCancelOwnedEvent(event.organizer_id), { wrapper })
+    await act(async () => {
+      await expect(result.current.mutateAsync(event.id)).rejects.toThrow('connection interrupted')
+    })
+    expect(rpc).toHaveBeenCalledTimes(1)
+    expect(queryClient.getQueryData(eventKeys.detail(event.organizer_id, event.id))).toBe('stale')
+    await act(async () => { await result.current.mutateAsync(event.id) })
+    expect(rpc).toHaveBeenCalledTimes(2)
+    expect(queryClient.getQueryData(eventKeys.detail(event.organizer_id, event.id))).toEqual(cancelled)
+    for (const key of keys) expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(eventKeys.ownedList('unrelated'))?.isInvalidated).toBe(false)
+  })
 
   it('save seeds only returned detail and invalidates only returned owner list', async () => {
     single.mockResolvedValue({ data: event, error: null })

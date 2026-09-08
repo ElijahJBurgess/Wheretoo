@@ -10,6 +10,20 @@ const STRIPE_EVENT_ID = "evt_Task10Delivery";
 const SESSION_ID = "cs_test_Task10Checkout";
 const REFUND_ID = "re_Task10Refund";
 
+Deno.test("refund logs retain all-used and mixed admission outcomes", () => {
+  for (const ticketStatus of ["used", "mixed"] as const) {
+    const records: string[] = [];
+    emitOperationalEvent({
+      contractVersion: "checkout_integrity_v1", operation: "refund.reconcile",
+      outcome: "applied", orderId: ORDER_ID, stripeEventId: STRIPE_EVENT_ID,
+      providerObjectId: REFUND_ID, currency: "usd", amountMinor: 3001,
+      resultStatus: "refunded", ticketStatus,
+    }, (record) => records.push(record));
+    assertEquals(records.length, 1);
+    assertEquals(JSON.parse(records[0]).ticketStatus, ticketStatus);
+  }
+});
+
 const invalidCheckoutSuccess: CheckoutOperationalEvent = {
   contractVersion: "checkout_integrity_v1",
   operation: "checkout.create",

@@ -10,7 +10,7 @@ import {
   useWithdrawEventReview,
 } from '../moderation/moderation.queries'
 import { useOrganizer } from '../organizers/organizer.queries'
-import { useOwnedEvent } from './event.queries'
+import { useCancelOwnedEvent, useOwnedEvent } from './event.queries'
 import { EventSummary } from './EventSummary'
 import type { EventRow } from './event.types'
 
@@ -69,6 +69,15 @@ export function PublishedEventPage() {
   const reviewQuery = useCurrentEventReviewRequest(authenticatedOrganizerId, eventId)
   const requestReviewMutation = useRequestEventReview(authenticatedOrganizerId, eventId)
   const withdrawReviewMutation = useWithdrawEventReview(authenticatedOrganizerId, eventId)
+  const cancelMutation = useCancelOwnedEvent(authenticatedOrganizerId)
+  const [confirmCancellation, setConfirmCancellation] = useState(false)
+  const [cancellationPending, setCancellationPending] = useState(false)
+  const [cancellationError, setCancellationError] = useState<string | null>(null)
+  const [cancelledEventId, setCancelledEventId] = useState<string | null>(null)
+  const cancellationActiveRef = useRef(false)
+  const cancelButtonRef = useRef<HTMLButtonElement | null>(null)
+  const cancelConfirmRef = useRef<HTMLButtonElement | null>(null)
+  const cancelStatusRef = useRef<HTMLParagraphElement | null>(null)
   const [reviewNote, setReviewNote] = useState('')
   const [reviewError, setReviewError] = useState<string | null>(null)
   const [reviewFeedback, setReviewFeedback] = useState<string | null>(null)
@@ -79,6 +88,14 @@ export function PublishedEventPage() {
   useEffect(() => {
     if (reviewFeedback !== null) reviewStatusRef.current?.focus()
   }, [reviewFeedback])
+
+  useEffect(() => {
+    if (confirmCancellation) cancelConfirmRef.current?.focus()
+  }, [confirmCancellation])
+
+  useEffect(() => {
+    if (cancelledEventId === eventId) cancelStatusRef.current?.focus()
+  }, [cancelledEventId, eventId])
 
   if (
     sessionState.status !== 'authenticated' ||
@@ -107,8 +124,10 @@ export function PublishedEventPage() {
     return <AsyncState action={<Link className="ui-button ui-button--secondary" to="/organizer/events">Back to events</Link>} description="The organizer profile may no longer be available." status="empty" title="Organizer details unavailable" />
   }
 
-  const isPublished = event.status === 'published'
-  const status = organizerStatus(event)
+  const cancellationSucceeded = cancelledEventId === eventId
+  const isPublished = event.status === 'published' && !cancellationSucceeded
+  const status = organizerStatus(cancellationSucceeded ? { ...event, status: 'cancelled' } : event)
+  const cancellationIsBusy = cancellationPending || cancelMutation.isPending
   const publicAvailabilityIsPending = publicEventQuery.isPending || publicEventQuery.isFetching || publicEventQuery.data === undefined
   const isPublic = isPublished && !publicEventQuery.isError && !publicAvailabilityIsPending && publicEventQuery.data !== null
   const canSetUpPaidTickets = isPublic && event.admission_type === 'free'
@@ -130,6 +149,23 @@ export function PublishedEventPage() {
       requestButtonRef.current?.focus()
     } finally {
       activeReviewActionRef.current = null
+    }
+  }
+
+  async function cancelEvent() {
+    if (cancellationActiveRef.current || cancellationIsBusy || !isPublished) return
+    cancellationActiveRef.current = true
+    setCancellationPending(true)
+    setCancellationError(null)
+    try {
+      await cancelMutation.mutateAsync(eventId)
+      setCancelledEventId(eventId)
+      setConfirmCancellation(false)
+    } catch {
+      setCancellationError('Could not confirm cancellation. It is safe to try again.')
+    } finally {
+      cancellationActiveRef.current = false
+      setCancellationPending(false)
     }
   }
 
@@ -228,9 +264,30 @@ export function PublishedEventPage() {
           )}
         </section>
       ) : null}
+      {cancellationSucceeded ? (
+        <p ref={cancelStatusRef} role="status" tabIndex={-1}>Event cancelled. Payments have not been automatically refunded.</p>
+      ) : null}
+      {isPublished && confirmCancellation ? (
+        <section aria-labelledby="cancel-event-title" className="review-request">
+          <h2 id="cancel-event-title">Cancel this event?</h2>
+          <p>This removes the event from discovery and stops unused admissions. Used admissions keep their check-in history. Cancellation does not automatically refund payments.</p>
+          {cancellationError ? <p role="alert">{cancellationError}</p> : null}
+          <div className="published-event__actions">
+            <Button disabled={cancellationIsBusy} onClick={() => void cancelEvent()} ref={cancelConfirmRef}>
+              {cancellationIsBusy ? 'Cancelling…' : cancellationError ? 'Try cancellation again' : 'Confirm cancellation'}
+            </Button>
+            <Button disabled={cancellationIsBusy} onClick={() => {
+              setConfirmCancellation(false)
+              setCancellationError(null)
+              cancelButtonRef.current?.focus()
+            }} variant="secondary">Keep event</Button>
+          </div>
+        </section>
+      ) : null}
       <footer className="published-event__actions">
         {canSetUpPaidTickets ? <Link className="ui-button ui-button--primary" to={`/organizer/events/${event.id}/tickets`}>Set up paid tickets</Link> : null}
         <Link className="ui-button ui-button--secondary" to={`/organizer/events/${event.id}/edit`}>Edit event</Link>
+        {isPublished ? <Button disabled={cancellationIsBusy} onClick={() => setConfirmCancellation(true)} ref={cancelButtonRef} variant="secondary">Cancel event</Button> : null}
         <Link className="ui-button ui-button--secondary" to="/organizer/events">Back to events</Link>
       </footer>
     </section>

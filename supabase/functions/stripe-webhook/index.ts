@@ -209,7 +209,7 @@ export interface RefundApplyResult {
     | "partially_refunded"
     | "refunded"
     | "requires_review";
-  ticketStatus: "valid" | "cancelled" | "refunded" | "mixed" | null;
+  ticketStatus: "valid" | "used" | "cancelled" | "refunded" | "mixed" | null;
 }
 
 export interface DisputeSnapshot {
@@ -772,7 +772,7 @@ export function refundApplyResultFromRpc(
       row.order_status !== "requires_review") ||
     (row.ticket_status !== null && row.ticket_status !== "valid" &&
       row.ticket_status !== "cancelled" && row.ticket_status !== "refunded" &&
-      row.ticket_status !== "mixed")
+      row.ticket_status !== "mixed" && row.ticket_status !== "used")
   ) throw new Error("REFUND_RESULT_INVALID");
   return {
     orderId: row.order_id,
@@ -1908,8 +1908,10 @@ async function dispatchRefund(
   } else if (
     !(
       (durable.orderStatus === "checkout_open" && ticketStatus === "none") ||
-      (durable.orderStatus === "paid" && ticketStatus === "valid") ||
-      (durable.orderStatus === "refunded" && ticketStatus === "refunded")
+      (durable.orderStatus === "paid" &&
+        (ticketStatus === "valid" || ticketStatus === "used" || ticketStatus === "mixed")) ||
+      (durable.orderStatus === "refunded" &&
+        (ticketStatus === "refunded" || ticketStatus === "used" || ticketStatus === "mixed"))
     )
   ) {
     emitOperationalEvent({
@@ -1938,7 +1940,7 @@ async function dispatchRefund(
       resultStatus: "checkout_open",
       ticketStatus: "none",
     }, dependencies.operationalSink);
-  } else if (durable.orderStatus === "paid") {
+  } else if (durable.orderStatus === "paid" && (ticketStatus === "valid" || ticketStatus === "used" || ticketStatus === "mixed")) {
     emitOperationalEvent({
       contractVersion: "checkout_integrity_v1",
       operation: "refund.reconcile",
@@ -1949,9 +1951,9 @@ async function dispatchRefund(
       currency,
       amountMinor: amount,
       resultStatus: "paid",
-      ticketStatus: "valid",
+      ticketStatus,
     }, dependencies.operationalSink);
-  } else {
+  } else if (ticketStatus === "refunded" || ticketStatus === "used" || ticketStatus === "mixed") {
     emitOperationalEvent({
       contractVersion: "checkout_integrity_v1",
       operation: "refund.reconcile",
@@ -1962,7 +1964,7 @@ async function dispatchRefund(
       currency,
       amountMinor: amount,
       resultStatus: "refunded",
-      ticketStatus: "refunded",
+      ticketStatus,
     }, dependencies.operationalSink);
   }
 }

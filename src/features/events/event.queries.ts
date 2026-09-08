@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { getOwnedEvent, listOwnedEvents, publishEvent, saveEventDraft, saveEventRevision } from './event.api'
+import { moderationKeys } from '../moderation/moderation.queries'
+import { ticketKeys } from '../tickets/ticket.queries'
+import { cancelOwnedEvent, getOwnedEvent, listOwnedEvents, publishEvent, saveEventDraft, saveEventRevision } from './event.api'
 
 export const eventKeys = {
   all: ['events'] as const,
@@ -13,6 +15,23 @@ export function useOwnedEvents(organizerId: string) {
     queryKey: eventKeys.ownedList(organizerId),
     queryFn: () => listOwnedEvents(organizerId),
     enabled: organizerId.length > 0,
+  })
+}
+
+export function useCancelOwnedEvent(organizerId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: cancelOwnedEvent,
+    retry: false,
+    onSuccess: async (event, eventId) => {
+      if (event.id === eventId && event.organizer_id === organizerId) {
+        queryClient.setQueryData(eventKeys.detail(organizerId, eventId), event)
+      }
+      await Promise.all([
+        eventKeys.detail(organizerId, eventId), eventKeys.ownedList(organizerId),
+        moderationKeys.publicEvent(eventId), ticketKeys.public(eventId),
+      ].map((queryKey) => queryClient.invalidateQueries({ queryKey, exact: true })))
+    },
   })
 }
 

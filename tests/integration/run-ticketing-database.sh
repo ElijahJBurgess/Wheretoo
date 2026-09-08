@@ -20,6 +20,7 @@ if [[ -n "${WHERETO_TICKETING_DB_URL:-}" ]]; then
     "$repository_root/supabase/tests/database/core_ticket_truth_lite_fulfillment.test.sql" \
     "$repository_root/supabase/tests/database/core_ticket_truth_lite_collection.test.sql" \
     "$repository_root/supabase/tests/database/core_ticket_truth_lite_redemption.test.sql" \
+    "$repository_root/supabase/tests/database/core_ticket_truth_lite_lifecycle.test.sql" \
     "$repository_root/supabase/tests/database/checkout_integrity_fulfillment.test.sql" \
     "$repository_root/supabase/tests/database/checkout_integrity_contract_cleanup.test.sql" \
     "$repository_root/supabase/tests/database/ticketing_schema.test.sql" \

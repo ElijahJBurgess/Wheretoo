@@ -287,6 +287,7 @@ export type RefundOrderStatus =
   | "requires_review";
 export type RefundTicketStatus =
   | "valid"
+  | "used"
   | "cancelled"
   | "refunded"
   | "mixed"
@@ -318,13 +319,13 @@ type RefundReconciliationEvent =
   | RefundEventFields & {
     outcome: "applied";
     resultStatus: "paid";
-    ticketStatus: "valid";
+    ticketStatus: "valid" | "used" | "mixed";
     errorCode?: never;
   }
   | RefundEventFields & {
     outcome: "applied";
     resultStatus: "refunded";
-    ticketStatus: "refunded";
+    ticketStatus: "refunded" | "used" | "mixed";
     errorCode?: never;
   }
   | RefundEventFields & {
@@ -970,9 +971,10 @@ function validCombination(
       source.ticketStatus === "none") ||
       (source.resultStatus === "payment_processing" &&
         source.ticketStatus === "none") ||
-      (source.resultStatus === "paid" && source.ticketStatus === "valid") ||
+      (source.resultStatus === "paid" &&
+        (source.ticketStatus === "valid" || source.ticketStatus === "used" || source.ticketStatus === "mixed")) ||
       (source.resultStatus === "refunded" &&
-        source.ticketStatus === "refunded");
+        (source.ticketStatus === "refunded" || source.ticketStatus === "used" || source.ticketStatus === "mixed"));
   }
   return false;
 }
@@ -1082,7 +1084,7 @@ function validatedRecord(value: unknown): Record<string, unknown> | null {
       record,
       "ticketStatus",
       (status) =>
-        status === "valid" || status === "cancelled" ||
+        status === "valid" || status === "used" || status === "cancelled" ||
         status === "refunded" || status === "mixed" || status === "none",
     ) ||
     !optionalString(

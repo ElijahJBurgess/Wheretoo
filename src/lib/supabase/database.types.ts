@@ -1009,6 +1009,54 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      cancel_owned_event: {
+        Args: { p_event_id: string }
+        Returns: {
+          address_line1: string | null
+          address_line2: string | null
+          admission_type: string
+          animation_preset: string
+          artwork_path: string | null
+          capacity: number | null
+          category: string | null
+          city: string | null
+          content_revision: number
+          country_code: string
+          created_at: string
+          description: string | null
+          ends_at: string | null
+          first_publicly_eligible_at: string | null
+          id: string
+          latitude: number | null
+          location: unknown
+          longitude: number | null
+          mapbox_feature_id: string | null
+          moderated_revision: number | null
+          moderation_status: string
+          moderation_updated_at: string | null
+          moderation_version: number
+          organizer_id: string
+          postal_code: string | null
+          public_eligibility_version: number
+          public_history_status: string
+          publicly_authorized_action_id: string | null
+          publicly_authorized_revision: number | null
+          published_at: string | null
+          region: string | null
+          starts_at: string | null
+          status: string
+          timezone: string
+          title: string | null
+          updated_at: string
+          venue_name: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "events"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       get_current_event_review_request: {
         Args: { p_event_id: string }
         Returns: {

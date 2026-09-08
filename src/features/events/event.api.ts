@@ -215,3 +215,10 @@ export async function publishEvent(eventId: string): Promise<EventRow> {
 
   return data
 }
+
+export async function cancelOwnedEvent(eventId: string): Promise<EventRow> {
+  const { data, error } = await supabase.rpc('cancel_owned_event', { p_event_id: eventId })
+  if (error) throw error
+  if (!data) throw new Error('Cancelled event was not returned')
+  return data
+}

@@ -1040,7 +1040,7 @@ h3 {
 .review-request__error,
 .review-request__error p,
 .review-request [role='alert'] { margin: 0; color: var(--color-danger); font-weight: 700; }
-.published-event__actions { justify-content: flex-start; }
+.published-event__actions { flex-wrap: wrap; justify-content: flex-start; }
 
 .public-event-layout {
   display: grid;

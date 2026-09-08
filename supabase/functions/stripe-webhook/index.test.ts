@@ -2,6 +2,7 @@
 
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import Stripe from "stripe";
+
 import {
   createDefaultStripeWebhookDependencies,
   createStripeWebhookHandler,
@@ -2242,6 +2243,14 @@ Deno.test("refund RPC result validation accepts exactly one authoritative bounde
   }
 });
 
+Deno.test("refund RPC preserves all-used and mixed admission outcomes", () => {
+  for (const ticketStatus of ["used", "mixed"] as const) {
+    assertEquals(refundApplyResultFromRpc([{
+      order_id: ORDER_ID, order_status: "refunded", ticket_status: ticketStatus,
+    }], ORDER_ID), { orderId: ORDER_ID, orderStatus: "refunded", ticketStatus });
+  }
+});
+
 Deno.test("valid unchanged out-of-order refund result is acknowledged after commit", async () => {
   let committed = false;
   const records: Array<Record<string, unknown>> = [];
@@ -2274,6 +2283,24 @@ Deno.test("valid unchanged out-of-order refund result is acknowledged after comm
     resultStatus: "checkout_open",
     ticketStatus: "none",
   }]);
+});
+
+Deno.test("refund delivery acknowledges used history without a false durable-state review", async () => {
+  for (const orderStatus of ["paid", "refunded"] as const) {
+    for (const ticketStatus of ["used", "mixed"] as const) {
+      const records: Array<Record<string, unknown>> = [];
+      const response = await createStripeWebhookHandler(dependencies({
+        operationalSink: (serialized) => records.push(JSON.parse(serialized)),
+        applyRefund: async () => ({ orderId: ORDER_ID, orderStatus, ticketStatus }),
+      }))(request(snapshotEvent("refund.updated", { id: REFUND_ID }, { id: "evt_LiteUsedRefund" })));
+      assertEquals(response.status, 200);
+      assertEquals(records, [{
+        contractVersion: "checkout_integrity_v1", operation: "refund.reconcile", outcome: "applied",
+        orderId: ORDER_ID, stripeEventId: "evt_LiteUsedRefund", providerObjectId: REFUND_ID,
+        currency: "usd", amountMinor: 5_500, resultStatus: orderStatus, ticketStatus,
+      }]);
+    }
+  }
 });
 
 Deno.test("pending refund with unchanged payment processing state is applied without review", async () => {

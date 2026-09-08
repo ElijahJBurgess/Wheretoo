@@ -10,7 +10,8 @@ const { eventRefetch, organizerRefetch, publicEventRefetch, requestMutateAsync, 
 }))
 vi.mock('../auth/SessionProvider', () => ({ useSession }))
 vi.mock('../organizers/organizer.queries', () => ({ useOrganizer }))
-vi.mock('./event.queries', () => ({ useOwnedEvent }))
+const { cancelMutateAsync, useCancelOwnedEvent } = vi.hoisted(() => ({ cancelMutateAsync: vi.fn(), useCancelOwnedEvent: vi.fn() }))
+vi.mock('./event.queries', () => ({ useOwnedEvent, useCancelOwnedEvent }))
 vi.mock('../moderation/moderation.queries', () => ({
   useCurrentEventReviewRequest, usePublicEvent, useRequestEventReview, useWithdrawEventReview,
 }))
@@ -52,6 +53,53 @@ describe('PublishedEventPage', () => {
     useCurrentEventReviewRequest.mockReturnValue({ data: null, isPending: false, isError: false, refetch: reviewRefetch })
     useRequestEventReview.mockReturnValue({ isPending: false, mutateAsync: requestMutateAsync })
     useWithdrawEventReview.mockReturnValue({ isPending: false, mutateAsync: withdrawMutateAsync })
+    useCancelOwnedEvent.mockReturnValue({ isPending: false, mutateAsync: cancelMutateAsync })
+  })
+
+  it('requires explicit cancellation confirmation and lets the organizer keep the event', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(screen.getByRole('button', { name: 'Cancel event' }))
+    expect(screen.getByRole('heading', { name: 'Cancel this event?' })).toBeInTheDocument()
+    expect(screen.getByText(/does not automatically refund payments/i)).toBeInTheDocument()
+    expect(cancelMutateAsync).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Keep event' }))
+    expect(screen.queryByRole('button', { name: 'Confirm cancellation' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Cancel event' })).toHaveFocus()
+    expect(cancelMutateAsync).not.toHaveBeenCalled()
+  })
+
+  it('submits one cancellation, disables pending controls, and reports success', async () => {
+    const user = userEvent.setup()
+    let resolve!: (value: EventRow) => void
+    cancelMutateAsync.mockImplementation(() => new Promise<EventRow>((done) => { resolve = done }))
+    renderPage()
+    await user.click(screen.getByRole('button', { name: 'Cancel event' }))
+    await user.dblClick(screen.getByRole('button', { name: 'Confirm cancellation' }))
+    expect(cancelMutateAsync).toHaveBeenCalledExactlyOnceWith('event-1')
+    expect(screen.getByRole('button', { name: 'Cancelling…' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Keep event' })).toBeDisabled()
+    await act(async () => resolve({ ...event, status: 'cancelled' }))
+    expect(screen.getByText('Event cancelled. Payments have not been automatically refunded.')).toHaveFocus()
+    expect(screen.queryByRole('button', { name: 'Cancel event' })).not.toBeInTheDocument()
+  })
+
+  it('keeps confirmation after a cancellation error and retries only when requested', async () => {
+    const user = userEvent.setup()
+    cancelMutateAsync.mockRejectedValueOnce(new Error('network lost')).mockResolvedValue({ ...event, status: 'cancelled' })
+    renderPage()
+    await user.click(screen.getByRole('button', { name: 'Cancel event' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm cancellation' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/could not confirm cancellation.*safe to try again/i)
+    expect(cancelMutateAsync).toHaveBeenCalledTimes(1)
+    await user.click(screen.getByRole('button', { name: 'Try cancellation again' }))
+    expect(cancelMutateAsync).toHaveBeenCalledTimes(2)
+    expect(screen.getByText('Event cancelled. Payments have not been automatically refunded.')).toBeInTheDocument()
+  })
+
+  it('does not offer cancellation for an already cancelled event', () => {
+    renderPage({ ...event, status: 'cancelled' })
+    expect(screen.queryByRole('button', { name: 'Cancel event' })).not.toBeInTheDocument()
   })
 
   it('queries owner and canonical public projection before confirming publication', () => {
