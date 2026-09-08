@@ -1,120 +1,147 @@
-/* eslint-disable react-refresh/only-export-components */
-import { useState } from 'react'
-import { Navigate, Outlet, createBrowserRouter, useNavigate } from 'react-router-dom'
-import { OrganizerLayout } from '../../components/layout/OrganizerLayout'
-import { FormErrorSummary } from '../../components/ui/FormErrorSummary'
-import { CheckEmailPage } from '../../features/auth/CheckEmailPage'
-import { SignInPage } from '../../features/auth/SignInPage'
-import { SignUpPage } from '../../features/auth/SignUpPage'
-import { CheckoutPage } from '../../features/checkout/CheckoutPage'
-import { signOut } from '../../features/auth/auth.api'
-import { EventEditorPage } from '../../features/events/EventEditorPage'
-import { EventPreviewPage } from '../../features/events/EventPreviewPage'
-import { OrganizerEventsPage } from '../../features/events/OrganizerEventsPage'
-import { PublishedEventPage } from '../../features/events/PublishedEventPage'
-import { OrganizerSetupPage } from '../../features/organizers/OrganizerSetupPage'
-import { OrganizerPaymentsPage } from '../../features/payments/OrganizerPaymentsPage'
-import { OrderConfirmationPage } from '../../features/orders/OrderConfirmationPage'
-import { EventPolicyPage } from '../../features/moderation/EventPolicyPage'
-import { OrganizerTermsPage } from '../../features/moderation/OrganizerTermsPage'
-import { ModerationCasePage } from '../../features/moderation/ModerationCasePage'
-import { ModerationQueuePage } from '../../features/moderation/ModerationQueuePage'
-import { RequireStaff } from '../../features/moderation/RequireStaff'
-import { useStaffRole } from '../../features/moderation/moderation.queries'
-import { OrganizerTicketTiersPage } from '../../features/tickets/OrganizerTicketTiersPage'
-import { PublicTicketEventPage } from '../../features/tickets/PublicTicketEventPage'
-import { RequireOrganizer } from './RequireOrganizer'
-import { RequireSession } from './RequireSession'
-import { useSession } from '../../features/auth/SessionProvider'
+import type { ComponentType } from 'react'
+import { Navigate, createBrowserRouter, type RouteObject } from 'react-router-dom'
+import type { TicketExperienceRuntime } from '../../features/ticket-experience/runtime/runtime.types'
 
-function OrganizerShell() {
-  const navigate = useNavigate()
-  const sessionState = useSession()
-  const staffUserId = sessionState.status === 'authenticated' ? sessionState.user.id : ''
-  const staffRoleQuery = useStaffRole(staffUserId)
-  const [signOutError, setSignOutError] = useState<string | null>(null)
+const lazyComponent = <T extends Record<K, ComponentType>, K extends keyof T>(
+  load: () => Promise<T>,
+  exportName: K,
+) => async () => ({ Component: (await load())[exportName] })
 
-  async function handleSignOut() {
-    setSignOutError(null)
+export function createAppRouter(runtime: TicketExperienceRuntime) {
+  const routes: RouteObject[] = [
+    { path: '/', element: <Navigate replace to="/auth/sign-in" /> },
+    {
+      path: '/events/:eventId',
+      lazy: lazyComponent(() => import('../../features/tickets/PublicTicketEventPage'), 'PublicTicketEventPage'),
+    },
+    {
+      path: '/events/:eventId/checkout',
+      lazy: lazyComponent(() => import('../../features/checkout/CheckoutPage'), 'CheckoutPage'),
+    },
+    {
+      path: '/orders/:confirmationToken',
+      lazy: lazyComponent(() => import('../../features/orders/OrderConfirmationPage'), 'OrderConfirmationPage'),
+    },
+    {
+      path: '/organizer-terms',
+      lazy: lazyComponent(() => import('../../features/moderation/OrganizerTermsPage'), 'OrganizerTermsPage'),
+    },
+    {
+      path: '/event-policy',
+      lazy: lazyComponent(() => import('../../features/moderation/EventPolicyPage'), 'EventPolicyPage'),
+    },
+    {
+      path: '/auth/sign-up',
+      lazy: lazyComponent(() => import('../../features/auth/SignUpPage'), 'SignUpPage'),
+    },
+    {
+      path: '/auth/check-email',
+      lazy: lazyComponent(() => import('../../features/auth/CheckEmailPage'), 'CheckEmailPage'),
+    },
+    {
+      path: '/auth/sign-in',
+      lazy: lazyComponent(() => import('../../features/auth/SignInPage'), 'SignInPage'),
+    },
+    { path: '/tickets/:collectionBearer', Component: runtime.TicketCollectionRoute },
+    { path: '/tickets/:collectionBearer/:ticketSelector', Component: runtime.TicketCollectionRoute },
+    {
+      id: 'session-shell',
+      lazy: lazyComponent(() => import('./SessionShell'), 'SessionShell'),
+      children: [
+        {
+          id: 'require-session',
+          lazy: lazyComponent(() => import('./RequireSession'), 'RequireSession'),
+          children: [
+            {
+              id: 'organizer-shell',
+              lazy: lazyComponent(() => import('./OrganizerShell'), 'OrganizerShell'),
+              children: [
+                {
+                  path: '/organizer/setup',
+                  lazy: lazyComponent(
+                    () => import('../../features/organizers/OrganizerSetupPage'),
+                    'OrganizerSetupPage',
+                  ),
+                },
+                {
+                  id: 'require-staff',
+                  lazy: lazyComponent(() => import('../../features/moderation/RequireStaff'), 'RequireStaff'),
+                  children: [
+                    {
+                      path: '/moderation',
+                      lazy: lazyComponent(
+                        () => import('../../features/moderation/ModerationQueuePage'),
+                        'ModerationQueuePage',
+                      ),
+                    },
+                    {
+                      path: '/moderation/events/:eventId',
+                      lazy: lazyComponent(
+                        () => import('../../features/moderation/ModerationCasePage'),
+                        'ModerationCasePage',
+                      ),
+                    },
+                  ],
+                },
+                {
+                  id: 'require-organizer',
+                  lazy: lazyComponent(() => import('./RequireOrganizer'), 'RequireOrganizer'),
+                  children: [
+                    {
+                      path: '/organizer/events',
+                      lazy: lazyComponent(
+                        () => import('../../features/events/OrganizerEventsPage'),
+                        'OrganizerEventsPage',
+                      ),
+                    },
+                    {
+                      path: '/organizer/settings/payments',
+                      lazy: lazyComponent(
+                        () => import('../../features/payments/OrganizerPaymentsPage'),
+                        'OrganizerPaymentsPage',
+                      ),
+                    },
+                    {
+                      path: '/organizer/events/new',
+                      lazy: lazyComponent(() => import('../../features/events/EventEditorPage'), 'EventEditorPage'),
+                    },
+                    {
+                      path: '/organizer/events/:eventId/edit',
+                      lazy: lazyComponent(() => import('../../features/events/EventEditorPage'), 'EventEditorPage'),
+                    },
+                    {
+                      path: '/organizer/events/:eventId/preview',
+                      lazy: lazyComponent(() => import('../../features/events/EventPreviewPage'), 'EventPreviewPage'),
+                    },
+                    {
+                      path: '/organizer/events/:eventId/tickets',
+                      lazy: lazyComponent(
+                        () => import('../../features/tickets/OrganizerTicketTiersPage'),
+                        'OrganizerTicketTiersPage',
+                      ),
+                    },
+                    {
+                      path: '/organizer/events/:eventId/dashboard',
+                      Component: runtime.OrganizerDashboardRoute,
+                    },
+                    {
+                      path: '/organizer/events/:eventId/check-in',
+                      Component: runtime.OrganizerScannerRoute,
+                    },
+                    {
+                      path: '/organizer/events/:eventId',
+                      lazy: lazyComponent(() => import('../../features/events/PublishedEventPage'), 'PublishedEventPage'),
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    ...runtime.developmentRoutes,
+  ]
 
-    try {
-      await signOut()
-      navigate('/auth/sign-in', { replace: true })
-    } catch (error) {
-      setSignOutError(error instanceof Error ? error.message : 'Sign out failed. Try again.')
-    }
-  }
-
-  return (
-    <OrganizerLayout onSignOut={() => void handleSignOut()} staffRole={staffRoleQuery.data ?? null}>
-      <FormErrorSummary errors={signOutError ? [signOutError] : []} title="Sign out failed" />
-      <Outlet />
-    </OrganizerLayout>
-  )
+  return createBrowserRouter(routes)
 }
-
-export const appRouter = createBrowserRouter([
-  { path: '/', element: <Navigate replace to="/auth/sign-in" /> },
-  { path: '/events/:eventId', element: <PublicTicketEventPage /> },
-  { path: '/events/:eventId/checkout', element: <CheckoutPage /> },
-  { path: '/orders/:confirmationToken', element: <OrderConfirmationPage /> },
-  { path: '/organizer-terms', element: <OrganizerTermsPage /> },
-  { path: '/event-policy', element: <EventPolicyPage /> },
-  { path: '/auth/sign-up', element: <SignUpPage /> },
-  { path: '/auth/check-email', element: <CheckEmailPage /> },
-  { path: '/auth/sign-in', element: <SignInPage /> },
-  {
-    element: <RequireSession />,
-    children: [
-      {
-        element: <OrganizerShell />,
-        children: [
-          {
-            path: '/organizer/setup',
-            element: <OrganizerSetupPage />,
-          },
-          {
-            element: <RequireStaff />,
-            children: [
-              { path: '/moderation', element: <ModerationQueuePage /> },
-              { path: '/moderation/events/:eventId', element: <ModerationCasePage /> },
-            ],
-          },
-          {
-            element: <RequireOrganizer />,
-            children: [
-              {
-                path: '/organizer/events',
-                element: <OrganizerEventsPage />,
-              },
-              {
-                path: '/organizer/settings/payments',
-                element: <OrganizerPaymentsPage />,
-              },
-              {
-                path: '/organizer/events/new',
-                element: <EventEditorPage />,
-              },
-              {
-                path: '/organizer/events/:eventId/edit',
-                element: <EventEditorPage />,
-              },
-              {
-                path: '/organizer/events/:eventId/preview',
-                element: <EventPreviewPage />,
-              },
-              {
-                path: '/organizer/events/:eventId/tickets',
-                element: <OrganizerTicketTiersPage />,
-              },
-              {
-                path: '/organizer/events/:eventId',
-                element: <PublishedEventPage />,
-              },
-            ],
-          },
-        ],
-      },
-    ],
-  },
-])

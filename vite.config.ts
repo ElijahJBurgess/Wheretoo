@@ -1,7 +1,7 @@
 import react from '@vitejs/plugin-react'
 import { loadEnv, type Plugin } from 'vite'
 import { configDefaults, defineConfig } from 'vitest/config'
-import { browserEnvKeys, selectBrowserEnv } from './src/config/browserEnv.ts'
+import { browserEnvKeys, selectBrowserEnv } from './src/config/browserEnv.js'
 
 function developmentCspBypass(): Plugin {
   return {
@@ -14,7 +14,20 @@ function developmentCspBypass(): Plugin {
   }
 }
 
-export default defineConfig(({ mode }) => {
+export function selectTicketExperienceEntry(html: string, command: 'serve' | 'build') {
+  return command === 'serve'
+    ? html.replace('/src/main.tsx', '/src/main.development.tsx')
+    : html
+}
+
+function ticketExperienceEntry(command: 'serve' | 'build'): Plugin {
+  return {
+    name: 'ticket-experience-entry',
+    transformIndexHtml: (html) => selectTicketExperienceEntry(html, command),
+  }
+}
+
+export default defineConfig(({ command, mode }) => {
   const browserEnv = selectBrowserEnv(loadEnv(mode, '.', ''))
 
   return {
@@ -22,7 +35,7 @@ export default defineConfig(({ mode }) => {
     define: Object.fromEntries(
       browserEnvKeys.map((key) => [`import.meta.env.${key}`, JSON.stringify(browserEnv[key] ?? '')]),
     ),
-    plugins: [developmentCspBypass(), react()],
+    plugins: [developmentCspBypass(), ticketExperienceEntry(command), react()],
     test: {
       environment: 'jsdom',
       setupFiles: ['./src/test/setup.ts'],

@@ -1,73 +1,166 @@
-import { isValidElement } from 'react'
-import { matchRoutes } from 'react-router-dom'
-import { describe, expect, it } from 'vitest'
-import { RequireOrganizer } from './RequireOrganizer'
-import { RequireSession } from './RequireSession'
-import { RequireStaff } from '../../features/moderation/RequireStaff'
-import { appRouter } from './router'
+import { render, screen } from '@testing-library/react'
+import { RouterProvider, createMemoryRouter, matchRoutes } from 'react-router-dom'
+import { describe, expect, it, vi } from 'vitest'
+import type { TicketExperienceRuntime } from '../../features/ticket-experience/runtime/runtime.types'
 
-describe('organizer-only routes', () => {
-  it.each([
-    ['/organizer-terms', 'OrganizerTermsPage'],
-    ['/event-policy', 'EventPolicyPage'],
-  ])('keeps the development policy route %s public', (path, componentName) => {
-    const matches = matchRoutes(appRouter.routes, path)
-    const routeElement = matches?.at(-1)?.route.element
+const supabaseEvaluation = vi.hoisted(() => vi.fn())
 
-    expect(matches?.at(-1)?.route.path).toBe(path)
-    expect(isValidElement(routeElement) && typeof routeElement.type === 'function' && routeElement.type.name).toBe(componentName)
-    expect(matches?.some((match) => isValidElement(match.route.element) && (
-      match.route.element.type === RequireOrganizer || match.route.element.type === RequireSession
-    ))).toBe(false)
+vi.mock('../../lib/supabase/client', () => {
+  supabaseEvaluation()
+  return { supabase: {} }
+})
+
+import { developmentTicketExperienceRuntime } from '../../features/ticket-experience/runtime/development'
+import {
+  NotEnabledRoute,
+  productionTicketExperienceRuntime,
+} from '../../features/ticket-experience/runtime/production'
+import { selectTicketExperienceEntry } from '../../../vite.config'
+import { createAppRouter } from './router'
+
+function TicketRoute() {
+  return null
+}
+
+function ScannerRoute() {
+  return null
+}
+
+function DashboardRoute() {
+  return null
+}
+
+const runtime: TicketExperienceRuntime = {
+  TicketCollectionRoute: TicketRoute,
+  OrganizerScannerRoute: ScannerRoute,
+  OrganizerDashboardRoute: DashboardRoute,
+  developmentRoutes: [],
+}
+
+function matchedIds(path: string) {
+  const router = createAppRouter(runtime)
+  return matchRoutes(router.routes, path)?.map(({ route }) => route.id) ?? []
+}
+
+describe('ticket experience router composition', () => {
+  it('does not evaluate the Supabase client when the router module loads', () => {
+    expect(supabaseEvaluation).not.toHaveBeenCalled()
   })
 
   it.each([
+    '/tickets/wh_test_collection_paid',
+    '/tickets/wh_test_collection_paid/paid-1',
+  ])('keeps the bearer-authorized customer route %s anonymous', (path) => {
+    const router = createAppRouter(runtime)
+    const matches = matchRoutes(router.routes, path)
+
+    const matchedElement = matches?.at(-1)?.route.element
+    expect(matchedElement).toMatchObject({ type: TicketRoute })
+    expect(matches?.map(({ route }) => route.id)).not.toContain('session-shell')
+    expect(matches?.map(({ route }) => route.id)).not.toContain('require-organizer')
+  })
+
+  it.each([
+    '/organizer/events/event-a/dashboard',
+    '/organizer/events/event-a/check-in',
+  ])('keeps %s behind session and organizer boundaries', (path) => {
+    expect(matchedIds(path)).toEqual(
+      expect.arrayContaining(['session-shell', 'require-session', 'organizer-shell', 'require-organizer']),
+    )
+  })
+
+  it.each([
+    '/',
+    '/events/event-a',
+    '/events/event-a/checkout',
+    '/orders/confirmation-bearer',
+    '/organizer-terms',
+    '/event-policy',
+    '/auth/sign-up',
+    '/auth/check-email',
+    '/auth/sign-in',
+  ])('retains the public route %s outside session composition', (path) => {
+    expect(matchedIds(path)).not.toContain('session-shell')
+  })
+
+  it.each([
+    '/organizer/events',
     '/organizer/settings/payments',
-    '/organizer/events/event-1/tickets',
-  ])('keeps %s behind the existing organizer guard', (path) => {
-    const matches = matchRoutes(appRouter.routes, path)
-
-    expect(matches?.at(-1)?.route.path).toBe(path.includes('/tickets') ? '/organizer/events/:eventId/tickets' : path)
-    expect(matches?.some((match) => (
-      isValidElement(match.route.element) && match.route.element.type === RequireOrganizer
-    ))).toBe(true)
+    '/organizer/events/new',
+    '/organizer/events/event-a/edit',
+    '/organizer/events/event-a/preview',
+    '/organizer/events/event-a/tickets',
+    '/organizer/events/event-a',
+  ])('retains the existing organizer route %s behind organizer access', (path) => {
+    expect(matchedIds(path)).toContain('require-organizer')
   })
 
-  it('keeps the anonymous paid-event route outside the session and organizer guards', () => {
-    const matches = matchRoutes(appRouter.routes, '/events/eb0fd9d5-d7d5-45dd-a99f-0c8a191bdc6f')
-
-    expect(matches?.at(-1)?.route.path).toBe('/events/:eventId')
-    expect(matches?.some((match) => isValidElement(match.route.element) && (
-      match.route.element.type === RequireOrganizer || match.route.element.type === RequireSession
-    ))).toBe(false)
+  it('keeps production routes fail-closed and excludes development routes', () => {
+    expect(productionTicketExperienceRuntime.OrganizerScannerRoute).not.toBe(NotEnabledRoute)
+    expect(productionTicketExperienceRuntime.OrganizerDashboardRoute).toBe(NotEnabledRoute)
+    expect(productionTicketExperienceRuntime.developmentRoutes).toEqual([])
   })
 
-  it('keeps guest Checkout anonymous and requires the event route parameter', () => {
-    const matches = matchRoutes(appRouter.routes, '/events/eb0fd9d5-d7d5-45dd-a99f-0c8a191bdc6f/checkout')
-
-    expect(matches?.at(-1)?.route.path).toBe('/events/:eventId/checkout')
-    expect(matches?.some((match) => isValidElement(match.route.element) && (
-      match.route.element.type === RequireOrganizer || match.route.element.type === RequireSession
-    ))).toBe(false)
+  it('registers only fixed development QA route patterns in development composition', () => {
+    expect(developmentTicketExperienceRuntime.developmentRoutes.map(({ path }) => path)).toEqual([
+      '/__dev/ticket-shells/events/:eventId/dashboard',
+      '/__dev/ticket-shells/events/:eventId/check-in',
+      '/__dev/ticket-shells/events/:eventId/check-in/:scannerScenario',
+      '/__dev/ticket-shells/emails/:template/:scenario',
+      '/__dev/ticket-shells/qr/:caseId',
+    ])
   })
 
-  it('keeps bearer order confirmation anonymous and requires the route token', () => {
-    const matches = matchRoutes(appRouter.routes, '/orders/tzGJcJWwoS-3IzLlK9cZV3QHHbC6-vv2d3a-Kl3nHng')
+  it('keeps the authenticated development dashboard inside the organizer main landmark', async () => {
+    const Dashboard = developmentTicketExperienceRuntime.OrganizerDashboardRoute
+    const router = createMemoryRouter([
+      {
+        path: '/organizer/events/:eventId/dashboard',
+        element: (
+          <main className="organizer-layout__main">
+            <Dashboard />
+          </main>
+        ),
+      },
+    ], { initialEntries: ['/organizer/events/event-a/dashboard'] })
+    const view = render(<RouterProvider router={router} />)
 
-    expect(matches?.at(-1)?.route.path).toBe('/orders/:confirmationToken')
-    expect(matches?.some((match) => isValidElement(match.route.element) && (
-      match.route.element.type === RequireOrganizer || match.route.element.type === RequireSession
-    ))).toBe(false)
+    expect(await screen.findByRole('heading', { name: 'Mission Night Market' })).toBeVisible()
+    expect(view.container.querySelectorAll('main')).toHaveLength(1)
   })
 
   it.each([
-    ['/moderation', '/moderation'],
-    ['/moderation/events/eb0fd9d5-d7d5-45dd-a99f-0c8a191bdc6f', '/moderation/events/:eventId'],
-  ])('keeps staff route %s behind session and database staff guards but not organizer setup', (path, routePath) => {
-    const matches = matchRoutes(appRouter.routes, path)
-    expect(matches?.at(-1)?.route.path).toBe(routePath)
-    expect(matches?.some((match) => isValidElement(match.route.element) && match.route.element.type === RequireSession)).toBe(true)
-    expect(matches?.some((match) => isValidElement(match.route.element) && match.route.element.type === RequireStaff)).toBe(true)
-    expect(matches?.some((match) => isValidElement(match.route.element) && match.route.element.type === RequireOrganizer)).toBe(false)
+    ['/__dev/ticket-shells/events/event-a/dashboard', 'Mission Night Market'],
+    ['/__dev/ticket-shells/events/event-a/check-in', 'Camera could not start'],
+    ['/__dev/ticket-shells/emails/tickets-ready/free-rsvp', 'Email shell'],
+  ])('accepts the fixed development scenario %s', async (path, title) => {
+    const router = createMemoryRouter([...developmentTicketExperienceRuntime.developmentRoutes], {
+      initialEntries: [path],
+    })
+
+    render(<RouterProvider router={router} />)
+
+    expect(await screen.findByText(title)).toBeVisible()
+  })
+
+  it.each([
+    '/__dev/ticket-shells/events/unknown/dashboard',
+    '/__dev/ticket-shells/events/unknown/check-in',
+    '/__dev/ticket-shells/emails/unknown/unknown',
+  ])('fails closed for the unknown development scenario %s', async (path) => {
+    const router = createMemoryRouter([...developmentTicketExperienceRuntime.developmentRoutes], {
+      initialEntries: [path],
+    })
+
+    render(<RouterProvider router={router} />)
+
+    expect(await screen.findByText('Development scenario unavailable')).toBeVisible()
+  })
+
+  it('selects the development entry only while Vite serves the app', () => {
+    const html = '<script type="module" src="/src/main.tsx"></script>'
+
+    expect(selectTicketExperienceEntry(html, 'serve')).toContain('/src/main.development.tsx')
+    expect(selectTicketExperienceEntry(html, 'build')).toBe(html)
   })
 })

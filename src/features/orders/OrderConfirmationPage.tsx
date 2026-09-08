@@ -1,7 +1,7 @@
 import { Button } from '../../components/ui/Button'
 import { AsyncState } from '../../components/ui/AsyncState'
 import { useEffect } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { clearCheckoutAttemptForConfirmation } from '../checkout/checkout.attempt'
 import type { OrderConfirmation } from './order.types'
 import { useOrderConfirmation } from './order.queries'
@@ -174,6 +174,9 @@ function OrderConfirmationRoute({ confirmationToken }: { confirmationToken: stri
           <div><dt>Order</dt><dd>{confirmation.data.orderNumber}</dd></div>
         </dl>
 
+        {confirmedStatus === 'paid'
+          ? <Link className="ui-button ui-button--primary" to={`/tickets/${encodeURIComponent(confirmationToken)}`}>View tickets</Link>
+          : null}
         {confirmation.isTimedOut && confirmedStatus === 'processing'
           ? <Button onClick={() => void confirmation.retry()} type="button">Check again</Button>
           : null}

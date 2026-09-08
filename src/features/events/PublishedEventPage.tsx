@@ -287,6 +287,7 @@ export function PublishedEventPage() {
       <footer className="published-event__actions">
         {canSetUpPaidTickets ? <Link className="ui-button ui-button--primary" to={`/organizer/events/${event.id}/tickets`}>Set up paid tickets</Link> : null}
         <Link className="ui-button ui-button--secondary" to={`/organizer/events/${event.id}/edit`}>Edit event</Link>
+        {isPublished ? <Link className="ui-button ui-button--secondary" to={`/organizer/events/${event.id}/check-in`}>Check in guests</Link> : null}
         {isPublished ? <Button disabled={cancellationIsBusy} onClick={() => setConfirmCancellation(true)} ref={cancelButtonRef} variant="secondary">Cancel event</Button> : null}
         <Link className="ui-button ui-button--secondary" to="/organizer/events">Back to events</Link>
       </footer>

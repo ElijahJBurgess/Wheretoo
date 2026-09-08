@@ -31,6 +31,17 @@ function renderPage(bearer = token) {
 }
 
 describe('OrderConfirmationPage', () => {
+  it.each(['paid', 'processing', 'requires_review', 'payment_failed', 'cancelled', 'expired', 'refunded'] as const)(
+    'offers collection access only for paid confirmation, current status %s',
+    (status) => {
+      useOrderConfirmation.mockReturnValue({ data: { ...confirmation, status }, isPending: false, isError: false, isTimedOut: false, retry })
+      renderPage()
+      const link = screen.queryByRole('link', { name: 'View tickets' })
+      if (status === 'paid') expect(link).toHaveAttribute('href', `/tickets/${encodeURIComponent(token)}`)
+      else expect(link).not.toBeInTheDocument()
+    },
+  )
+
   beforeEach(() => {
     vi.clearAllMocks()
     useOrderConfirmation.mockReturnValue({ data: confirmation, isPending: false, isError: false, isTimedOut: false, retry })

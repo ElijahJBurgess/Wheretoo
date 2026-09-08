@@ -39,6 +39,7 @@ function renderPage(
     { path: '/organizer/events/:eventId', element: <PublishedEventPage /> },
     { path: '/organizer/events/:eventId/edit', element: <p>edit destination</p> },
     { path: '/organizer/events/:eventId/tickets', element: <p>ticket setup destination</p> },
+    { path: '/organizer/events/:eventId/check-in', element: <p>scanner destination</p> },
     { path: '/organizer/events', element: <p>events destination</p> },
   ], { initialEntries: ['/organizer/events/event-1'] })
   return { router, ...render(<RouterProvider router={router} />) }
@@ -67,6 +68,14 @@ describe('PublishedEventPage', () => {
     expect(screen.queryByRole('button', { name: 'Confirm cancellation' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Cancel event' })).toHaveFocus()
     expect(cancelMutateAsync).not.toHaveBeenCalled()
+  })
+
+  it('opens the event-scoped scanner from an owned published event', async () => {
+    const user = userEvent.setup()
+    const { router } = renderPage()
+    await user.click(screen.getByRole('link', { name: 'Check in guests' }))
+    expect(await screen.findByText('scanner destination')).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe('/organizer/events/event-1/check-in')
   })
 
   it('submits one cancellation, disables pending controls, and reports success', async () => {
@@ -100,6 +109,7 @@ describe('PublishedEventPage', () => {
   it('does not offer cancellation for an already cancelled event', () => {
     renderPage({ ...event, status: 'cancelled' })
     expect(screen.queryByRole('button', { name: 'Cancel event' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Check in guests' })).not.toBeInTheDocument()
   })
 
   it('queries owner and canonical public projection before confirming publication', () => {

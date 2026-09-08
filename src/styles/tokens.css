@@ -7,7 +7,12 @@
   --color-violet-deep: #4d2fd4;
   --color-border: #dedce8;
   --color-success: #117a56;
+  --color-success-surface: #e8f6ef;
   --color-danger: #b42318;
+  --color-danger-surface: #fff0ee;
+  --color-warning: #7a4d00;
+  --color-warning-surface: #fff4ce;
+  --color-neutral-surface: #f0eff6;
   --font-display: 'Space Grotesk Variable', sans-serif;
   --font-body: 'Manrope Variable', sans-serif;
   --radius-control: 0.75rem;

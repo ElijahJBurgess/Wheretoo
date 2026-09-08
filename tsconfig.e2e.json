@@ -1,5 +1,6 @@
 {
   "compilerOptions": {
+    "jsx": "react-jsx",
     "target": "ES2023",
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "module": "ESNext",
@@ -15,5 +16,10 @@
     "noUncheckedSideEffectImports": true,
     "types": ["node"]
   },
-  "include": ["playwright.config.ts", "tests/e2e"]
+  "include": [
+    "playwright.config.ts",
+    "playwright.ticket-shells.config.ts",
+    "playwright.ticket-shells.production.config.ts",
+    "tests/e2e"
+  ]
 }

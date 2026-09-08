@@ -1,6 +1,9 @@
-import { RouterProvider } from 'react-router-dom'
-import { appRouter } from './router/router'
+import { RouterProvider, createBrowserRouter } from 'react-router-dom'
 
-export function App() {
-  return <RouterProvider router={appRouter} />
+type AppProps = {
+  router: ReturnType<typeof createBrowserRouter>
+}
+
+export function App({ router }: AppProps) {
+  return <RouterProvider router={router} />
 }
