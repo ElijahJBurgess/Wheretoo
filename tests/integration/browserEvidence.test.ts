@@ -41,3 +41,12 @@ describe('isIgnorableBrowserRequestFailure', () => {
     ).toBe(false)
   })
 })
+
+describe('hosted browser evidence', () => {
+  it('redacts hosted Checkout paths and every transient query value before browser evidence is saved', () => {
+    const redacted = redactBrowserUrl('https://checkout.stripe.com/c/pay/cs_test_hidden?client_reference_id=private&token=private')
+
+    expect(redacted).toMatch(/^<external-origin:[a-f0-9]{12}>\/c\/pay\/cs_test_hidden\?client_reference_id=<redacted>&token=<redacted>$/)
+    expect(redacted).not.toContain('private')
+  })
+})

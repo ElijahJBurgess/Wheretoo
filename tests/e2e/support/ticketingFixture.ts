@@ -1,6 +1,8 @@
 export type TicketingProjectName = 'mobile-chromium' | 'desktop-chromium'
 export type TicketingScenario = 'purchase' | 'visual'
 
+export const task18CheckoutTierNames = ['General admission', 'VIP'] as const
+
 const task18EventTitles: Record<TicketingProjectName, Record<TicketingScenario, string>> = {
   'mobile-chromium': {
     purchase: 'Sunset Sessions at the Ferry Building',

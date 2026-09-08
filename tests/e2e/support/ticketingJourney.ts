@@ -1,15 +1,16 @@
 import { createClient } from '@supabase/supabase-js'
-import { randomUUID } from 'node:crypto'
 import { expect, type Locator, type Page, type TestInfo } from '@playwright/test'
 import type { Database } from '../../../src/lib/supabase/database.types'
 import { loadTask18E2EEnv } from './e2eEnv'
 import {
   task18EventTitle,
+  task18CheckoutTierNames,
   task18MapboxFeatureId,
   type TicketingProjectName,
 } from './ticketingFixture'
 
 const env = loadTask18E2EEnv()
+const unsafeVisibleEvidence = /(?:https:\/\/checkout\.stripe\.com\/|\b(?:bearer|authorization)\b|\b(?:acct|cs_(?:test|live)|ch|evt|fee|pi|price|prod|re|tr|trr|txn)_[A-Za-z0-9]+\b|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b)/i
 
 export type TicketingJourneyFixture = {
   eventId: string
@@ -128,11 +129,10 @@ export async function signInCrossUser(page: Page) {
   await expect(page).toHaveURL(/\/organizer\/events$/)
 }
 
-export async function configureThreeTicketTiers(page: Page) {
+export async function configureCheckoutTicketTiers(page: Page) {
   const definitions = [
-    { name: 'First release', price: '12.00', capacity: '1', description: 'A limited first-release ticket.' },
-    { name: 'General admission', price: '18.50', capacity: '3', description: 'Standard admission to the event.' },
-    { name: 'Supporter', price: '30.01', capacity: '5', description: 'Admission with extra support for the organizer.' },
+    { name: task18CheckoutTierNames[0], price: '18.50', capacity: '10', description: 'Standard admission to the event.' },
+    { name: task18CheckoutTierNames[1], price: '30.01', capacity: '10', description: 'Early entry and lounge access.' },
   ]
   for (let index = 0; index < definitions.length; index += 1) {
     if (await page.locator('.ticket-tier-card').count() <= index) {
@@ -144,7 +144,32 @@ export async function configureThreeTicketTiers(page: Page) {
     await tier.getByLabel('Capacity').fill(definitions[index].capacity)
     await tier.getByLabel('Description (optional)').fill(definitions[index].description)
   }
-  await expect(page.locator('.ticket-tier-card')).toHaveCount(3)
+  await expect(page.locator('.ticket-tier-card')).toHaveCount(2)
+}
+
+export async function chooseTwoGeneralAdmissionAndOneVip(page: Page) {
+  const generalAdmission = page.getByRole('spinbutton', { name: 'General admission quantity' })
+  const vip = page.getByRole('spinbutton', { name: 'VIP quantity' })
+
+  await generalAdmission.focus()
+  await page.keyboard.press('ArrowUp')
+  await page.keyboard.press('ArrowUp')
+  await expect(generalAdmission).toHaveValue('2')
+  await vip.focus()
+  await page.keyboard.press('ArrowUp')
+  await expect(vip).toHaveValue('1')
+  await expect(page.getByRole('status')).toHaveText('3 of 10 tickets selected')
+
+  await generalAdmission.fill('9')
+  await vip.focus()
+  await page.keyboard.press('ArrowUp')
+  await expect(page.getByRole('status')).toHaveText('11 tickets selected. Maximum 10.')
+  await expect(page.getByRole('button', { name: 'Continue to checkout' })).toBeDisabled()
+
+  await generalAdmission.fill('2')
+  await vip.fill('1')
+  await expect(page.getByRole('status')).toHaveText('3 of 10 tickets selected')
+  await expect(page.getByRole('button', { name: 'Continue to checkout' })).toBeEnabled()
 }
 
 export async function assertNoHorizontalOverflow(page: Page) {
@@ -207,52 +232,75 @@ export async function completeHostedStripeTestPayment(page: Page) {
   await page.waitForURL((url) => url.origin === 'http://127.0.0.1:3000' && /^\/orders\//.test(url.pathname), { timeout: 30_000 })
 }
 
-export async function deliverCheckoutWebhook(fixture: TicketingJourneyFixture) {
-  type Inspection = {
-    orders: Array<{
-      id: string
-      buyer_email: string
-      status: string
-      stripe_checkout_session_id: string | null
-      total_minor: number
-      application_fee_amount_minor: number
-      expected_organizer_proceeds_minor: number
-    }>
-    tickets: Array<{ order_id: string }>
+type ConfirmationLifecycle = 'processing' | 'requires_review' | 'paid'
+
+const browserConfirmation = (status: ConfirmationLifecycle) => ({
+  orderNumber: 'WT-TEST-ORDER',
+  status,
+  event: {
+    title: 'Ticketing browser proof',
+    startsAt: '2026-10-01T19:00:00-07:00',
+    endsAt: '2026-10-01T22:00:00-07:00',
+    timezone: 'America/Los_Angeles',
+    venueName: 'Test venue',
+  },
+  items: [
+    { tierName: 'General admission', quantity: 2, unitAmountMinor: 1850, subtotalMinor: 3700, currency: 'usd' },
+    { tierName: 'VIP', quantity: 1, unitAmountMinor: 3001, subtotalMinor: 3001, currency: 'usd' },
+  ],
+  quantity: 3,
+  currency: 'usd',
+  subtotalMinor: 6701,
+  taxAmountMinor: 0,
+  totalMinor: 6701,
+})
+
+export async function controlConfirmationLifecycle(page: Page) {
+  let status: ConfirmationLifecycle = 'processing'
+  await page.route('**/functions/v1/order-confirmation', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      status: 200,
+      body: JSON.stringify(browserConfirmation(status)),
+    })
+  })
+  return {
+    showRequiresReview: () => { status = 'requires_review' },
+    showPaid: () => { status = 'paid' },
   }
-  let state = await invokeDriver<Inspection>('inspect', { event_id: fixture.eventId })
-  const order = state.orders.filter((candidate) => candidate.buyer_email === fixture.buyerEmail).at(-1)
-  expect(order?.stripe_checkout_session_id).toMatch(/^cs_test_/)
-  const eventId = `evt_task17${randomUUID().replaceAll('-', '')}`
-  const delivered = await invokeDriver<{ status: number }>('deliver', {
-    event: {
-      event_id: eventId,
-      type: 'checkout.session.completed',
-      object: 'checkout.session',
-      object_id: order!.stripe_checkout_session_id,
-      created: Math.floor(Date.now() / 1_000),
-    },
+}
+
+export async function submitAfterOneAmbiguousResponse(page: Page, fixture: TicketingJourneyFixture) {
+  const attempts: Array<{ clientRequestId: string; confirmationBearer: string }> = []
+  let intercepted = false
+  await page.route('**/functions/v1/stripe-create-checkout', async (route) => {
+    const request = route.request()
+    if (request.method() !== 'POST') return await route.continue()
+    const body = request.postDataJSON() as { clientRequestId?: unknown }
+    const confirmationBearer = request.headers()['x-whereto-confirmation-bearer']
+    if (typeof body.clientRequestId !== 'string' || typeof confirmationBearer !== 'string') {
+      throw new Error('Checkout retry request is incomplete')
+    }
+    attempts.push({ clientRequestId: body.clientRequestId, confirmationBearer })
+    if (!intercepted) {
+      intercepted = true
+      await route.fulfill({ contentType: 'application/json', status: 503, body: '{"error":{"code":"unavailable"}}' })
+      return
+    }
+    await route.continue()
   })
-  expect(delivered.status).toBe(200)
-  state = await invokeDriver<Inspection>('inspect', { event_id: fixture.eventId })
-  const paidOrder = state.orders.find((candidate) => candidate.id === order!.id)
-  const expectedFee = Math.floor(order!.total_minor * 0.05) + 50
-  expect(paidOrder).toMatchObject({
-    status: 'paid',
-    application_fee_amount_minor: expectedFee,
-    expected_organizer_proceeds_minor: order!.total_minor - expectedFee,
-  })
-  expect(state.tickets.filter((ticket) => ticket.order_id === order!.id)).toHaveLength(1)
-  const reconciliation = await invokeDriver<Record<string, unknown>>('reconcile_payment', { order_id: order!.id })
-  expect(reconciliation).toMatchObject({
-    ok: true,
-    livemode: false,
-    connected_account_matches: true,
-    persisted_ids_match: true,
-    total_minor: order!.total_minor,
-    application_fee_actual: expectedFee,
-    transfer_less_application_fee: order!.total_minor - expectedFee,
-  })
+
+  await page.getByLabel('Your name').fill('Task Eighteen Guest')
+  await page.getByLabel('Email address').fill(fixture.buyerEmail)
+  await page.getByRole('button', { name: 'Continue to secure payment' }).click()
+  await expect(page.getByRole('alert')).toContainText('Secure checkout is unavailable')
+  await page.reload()
+  await page.getByLabel('Your name').fill('Task Eighteen Guest')
+  await page.getByLabel('Email address').fill(fixture.buyerEmail)
+  await page.getByRole('button', { name: 'Continue to secure payment' }).click()
+  await expect.poll(() => attempts.length).toBe(2)
+  expect(attempts[1]).toEqual(attempts[0])
+  await page.unroute('**/functions/v1/stripe-create-checkout')
 }
 
 export async function captureTicketingState(
@@ -271,6 +319,8 @@ export async function captureTicketingState(
     await expect(emailFields.nth(index)).toHaveValue('')
   }
   await page.emulateMedia({ reducedMotion: 'reduce' })
+  const visibleText = await page.locator('body').innerText()
+  expect(unsafeVisibleEvidence.test(visibleText)).toBe(false)
   await page.evaluate(() => document.fonts.ready)
   const path = testInfo.outputPath(`${name}.png`)
   await page.screenshot({ path, fullPage: true })

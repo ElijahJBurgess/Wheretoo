@@ -74,7 +74,7 @@ if (process.env.KIND === 'delivery') {
   if (value.ok !== true || value.livemode !== false || value.amount !== value.reversal_amount || value.application_fee_refund_amount <= 0) process.exit(1)
 } else if (process.env.KIND === 'cleanup') {
   const counts = ['event_count','organizer_count','connect_count','order_count','tier_count','receipt_count','ticket_count','dispute_count','refund_count','item_count']
-  if (value.ok !== true || value.connected_account_closed !== true || counts.some((name) => value[name] !== 0)) process.exit(1)
+  if (value.ok !== true || value.connected_account_closed !== false || value.connected_account_preserved !== true || counts.some((name) => value[name] !== 0)) process.exit(1)
 } else process.exit(1)
 NODE
 }
@@ -166,7 +166,7 @@ NODE
   fi
 
   if [[ $driver_deployed -eq 1 && $cleanup_failed -eq 0 ]]; then
-    driver_request '{"action":"cleanup","close_connected_account":true}' "$temporary_directory/driver-cleanup.json" && \
+    driver_request '{"action":"cleanup","close_connected_account":false}' "$temporary_directory/driver-cleanup.json" && \
       validate_driver_output cleanup "$temporary_directory/driver-cleanup.json" || cleanup_failed=1
   fi
 

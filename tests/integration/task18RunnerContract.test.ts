@@ -16,7 +16,7 @@ describe('Task 18 browser proof runner contract', () => {
     )
   })
 
-  it('guards provisioning, real browser execution, reconciliation, and exact cleanup', () => {
+  it('preserves the ready test account while browser cleanup is still being certified', () => {
     const runner = readFileSync(runnerPath, 'utf8')
 
     expect(runner).toContain('trap cleanup EXIT HUP INT TERM')
@@ -27,8 +27,8 @@ describe('Task 18 browser proof runner contract', () => {
     expect(runner).toContain('\\"action\\":\\"checkout_status\\"')
     expect(runner).toContain('\\"action\\":\\"expire_checkout\\"')
     expect(runner).toContain('\\"action\\":\\"create_refund\\"')
-    expect(runner).toContain('{"action":"cleanup","close_connected_account":true}')
-    expect(runner).not.toContain('{"action":"cleanup"}')
+    expect(runner).toContain('{"action":"cleanup","close_connected_account":false}')
+    expect(runner).not.toContain('{"action":"cleanup","close_connected_account":true}')
     expect(runner).toContain('functions delete task17-transaction-driver')
     expect(runner).toContain('secrets unset')
     expect(runner).toContain('residue_count')
