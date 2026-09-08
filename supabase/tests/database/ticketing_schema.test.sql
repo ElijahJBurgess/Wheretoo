@@ -107,7 +107,9 @@ select columns_are(
     'id', 'stripe_refund_id', 'order_id', 'amount_minor', 'currency', 'status', 'reason',
     'reverse_transfer', 'refund_application_fee', 'stripe_event_id', 'processed_at',
     'created_at', 'updated_at', 'stripe_payment_intent_id', 'stripe_charge_id',
-    'stripe_transfer_reversal_id', 'stripe_application_fee_refund_id'
+    'stripe_transfer_reversal_id', 'stripe_application_fee_refund_id',
+    'transfer_reversal_amount_minor', 'application_fee_refund_amount_minor',
+    'policy_verified', 'policy_failure_code'
   ],
   'refund columns are exact'
 );
@@ -263,7 +265,9 @@ select results_eq(
       'processed_at:timestamp with time zone', 'created_at:timestamp with time zone',
       'updated_at:timestamp with time zone', 'stripe_payment_intent_id:text',
       'stripe_charge_id:text', 'stripe_transfer_reversal_id:text',
-      'stripe_application_fee_refund_id:text'
+      'stripe_application_fee_refund_id:text', 'transfer_reversal_amount_minor:bigint',
+      'application_fee_refund_amount_minor:bigint', 'policy_verified:boolean',
+      'policy_failure_code:text'
     ]::text[]) collate "C")
   $$,
   'refund column types are exact and refund money uses bigint'

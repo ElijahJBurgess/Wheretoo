@@ -456,7 +456,7 @@ select throws_ok(
     )
   $$,
   'P0001',
-  'CHECKOUT_ALREADY_EXISTS',
+  'IDEMPOTENCY_CONFLICT',
   'a persisted request id with a different tier is an idempotency conflict'
 );
 
@@ -470,7 +470,7 @@ select throws_ok(
     )
   $$,
   'P0001',
-  'CHECKOUT_ALREADY_EXISTS',
+  'IDEMPOTENCY_CONFLICT',
   'a persisted request id with a different buyer name is an idempotency conflict'
 );
 
@@ -484,7 +484,7 @@ select throws_ok(
     )
   $$,
   'P0001',
-  'CHECKOUT_ALREADY_EXISTS',
+  'IDEMPOTENCY_CONFLICT',
   'a persisted request id with a different buyer email is an idempotency conflict'
 );
 
@@ -498,7 +498,7 @@ select throws_ok(
     )
   $$,
   'P0001',
-  'CHECKOUT_ALREADY_EXISTS',
+  'IDEMPOTENCY_CONFLICT',
   'a persisted request id with a different confirmation bearer hash is an idempotency conflict'
 );
 

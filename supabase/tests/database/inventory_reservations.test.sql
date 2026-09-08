@@ -635,7 +635,7 @@ select throws_ok(
       'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
     )
   $$,
-  'P0001', 'CHECKOUT_ALREADY_EXISTS',
+  'P0001', 'IDEMPOTENCY_CONFLICT',
   'a malicious same-request retry with a mismatched token hash is rejected'
 );
 
