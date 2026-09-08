@@ -89,6 +89,39 @@ where receipts.stripe_event_id in (
 
 do $cleanup_admission$
 begin
+  -- Recovery-only never deletes a review-held or economically unverified row.
+  -- Recheck after acquiring every lifecycle/table lock, not just at HTTP return.
+  if '__TASK14_REFUND_RECOVERY_ONLY__' = '1' and (
+    (select count(*) from task17_cleanup_namespace) <> 1
+    or (select count(*) from task17_cleanup_fixture) <> 1
+    or (select count(*) from task17_cleanup_orders) <> 1
+    or (select count(*) from public.orders as orders
+      join task17_cleanup_orders as target on target.id = orders.id
+      where orders.livemode = false and orders.status = 'refunded'
+        and orders.reconciliation_status = 'reconciled'
+        and orders.quantity = 3 and orders.currency = 'usd'
+        and orders.subtotal_minor = 5500 and orders.total_minor = 5500
+        and orders.application_fee_amount_minor = 425
+        and orders.stripe_destination_account_id = '__TASK17_CONNECTED_ACCOUNT_ID__') <> 1
+    or (select count(*) from task17_cleanup_refunds) <> 1
+    or (select count(*) from public.refunds as refunds
+      join public.orders as orders on orders.id = refunds.order_id
+      join task17_cleanup_orders as target on target.id = orders.id
+      where refunds.status = 'succeeded' and refunds.policy_verified
+        and refunds.policy_failure_code is null and refunds.currency = 'usd'
+        and refunds.amount_minor = 5500 and refunds.reverse_transfer and refunds.refund_application_fee
+        and refunds.transfer_reversal_amount_minor = 5500 and refunds.application_fee_refund_amount_minor = 425
+        and refunds.stripe_transfer_reversal_id is not null and refunds.stripe_application_fee_refund_id is not null
+        and refunds.stripe_payment_intent_id = orders.stripe_payment_intent_id
+        and refunds.stripe_charge_id = orders.stripe_charge_id) <> 1
+    or (select count(*) from public.tickets where order_id in (select id from task17_cleanup_orders)) <> 3
+    or (select count(*) from public.tickets where order_id in (select id from task17_cleanup_orders)
+      and status = 'refunded' and refunded_at is not null) <> 3
+    or exists (select 1 from private.checkout_runtime_control where singleton and checkout_creation_enabled)
+  ) then
+    raise exception using errcode = 'P0001', message = 'TASK14_RECOVERY_CLEANUP_UNSAFE';
+  end if;
+
   if exists (
     select 1 from public.disputes
     where order_id in (select id from task17_cleanup_orders)

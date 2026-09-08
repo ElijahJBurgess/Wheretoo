@@ -143,7 +143,10 @@ for argument in "$@"; do
   fi
   previous=$argument
 done
-if grep -q 'account_diagnostic' "$config_file"; then
+if grep -q 'recover_refund' "$config_file"; then
+  printf '%s\\n' 'curl-action recover_refund' >> "$FAKE_COMMAND_LOG"
+  printf '%s\\n' "$FAKE_RECOVERY_RESPONSE"
+elif grep -q 'account_diagnostic' "$config_file"; then
   printf '%s\\n' 'curl-action account_diagnostic' >> "$FAKE_COMMAND_LOG"
   printf '%s\\n' "$FAKE_DIAGNOSTIC_RESPONSE"
 elif grep -q 'checkout_diagnostic' "$config_file"; then
@@ -229,6 +232,22 @@ fi
 }
 
 describe('Task 17 managed proof runner', () => {
+  it.each([true, false])('Task14 recovery-only never enables checkout or creates/retire objects (certified=%s)', async (certified) => {
+    const result = await runRunner(false, false, {
+      TASK14_REFUND_RECOVERY_ONLY: '1',
+      FAKE_RESIDUAL_FIXTURE_RESPONSE: '{"rows":[{"residual_fixture_candidate":"task17_checkout0001","residual_fixture_exact":true}]}',
+      FAKE_RECOVERY_RESPONSE: JSON.stringify({ ok: true, livemode: false, amount: 5500, reversal_amount: 5500, application_fee_refund_amount: 425, order_refunded: certified, reconciled: certified, refund_count: 1, policy_verified: certified, ticket_count: 3, invalid_ticket_count: 3, refunded_ticket_count: 3 }),
+    })
+    expect(result.exitCode).toBe(certified ? 0 : 1)
+    expect(result.log).toContain('curl-action recover_refund')
+    expect(result.log).not.toContain('curl-action fixture_preflight')
+    expect(result.log).not.toContain('curl-action checkout_diagnostic')
+    expect(result.log).not.toContain('curl-action retire_connected_account')
+    expect(result.log).not.toContain('with enabled as')
+    expect(result.log).not.toContain('vitest run')
+    expect(result.log.includes('task17_cleanup_receipts')).toBe(certified)
+    expect(result.materializedExists).toBe(false)
+  })
   const exactResidual = '{"rows":[{"residual_fixture_candidate":"task17_oldfixture01","residual_fixture_exact":true}]}'
   const exactResidualCleanup = '{"ok":true,"stable_fixture":true,"fixture_reusable":true,"event_count":1,"organizer_count":1,"auth_user_inert":true,"event_sellable":false,"public_projection_count":0,"active_tier_count":2,"tier_count":2,"connect_count":1,"order_count":1,"item_count":2,"ticket_count":0,"receipt_count":1,"refund_count":0,"dispute_count":0,"database_cleanup_required":true,"connected_account_closed":false,"connected_account_preserved":true}'
 

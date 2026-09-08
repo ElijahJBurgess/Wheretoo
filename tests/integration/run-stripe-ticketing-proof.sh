@@ -49,6 +49,7 @@ TEARDOWN_FAILURE=0
 TASK14_BROWSER_PROJECT=${TASK14_BROWSER_PROJECT-}
 TASK14_FIXTURE_FILE=""
 TASK14_SETTLEMENT_FAILED=0
+TASK14_REFUND_RECOVERY_ONLY=${TASK14_REFUND_RECOVERY_ONLY-0}
 
 verify_task14_browser_prerequisites() {
   VITE_MAPBOX_ACCESS_TOKEN=$(read_public_env VITE_MAPBOX_ACCESS_TOKEN VITE_MAPBOX_ACCESS_TOKEN)
@@ -137,7 +138,7 @@ temporary_secret_count() {
     const fs = require("node:fs");
     const parsed = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
     const secrets = Array.isArray(parsed) ? parsed : (parsed.secrets ?? []);
-    const names = new Set(["TASK17_PROOF_TOKEN", "TASK17_FIXTURE_PREFIX", "TASK17_CONNECTED_ACCOUNT_ID", "TASK17_CLOSE_CONNECTED_ACCOUNT"]);
+    const names = new Set(["TASK17_PROOF_TOKEN", "TASK17_FIXTURE_PREFIX", "TASK17_CONNECTED_ACCOUNT_ID", "TASK17_CLOSE_CONNECTED_ACCOUNT", "TASK17_REFUND_RECOVERY_ONLY"]);
     process.stdout.write(String(secrets.filter((item) => names.has(item.name)).length));
   ' "$list_file"
 }
@@ -265,6 +266,7 @@ delete_fixture_runtime() {
   TASK17_CLEANUP_FIXTURE_PREFIX="$TEST_STRIPE_FIXTURE_PREFIX" \
     TASK17_CLEANUP_CONNECTED_ACCOUNT_ID="$TEST_CONNECTED_ACCOUNT_ID" \
     TASK17_CLEANUP_ONLY="$TASK13_CLEANUP_ONLY" \
+    TASK17_REFUND_RECOVERY_ONLY="${TASK14_REFUND_RECOVERY_ONLY-0}" \
     render_task17_cleanup_sql > "$database_cleanup_sql" || return 1
   chmod 600 "$database_cleanup_sql"
   pnpm exec supabase db query --linked --file "$database_cleanup_sql" \
@@ -516,7 +518,7 @@ NODE
     fi
   fi
 
-  if [ "${TASK13_CLEANUP_ONLY-0}" -eq 1 ] && [ -n "$TEMP_DIR" ]; then
+  if { [ "${TASK13_CLEANUP_ONLY-0}" -eq 1 ] || [ "${TASK14_REFUND_RECOVERY_ONLY-0}" -eq 1 ]; } && [ -n "$TEMP_DIR" ]; then
     verify_checkout_disabled
     [ $? -eq 0 ] || TEARDOWN_FAILURE=1
   fi
@@ -529,7 +531,7 @@ NODE
   if [ "$TEMP_SECRETS_SET" -eq 1 ]; then
     pnpm exec supabase secrets unset \
       TASK17_PROOF_TOKEN TASK17_FIXTURE_PREFIX TASK17_CONNECTED_ACCOUNT_ID \
-      TASK17_CLOSE_CONNECTED_ACCOUNT \
+      TASK17_CLOSE_CONNECTED_ACCOUNT TASK17_REFUND_RECOVERY_ONLY \
       --project-ref "$PROJECT_REF" >/dev/null
     [ $? -eq 0 ] || TEARDOWN_FAILURE=1
   fi
@@ -603,6 +605,12 @@ TASK13_FIXTURE_PREFLIGHT_ONLY=${TASK13_FIXTURE_PREFLIGHT_ONLY-0}
 TASK13_CHECKOUT_DIAGNOSTIC_ONLY=${TASK13_CHECKOUT_DIAGNOSTIC_ONLY-0}
 TASK13_BROWSER_DIAGNOSTIC_ONLY=${TASK13_BROWSER_DIAGNOSTIC_ONLY-0}
 TASK13_CLEANUP_ONLY=${TASK13_CLEANUP_ONLY-0}
+case "$TASK14_REFUND_RECOVERY_ONLY" in 0|1) ;; *) exit 1 ;; esac
+if [ "$TASK14_REFUND_RECOVERY_ONLY" -eq 1 ]; then
+  [ -z "$TASK14_BROWSER_PROJECT" ] &&
+    [ "$TASK13_FIXTURE_PREFLIGHT_ONLY$TASK13_CHECKOUT_DIAGNOSTIC_ONLY$TASK13_BROWSER_DIAGNOSTIC_ONLY$TASK13_CLEANUP_ONLY" = 0000 ] || exit 1
+  TASK14_SETTLEMENT_FAILED=1
+fi
 
 case "$TASK14_BROWSER_PROJECT" in
   ''|mobile-chromium|desktop-chromium) ;;
@@ -684,7 +692,7 @@ chmod 600 "$projects_file" "$environment_file"
 if [ -n "$TASK14_BROWSER_PROJECT" ]; then
   verify_task14_browser_prerequisites
 fi
-if [ "$TASK13_CLEANUP_ONLY" -eq 1 ]; then
+if [ "$TASK13_CLEANUP_ONLY" -eq 1 ] || [ "$TASK14_REFUND_RECOVERY_ONLY" -eq 1 ]; then
   capture_checkout_switch
   [ "$(tr -d '\r\n' < "$CHECKOUT_SWITCH_STATE_FILE")" = false ] || {
     CHECKOUT_SWITCH_CAPTURED=0
@@ -733,15 +741,19 @@ if [ "$TASK13_CLEANUP_ONLY" -eq 1 ]; then
         and events.publicly_authorized_action_id is null
       join public.orders as orders
         on orders.event_id = events.id and orders.organizer_id = organizers.id
-        and orders.livemode = false and orders.status = 'expired'
-        and orders.reconciliation_status = 'pending'
+        and orders.livemode = false
+        and (( $TASK14_REFUND_RECOVERY_ONLY = 0 and orders.status = 'expired' and orders.reconciliation_status = 'pending')
+          or ($TASK14_REFUND_RECOVERY_ONLY = 1 and orders.status = 'requires_review'
+            and orders.reconciliation_status = 'requires_review'
+            and orders.failure_code = 'REFUND_POLICY_MISMATCH'
+            and events.moderation_status = 'clear'))
         and orders.quantity = 3 and orders.currency = 'usd'
         and orders.subtotal_minor = 5500 and orders.tax_amount_minor = 0
         and orders.total_minor = 5500
         and orders.application_fee_amount_minor = 425
         and orders.stripe_destination_account_id = '$TEST_CONNECTED_ACCOUNT_ID'
         and orders.stripe_checkout_session_id ~ '^cs_test_[A-Za-z0-9]+$'
-        and orders.stripe_payment_intent_id is null
+        and (($TASK14_REFUND_RECOVERY_ONLY = 0 and orders.stripe_payment_intent_id is null
         and orders.stripe_charge_id is null and orders.stripe_transfer_id is null
         and orders.stripe_application_fee_id is null
         and orders.stripe_balance_transaction_id is null
@@ -749,7 +761,15 @@ if [ "$TASK13_CLEANUP_ONLY" -eq 1 ]; then
         and orders.last_stripe_event_id is null
         and orders.paid_at is null and orders.failed_at is null
         and orders.expired_at is not null and orders.refunded_at is null
-        and orders.reservation_expires_at <= statement_timestamp()
+        and orders.reservation_expires_at <= statement_timestamp())
+        or ($TASK14_REFUND_RECOVERY_ONLY = 1
+          and orders.buyer_email = fixture_namespace.prefix || '-paid@example.invalid'
+          and orders.stripe_payment_intent_id ~ '^pi_[A-Za-z0-9]+$'
+          and orders.stripe_charge_id ~ '^ch_[A-Za-z0-9]+$'
+          and orders.stripe_transfer_id ~ '^tr_[A-Za-z0-9]+$'
+          and orders.stripe_application_fee_id ~ '^fee_[A-Za-z0-9]+$'
+          and orders.stripe_balance_transaction_id ~ '^txn_[A-Za-z0-9]+$'
+          and orders.paid_at is not null and orders.refunded_at is null))
     ), exact_candidate as (
       select candidate.prefix,
         (select count(*) from fixture_namespace) = 1
@@ -774,11 +794,30 @@ if [ "$TASK13_CLEANUP_ONLY" -eq 1 ]; then
         and (select count(*) from public.order_items where order_id = candidate.order_id) = 2
         and (select count(*) from public.order_items as items join public.ticket_tiers as tiers on tiers.id = items.ticket_tier_id where items.order_id = candidate.order_id and tiers.name = 'Task 17 General Admission' and items.tier_name = tiers.name and items.tier_version = tiers.version and items.quantity = 2 and items.unit_amount_minor = 1500 and items.subtotal_minor = 3000 and items.currency = 'usd') = 1
         and (select count(*) from public.order_items as items join public.ticket_tiers as tiers on tiers.id = items.ticket_tier_id where items.order_id = candidate.order_id and tiers.name = 'Task 17 VIP' and items.tier_name = tiers.name and items.tier_version = tiers.version and items.quantity = 1 and items.unit_amount_minor = 2500 and items.subtotal_minor = 2500 and items.currency = 'usd') = 1
-        and not exists (select 1 from public.tickets where order_id = candidate.order_id)
-        and not exists (select 1 from public.refunds where order_id = candidate.order_id)
+        and (($TASK14_REFUND_RECOVERY_ONLY = 0
+          and not exists (select 1 from public.tickets where order_id = candidate.order_id)
+          and not exists (select 1 from public.refunds where order_id = candidate.order_id))
+        or ($TASK14_REFUND_RECOVERY_ONLY = 1
+          and (select count(*) from public.tickets where order_id = candidate.order_id) = 3
+          and (select count(*) from public.tickets where order_id = candidate.order_id and status = 'invalid') = 3
+          and (select count(*) from public.refunds where order_id = candidate.order_id) = 1
+          and (select count(*) from public.refunds as refunds join public.orders as orders on orders.id = refunds.order_id
+            where orders.id = candidate.order_id and refunds.status = 'succeeded' and refunds.currency = 'usd'
+              and refunds.amount_minor = 5500 and refunds.reverse_transfer and refunds.refund_application_fee
+              and refunds.stripe_payment_intent_id = orders.stripe_payment_intent_id
+              and refunds.stripe_charge_id = orders.stripe_charge_id
+              and refunds.stripe_refund_id ~ '^re_[A-Za-z0-9]+$'
+              and refunds.stripe_transfer_reversal_id ~ '^trr_[A-Za-z0-9]+$'
+              and refunds.transfer_reversal_amount_minor = 5500
+              and refunds.stripe_application_fee_refund_id is null
+              and refunds.application_fee_refund_amount_minor = 0
+              and not refunds.policy_verified and refunds.policy_failure_code = 'REFUND_POLICY_MISMATCH') = 1))
         and not exists (select 1 from public.disputes where order_id = candidate.order_id)
-        and (select count(*) from public.stripe_webhook_events where stripe_object_id = candidate.session_id) = 1
-        and (select count(*) from public.stripe_webhook_events where stripe_object_id = candidate.session_id and event_type = 'checkout.session.completed' and livemode = false and processing_status = 'processed' and processed_at is not null and error_code = 'STRIPE_OBJECT_INVALID') = 1
+        and (($TASK14_REFUND_RECOVERY_ONLY = 0
+          and (select count(*) from public.stripe_webhook_events where stripe_object_id = candidate.session_id) = 1
+          and (select count(*) from public.stripe_webhook_events where stripe_object_id = candidate.session_id and event_type = 'checkout.session.completed' and livemode = false and processing_status = 'processed' and processed_at is not null and error_code = 'STRIPE_OBJECT_INVALID') = 1)
+        or ($TASK14_REFUND_RECOVERY_ONLY = 1
+          and exists (select 1 from public.stripe_webhook_events where stripe_object_id = candidate.session_id and event_type = 'checkout.session.completed' and livemode = false and processing_status = 'processed' and processed_at is not null and error_code is null)))
         as residual_fixture_exact
       from candidate
     )
@@ -922,6 +961,7 @@ TEST_FUNCTION_URL="${TEST_SUPABASE_URL%/}/functions/v1/task17-transaction-driver
   printf 'TASK17_FIXTURE_PREFIX=%s\n' "$TEST_STRIPE_FIXTURE_PREFIX"
   printf 'TASK17_CONNECTED_ACCOUNT_ID=%s\n' "$TEST_CONNECTED_ACCOUNT_ID"
   printf 'TASK17_CLOSE_CONNECTED_ACCOUNT=false\n'
+  printf 'TASK17_REFUND_RECOVERY_ONLY=%s\n' "$TASK14_REFUND_RECOVERY_ONLY"
 } > "$TEMP_SECRET_FILE"
 write_cleanup_config
 write_driver_request_config "$DIAGNOSTIC_CURL_CONFIG" \
@@ -958,6 +998,28 @@ DRIVER_DELETE_REQUIRED=1
 pnpm exec supabase functions deploy task17-transaction-driver \
   --project-ref "$PROJECT_REF" --no-verify-jwt --import-map deno.json >/dev/null
 DRIVER_DEPLOYED=1
+
+if [ "$TASK14_REFUND_RECOVERY_ONLY" -eq 1 ]; then
+  recovery_config="$TEMP_DIR/recovery.curl"
+  recovery_response="$TEMP_DIR/recovery.json"
+  write_driver_request_config "$recovery_config" \
+    '{\"action\":\"recover_refund\",\"order_handle\":\"paid\"}'
+  curl --silent --show-error --fail-with-body --config "$recovery_config" > "$recovery_response"
+  RECOVERY_RESPONSE="$recovery_response" node --input-type=module <<'NODE'
+import fs from 'node:fs'
+const value = JSON.parse(fs.readFileSync(process.env.RECOVERY_RESPONSE, 'utf8'))
+const expected = { ok: true, livemode: false, amount: 5500, reversal_amount: 5500,
+  application_fee_refund_amount: 425, order_refunded: true, reconciled: true,
+  refund_count: 1, policy_verified: true, ticket_count: 3, invalid_ticket_count: 3,
+  refunded_ticket_count: 3 }
+if (Object.keys(value).sort().join(',') !== Object.keys(expected).sort().join(',') ||
+  Object.entries(expected).some(([key, expectedValue]) => value[key] !== expectedValue)) process.exit(1)
+process.stdout.write('Task 14 same-refund durable recovery: pass\n')
+NODE
+  TASK14_SETTLEMENT_FAILED=0
+  ACCOUNT_OWNERSHIP_ACCEPTED=1
+  exit 0
+fi
 
 if [ "$TASK13_CLEANUP_ONLY" -eq 1 ]; then
   ACCOUNT_OWNERSHIP_ACCEPTED=1

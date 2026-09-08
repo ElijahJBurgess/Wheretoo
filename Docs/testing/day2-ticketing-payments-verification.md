@@ -87,6 +87,17 @@ The current checkout-integrity Task 14 browser proof runs four buyer-only cases 
 
 Both cases reuse the committed Task 13 driver's stable audit-tombstone fixture through its `setup` action. Each viewport runs visual proof before payment and completes exact cleanup before the next viewport starts, preserving the canonical one-refund/three-ticket bounds without creating new immutable event rows. Captures use separate `test-results/e2e/task14/<project>/visual` and `purchase` directories so later invocations do not erase earlier evidence.
 
+Browser settlement now resolves the same authoritative TEST refund after creation, including a create/enrich race. It never repeats creation when inspection already contains a refund. Evidence polling is bounded to five attempts, requires exact provider identities/currency and the 5500 transfer reversal plus 425 application-fee refund, and only then enriches existing metadata. A fresh signed `refund.updated` must leave one refunded/reconciled order, one policy-verified succeeded refund, and exactly three refunded (non-admitting) tickets before financial cleanup.
+
+The exceptional current paid-review residue has a separate owner-controlled command (using the already-configured disposable TEST account):
+
+```sh
+TASK14_REFUND_RECOVERY_ONLY=1 TEST_CONNECTED_ACCOUNT_DISPOSABLE=1 \
+  tests/integration/run-stripe-ticketing-proof.sh
+```
+
+This mode requires checkout already disabled and the exact inert, published/clear fixture with two active tiers, one Connect binding, one succeeded-but-policy-mismatched refund with 5500 reversal/zero fallback fee evidence, and three invalid tickets. It cannot prepare a fixture, enable checkout, create a checkout/refund, or retire the account. Contradictions or exhausted missing evidence fail closed and preserve financial rows. After recovery, locked SQL rechecks terminal economics before exact runtime cleanup and audit-tombstone certification; temporary function, secrets, and local materialization are removed. Normal fixture admission is unchanged. This command is not a substitute for rerunning both browser viewports and inspecting their safe screenshots.
+
 The browser process is intentionally least-privileged and must not own destructive cleanup. Run it only through the committed guard, supplying one fully onboarded disposable TEST recipient:
 
 ```sh

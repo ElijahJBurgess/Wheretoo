@@ -23,7 +23,7 @@ test.describe('native ticket purchase journey', () => {
     await expect(page.getByText('2 tickets')).toBeVisible()
     await expect(page.getByText('Task 17 VIP')).toBeVisible()
     await expect(page.getByText('1 ticket')).toBeVisible()
-    await expect(page.getByText('$55.00')).toBeVisible()
+    await expect(page.locator('dl > div').filter({ has: page.getByText('Total', { exact: true }) }).getByRole('definition')).toHaveText('$55.00')
 
     await page.getByRole('button', { name: 'Continue to secure payment' }).click()
     await expect(page.getByLabel('Your name')).toBeFocused()
@@ -40,7 +40,7 @@ test.describe('native ticket purchase journey', () => {
     await expect(page.getByRole('heading', { name: "You're all set", level: 1 })).toBeVisible()
     await expect(page.getByText('Task 17 General Admission × 2')).toBeVisible()
     await expect(page.getByText('Task 17 VIP × 1')).toBeVisible()
-    await expect(page.getByText('$55.00')).toBeVisible()
+    await expect(page.locator('dl > div').filter({ has: page.getByText('Total', { exact: true }) }).getByRole('definition')).toHaveText('$55.00')
     await expectMatchingCheckoutAttemptCleared(page)
     await page.reload()
     await expect(page.getByRole('heading', { name: "You're all set", level: 1 })).toBeVisible()

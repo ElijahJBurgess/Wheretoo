@@ -33,12 +33,37 @@ describe('Task 14 stable buyer fixture and failure cleanup', () => {
       if (action === 'expire_checkout') return { ok: true, livemode: false, status: 'expired' }
       if (action === 'deliver') return { status: 200, receipt: { processing_status: 'processed' } }
       if (action === 'create_refund') return { ok: true, livemode: false, status: 'succeeded', amount: 5500, reversal_amount: 5500, application_fee_refund_amount: 425 }
+      if (action === 'recover_refund') return { ok: true, livemode: false, amount: 5500, reversal_amount: 5500, application_fee_refund_amount: 425, order_refunded: true, reconciled: true, refund_count: 1, policy_verified: true, ticket_count: 3, invalid_ticket_count: 3, refunded_ticket_count: 3 }
       throw new Error('unexpected action')
     }
     await settle(response, '11111111-1111-4111-8111-111111111111')
     expect(actions).toEqual(state === 'paid'
-      ? ['inspect', 'checkout_status', 'deliver', 'create_refund']
+      ? ['inspect', 'checkout_status', 'deliver', 'create_refund', 'recover_refund']
       : state === 'open' ? ['inspect', 'checkout_status', 'expire_checkout', 'deliver'] : ['inspect', 'checkout_status', 'deliver'])
+  })
+
+  it('recovers a create/enrich race without calling create twice', async () => {
+    const actions: string[] = []
+    await fixtureHarness.settleBrowserCheckout(async (action) => {
+      actions.push(action)
+      if (action === 'inspect') return { orders: [{ order_handle: 'paid' }] }
+      if (action === 'checkout_status') return { ok: true, livemode: false, status: 'complete', payment_status: 'paid', charge_paid: true }
+      if (action === 'deliver') return { status: 200, receipt: { processing_status: 'processed' } }
+      if (action === 'create_refund') throw new Error('create/enrich race')
+      return { ok: true, livemode: false, amount: 5500, reversal_amount: 5500, application_fee_refund_amount: 425, order_refunded: true, reconciled: true, refund_count: 1, policy_verified: true, ticket_count: 3, invalid_ticket_count: 3, refunded_ticket_count: 3 }
+    }, 'event')
+    expect(actions).toEqual(['inspect', 'checkout_status', 'deliver', 'create_refund', 'recover_refund'])
+  })
+  it('never requests creation when inspection already contains the existing refund', async () => {
+    let created = 0
+    await fixtureHarness.settleBrowserCheckout(async (action) => {
+      if (action === 'inspect') return { orders: [{ order_handle: 'paid' }], refunds: [{ order_handle: 'paid' }] }
+      if (action === 'checkout_status') return { ok: true, livemode: false, status: 'complete', payment_status: 'paid', charge_paid: true }
+      if (action === 'deliver') return { status: 200, receipt: { processing_status: 'processed' } }
+      if (action === 'create_refund') { created++; throw new Error('already exists') }
+      return { ok: true, livemode: false, amount: 5500, reversal_amount: 5500, application_fee_refund_amount: 425, order_refunded: true, reconciled: true, refund_count: 1, policy_verified: true, ticket_count: 3, invalid_ticket_count: 3, refunded_ticket_count: 3 }
+    }, 'event')
+    expect(created).toBe(0)
   })
 
   it('refuses live, ambiguous, duplicate-order and failed-refund cleanup evidence', async () => {

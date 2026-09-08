@@ -3,6 +3,19 @@ import { runInNewContext } from 'node:vm'
 import { chromium, expect as browserExpect } from '@playwright/test'
 import { expect, it } from 'vitest'
 
+it('buyer total assertions identify Total when Subtotal has the same amount', async () => {
+  const journey = readFileSync(new URL('../e2e/ticket-purchase.spec.ts', import.meta.url), 'utf8')
+  const assertions = journey.split('\n').filter((line) => line.includes('await expect(') && line.includes('$55.00'))
+  expect(assertions.length).toBe(2)
+  const browser = await chromium.launch({ headless: true })
+  try {
+    const page = await browser.newPage()
+    await page.route('**/*', (route) => route.abort())
+    await page.setContent('<dl><div><dt>Subtotal</dt><dd>$55.00</dd></div><div><dt>Total</dt><dd>$55.00</dd></div></dl>')
+    await runInNewContext(`(async () => { ${assertions.join('\n')} })()`, { page, expect: browserExpect.configure({ timeout: 500 }) })
+  } finally { await browser.close() }
+})
+
 it('buyer journey validates both field errors with the summary alert also present', async () => {
   const journey = readFileSync(new URL('../e2e/ticket-purchase.spec.ts', import.meta.url), 'utf8')
   const start = journey.indexOf("    await expect(page.getByLabel('Your name')).toBeFocused()")

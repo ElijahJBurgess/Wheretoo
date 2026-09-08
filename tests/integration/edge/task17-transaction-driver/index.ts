@@ -38,6 +38,9 @@ import {
   exactFixtureModerationTarget,
   findExactFixtureAuthUser,
   isCheckoutDiagnosticCandidate,
+  recoveredRefundStateIsSafe,
+  recoverExistingRefundEvidence,
+  recoveryDriverActionAllowed,
   requirePublicApiKey,
   restoreSellableFixture,
   retireCertifiedConnectedAccount,
@@ -65,6 +68,7 @@ const actions = new Set([
   "reconcile_payment",
   "reconcile_events",
   "create_refund",
+  "recover_refund",
   "cleanup",
   "retire_connected_account",
 ]);
@@ -1667,6 +1671,128 @@ async function createRefund(
   };
 }
 
+async function recoverRefund(
+  orderHandleValue: unknown,
+): Promise<Record<string, unknown>> {
+  if (orderHandleValue !== "paid") throw new Error("INPUT");
+  const client = getServiceClient();
+  const order = await proofOrder(orderHandleValue);
+  const scope = await client.from("orders").select(
+    "event_id,organizer_id,livemode,currency,quantity,stripe_destination_account_id",
+  )
+    .eq("id", order.id).single();
+  const fixture = await client.from("events").select("id,organizer_id")
+    .eq("title", `${fixturePrefix()} transaction`).single();
+  if (
+    scope.error || fixture.error || scope.data.event_id !== fixture.data.id ||
+    scope.data.organizer_id !== fixture.data.organizer_id ||
+    scope.data.livemode !== false ||
+    scope.data.currency !== "usd" || scope.data.quantity !== 3 ||
+    scope.data.stripe_destination_account_id !== connectedAccountId() ||
+    order.total_minor !== 5500 || order.application_fee_amount_minor !== 425 ||
+    !["paid", "requires_review", "refunded"].includes(order.status)
+  ) throw new Error("INPUT");
+  const persisted = await client.from("refunds")
+    .select(
+      "stripe_refund_id,stripe_transfer_reversal_id,stripe_application_fee_refund_id",
+    )
+    .eq("order_id", order.id);
+  if (persisted.error || persisted.data.length > 1) throw new Error("DATABASE");
+  const existing = persisted.data[0];
+  const stripe = getStripe();
+  let verifiedRefundId: string | undefined;
+  const boundedRequest = { timeout: 10_000, maxNetworkRetries: 0 };
+  const result = await recoverExistingRefundEvidence({
+    orderId: order.id,
+    paymentIntentId: stripeId(order.stripe_payment_intent_id, "pi_"),
+    chargeId: stripeId(order.stripe_charge_id, "ch_"),
+    transferId: stripeId(order.stripe_transfer_id, "tr_"),
+    applicationFeeId: stripeId(order.stripe_application_fee_id, "fee_"),
+    connectedAccountId: connectedAccountId(),
+    refundId: existing?.stripe_refund_id ?? null,
+    reversalId: existing?.stripe_transfer_reversal_id ?? null,
+    feeRefundId: existing?.stripe_application_fee_refund_id ?? null,
+  }, {
+    read: async () => {
+      const [refunds, transfer, fee, feeRefunds] = await Promise.all([
+        stripe.refunds.list(
+          { charge: order.stripe_charge_id!, limit: 10 },
+          boundedRequest,
+        ),
+        stripe.transfers.retrieve(order.stripe_transfer_id!, {
+          expand: ["reversals"],
+        }, boundedRequest),
+        stripe.applicationFees.retrieve(
+          order.stripe_application_fee_id!,
+          {},
+          boundedRequest,
+        ),
+        stripe.applicationFees.listRefunds(order.stripe_application_fee_id!, {
+          limit: 10,
+        }, boundedRequest),
+      ]);
+      if (refunds.data.length === 1 && !refunds.has_more) {
+        const retrieved = await stripe.refunds.retrieve(
+          refunds.data[0].id,
+          {},
+          boundedRequest,
+        );
+        if (retrieved.id !== refunds.data[0].id) {
+          throw new Error("TASK14_REFUND_EVIDENCE_CONFLICT");
+        }
+        refunds.data[0] = retrieved;
+      }
+      return { refunds, transfer, fee, feeRefunds } as unknown as Awaited<
+        ReturnType<Parameters<typeof recoverExistingRefundEvidence>[1]["read"]>
+      >;
+    },
+    update: async (id, metadata) => {
+      const updated = await stripe.refunds.update(
+        id,
+        { metadata },
+        boundedRequest,
+      );
+      assertTestMode(updated);
+      if (updated.id !== id) throw new Error("STRIPE");
+      verifiedRefundId = id;
+    },
+    pause: () => new Promise((resolve) => setTimeout(resolve, 500)),
+  });
+  if (!verifiedRefundId) throw new Error("STRIPE");
+  // Fresh receipt, canonical signed webhook and provider retrieval: no direct DB repair.
+  const descriptor: EventDescriptor = {
+    event_id: `evt_task17${crypto.randomUUID().replaceAll("-", "")}`,
+    type: "refund.updated",
+    object: "refund",
+    object_id: verifiedRefundId,
+    created: Math.floor(Date.now() / 1000),
+  };
+  const response = await createStripeWebhookHandler(
+    createDefaultStripeWebhookDependencies(),
+  )(await signedRequest(descriptor));
+  if (response.status !== 200) throw new Error("STRIPE");
+  const state = await inspect(fixture.data.id);
+  const receipt = await client.from("stripe_webhook_events").select(
+    "processing_status,error_code",
+  )
+    .eq("stripe_event_id", descriptor.event_id).single();
+  if (
+    receipt.error || receipt.data.processing_status !== "processed" ||
+    receipt.data.error_code !== null ||
+    !recoveredRefundStateIsSafe(state)
+  ) throw new Error("STRIPE");
+  return {
+    ...result,
+    order_refunded: true,
+    reconciled: true,
+    refund_count: 1,
+    policy_verified: true,
+    ticket_count: 3,
+    invalid_ticket_count: 3,
+    refunded_ticket_count: 3,
+  };
+}
+
 async function cleanup(
   publicClient: SupabaseClient,
 ): Promise<Record<string, unknown>> {
@@ -2088,6 +2214,12 @@ Deno.serve(async (request) => {
       return json({ ok: false }, 400);
     }
     const input = body as Record<string, unknown>;
+    if (
+      !recoveryDriverActionAllowed(
+        Deno.env.get("TASK17_REFUND_RECOVERY_ONLY"),
+        action,
+      )
+    ) return json({ ok: false }, 403);
     if (action === "account_diagnostic") return json(await serverProof());
     if (action === "checkout_diagnostic") {
       return json(await checkoutDiagnostic());
@@ -2122,6 +2254,9 @@ Deno.serve(async (request) => {
     }
     if (action === "create_refund") {
       return json(await createRefund(input.order_handle));
+    }
+    if (action === "recover_refund") {
+      return json(await recoverRefund(input.order_handle));
     }
     if (action === "cleanup") {
       const closeConnectedAccount = input.close_connected_account;
@@ -2178,6 +2313,8 @@ Deno.serve(async (request) => {
         "CLEANUP_PRODUCT_ARCHIVE_FAILED",
         "LIVE_MODE_FORBIDDEN",
         "STRIPE",
+        "TASK14_REFUND_EVIDENCE_RETRYABLE",
+        "TASK14_REFUND_EVIDENCE_CONFLICT",
       ].includes(error.message))
       ? error.message
       : "UNKNOWN";

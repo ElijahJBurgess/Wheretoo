@@ -13,6 +13,10 @@ render_task17_cleanup_sql() {
     0|1) ;;
     *) return 1 ;;
   esac
+  case "${TASK17_REFUND_RECOVERY_ONLY-0}" in
+    0|1) ;;
+    *) return 1 ;;
+  esac
   printf '%s' "$TASK17_CLEANUP_FIXTURE_PREFIX" |
     grep -Eq '^task17_[a-z0-9]{12}$' || return 1
   printf '%s' "$TASK17_CLEANUP_CONNECTED_ACCOUNT_ID" |
@@ -22,5 +26,6 @@ render_task17_cleanup_sql() {
     -e "s/__TASK17_FIXTURE_PREFIX__/$TASK17_CLEANUP_FIXTURE_PREFIX/g" \
     -e "s/__TASK17_CONNECTED_ACCOUNT_ID__/$TASK17_CLEANUP_CONNECTED_ACCOUNT_ID/g" \
     -e "s/__TASK13_CLEANUP_ONLY__/$TASK17_CLEANUP_ONLY/g" \
+    -e "s/__TASK14_REFUND_RECOVERY_ONLY__/${TASK17_REFUND_RECOVERY_ONLY-0}/g" \
     "$TASK17_CLEANUP_SQL_TEMPLATE"
 }

@@ -13,6 +13,170 @@ const prohibitedIdKeyPattern =
 
 export const CONNECT_ACCOUNT_CONFLICT_TARGET = "organizer_id,livemode";
 
+type RecoveryRecord = Record<string, unknown>;
+type RecoveryList = { has_more: boolean; data: RecoveryRecord[] };
+export function recoveryDriverActionAllowed(
+  mode: string | undefined,
+  action: string,
+): boolean {
+  return mode !== "1" || ["recover_refund", "cleanup"].includes(action);
+}
+export function recoveredRefundStateIsSafe(state: RecoveryRecord): boolean {
+  const expected: Record<string, RecoveryRecord> = {
+    orders: { status: "refunded", reconciliation_status: "reconciled" },
+    refunds: {
+      status: "succeeded",
+      policy_verified: true,
+      policy_failure_code: null,
+      amount_minor: 5500,
+      transfer_reversal_amount_minor: 5500,
+      application_fee_refund_amount_minor: 425,
+      reverse_transfer: true,
+      refund_application_fee: true,
+    },
+    tickets: {
+      ticket_count: 3,
+      unique_ticket_count: 3,
+      valid_count: 0,
+      refunded_count: 3,
+      bindings_valid: true,
+      sequences_valid: true,
+      refunded_timestamps_valid: true,
+    },
+  };
+  return Object.entries(expected).every(([key, fields]) => {
+    const rows = state[key];
+    return Array.isArray(rows) && rows.length === 1 && record(rows[0]) &&
+      Object.entries(fields).every(([field, value]) =>
+        rows[0][field] === value
+      );
+  });
+}
+export type ExistingRefundSnapshot = {
+  orderId: string;
+  paymentIntentId: string;
+  chargeId: string;
+  transferId: string;
+  applicationFeeId: string;
+  connectedAccountId: string;
+  refundId: string | null;
+  reversalId: string | null;
+  feeRefundId: string | null;
+};
+
+// TEST driver only: no create capability, no invented economic evidence.
+export async function recoverExistingRefundEvidence(
+  snapshot: ExistingRefundSnapshot,
+  dependencies: {
+    read(): Promise<
+      {
+        refunds: RecoveryList;
+        transfer: RecoveryRecord;
+        fee: RecoveryRecord;
+        feeRefunds: RecoveryList;
+      }
+    >;
+    update(id: string, metadata: Record<string, string>): Promise<void>;
+    pause(): Promise<void>;
+  },
+) {
+  const conflict = () => {
+    throw new Error("TASK14_REFUND_EVIDENCE_CONFLICT");
+  };
+  const id = (value: unknown) =>
+    typeof value === "string" ? value : (value as RecoveryRecord | null)?.id;
+  let refundId = snapshot.refundId;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const { refunds, transfer, fee, feeRefunds } = await dependencies.read();
+    const reversals = transfer.reversals as RecoveryList;
+    if (
+      !reversals ||
+      [refunds, reversals, feeRefunds].some((list) =>
+        list.has_more !== false || !Array.isArray(list.data) ||
+        list.data.length > 1
+      )
+    ) conflict();
+    if (
+      transfer.object !== "transfer" || transfer.id !== snapshot.transferId ||
+      transfer.livemode !== false || transfer.amount !== 5500 ||
+      transfer.currency !== "usd" ||
+      id(transfer.source_transaction) !== snapshot.chargeId ||
+      id(transfer.destination) !== snapshot.connectedAccountId ||
+      fee.object !== "application_fee" ||
+      fee.id !== snapshot.applicationFeeId ||
+      fee.livemode !== false || fee.amount !== 425 || fee.currency !== "usd" ||
+      id(fee.charge) !== snapshot.chargeId ||
+      id(fee.account) !== snapshot.connectedAccountId
+    ) conflict();
+    const refund = refunds.data[0];
+    const reversal = reversals.data[0];
+    const feeRefund = feeRefunds.data[0];
+    const metadata = refund?.metadata as RecoveryRecord | undefined;
+    if (
+      refund &&
+      (refund.object !== "refund" || typeof refund.id !== "string" ||
+        !/^re_[A-Za-z0-9]+$/.test(refund.id) ||
+        (refundId !== null && refund.id !== refundId) ||
+        refund.livemode !== false || refund.status !== "succeeded" ||
+        refund.amount !== 5500 || refund.currency !== "usd" ||
+        id(refund.payment_intent) !== snapshot.paymentIntentId ||
+        id(refund.charge) !== snapshot.chargeId ||
+        metadata?.order_id !== snapshot.orderId ||
+        metadata?.whereto_refund_policy !== "destination_v1" ||
+        metadata?.whereto_reverse_transfer !== "true" ||
+        metadata?.whereto_refund_application_fee !== "true")
+    ) conflict();
+    if (refund) refundId = refund.id as string;
+    if (
+      reversal &&
+      (reversal.object !== "transfer_reversal" ||
+        typeof reversal.id !== "string" ||
+        !/^trr_[A-Za-z0-9]+$/.test(reversal.id) ||
+        reversal.amount !== 5500 || reversal.currency !== "usd" ||
+        id(reversal.transfer) !== snapshot.transferId ||
+        (refundId !== null && id(reversal.source_refund) !== refundId) ||
+        (snapshot.reversalId !== null && reversal.id !== snapshot.reversalId) ||
+        (refund && id(refund.transfer_reversal) !== reversal.id))
+    ) conflict();
+    if (
+      feeRefund &&
+      (feeRefund.object !== "fee_refund" || typeof feeRefund.id !== "string" ||
+        !/^fr_[A-Za-z0-9]+$/.test(feeRefund.id) ||
+        feeRefund.amount !== 425 || feeRefund.currency !== "usd" ||
+        id(feeRefund.fee) !== snapshot.applicationFeeId ||
+        (snapshot.feeRefundId !== null &&
+          feeRefund.id !== snapshot.feeRefundId))
+    ) conflict();
+    if (refund && reversal && feeRefund) {
+      // Existing nonempty metadata must agree; absence alone is recoverable.
+      const enriched = {
+        order_id: snapshot.orderId,
+        whereto_refund_policy: "destination_v1",
+        whereto_reverse_transfer: "true",
+        whereto_refund_application_fee: "true",
+        whereto_transfer_reversal_amount: String(reversal.amount),
+        whereto_application_fee_refund_id: feeRefund.id as string,
+        whereto_application_fee_refund_amount: String(feeRefund.amount),
+      };
+      for (const [key, value] of Object.entries(enriched)) {
+        if (metadata?.[key] !== undefined && metadata[key] !== value) {
+          conflict();
+        }
+      }
+      await dependencies.update(refund.id as string, enriched);
+      return {
+        ok: true,
+        livemode: false,
+        amount: 5500,
+        reversal_amount: 5500,
+        application_fee_refund_amount: 425,
+      };
+    }
+    if (attempt < 4) await dependencies.pause();
+  }
+  throw new Error("TASK14_REFUND_EVIDENCE_RETRYABLE");
+}
+
 export function createFixtureAuthPassword(randomId: string): string {
   if (!uuidPattern.test(randomId)) throw new Error("DATABASE");
   return `${randomId.replaceAll("-", "")}Aa1!`;

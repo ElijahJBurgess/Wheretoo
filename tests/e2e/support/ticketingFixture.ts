@@ -49,10 +49,24 @@ export async function settleBrowserCheckout(invoke: DriverInvoke, eventId: strin
   } })
   if (delivery.status !== 200 || (delivery.receipt as Record<string, unknown>)?.processing_status !== 'processed') unsafe()
   if (paid) {
-    const refund = await invoke('create_refund', input)
-    if (refund.ok !== true || refund.livemode !== false || refund.status !== 'succeeded' || refund.amount !== 5500 ||
-      refund.reversal_amount !== 5500 || refund.application_fee_refund_amount !== 425) unsafe()
+    // Creation can succeed before enrichment fails. Never retry creation here.
+    const existing = inspection.refunds as Array<Record<string, unknown>> | undefined
+    if (existing !== undefined && (!Array.isArray(existing) || existing.length > 1 ||
+      existing.some((refund) => refund.order_handle !== 'paid'))) unsafe()
+    if (!existing?.length) {
+      try { await invoke('create_refund', input) } catch { /* authoritative same-refund recovery below */ }
+    }
+    const refund = await invoke('recover_refund', input)
+    if (!browserRefundRecoveryIsSafe(refund)) unsafe()
   }
+}
+
+export function browserRefundRecoveryIsSafe(refund: Record<string, unknown>) {
+  return refund.ok === true && refund.livemode === false && refund.amount === 5500 &&
+    refund.reversal_amount === 5500 && refund.application_fee_refund_amount === 425 &&
+    refund.order_refunded === true && refund.reconciled === true && refund.refund_count === 1 &&
+    refund.policy_verified === true && refund.ticket_count === 3 && refund.invalid_ticket_count === 3 &&
+    refund.refunded_ticket_count === 3
 }
 
 type CheckoutAttemptIdentity = {
