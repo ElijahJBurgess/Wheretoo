@@ -217,24 +217,14 @@ export function createStripeCancelCheckoutHandler(
         throw new CheckoutHttpError(404, "CHECKOUT_NOT_FOUND");
       }
 
+      const orderStatus = order.status;
+      const alreadyReleased = orderStatus === "cancelled" ||
+        orderStatus === "expired" || orderStatus === "payment_failed";
       if (
-        order.status !== "creating_checkout" && order.status !== "checkout_open"
+        orderStatus !== "creating_checkout" &&
+        orderStatus !== "checkout_open" &&
+        !alreadyReleased
       ) {
-        if (
-          order.status === "cancelled" || order.status === "expired" ||
-          order.status === "payment_failed"
-        ) {
-          emitOperationalEvent({
-            contractVersion: "checkout_integrity_v1",
-            operation: "checkout.cancel",
-            outcome: "no_transition",
-            orderId: order.orderId,
-            providerObjectId: order.stripeCheckoutSessionId ?? undefined,
-            priorStatus: order.status,
-            resultStatus: order.status,
-          }, dependencies.operationalSink);
-          return jsonResponse({ cancelled: true }, 200, headers);
-        }
         throw new CheckoutHttpError(409, "CHECKOUT_UNAVAILABLE");
       }
       if (order.stripeCheckoutSessionId === null) {
@@ -267,6 +257,22 @@ export function createStripeCancelCheckoutHandler(
       }
       if (session.paymentStatus !== "unpaid") {
         throw new CheckoutHttpError(502, "INVALID_STRIPE_SESSION");
+      }
+      if (alreadyReleased) {
+        // A database release alone cannot prove an attached provider checkout is terminal.
+        if (session.status !== "expired") {
+          throw new CheckoutHttpError(409, "CHECKOUT_UNAVAILABLE");
+        }
+        emitOperationalEvent({
+          contractVersion: "checkout_integrity_v1",
+          operation: "checkout.cancel",
+          outcome: "no_transition",
+          orderId: order.orderId,
+          providerObjectId: order.stripeCheckoutSessionId,
+          priorStatus: orderStatus,
+          resultStatus: orderStatus,
+        }, dependencies.operationalSink);
+        return jsonResponse({ cancelled: true }, 200, headers);
       }
       if (session.status === "open") {
         let expired: unknown;
@@ -308,7 +314,7 @@ export function createStripeCancelCheckoutHandler(
         outcome: "cancelled",
         orderId: order.orderId,
         providerObjectId: order.stripeCheckoutSessionId,
-        priorStatus: order.status,
+        priorStatus: orderStatus,
         resultStatus: "cancelled",
       }, dependencies.operationalSink);
       return jsonResponse({ cancelled: true }, 200, headers);
