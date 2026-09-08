@@ -1,6 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
+\ir helpers/ticket_manifest.inc
 
 select plan(45);
 
@@ -275,14 +276,7 @@ select throws_ok(
       'tr_primaryfulfillment', 'fee_primaryfulfillment', 'txn_primaryfulfillment',
       'cus_primaryfulfillment', 'subscription', 'paid', 'usd',
       2000, 2000, 150, 'acct_fulfillmentowner',
-    (select jsonb_agg(jsonb_build_object(
-      'order_item_id', manifest_item.id, 'unit_sequence', manifest_unit.n,
-      'admission_label', manifest_item.tier_name,
-      'credential_hash', encode(extensions.digest(manifest_item.id::text || ':' || manifest_unit.n::text, 'sha256'), 'hex'))
-      order by manifest_item.id, manifest_unit.n)
-    from public.order_items as manifest_item
-    cross join lateral generate_series(1, manifest_item.quantity) as manifest_unit(n)
-    where manifest_item.order_id = ((select id from primary_order)))
+    pg_temp.ticket_manifest((select id from primary_order))
   )
   $$,
   'P0001', 'PAYMENT_SNAPSHOT_MISMATCH',
@@ -297,14 +291,7 @@ select throws_ok(
       'tr_primaryfulfillment', 'fee_primaryfulfillment', 'txn_primaryfulfillment',
       'cus_primaryfulfillment', 'payment', 'unpaid', 'usd',
       2000, 2000, 150, 'acct_fulfillmentowner',
-    (select jsonb_agg(jsonb_build_object(
-      'order_item_id', manifest_item.id, 'unit_sequence', manifest_unit.n,
-      'admission_label', manifest_item.tier_name,
-      'credential_hash', encode(extensions.digest(manifest_item.id::text || ':' || manifest_unit.n::text, 'sha256'), 'hex'))
-      order by manifest_item.id, manifest_unit.n)
-    from public.order_items as manifest_item
-    cross join lateral generate_series(1, manifest_item.quantity) as manifest_unit(n)
-    where manifest_item.order_id = ((select id from primary_order)))
+    pg_temp.ticket_manifest((select id from primary_order))
   )
   $$,
   'P0001', 'PAYMENT_NOT_PAID',
@@ -325,14 +312,7 @@ select throws_ok(
       'tr_primaryfulfillment', 'fee_primaryfulfillment', 'txn_primaryfulfillment',
       'cus_primaryfulfillment', 'payment', 'paid', 'usd',
       2000, 2000, 150, 'acct_fulfillmentowner',
-    (select jsonb_agg(jsonb_build_object(
-      'order_item_id', manifest_item.id, 'unit_sequence', manifest_unit.n,
-      'admission_label', manifest_item.tier_name,
-      'credential_hash', encode(extensions.digest(manifest_item.id::text || ':' || manifest_unit.n::text, 'sha256'), 'hex'))
-      order by manifest_item.id, manifest_unit.n)
-    from public.order_items as manifest_item
-    cross join lateral generate_series(1, manifest_item.quantity) as manifest_unit(n)
-    where manifest_item.order_id = ((select id from primary_order)))
+    pg_temp.ticket_manifest((select id from primary_order))
   )
   $$,
   'P0001', 'PAYMENT_SNAPSHOT_MISMATCH',
@@ -347,14 +327,7 @@ select throws_ok(
       'tr_primaryfulfillment', 'fee_primaryfulfillment', 'txn_primaryfulfillment',
       'cus_primaryfulfillment', 'payment', 'paid', 'eur',
       2000, 2000, 150, 'acct_fulfillmentowner',
-    (select jsonb_agg(jsonb_build_object(
-      'order_item_id', manifest_item.id, 'unit_sequence', manifest_unit.n,
-      'admission_label', manifest_item.tier_name,
-      'credential_hash', encode(extensions.digest(manifest_item.id::text || ':' || manifest_unit.n::text, 'sha256'), 'hex'))
-      order by manifest_item.id, manifest_unit.n)
-    from public.order_items as manifest_item
-    cross join lateral generate_series(1, manifest_item.quantity) as manifest_unit(n)
-    where manifest_item.order_id = ((select id from primary_order)))
+    pg_temp.ticket_manifest((select id from primary_order))
   )
   $$,
   'P0001', 'PAYMENT_SNAPSHOT_MISMATCH',
@@ -369,14 +342,7 @@ select throws_ok(
       'tr_primaryfulfillment', 'fee_primaryfulfillment', 'txn_primaryfulfillment',
       'cus_primaryfulfillment', 'payment', 'paid', 'usd',
       1999, 2000, 150, 'acct_fulfillmentowner',
-    (select jsonb_agg(jsonb_build_object(
-      'order_item_id', manifest_item.id, 'unit_sequence', manifest_unit.n,
-      'admission_label', manifest_item.tier_name,
-      'credential_hash', encode(extensions.digest(manifest_item.id::text || ':' || manifest_unit.n::text, 'sha256'), 'hex'))
-      order by manifest_item.id, manifest_unit.n)
-    from public.order_items as manifest_item
-    cross join lateral generate_series(1, manifest_item.quantity) as manifest_unit(n)
-    where manifest_item.order_id = ((select id from primary_order)))
+    pg_temp.ticket_manifest((select id from primary_order))
   )
   $$,
   'P0001', 'PAYMENT_SNAPSHOT_MISMATCH',
@@ -391,14 +357,7 @@ select throws_ok(
       'tr_primaryfulfillment', 'fee_primaryfulfillment', 'txn_primaryfulfillment',
       'cus_primaryfulfillment', 'payment', 'paid', 'usd',
       2000, 1999, 150, 'acct_fulfillmentowner',
-    (select jsonb_agg(jsonb_build_object(
-      'order_item_id', manifest_item.id, 'unit_sequence', manifest_unit.n,
-      'admission_label', manifest_item.tier_name,
-      'credential_hash', encode(extensions.digest(manifest_item.id::text || ':' || manifest_unit.n::text, 'sha256'), 'hex'))
-      order by manifest_item.id, manifest_unit.n)
-    from public.order_items as manifest_item
-    cross join lateral generate_series(1, manifest_item.quantity) as manifest_unit(n)
-    where manifest_item.order_id = ((select id from primary_order)))
+    pg_temp.ticket_manifest((select id from primary_order))
   )
   $$,
   'P0001', 'PAYMENT_SNAPSHOT_MISMATCH',
@@ -413,14 +372,7 @@ select throws_ok(
       'tr_primaryfulfillment', 'fee_primaryfulfillment', 'txn_primaryfulfillment',
       'cus_primaryfulfillment', 'payment', 'paid', 'usd',
       2000, 2000, 149, 'acct_fulfillmentowner',
-    (select jsonb_agg(jsonb_build_object(
-      'order_item_id', manifest_item.id, 'unit_sequence', manifest_unit.n,
-      'admission_label', manifest_item.tier_name,
-      'credential_hash', encode(extensions.digest(manifest_item.id::text || ':' || manifest_unit.n::text, 'sha256'), 'hex'))
-      order by manifest_item.id, manifest_unit.n)
-    from public.order_items as manifest_item
-    cross join lateral generate_series(1, manifest_item.quantity) as manifest_unit(n)
-    where manifest_item.order_id = ((select id from primary_order)))
+    pg_temp.ticket_manifest((select id from primary_order))
   )
   $$,
   'P0001', 'PAYMENT_SNAPSHOT_MISMATCH',
@@ -435,14 +387,7 @@ select throws_ok(
       'tr_primaryfulfillment', 'fee_primaryfulfillment', 'txn_primaryfulfillment',
       'cus_primaryfulfillment', 'payment', 'paid', 'usd',
       2000, 2000, 150, 'acct_wrongdestination',
-    (select jsonb_agg(jsonb_build_object(
-      'order_item_id', manifest_item.id, 'unit_sequence', manifest_unit.n,
-      'admission_label', manifest_item.tier_name,
-      'credential_hash', encode(extensions.digest(manifest_item.id::text || ':' || manifest_unit.n::text, 'sha256'), 'hex'))
-      order by manifest_item.id, manifest_unit.n)
-    from public.order_items as manifest_item
-    cross join lateral generate_series(1, manifest_item.quantity) as manifest_unit(n)
-    where manifest_item.order_id = ((select id from primary_order)))
+    pg_temp.ticket_manifest((select id from primary_order))
   )
   $$,
   'P0001', 'PAYMENT_SNAPSHOT_MISMATCH',
@@ -458,14 +403,7 @@ select results_eq(
       'tr_primaryfulfillment', 'fee_primaryfulfillment', 'txn_primaryfulfillment',
       'cus_primaryfulfillment', 'payment', 'paid', 'usd',
       2000, 2000, 150, 'acct_fulfillmentowner',
-    (select jsonb_agg(jsonb_build_object(
-      'order_item_id', manifest_item.id, 'unit_sequence', manifest_unit.n,
-      'admission_label', manifest_item.tier_name,
-      'credential_hash', encode(extensions.digest(manifest_item.id::text || ':' || manifest_unit.n::text, 'sha256'), 'hex'))
-      order by manifest_item.id, manifest_unit.n)
-    from public.order_items as manifest_item
-    cross join lateral generate_series(1, manifest_item.quantity) as manifest_unit(n)
-    where manifest_item.order_id = ((select id from primary_order)))
+    pg_temp.ticket_manifest((select id from primary_order))
   )
   $$,
   $$ values ('paid'::text, 1::bigint) $$,
@@ -548,14 +486,7 @@ select results_eq(
       'tr_primaryfulfillment', 'fee_primaryfulfillment', 'txn_primaryfulfillment',
       'cus_primaryfulfillment', 'payment', 'paid', 'usd',
       2000, 2000, 150, 'acct_fulfillmentowner',
-    (select jsonb_agg(jsonb_build_object(
-      'order_item_id', manifest_item.id, 'unit_sequence', manifest_unit.n,
-      'admission_label', manifest_item.tier_name,
-      'credential_hash', encode(extensions.digest(manifest_item.id::text || ':' || manifest_unit.n::text, 'sha256'), 'hex'))
-      order by manifest_item.id, manifest_unit.n)
-    from public.order_items as manifest_item
-    cross join lateral generate_series(1, manifest_item.quantity) as manifest_unit(n)
-    where manifest_item.order_id = ((select id from primary_order)))
+    pg_temp.ticket_manifest((select id from primary_order))
   )
   $$,
   $$
@@ -591,14 +522,7 @@ select results_eq(
       'tr_primaryfulfillment', 'fee_primaryfulfillment', 'txn_primaryfulfillment',
       'cus_primaryfulfillment', 'payment', 'paid', 'usd',
       2000, 2000, 150, 'acct_fulfillmentowner',
-    (select jsonb_agg(jsonb_build_object(
-      'order_item_id', manifest_item.id, 'unit_sequence', manifest_unit.n,
-      'admission_label', manifest_item.tier_name,
-      'credential_hash', encode(extensions.digest(manifest_item.id::text || ':' || manifest_unit.n::text, 'sha256'), 'hex'))
-      order by manifest_item.id, manifest_unit.n)
-    from public.order_items as manifest_item
-    cross join lateral generate_series(1, manifest_item.quantity) as manifest_unit(n)
-    where manifest_item.order_id = ((select id from primary_order)))
+    pg_temp.ticket_manifest((select id from primary_order))
   )
   $$,
   $$
@@ -710,14 +634,7 @@ select results_eq(
       'fee_processingfulfillment', 'txn_processingfulfillment',
       'cus_processingfulfillment', 'payment', 'paid', 'usd',
       2000, 2000, 150, 'acct_fulfillmentowner',
-    (select jsonb_agg(jsonb_build_object(
-      'order_item_id', manifest_item.id, 'unit_sequence', manifest_unit.n,
-      'admission_label', manifest_item.tier_name,
-      'credential_hash', encode(extensions.digest(manifest_item.id::text || ':' || manifest_unit.n::text, 'sha256'), 'hex'))
-      order by manifest_item.id, manifest_unit.n)
-    from public.order_items as manifest_item
-    cross join lateral generate_series(1, manifest_item.quantity) as manifest_unit(n)
-    where manifest_item.order_id = ((select id from processing_order)))
+    pg_temp.ticket_manifest((select id from processing_order))
   )
   $$,
   $$ values ('paid'::text, 1::bigint) $$,
@@ -806,14 +723,7 @@ select results_eq(
       'fee_invalidatedfulfillment', 'txn_invalidatedfulfillment',
       'cus_invalidatedfulfillment', 'payment', 'paid', 'usd',
       3000, 3000, 200, 'acct_fulfillmentowner',
-    (select jsonb_agg(jsonb_build_object(
-      'order_item_id', manifest_item.id, 'unit_sequence', manifest_unit.n,
-      'admission_label', manifest_item.tier_name,
-      'credential_hash', encode(extensions.digest(manifest_item.id::text || ':' || manifest_unit.n::text, 'sha256'), 'hex'))
-      order by manifest_item.id, manifest_unit.n)
-    from public.order_items as manifest_item
-    cross join lateral generate_series(1, manifest_item.quantity) as manifest_unit(n)
-    where manifest_item.order_id = ((select id from invalidated_order)))
+    pg_temp.ticket_manifest((select id from invalidated_order))
   )
   $$,
   $$ values ('requires_review'::text, 0::bigint) $$,
@@ -870,14 +780,7 @@ select results_eq(
       'ch_latefulfillment', 'tr_latefulfillment', 'fee_latefulfillment',
       'txn_latefulfillment', 'cus_latefulfillment', 'payment', 'paid', 'usd',
       3000, 3000, 200, 'acct_fulfillmentowner',
-    (select jsonb_agg(jsonb_build_object(
-      'order_item_id', manifest_item.id, 'unit_sequence', manifest_unit.n,
-      'admission_label', manifest_item.tier_name,
-      'credential_hash', encode(extensions.digest(manifest_item.id::text || ':' || manifest_unit.n::text, 'sha256'), 'hex'))
-      order by manifest_item.id, manifest_unit.n)
-    from public.order_items as manifest_item
-    cross join lateral generate_series(1, manifest_item.quantity) as manifest_unit(n)
-    where manifest_item.order_id = ((select id from late_order)))
+    pg_temp.ticket_manifest((select id from late_order))
   )
   $$,
   $$ values ('requires_review'::text, 0::bigint) $$,
@@ -946,14 +849,7 @@ select results_eq(
       'fee_afterendfulfillment', 'txn_afterendfulfillment',
       'cus_afterendfulfillment', 'payment', 'paid', 'usd',
       2000, 2000, 150, 'acct_fulfillmentowner',
-    (select jsonb_agg(jsonb_build_object(
-      'order_item_id', manifest_item.id, 'unit_sequence', manifest_unit.n,
-      'admission_label', manifest_item.tier_name,
-      'credential_hash', encode(extensions.digest(manifest_item.id::text || ':' || manifest_unit.n::text, 'sha256'), 'hex'))
-      order by manifest_item.id, manifest_unit.n)
-    from public.order_items as manifest_item
-    cross join lateral generate_series(1, manifest_item.quantity) as manifest_unit(n)
-    where manifest_item.order_id = ((select id from after_end_order)))
+    pg_temp.ticket_manifest((select id from after_end_order))
   )
   $$,
   $$ values ('paid'::text, 1::bigint) $$,
