@@ -317,6 +317,10 @@ verify_jwt = false
 [functions.ticket-collection]
 verify_jwt = false
 
+# JWT and organizer identity are verified server-side with auth.getUser.
+[functions.ticket-admission]
+verify_jwt = false
+
 [functions.moderate-event-queue]
 verify_jwt = false
 

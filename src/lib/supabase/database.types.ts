@@ -1827,6 +1827,17 @@ export type Database = {
           should_process: boolean
         }[]
       }
+      server_redeem_paid_ticket: {
+        Args: {
+          p_credential_hash: string
+          p_event_id: string
+          p_organizer_id: string
+        }
+        Returns: {
+          admission_label: string
+          outcome: string
+        }[]
+      }
       server_reserve_checkout: {
         Args: {
           p_client_request_id: string

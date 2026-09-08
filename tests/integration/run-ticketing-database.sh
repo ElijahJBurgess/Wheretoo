@@ -15,10 +15,11 @@ if [[ -n "${WHERETO_TICKETING_DB_URL:-}" ]]; then
       process.exit(1)
     }
   '
-  exec "$supabase_cli" test db --db-url "$WHERETO_TICKETING_DB_URL" \
+  "$supabase_cli" test db --db-url "$WHERETO_TICKETING_DB_URL" \
     "$repository_root/supabase/tests/database/core_ticket_truth_lite_schema.test.sql" \
     "$repository_root/supabase/tests/database/core_ticket_truth_lite_fulfillment.test.sql" \
     "$repository_root/supabase/tests/database/core_ticket_truth_lite_collection.test.sql" \
+    "$repository_root/supabase/tests/database/core_ticket_truth_lite_redemption.test.sql" \
     "$repository_root/supabase/tests/database/checkout_integrity_fulfillment.test.sql" \
     "$repository_root/supabase/tests/database/checkout_integrity_contract_cleanup.test.sql" \
     "$repository_root/supabase/tests/database/ticketing_schema.test.sql" \
@@ -26,6 +27,7 @@ if [[ -n "${WHERETO_TICKETING_DB_URL:-}" ]]; then
     "$repository_root/supabase/tests/database/checkout_integrity_refunds.test.sql" \
     "$repository_root/supabase/tests/database/refunds_disputes.test.sql" \
     "$repository_root/supabase/tests/database/webhook_review_safety.test.sql"
+  exec bash "$repository_root/supabase/tests/database/core_ticket_truth_lite_redemption_concurrency.test.sh"
 fi
 
 temporary_directory="$(mktemp -d)"
