@@ -79,6 +79,7 @@ case "$*" in
     ;;
   *"functions list"*) printf '%s\\n' '{"functions":[]}' ;;
   *"secrets list"*) printf '%s\\n' '{"secrets":[]}' ;;
+  *"migration list"*) printf '%s\\n' '{"migrations":[{"local":"123","remote":"123"}]}' ;;
   *"db query"*"policy_environment"*)
     [ "$FAKE_POLICY_QUERY_FAILURE" = 0 ] || exit 1
     printf '%s\\n' "$FAKE_POLICY_RESPONSE"
@@ -461,6 +462,50 @@ describe('Task 17 managed proof runner', () => {
     expect(result.log).not.toContain('supabase secrets set --env-file')
     expect(result.log).not.toContain('functions deploy task17-transaction-driver')
     expect(result.log).not.toContain('curl ')
+  })
+
+  it.each([
+    ['zero', '{"rows":[]}'],
+    ['ambiguous', '{"rows":[{"stable_fixture_candidate":"task17_oldfixture01","stable_fixture_recoverable":true,"stable_fixture_safe":true},{"stable_fixture_candidate":"task17_checkout0001","stable_fixture_recoverable":true,"stable_fixture_safe":true}]}'],
+  ])('Task 14 rejects %s stable fixture candidates before any deployment or setup', async (_label, response) => {
+    const result = await runRunner(false, false, {
+      TASK14_BROWSER_PROJECT: 'mobile-chromium',
+      VITE_MAPBOX_ACCESS_TOKEN: 'pk.local_contract',
+      FAKE_STABLE_FIXTURE_RESPONSE: response,
+    })
+
+    expect(result.exitCode).not.toBe(0)
+    expect(result.log).toContain('stable_fixture_candidate')
+    expect(result.log).not.toContain('supabase secrets set --env-file')
+    expect(result.log).not.toContain('functions deploy task17-transaction-driver')
+    expect(result.log).not.toContain('curl ')
+    expect(result.log).not.toContain('set checkout_creation_enabled = true')
+    expect(result.log).not.toContain('playwright test')
+    expect(result.materializedExists).toBe(false)
+    expect(result.materializedContractsExist).toBe(false)
+  })
+
+  it('Task 14 admits exactly one existing stable fixture without substituting a seed prefix', async () => {
+    const result = await runRunner(false, false, {
+      TASK14_BROWSER_PROJECT: 'desktop-chromium',
+      VITE_MAPBOX_ACCESS_TOKEN: 'pk.local_contract',
+      FAKE_STABLE_FIXTURE_RESPONSE: '{"rows":[{"stable_fixture_candidate":"task17_oldfixture01","stable_fixture_recoverable":true,"stable_fixture_safe":true}]}',
+      FAKE_SECRET_SET_FAILURE: '1',
+    })
+
+    // Stop at the fake secret boundary: this contract exercises admission, not browser setup.
+    expect(result.exitCode).not.toBe(0)
+    expect(result.log).toContain('fixture-prefix task17_oldfixture01')
+    expect(result.log).not.toContain('fixture-prefix task17_checkout0001')
+    expect(result.log).not.toContain('functions deploy task17-transaction-driver')
+  })
+
+  it('preserves canonical Task 13 seed selection when no stable fixture exists', async () => {
+    const result = await runRunner(false)
+
+    expect(result.exitCode).toBe(0)
+    expect(result.log).toContain('fixture-prefix task17_checkout0001')
+    expect(result.log).toContain('vitest run')
   })
 
   it('adopts the one exact protected legacy fixture instead of creating a second shell', async () => {

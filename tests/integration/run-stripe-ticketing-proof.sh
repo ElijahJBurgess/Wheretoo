@@ -879,7 +879,7 @@ else
   from classified
   order by classified.prefix;" > "$stable_fixture_file"
 chmod 600 "$stable_fixture_file"
-TEST_STRIPE_FIXTURE_PREFIX=$(STABLE_FIXTURE_FILE="$stable_fixture_file" node --input-type=module <<'NODE'
+TEST_STRIPE_FIXTURE_PREFIX=$(STABLE_FIXTURE_FILE="$stable_fixture_file" TASK14_BROWSER_PROJECT="$TASK14_BROWSER_PROJECT" node --input-type=module <<'NODE'
 import fs from 'node:fs'
 const payload = JSON.parse(fs.readFileSync(process.env.STABLE_FIXTURE_FILE, 'utf8'))
 const rows = Array.isArray(payload.rows)
@@ -887,6 +887,11 @@ const rows = Array.isArray(payload.rows)
   : Array.isArray(payload.result)
     ? payload.result
     : null
+// Browser proof may reuse the audit tombstone, but must never seed a new fixture.
+if (process.env.TASK14_BROWSER_PROJECT && rows?.length !== 1) {
+  process.stderr.write('Task 14 requires exactly one existing stable fixture.\n')
+  process.exit(1)
+}
 if (rows === null || rows.length > 1) process.exit(1)
 if (rows.length === 1 && rows[0]?.stable_fixture_safe !== true &&
   rows[0]?.stable_fixture_recoverable !== true) process.exit(1)
