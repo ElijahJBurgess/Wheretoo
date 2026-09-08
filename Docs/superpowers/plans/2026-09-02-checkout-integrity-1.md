@@ -1501,11 +1501,20 @@ pnpm typecheck:functions
 pnpm test:integration:ticketing-db
 ```
 
-After all checks pass, the database owner sets `checkout_creation_enabled = true` in linked development and verifies one new cart request reaches the new overload. Re-disabling it must still leave webhook/cancel/expiry/refund/confirmation operational.
+After all checks pass, keep `checkout_creation_enabled = false` in linked
+development and verify the new overload through the rollback-only database
+contract and the bounded, guarded TEST-mode proof. Passing these checks is not
+authorization to enable sales. Any later enablement requires a separate,
+explicit owner decision after the full release gate; disabling creation must
+continue to leave webhook/cancel/expiry/refund/confirmation operational.
 
 - [ ] **Step 7: Record forward-fix rollback procedure**
 
-If a defect appears after any multi-item order/Session exists: disable new creation, keep lifecycle processing on, do not revert migration 7 or deploy singular code, add a forward migration/release, reconcile existing orders, rerun the affected gates, then re-enable.
+If a defect appears after any multi-item order/Session exists: disable new
+creation, keep lifecycle processing on, do not revert migration 7 or deploy
+singular code, add a forward migration/release, reconcile existing orders, and
+rerun the affected gates. Re-enablement remains a separate owner-authorized
+launch decision.
 
 ---
 

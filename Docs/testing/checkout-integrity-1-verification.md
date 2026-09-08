@@ -6,6 +6,58 @@ Any later enablement requires separate owner authorization. Run commands from th
 Do not print credentials, call live mode, or use browser redirect state as
 payment evidence.
 
+## Completed branch-gate evidence — 2026-09-08
+
+Release decision: **PASS — safe to merge, with checkout creation disabled.**
+The checklist below remains the reusable operator template; this section records
+the completed Checkout Integrity 1.0 branch gate.
+
+- Task 14 passed guarded mobile and desktop visual journeys plus real hosted
+  Stripe TEST purchases. Each run reconciled the two-line, three-admission cart,
+  exact destination-charge economics, three tickets, whole-order refund,
+  transfer reversal, application-fee refund, confirmation lifecycle, and exact
+  teardown. The connected TEST account was preserved.
+- Task 15 applied forward-only migration `20260902010600`; local and linked
+  migration histories align. All 13 obsolete singular checkout signatures and
+  the legacy digest fallback are absent, while canonical JSON-cart reservation,
+  fulfillment, confirmation, ACL, eligibility, and concurrency contracts pass.
+- Task 16 passed 189 Edge tests, 125 focused checkout/order tests, 215 isolated
+  integration contracts, 11 linked ticketing integration tests, 180 corrected
+  linked schema assertions, five linked concurrency/lock-order scripts, full
+  application and Edge typechecks, ESLint, production build, database lint,
+  migration alignment, operational integrity queries, and the guarded mobile
+  and desktop browser proof.
+- Final operational inspection found development configuration, checkout
+  creation disabled, zero orders, zero expired holds, zero oversell, zero
+  order/ticket/refund/provider-identity anomalies, zero stale webhook receipts,
+  and zero unresolved review orders. The expiration job is active; its latest
+  20 inspected runs all succeeded.
+- Independent review found and fixed three release-relevant issues: terminal
+  checkout attempts now rotate only after authoritative cancellation, and an
+  attached Stripe Session must be exactly TEST, order-bound, expired, and
+  unpaid before ordinary cancellation is acknowledged. A verified asynchronous
+  payment failure may also release retry identity only for the exact conjunction
+  of durable `payment_failed` plus TEST, order-bound `complete`/`unpaid` provider
+  truth; paid and ambiguous completion remain blocked. The release plan no
+  longer instructs routine checkout enablement after verification. Final scoped
+  review has no unresolved Critical or Important finding.
+
+Recorded non-blocking deviations:
+
+- The Docker-backed `supabase test db --linked` wrapper was unavailable. The
+  same checkout-specific pgTAP files ran directly against the linked development
+  database in rollback-only mode, supplemented by the linked integration and
+  concurrency gates above.
+- The repository-wide unit command passed 625 of 626 tests; its sole failure is
+  a pre-existing organizer-navigation CSS source assertion (`space-between`
+  versus `flex-start`) outside checkout. Real 320 px/mobile and desktop buyer
+  journeys passed, so this does not block a purchase or payment integrity.
+- The raw all-profile integration command was split into its isolated offline,
+  linked-database, and guarded Stripe/browser profiles so incompatible runtime
+  prerequisites could not interfere with one another.
+- Production build emits the existing bundle-size advisory. No buyer-flow or
+  integrity failure accompanies it.
+
 ## Automated gates
 
 - [ ] The focused operational and payment suites pass:
