@@ -12,6 +12,37 @@ const evidence = () => ({
 })
 
 describe('Task14 existing-refund recovery', () => {
+  it('reports both refund reversal relations without accepting the source-only alternative', async () => {
+    const value = evidence()
+    Object.assign(value.refunds.data[0], { transfer_reversal: null, source_transfer_reversal: 'trr_Test' })
+    let caught: unknown
+    let writes = 0
+    try {
+      await contracts.runRefundRecoveryStage('evidence_validation', () => contracts.recoverExistingRefundEvidence(snapshot, {
+        read: async () => value, pause: async () => {}, update: async () => { writes++ },
+      }))
+    } catch (error) { caught = error }
+    const diagnostic = contracts.refundRecoveryDiagnostic(caught) as unknown as { evidence?: Record<string, boolean> }
+    expect(diagnostic?.evidence?.refund_transfer_reversal_matches).toBe(false)
+    expect(diagnostic?.evidence?.refund_source_transfer_reversal_matches).toBe(true)
+    expect(writes).toBe(0)
+    expect(Object.values(diagnostic.evidence ?? {}).every((value) => typeof value === 'boolean')).toBe(true)
+    expect(JSON.stringify(diagnostic)).not.toMatch(/trr_Test|re_Test|pi_Test|ch_Test|acct_Test|fee_Test|fr_Test/)
+  })
+  it('identifies the exact failed economic predicate without reporting provider values', async () => {
+    const value = evidence()
+    value.feeRefunds.data[0].amount = 424
+    let caught: unknown
+    try {
+      await contracts.runRefundRecoveryStage('evidence_validation', () => contracts.recoverExistingRefundEvidence(snapshot, {
+        read: async () => value, pause: async () => {}, update: async () => { throw new Error('unexpected update') },
+      }))
+    } catch (error) { caught = error }
+    const diagnostic = contracts.refundRecoveryDiagnostic(caught) as unknown as { evidence?: Record<string, boolean> }
+    expect(diagnostic?.evidence?.fee_refund_amount_matches).toBe(false)
+    expect(diagnostic?.evidence?.reversal_amount_matches).toBe(true)
+    expect(JSON.stringify(diagnostic)).not.toContain('424')
+  })
   it('reports the exact failing recovery stage without retaining arbitrary provider detail', async () => {
     let caught: unknown
     try {

@@ -1023,10 +1023,34 @@ if (value.ok === false) {
   const diagnostic = value.recovery_diagnostic
   const stages = new Set(['scope', 'refund_list', 'refund_retrieve', 'transfer_retrieve', 'application_fee_retrieve',
     'fee_refunds_list', 'evidence_validation', 'metadata_update', 'webhook_delivery', 'durable_verification'])
+  const evidenceKeys = [
+    'refund_list_complete', 'refund_list_bounded', 'reversal_list_complete', 'reversal_list_bounded',
+    'fee_refund_list_complete', 'fee_refund_list_bounded',
+    'transfer_object_matches', 'transfer_identity_matches', 'transfer_test_mode', 'transfer_amount_matches',
+    'transfer_currency_matches', 'transfer_charge_matches', 'transfer_destination_matches',
+    'fee_object_matches', 'fee_identity_matches', 'fee_test_mode', 'fee_amount_matches',
+    'fee_currency_matches', 'fee_charge_matches', 'fee_account_matches',
+    'refund_present', 'refund_object_matches', 'refund_identity_valid', 'refund_identity_matches',
+    'refund_test_mode', 'refund_succeeded', 'refund_amount_matches', 'refund_currency_matches',
+    'refund_payment_matches', 'refund_charge_matches', 'metadata_order_matches', 'metadata_policy_matches',
+    'metadata_reverse_transfer_matches', 'metadata_refund_application_fee_matches',
+    'reversal_present', 'reversal_object_matches', 'reversal_identity_valid', 'reversal_identity_matches',
+    'reversal_amount_matches', 'reversal_currency_matches', 'reversal_transfer_matches', 'reversal_source_refund_matches',
+    'refund_transfer_reversal_matches', 'refund_source_transfer_reversal_matches',
+    'fee_refund_present', 'fee_refund_object_matches', 'fee_refund_identity_valid', 'fee_refund_identity_matches',
+    'fee_refund_amount_matches', 'fee_refund_currency_matches', 'fee_refund_fee_matches',
+    'metadata_reversal_amount_matches', 'metadata_fee_refund_identity_matches', 'metadata_fee_refund_amount_matches',
+  ]
   if (value.kind === 'TASK14_REFUND_RECOVERY_FAILED' && exactKeys(value, ['ok', 'kind', 'recovery_diagnostic']) &&
-    diagnostic && typeof diagnostic === 'object' && !Array.isArray(diagnostic) && exactKeys(diagnostic, ['stage', 'category']) &&
+    diagnostic && typeof diagnostic === 'object' && !Array.isArray(diagnostic) &&
+    (exactKeys(diagnostic, ['stage', 'category']) || exactKeys(diagnostic, ['stage', 'category', 'evidence'])) &&
     stages.has(diagnostic.stage) && (categories.has(diagnostic.category) || diagnostic.category === 'provider_or_network')) {
+    if ('evidence' in diagnostic && (diagnostic.stage !== 'evidence_validation' ||
+      diagnostic.category !== 'TASK14_REFUND_EVIDENCE_CONFLICT' || !diagnostic.evidence ||
+      typeof diagnostic.evidence !== 'object' || Array.isArray(diagnostic.evidence) ||
+      !exactKeys(diagnostic.evidence, evidenceKeys) || Object.values(diagnostic.evidence).some((value) => typeof value !== 'boolean'))) unavailable()
     process.stderr.write(`Task 14 refund recovery failure: stage=${diagnostic.stage} category=${diagnostic.category}\n`)
+    if (diagnostic.evidence) process.stderr.write(`Task 14 refund evidence false_checks=${evidenceKeys.filter((key) => diagnostic.evidence[key] === false).join(',')}\n`)
     process.exit(1)
   }
   if (exactKeys(value, ['ok', 'kind']) && categories.has(value.kind)) {

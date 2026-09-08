@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { afterEach, describe, expect, it } from 'vitest'
+import { recoverExistingRefundEvidence, runRefundRecoveryStage, refundRecoveryDiagnostic } from './edge/task17-transaction-driver/contracts'
 
 const temporaryDirectories: string[] = []
 
@@ -234,6 +235,32 @@ fi
 }
 
 describe('Task 17 managed proof runner', () => {
+  it.each(['valid', 'nonboolean', 'extra_key'])('Task14 emits only an exact boolean evidence bitmap (%s)', async (variant) => {
+    let failure: unknown
+    try {
+      await runRefundRecoveryStage('evidence_validation', () => recoverExistingRefundEvidence({
+        orderId: 'fixture', paymentIntentId: 'fixture', chargeId: 'fixture', transferId: 'fixture', applicationFeeId: 'fixture', connectedAccountId: 'fixture', refundId: null, reversalId: null, feeRefundId: null,
+      }, { read: async () => ({ refunds: { data: [], has_more: true }, transfer: { reversals: { data: [], has_more: false } }, fee: {}, feeRefunds: { data: [], has_more: false } }), pause: async () => {}, update: async () => {} }))
+    } catch (error) { failure = error }
+    const diagnostic = refundRecoveryDiagnostic(failure) as { stage: string; category: string; evidence: Record<string, unknown> }
+    if (variant === 'nonboolean') diagnostic.evidence.refund_transfer_reversal_matches = 'unsafe-provider-detail'
+    if (variant === 'extra_key') diagnostic.evidence['unsafe-provider-detail'] = true
+    const result = await runRunner(false, false, {
+      TASK14_REFUND_RECOVERY_ONLY: '1',
+      FAKE_RESIDUAL_FIXTURE_RESPONSE: '{"rows":[{"residual_fixture_candidate":"task17_checkout0001","residual_fixture_exact":true}]}',
+      FAKE_RECOVERY_RESPONSE: JSON.stringify({ ok: false, kind: 'TASK14_REFUND_RECOVERY_FAILED', recovery_diagnostic: diagnostic }), FAKE_RECOVERY_CURL_STATUS: '22',
+    })
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain(variant === 'valid' ? 'false_checks=' : 'UNSAFE_OR_UNAVAILABLE')
+    if (variant === 'valid') {
+      expect(result.stderr).toContain('refund_transfer_reversal_matches')
+      expect(result.stderr).toContain('refund_source_transfer_reversal_matches')
+      expect(result.stderr).not.toContain('"refund_transfer_reversal_matches":false')
+      expect(result.stderr).not.toContain('fee_refund_list_complete')
+    }
+    expect(result.stderr).not.toContain('unsafe-provider-detail')
+    expect(result.log).not.toContain('task17_cleanup_receipts')
+  })
   it.each([
     [{ ok: false, kind: 'TASK14_REFUND_EVIDENCE_CONFLICT' }, 'kind=TASK14_REFUND_EVIDENCE_CONFLICT'],
     [{ ok: false, kind: 'TASK14_REFUND_RECOVERY_FAILED', recovery_diagnostic: { stage: 'refund_retrieve', category: 'provider_or_network' } }, 'stage=refund_retrieve category=provider_or_network'],

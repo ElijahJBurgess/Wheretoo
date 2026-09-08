@@ -27,7 +27,11 @@ type RefundRecoveryStage =
   | "webhook_delivery"
   | "durable_verification";
 class RefundRecoveryFailure extends Error {
-  constructor(readonly stage: RefundRecoveryStage, readonly category: string) {
+  constructor(
+    readonly stage: RefundRecoveryStage,
+    readonly category: string,
+    readonly evidence?: Record<string, boolean>,
+  ) {
     super("TASK14_REFUND_RECOVERY_FAILED");
   }
 }
@@ -52,12 +56,20 @@ export async function runRefundRecoveryStage<T>(
         ? error.message
         : "provider_or_network";
     // Deliberately discard cause, stack, provider message, request, and response.
-    throw new RefundRecoveryFailure(stage, category);
+    throw new RefundRecoveryFailure(
+      stage,
+      category,
+      error instanceof RefundEvidenceConflict ? error.evidence : undefined,
+    );
   }
 }
 export function refundRecoveryDiagnostic(error: unknown) {
   return error instanceof RefundRecoveryFailure
-    ? { stage: error.stage, category: error.category }
+    ? {
+      stage: error.stage,
+      category: error.category,
+      ...(error.evidence === undefined ? {} : { evidence: error.evidence }),
+    }
     : null;
 }
 export function recoveryDriverActionAllowed(
@@ -109,6 +121,113 @@ export type ExistingRefundSnapshot = {
   feeRefundId: string | null;
 };
 
+class RefundEvidenceConflict extends Error {
+  constructor(readonly evidence: Record<string, boolean>) {
+    super("TASK14_REFUND_EVIDENCE_CONFLICT");
+  }
+}
+
+// Observation only. Keep the acceptance checks below unchanged while diagnosing.
+function refundEvidenceBitmap(
+  snapshot: ExistingRefundSnapshot,
+  refunds: RecoveryList,
+  transfer: RecoveryRecord,
+  fee: RecoveryRecord,
+  feeRefunds: RecoveryList,
+) {
+  const reversals = transfer.reversals as RecoveryList | undefined;
+  const refund = refunds.data?.[0] ?? {};
+  const reversal = reversals?.data?.[0] ?? {};
+  const feeRefund = feeRefunds.data?.[0] ?? {};
+  const metadata = record(refund.metadata) ? refund.metadata : {};
+  const id = (value: unknown) =>
+    typeof value === "string" ? value : record(value) ? value.id : undefined;
+  const validId = (value: unknown, prefix: string) =>
+    typeof value === "string" &&
+    new RegExp(`^${prefix}_[A-Za-z0-9]+$`).test(value);
+  const bounded = (list: RecoveryList | undefined) =>
+    Array.isArray(list?.data) && list.data.length <= 1;
+  const optionalMetadata = (key: string, expected: unknown) =>
+    metadata[key] === undefined || metadata[key] === expected;
+  return {
+    refund_list_complete: refunds.has_more === false,
+    refund_list_bounded: bounded(refunds),
+    reversal_list_complete: reversals?.has_more === false,
+    reversal_list_bounded: bounded(reversals),
+    fee_refund_list_complete: feeRefunds.has_more === false,
+    fee_refund_list_bounded: bounded(feeRefunds),
+    transfer_object_matches: transfer.object === "transfer",
+    transfer_identity_matches: transfer.id === snapshot.transferId,
+    transfer_test_mode: transfer.livemode === false,
+    transfer_amount_matches: transfer.amount === 5500,
+    transfer_currency_matches: transfer.currency === "usd",
+    transfer_charge_matches:
+      id(transfer.source_transaction) === snapshot.chargeId,
+    transfer_destination_matches:
+      id(transfer.destination) === snapshot.connectedAccountId,
+    fee_object_matches: fee.object === "application_fee",
+    fee_identity_matches: fee.id === snapshot.applicationFeeId,
+    fee_test_mode: fee.livemode === false,
+    fee_amount_matches: fee.amount === 425,
+    fee_currency_matches: fee.currency === "usd",
+    fee_charge_matches: id(fee.charge) === snapshot.chargeId,
+    fee_account_matches: id(fee.account) === snapshot.connectedAccountId,
+    refund_present: refunds.data?.length === 1,
+    refund_object_matches: refund.object === "refund",
+    refund_identity_valid: validId(refund.id, "re"),
+    refund_identity_matches: snapshot.refundId === null ||
+      refund.id === snapshot.refundId,
+    refund_test_mode: refund.livemode === false,
+    refund_succeeded: refund.status === "succeeded",
+    refund_amount_matches: refund.amount === 5500,
+    refund_currency_matches: refund.currency === "usd",
+    refund_payment_matches:
+      id(refund.payment_intent) === snapshot.paymentIntentId,
+    refund_charge_matches: id(refund.charge) === snapshot.chargeId,
+    metadata_order_matches: metadata.order_id === snapshot.orderId,
+    metadata_policy_matches:
+      metadata.whereto_refund_policy === "destination_v1",
+    metadata_reverse_transfer_matches:
+      metadata.whereto_reverse_transfer === "true",
+    metadata_refund_application_fee_matches:
+      metadata.whereto_refund_application_fee === "true",
+    reversal_present: reversals?.data?.length === 1,
+    reversal_object_matches: reversal.object === "transfer_reversal",
+    reversal_identity_valid: validId(reversal.id, "trr"),
+    reversal_identity_matches: snapshot.reversalId === null ||
+      reversal.id === snapshot.reversalId,
+    reversal_amount_matches: reversal.amount === 5500,
+    reversal_currency_matches: reversal.currency === "usd",
+    reversal_transfer_matches: id(reversal.transfer) === snapshot.transferId,
+    reversal_source_refund_matches:
+      id(reversal.source_refund) === (refund.id ?? snapshot.refundId),
+    refund_transfer_reversal_matches: typeof reversal.id === "string" &&
+      id(refund.transfer_reversal) === reversal.id,
+    refund_source_transfer_reversal_matches: typeof reversal.id === "string" &&
+      id(refund.source_transfer_reversal) === reversal.id,
+    fee_refund_present: feeRefunds.data?.length === 1,
+    fee_refund_object_matches: feeRefund.object === "fee_refund",
+    fee_refund_identity_valid: validId(feeRefund.id, "fr"),
+    fee_refund_identity_matches: snapshot.feeRefundId === null ||
+      feeRefund.id === snapshot.feeRefundId,
+    fee_refund_amount_matches: feeRefund.amount === 425,
+    fee_refund_currency_matches: feeRefund.currency === "usd",
+    fee_refund_fee_matches: id(feeRefund.fee) === snapshot.applicationFeeId,
+    metadata_reversal_amount_matches: optionalMetadata(
+      "whereto_transfer_reversal_amount",
+      String(reversal.amount),
+    ),
+    metadata_fee_refund_identity_matches: optionalMetadata(
+      "whereto_application_fee_refund_id",
+      feeRefund.id,
+    ),
+    metadata_fee_refund_amount_matches: optionalMetadata(
+      "whereto_application_fee_refund_amount",
+      String(feeRefund.amount),
+    ),
+  };
+}
+
 // TEST driver only: no create capability, no invented economic evidence.
 export async function recoverExistingRefundEvidence(
   snapshot: ExistingRefundSnapshot,
@@ -125,14 +244,22 @@ export async function recoverExistingRefundEvidence(
     pause(): Promise<void>;
   },
 ) {
-  const conflict = () => {
-    throw new Error("TASK14_REFUND_EVIDENCE_CONFLICT");
-  };
   const id = (value: unknown) =>
     typeof value === "string" ? value : (value as RecoveryRecord | null)?.id;
   let refundId = snapshot.refundId;
   for (let attempt = 0; attempt < 5; attempt++) {
     const { refunds, transfer, fee, feeRefunds } = await dependencies.read();
+    const conflict = () => {
+      throw new RefundEvidenceConflict(
+        refundEvidenceBitmap(
+          { ...snapshot, refundId },
+          refunds,
+          transfer,
+          fee,
+          feeRefunds,
+        ),
+      );
+    };
     const reversals = transfer.reversals as RecoveryList;
     if (
       !reversals ||
