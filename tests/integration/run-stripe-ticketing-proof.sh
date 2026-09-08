@@ -743,10 +743,11 @@ if [ "$TASK13_CLEANUP_ONLY" -eq 1 ] || [ "$TASK14_REFUND_RECOVERY_ONLY" -eq 1 ];
         on orders.event_id = events.id and orders.organizer_id = organizers.id
         and orders.livemode = false
         and (( $TASK14_REFUND_RECOVERY_ONLY = 0 and orders.status = 'expired' and orders.reconciliation_status = 'pending')
-          or ($TASK14_REFUND_RECOVERY_ONLY = 1 and orders.status = 'requires_review'
-            and orders.reconciliation_status = 'requires_review'
-            and orders.failure_code = 'REFUND_POLICY_MISMATCH'
-            and events.moderation_status = 'clear'))
+          or ($TASK14_REFUND_RECOVERY_ONLY = 1 and events.moderation_status = 'clear'
+            and ((orders.status = 'requires_review' and orders.reconciliation_status = 'requires_review'
+              and orders.failure_code = 'REFUND_POLICY_MISMATCH' and orders.refunded_at is null)
+            or (orders.status = 'refunded' and orders.reconciliation_status = 'reconciled'
+              and orders.failure_code is null and orders.refunded_at is not null))))
         and orders.quantity = 3 and orders.currency = 'usd'
         and orders.subtotal_minor = 5500 and orders.tax_amount_minor = 0
         and orders.total_minor = 5500
@@ -769,7 +770,7 @@ if [ "$TASK13_CLEANUP_ONLY" -eq 1 ] || [ "$TASK14_REFUND_RECOVERY_ONLY" -eq 1 ];
           and orders.stripe_transfer_id ~ '^tr_[A-Za-z0-9]+$'
           and orders.stripe_application_fee_id ~ '^fee_[A-Za-z0-9]+$'
           and orders.stripe_balance_transaction_id ~ '^txn_[A-Za-z0-9]+$'
-          and orders.paid_at is not null and orders.refunded_at is null))
+          and orders.paid_at is not null))
     ), exact_candidate as (
       select candidate.prefix,
         (select count(*) from fixture_namespace) = 1
@@ -799,7 +800,6 @@ if [ "$TASK13_CLEANUP_ONLY" -eq 1 ] || [ "$TASK14_REFUND_RECOVERY_ONLY" -eq 1 ];
           and not exists (select 1 from public.refunds where order_id = candidate.order_id))
         or ($TASK14_REFUND_RECOVERY_ONLY = 1
           and (select count(*) from public.tickets where order_id = candidate.order_id) = 3
-          and (select count(*) from public.tickets where order_id = candidate.order_id and status = 'cancelled') = 3
           and (select count(*) from public.refunds where order_id = candidate.order_id) = 1
           and (select count(*) from public.refunds as refunds join public.orders as orders on orders.id = refunds.order_id
             where orders.id = candidate.order_id and refunds.status = 'succeeded' and refunds.currency = 'usd'
@@ -809,9 +809,19 @@ if [ "$TASK13_CLEANUP_ONLY" -eq 1 ] || [ "$TASK14_REFUND_RECOVERY_ONLY" -eq 1 ];
               and refunds.stripe_refund_id ~ '^re_[A-Za-z0-9]+$'
               and refunds.stripe_transfer_reversal_id ~ '^trr_[A-Za-z0-9]+$'
               and refunds.transfer_reversal_amount_minor = 5500
-              and refunds.stripe_application_fee_refund_id is null
-              and refunds.application_fee_refund_amount_minor = 0
-              and not refunds.policy_verified and refunds.policy_failure_code = 'REFUND_POLICY_MISMATCH') = 1))
+              and orders.paid_at is not null
+              and ((orders.status = 'requires_review' and orders.reconciliation_status = 'requires_review'
+                and orders.failure_code = 'REFUND_POLICY_MISMATCH' and orders.refunded_at is null
+                and (select count(*) from public.tickets where order_id = candidate.order_id and status = 'cancelled') = 3
+                and refunds.stripe_application_fee_refund_id is null
+                and refunds.application_fee_refund_amount_minor = 0
+                and not refunds.policy_verified and refunds.policy_failure_code = 'REFUND_POLICY_MISMATCH')
+              or (orders.status = 'refunded' and orders.reconciliation_status = 'reconciled'
+                and orders.failure_code is null and orders.refunded_at is not null
+                and (select count(*) from public.tickets where order_id = candidate.order_id and status = 'refunded') = 3
+                and refunds.stripe_application_fee_refund_id ~ '^fr_[A-Za-z0-9]+$'
+                and refunds.application_fee_refund_amount_minor = 425
+                and refunds.policy_verified and refunds.policy_failure_code is null))) = 1))
         and not exists (select 1 from public.disputes where order_id = candidate.order_id)
         and (($TASK14_REFUND_RECOVERY_ONLY = 0
           and (select count(*) from public.stripe_webhook_events where stripe_object_id = candidate.session_id) = 1

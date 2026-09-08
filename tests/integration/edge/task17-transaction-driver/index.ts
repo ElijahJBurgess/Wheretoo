@@ -25,6 +25,7 @@ import {
   assertSafeProofResponse,
   auditTombstoneIsSafe,
   type AuditTombstoneState,
+  certifyRecoveredRefund,
   checkoutSessionContractBitmap,
   cleanupFailureDiagnostic,
   cleanupPreparedStateIsSafe,
@@ -38,7 +39,6 @@ import {
   exactFixtureModerationTarget,
   findExactFixtureAuthUser,
   isCheckoutDiagnosticCandidate,
-  recoveredRefundStateIsSafe,
   recoverExistingRefundEvidence,
   recoveryDriverActionAllowed,
   refundModeIsTestCompatible,
@@ -1684,7 +1684,7 @@ async function recoverRefund(
       if (orderHandleValue !== "paid") throw new Error("INPUT");
       const order = await proofOrder(orderHandleValue);
       const scope = await client.from("orders").select(
-        "event_id,organizer_id,livemode,currency,quantity,stripe_destination_account_id",
+        "event_id,organizer_id,livemode,currency,quantity,stripe_destination_account_id,paid_at,refunded_at,failure_code",
       )
         .eq("id", order.id).single();
       const fixture = await client.from("events").select("id,organizer_id")
@@ -1702,7 +1702,7 @@ async function recoverRefund(
       ) throw new Error("INPUT");
       const persisted = await client.from("refunds")
         .select(
-          "stripe_refund_id,stripe_transfer_reversal_id,stripe_application_fee_refund_id",
+          "stripe_refund_id,stripe_transfer_reversal_id,stripe_application_fee_refund_id,stripe_payment_intent_id,stripe_charge_id,currency",
         )
         .eq("order_id", order.id);
       if (persisted.error || persisted.data.length > 1) {
@@ -1711,13 +1711,42 @@ async function recoverRefund(
         );
       }
       const existing = persisted.data[0];
+      if (order.status === "refunded") {
+        if (
+          typeof scope.data.paid_at !== "string" ||
+          typeof scope.data.refunded_at !== "string" ||
+          scope.data.failure_code !== null || !existing ||
+          existing.currency !== "usd" ||
+          !/^pi_[A-Za-z0-9]+$/.test(order.stripe_payment_intent_id ?? "") ||
+          !/^ch_[A-Za-z0-9]+$/.test(order.stripe_charge_id ?? "") ||
+          !/^tr_[A-Za-z0-9]+$/.test(order.stripe_transfer_id ?? "") ||
+          !/^fee_[A-Za-z0-9]+$/.test(order.stripe_application_fee_id ?? "") ||
+          existing.stripe_payment_intent_id !==
+            order.stripe_payment_intent_id ||
+          existing.stripe_charge_id !== order.stripe_charge_id ||
+          !/^re_[A-Za-z0-9]+$/.test(existing.stripe_refund_id) ||
+          !/^trr_[A-Za-z0-9]+$/.test(
+            existing.stripe_transfer_reversal_id ?? "",
+          ) ||
+          !/^fr_[A-Za-z0-9]+$/.test(
+            existing.stripe_application_fee_refund_id ?? "",
+          )
+        ) throw new Error("INPUT");
+      }
       return { order, fixture, existing };
     },
   );
+  if (order.status === "refunded") {
+    // Resume certification only; do not retrieve, enrich, or redeliver to Stripe.
+    return await runRefundRecoveryStage(
+      "durable_verification",
+      async () => certifyRecoveredRefund(await inspect(fixture.data.id)),
+    );
+  }
   const stripe = getStripe();
   let verifiedRefundId: string | undefined;
   const boundedRequest = { timeout: 10_000, maxNetworkRetries: 0 };
-  const result = await runRefundRecoveryStage(
+  await runRefundRecoveryStage(
     "evidence_validation",
     () =>
       recoverExistingRefundEvidence({
@@ -1814,28 +1843,15 @@ async function recoverRefund(
     )(await signedRequest(descriptor));
     if (response.status !== 200) throw new Error("STRIPE");
   });
-  await runRefundRecoveryStage("durable_verification", async () => {
+  return await runRefundRecoveryStage("durable_verification", async () => {
     const state = await inspect(fixture.data.id);
     const receipt = await client.from("stripe_webhook_events").select(
       "processing_status,error_code",
     )
       .eq("stripe_event_id", descriptor.event_id).single();
-    if (
-      receipt.error || receipt.data.processing_status !== "processed" ||
-      receipt.data.error_code !== null ||
-      !recoveredRefundStateIsSafe(state)
-    ) throw new Error("STRIPE");
+    if (receipt.error) throw new Error("STRIPE");
+    return certifyRecoveredRefund(state, receipt.data);
   });
-  return {
-    ...result,
-    order_refunded: true,
-    reconciled: true,
-    refund_count: 1,
-    policy_verified: true,
-    ticket_count: 3,
-    invalid_ticket_count: 3,
-    refunded_ticket_count: 3,
-  };
 }
 
 async function cleanup(

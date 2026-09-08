@@ -109,6 +109,33 @@ export function recoveredRefundStateIsSafe(state: RecoveryRecord): boolean {
       );
   });
 }
+export function certifyRecoveredRefund(
+  state: RecoveryRecord,
+  receipt?: RecoveryRecord,
+) {
+  if (
+    !recoveredRefundStateIsSafe(state) ||
+    (receipt !== undefined &&
+      (receipt.processing_status !== "processed" ||
+        (receipt.error_code !== null &&
+          receipt.error_code !== "REFUND_STATE_IGNORED")))
+  ) throw new Error("STRIPE");
+  // A terminal-row no-op receipt is safe only with the exact durable aggregate.
+  return {
+    ok: true,
+    livemode: false,
+    amount: 5500,
+    reversal_amount: 5500,
+    application_fee_refund_amount: 425,
+    order_refunded: true,
+    reconciled: true,
+    refund_count: 1,
+    policy_verified: true,
+    ticket_count: 3,
+    invalid_ticket_count: 3,
+    refunded_ticket_count: 3,
+  };
+}
 export type ExistingRefundSnapshot = {
   orderId: string;
   paymentIntentId: string;
