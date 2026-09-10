@@ -1,0 +1,35 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions;
+select no_plan();
+\ir helpers/core_ticket_truth_lite_setup.inc
+select pg_temp.record_and_fulfill('opsorders','opsorders',id,session_id) from fulfillment_orders where kind='clean';
+reset role;
+create function pg_temp.orders(p_search text default '',p_limit integer default 25,p_time timestamptz default null,p_id uuid default null) returns jsonb language sql as $$select public.list_organizer_event_orders('a6200000-0000-4000-8000-000000000001',p_search,p_limit,p_time,p_id);$$;
+set local role authenticated;
+select is(jsonb_array_length(pg_temp.orders()->'orders'),7,'all payment states remain reachable');
+select is(jsonb_array_length(pg_temp.orders('SYNTHETIC BUYER')->'orders'),7,'buyer name search case insensitive');
+select is(jsonb_array_length(pg_temp.orders('example.invalid')->'orders'),7,'email substring search');
+select is(jsonb_array_length(pg_temp.orders('%')->'orders'),0,'wildcards interpreted literally');
+select is(jsonb_array_length(pg_temp.orders('',2)->'orders'),2,'bounded page');
+select ok(pg_temp.orders('',2)->'nextCursor'<>'null'::jsonb,'cursor returned for next page');
+select throws_ok($$select pg_temp.orders('',51)$$,'22023','Invalid order query','unbounded requests rejected');
+select throws_ok($$select pg_temp.orders(repeat('x',321))$$,'22023','Invalid order query','oversize search rejected');
+select ok(not (pg_temp.orders()::text ~ 'credential|confirmation|stripe_|reservation|organizer_id'),'list exposes only operational allowlist');
+reset role;
+select is(jsonb_array_length(pg_temp.orders((select order_number from public.orders where status='paid'))->'orders'),1,'exact order reference search');
+select is(pg_temp.orders((select order_number from public.orders where status='paid'))->'orders'->0->>'quantity','3','one row for three admissions');
+select is(jsonb_array_length(pg_temp.orders((select order_number from public.orders where status='paid'))->'orders'->0->'items'),2,'two purchased tier snapshots');
+create temp table paging as
+with first as (select pg_temp.orders('',3) p), second as (select pg_temp.orders('',3,(p->'nextCursor'->>'createdAt')::timestamptz,(p->'nextCursor'->>'id')::uuid) p from first), third as (select pg_temp.orders('',3,(p->'nextCursor'->>'createdAt')::timestamptz,(p->'nextCursor'->>'id')::uuid) p from second)
+select jsonb_array_elements(p->'orders')->>'id' id from first union all select jsonb_array_elements(p->'orders')->>'id' from second union all select jsonb_array_elements(p->'orders')->>'id' from third;
+select is((select count(distinct id) from paging),7::bigint,'keyset pagination loses no orders sharing timestamps');
+select is((select count(*) from paging),7::bigint,'keyset pagination duplicates none');
+select set_config('request.jwt.claim.sub','a6100000-0000-4000-8000-000000000002',true);
+set local role authenticated;
+select throws_ok($$select pg_temp.orders()$$,'42501','Event unavailable','other organizer sees no buyer PII');
+reset role;
+select ok(not has_function_privilege('anon','public.list_organizer_event_orders(uuid,text,integer,timestamptz,uuid)','execute'),'anonymous cannot list orders');
+select ok(not has_table_privilege('authenticated','public.order_items','select'),'item table remains private');
+select * from finish();
+rollback;

@@ -1187,6 +1187,16 @@ export type Database = {
           queued_evaluation_count: number
         }[]
       }
+      list_organizer_event_orders: {
+        Args: {
+          p_cursor_created_at?: string
+          p_cursor_id?: string
+          p_event_id: string
+          p_limit?: number
+          p_search?: string
+        }
+        Returns: Json
+      }
       list_owned_ticket_tiers: {
         Args: { p_event_id: string }
         Returns: {

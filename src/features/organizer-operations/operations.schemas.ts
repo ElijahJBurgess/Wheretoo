@@ -14,3 +14,14 @@ export const metricsSchema = z.strictObject({
   })),
 }).refine((value) => value.checkedIn <= value.issued)
 export type EventMetrics = z.infer<typeof metricsSchema>
+export const orderStatusSchema = z.enum(['creating_checkout','checkout_open','payment_processing','payment_failed','expired','cancelled','paid','refunded','requires_review','partially_refunded'])
+export const orderSummarySchema = z.strictObject({
+ id: z.uuid(), orderNumber: z.string().min(1), buyerName: z.string(), buyerEmail: z.string(),
+ createdAt: z.iso.datetime({ offset: true }), paidAt: z.iso.datetime({ offset: true }).nullable(),
+ status: orderStatusSchema, quantity: count, totalMinor: count, currency: z.literal('usd'),
+ items: z.array(z.strictObject({ tierName: z.string(), quantity: count, subtotalMinor: count })),
+})
+export const orderCursorSchema = z.strictObject({ createdAt: z.iso.datetime({ offset: true }), id: z.uuid() })
+export const ordersPageSchema = z.strictObject({ orders: z.array(orderSummarySchema).max(50), nextCursor: orderCursorSchema.nullable() })
+export type OrderCursor = z.infer<typeof orderCursorSchema>
+export type OrderSummary = z.infer<typeof orderSummarySchema>

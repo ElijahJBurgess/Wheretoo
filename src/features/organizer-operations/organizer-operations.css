@@ -50,3 +50,16 @@
 .operations-layout .event-list__dates { color: var(--ops-muted); }
 .operations-layout .organizer-eyebrow { display:none; }
 @media(max-width: 760px) { .operations-layout { grid-template-columns: 1fr; } .operations-sidebar { padding: 16px 20px; border-right: 0; border-bottom: 1px solid #263340; gap: 16px; } .operations-brand { font-size: 24px; } .operations-sidebar nav { display:flex; gap: 3px; flex-wrap:wrap; } .operations-sidebar nav a { font-size: 12px; padding: 8px 10px; } .operations-sidebar__footer { display:none; } .operations-main { padding: 24px 18px 40px; } .operations-hero { min-height: 210px; } .operations-hero__body { padding: 24px; } .operations-hero h1 { font-size: 36px; } .ops-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; } .ops-metrics>div { padding: 20px 16px; } .ops-metrics dd { font-size: 24px; } .ops-actions { gap: 8px; } .ops-button { padding: 11px 15px; } }
+.ops-page-heading h1 { font-size: 32px; font-weight: 600; margin: 8px 0; }
+.ops-page-heading p { font-size: 13px; color: var(--ops-muted); margin: 8px 0; }
+.ops-search { display: flex; gap: 12px; margin: 26px 0; }
+.ops-search input { flex: 1; min-width: 0; background: #101a26; border: 1px solid #314154; color: #f0f4fd; padding: 13px 18px; border-radius: 30px; font-size: 13px; }
+.ops-orders { list-style: none; padding: 0; margin: 0 0 25px; }
+.ops-orders-header,.ops-orders li>a { display: grid; grid-template-columns: minmax(0,1fr) 100px 100px 130px; gap: 16px; padding: 20px 8px; align-items: center; }
+.ops-orders-header { color: var(--ops-muted); font-size: 12px; border-bottom: 1px solid var(--ops-line); }
+.ops-orders li>a { text-decoration: none; border-bottom: 1px solid #1d2937; font-size: 13px; border-radius: 6px; }
+.ops-orders li>a:hover { background: #111b27; }
+.ops-orders li>a>div { display: grid; gap: 5px; min-width:0; overflow-wrap: anywhere; }
+.ops-orders li strong { font-weight: 550; }
+.ops-orders li small,.ops-orders li>a>div>span { color: var(--ops-muted); font-size: 11px; }
+@media(max-width: 760px) { .ops-orders-header { display: none; } .ops-orders li>a { grid-template-columns: minmax(0,1fr) auto; gap: 12px; padding: 20px 2px; } .ops-orders li>a>div { grid-column: 1; grid-row: span 3; } .ops-orders li>a>span { grid-column: 2; text-align:right; } .ops-search { gap: 8px; } }
