@@ -1,5 +1,5 @@
 import { supabase } from '../../lib/supabase/client'
-import { metricsSchema, ordersPageSchema, type OrderCursor, type EventMetrics } from './operations.schemas'
+import { metricsSchema, orderDetailSchema, ordersPageSchema, type OrderCursor, type EventMetrics } from './operations.schemas'
 
 export async function getEventMetrics(eventId: string): Promise<EventMetrics> {
   const { data, error } = await supabase.rpc('get_organizer_event_metrics', { p_event_id: eventId })
@@ -18,4 +18,12 @@ export async function listEventOrders(eventId: string, search: string, cursor: O
   if (error || !parsed.success) throw new Error()
   return parsed.data
  } catch { throw new Error('Orders unavailable') }
+}
+export async function getOrder(eventId: string, orderId: string) {
+ try {
+  const { data, error } = await supabase.rpc('get_organizer_order', { p_event_id: eventId, p_order_id: orderId })
+  const parsed = orderDetailSchema.safeParse(data)
+  if (error || !parsed.success || parsed.data.id !== orderId) throw new Error()
+  return parsed.data
+ } catch { throw new Error('Order unavailable') }
 }

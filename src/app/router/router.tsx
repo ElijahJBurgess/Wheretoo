@@ -129,6 +129,10 @@ export function createAppRouter(runtime: TicketExperienceRuntime) {
                       lazy: lazyComponent(() => import('../../features/organizer-operations/OrganizerOrdersPage'), 'OrganizerOrdersPage'),
                     },
                     {
+                      path: '/organizer/events/:eventId/orders/:orderId',
+                      lazy: lazyComponent(() => import('../../features/organizer-operations/OrganizerOrderDetailPage'), 'OrganizerOrderDetailPage'),
+                    },
+                    {
                       path: '/organizer/events/:eventId/check-in',
                       Component: runtime.OrganizerScannerRoute,
                     },

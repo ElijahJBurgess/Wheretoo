@@ -1,6 +1,6 @@
 import { useQuery, useInfiniteQuery } from '@tanstack/react-query'
 import type { OrderCursor } from './operations.schemas'
-import { getEventMetrics, listEventOrders } from './operations.api'
+import { getEventMetrics, listEventOrders, getOrder } from './operations.api'
 export const operationsKeys = {
   event: (ownerId: string, eventId: string) => ['organizer-operations', ownerId, eventId] as const,
 }
@@ -19,4 +19,8 @@ export function useEventOrders(ownerId: string, eventId: string, search: string)
   getNextPageParam: page => page.nextCursor,
   enabled: !!ownerId && !!eventId,
  })
+}
+
+export function useOrder(ownerId: string, eventId: string, orderId: string) {
+ return useQuery({ queryKey: [...operationsKeys.event(ownerId,eventId),'order',orderId], queryFn: () => getOrder(eventId,orderId), enabled: !!ownerId && !!eventId && !!orderId })
 }

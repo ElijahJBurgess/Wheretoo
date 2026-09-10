@@ -63,6 +63,7 @@ describe('ticket experience router composition', () => {
   it.each([
     '/organizer/events/event-a/dashboard',
     '/organizer/events/event-a/check-in',
+    '/organizer/events/event-a/orders',
   ])('keeps %s behind session and organizer boundaries', (path) => {
     expect(matchedIds(path)).toEqual(
       expect.arrayContaining(['session-shell', 'require-session', 'organizer-shell', 'require-organizer']),
@@ -97,7 +98,7 @@ describe('ticket experience router composition', () => {
 
   it('keeps production routes fail-closed and excludes development routes', () => {
     expect(productionTicketExperienceRuntime.OrganizerScannerRoute).not.toBe(NotEnabledRoute)
-    expect(productionTicketExperienceRuntime.OrganizerDashboardRoute).toBe(NotEnabledRoute)
+    expect(productionTicketExperienceRuntime.OrganizerDashboardRoute).not.toBe(NotEnabledRoute)
     expect(productionTicketExperienceRuntime.developmentRoutes).toEqual([])
   })
 
@@ -111,22 +112,9 @@ describe('ticket experience router composition', () => {
     ])
   })
 
-  it('keeps the authenticated development dashboard inside the organizer main landmark', async () => {
-    const Dashboard = developmentTicketExperienceRuntime.OrganizerDashboardRoute
-    const router = createMemoryRouter([
-      {
-        path: '/organizer/events/:eventId/dashboard',
-        element: (
-          <main className="organizer-layout__main">
-            <Dashboard />
-          </main>
-        ),
-      },
-    ], { initialEntries: ['/organizer/events/event-a/dashboard'] })
-    const view = render(<RouterProvider router={router} />)
-
-    expect(await screen.findByRole('heading', { name: 'Mission Night Market' })).toBeVisible()
-    expect(view.container.querySelectorAll('main')).toHaveLength(1)
+  it('uses the same real organizer operations in development and production', () => {
+    expect(developmentTicketExperienceRuntime.OrganizerDashboardRoute).toBe(productionTicketExperienceRuntime.OrganizerDashboardRoute)
+    expect(developmentTicketExperienceRuntime.OrganizerScannerRoute).toBe(productionTicketExperienceRuntime.OrganizerScannerRoute)
   })
 
   it.each([

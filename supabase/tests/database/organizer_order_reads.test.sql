@@ -25,8 +25,15 @@ with first as (select pg_temp.orders('',3) p), second as (select pg_temp.orders(
 select jsonb_array_elements(p->'orders')->>'id' id from first union all select jsonb_array_elements(p->'orders')->>'id' from second union all select jsonb_array_elements(p->'orders')->>'id' from third;
 select is((select count(distinct id) from paging),7::bigint,'keyset pagination loses no orders sharing timestamps');
 select is((select count(*) from paging),7::bigint,'keyset pagination duplicates none');
+create function pg_temp.detail(p_id uuid) returns jsonb language sql as $$select public.get_organizer_order('a6200000-0000-4000-8000-000000000001',p_id);$$;
+select is(jsonb_array_length(pg_temp.detail((select id from fulfillment_orders where kind='clean'))->'tickets'),3,'detail projects three individually issued units');
+select is(jsonb_array_length(pg_temp.detail((select id from fulfillment_orders where kind='partial'))->'tickets'),0,'unpaid detail invents no admissions');
+select is(pg_temp.detail((select id from fulfillment_orders where kind='clean'))->>'refundState','available','paid whole order can be requested for refund');
+select ok(not (pg_temp.detail((select id from fulfillment_orders where kind='clean'))::text ~ 'credential|confirmation|stripe_|reservation'),'detail excludes secret source material');
+select throws_ok($$select public.get_organizer_order('a6200000-0000-4000-8000-000000000002',(select id from fulfillment_orders where kind='clean'))$$,'42501','Event unavailable','cross-event order detail denied');
 select set_config('request.jwt.claim.sub','a6100000-0000-4000-8000-000000000002',true);
 set local role authenticated;
+select throws_ok($$select pg_temp.detail('00000000-0000-4000-8000-000000000000')$$,'42501','Event unavailable','detail owner checked before order existence');
 select throws_ok($$select pg_temp.orders()$$,'42501','Event unavailable','other organizer sees no buyer PII');
 reset role;
 select ok(not has_function_privilege('anon','public.list_organizer_event_orders(uuid,text,integer,timestamptz,uuid)','execute'),'anonymous cannot list orders');

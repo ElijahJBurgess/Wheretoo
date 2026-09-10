@@ -25,3 +25,8 @@ export const orderCursorSchema = z.strictObject({ createdAt: z.iso.datetime({ of
 export const ordersPageSchema = z.strictObject({ orders: z.array(orderSummarySchema).max(50), nextCursor: orderCursorSchema.nullable() })
 export type OrderCursor = z.infer<typeof orderCursorSchema>
 export type OrderSummary = z.infer<typeof orderSummarySchema>
+export const orderDetailSchema = orderSummarySchema.extend({
+ tickets: z.array(z.strictObject({ id: z.uuid(), admissionLabel: z.string(), status: z.enum(['valid','used','refunded','cancelled']), usedAt: z.iso.datetime({ offset: true }).nullable(), issuedAt: z.iso.datetime({ offset: true }) }).refine(ticket => (ticket.status === 'used') === (ticket.usedAt !== null))),
+ refundState: z.enum(['available','pending','refunded','unavailable']), admissionEligible: z.boolean(),
+}).refine(order => order.tickets.length === (order.paidAt ? order.quantity : 0))
+export type OrderDetail = z.infer<typeof orderDetailSchema>

@@ -1106,6 +1106,10 @@ export type Database = {
         Args: { p_event_id: string }
         Returns: Json
       }
+      get_organizer_order: {
+        Args: { p_event_id: string; p_order_id: string }
+        Returns: Json
+      }
       get_owned_event_requirements: {
         Args: { p_event_id: string }
         Returns: {
