@@ -30,3 +30,8 @@ export const orderDetailSchema = orderSummarySchema.extend({
  refundState: z.enum(['available','pending','refunded','unavailable']), admissionEligible: z.boolean(),
 }).refine(order => order.tickets.length === (order.paidAt ? order.quantity : 0))
 export type OrderDetail = z.infer<typeof orderDetailSchema>
+export const manualAdmissionSchema = z.union([
+ z.strictObject({ outcome: z.enum(['admitted','already_used']), admissionLabel: z.string().min(1).max(80), buyerName: z.string(), usedAt: z.iso.datetime({ offset: true }) }),
+ z.strictObject({ outcome: z.enum(['refunded','cancelled']), admissionLabel: z.string().min(1).max(80), buyerName: z.string() }),
+ z.strictObject({ outcome: z.enum(['invalid','wrong_event']) }),
+])

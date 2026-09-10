@@ -11,6 +11,7 @@ export type AdmissionCheckResult = {
   outcome: AdmissionOutcome
   admissionLabel?: string
   attendeeLabel?: string
+  usedAt?: string
 }
 
 export interface AdmissionChecker {

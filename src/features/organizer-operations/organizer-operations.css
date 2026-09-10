@@ -79,3 +79,15 @@
 .ops-ticket h3 { font-size:14px; margin:0; font-weight:550; }
 .ops-ticket p { margin:8px 0; font-size:13px; }
 @media(max-width:480px) { .ops-order-facts { gap:14px; } .ops-order-facts>div+div { padding-left:14px; } .ops-order-summary { padding:0 18px 20px; } .ops-order-summary .ops-section-heading { flex-wrap:wrap; } }
+.ops-dialog { width:min(440px,calc(100vw - 36px)); padding:28px; color:#f2f4fa; background:#0c151f; border:1px solid #384657; border-radius:18px; }
+.ops-dialog::backdrop { background:#02060bbb; backdrop-filter:blur(5px); }
+.ops-dialog h2 { font-size:22px; margin:0 0 24px; }
+.ops-dialog p { line-height:1.6; overflow-wrap:anywhere; }
+.ops-dialog .ops-actions { margin-bottom:0; }
+.ops-scanner { max-width:460px; margin:auto; text-align:center; }
+.ops-scanner .ops-back { display:block; text-align:left; }
+.ops-scanner__event h1 { font: 32px/1.1 Georgia,serif; margin:18px 0; text-wrap:balance; }
+.ops-scanner__event p { font-size:13px; }
+.ops-scanner .organizer-scanner { min-height:480px; border:1px solid var(--ops-line); border-radius:18px; margin:25px 0; }
+.ops-scanner .organizer-scanner__brand { display:none; }
+@media(prefers-reduced-motion:reduce) { .operations-layout *, .operations-layout *::before,.operations-layout *::after { animation-duration:.01ms!important; transition-duration:.01ms!important; } }

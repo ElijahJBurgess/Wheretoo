@@ -1288,6 +1288,10 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      redeem_owned_ticket: {
+        Args: { p_event_id: string; p_ticket_id: string }
+        Returns: Json
+      }
       request_event_review: {
         Args: { p_event_id: string; p_organizer_note: string }
         Returns: string
@@ -1891,6 +1895,19 @@ export type Database = {
           delivery_attempt_count: number
           processing_status: string
           should_process: boolean
+        }[]
+      }
+      server_redeem_organizer_ticket: {
+        Args: {
+          p_credential_hash: string
+          p_event_id: string
+          p_organizer_id: string
+        }
+        Returns: {
+          admission_label: string
+          buyer_name: string
+          outcome: string
+          used_at: string
         }[]
       }
       server_redeem_paid_ticket: {

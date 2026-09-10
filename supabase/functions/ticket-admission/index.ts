@@ -72,7 +72,7 @@ export async function defaultRedeem(
   input: RedeemInput,
   client: SupabaseClient = getServiceClient(),
 ): Promise<unknown> {
-  const { data, error } = await client.rpc("server_redeem_paid_ticket", {
+  const { data, error } = await client.rpc("server_redeem_organizer_ticket", {
     p_organizer_id: input.organizerId,
     p_event_id: input.eventId,
     p_credential_hash: input.credentialHash,
@@ -83,11 +83,11 @@ export async function defaultRedeem(
   return data[0];
 }
 function safeResult(value: unknown) {
-  if (!record(value) || !exact(value, ["outcome", "admission_label"])) {
+  if (!record(value) || (!exact(value, ["outcome", "admission_label"]) && !exact(value, ["outcome", "admission_label", "buyer_name", "used_at"]))) {
     return null;
   }
   if (value.outcome === "invalid" || value.outcome === "wrong_event") {
-    return value.admission_label === null ? { outcome: value.outcome } : null;
+    return value.admission_label === null && (value.buyer_name == null) && (value.used_at == null) ? { outcome: value.outcome } : null;
   }
   if (
     typeof value.outcome !== "string" ||
@@ -98,6 +98,13 @@ function safeResult(value: unknown) {
     [...value.admission_label].length < 1 ||
     [...value.admission_label].length > 80
   ) return null;
+  if ("buyer_name" in value) {
+    if (typeof value.buyer_name !== "string" || value.buyer_name.length > 200) return null;
+    if (value.outcome === "admitted" || value.outcome === "already_used") {
+      if (typeof value.used_at !== "string" || !/^\d{4}-\d{2}-\d{2}T.*(Z|[+-]\d{2}:\d{2})$/.test(value.used_at) || !Number.isFinite(Date.parse(value.used_at))) return null;
+    } else if (value.used_at !== null) return null;
+    return { outcome: value.outcome, admissionLabel: value.admission_label, attendeeLabel: value.buyer_name, ...(value.used_at ? { usedAt: value.used_at } : {}) };
+  }
   return { outcome: value.outcome, admissionLabel: value.admission_label };
 }
 export function createTicketAdmissionHandler(

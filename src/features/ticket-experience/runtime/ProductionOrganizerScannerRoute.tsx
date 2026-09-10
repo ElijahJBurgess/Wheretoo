@@ -7,5 +7,5 @@ const admissionChecker = createAdmissionChecker()
 
 export default function ProductionOrganizerScannerRoute() {
   const [cameraDecoder] = useState(createCameraDecoder)
-  return <OrganizerScannerPage admissionChecker={admissionChecker} cameraDecoder={cameraDecoder} />
+  return <OrganizerScannerPage operational admissionChecker={admissionChecker} cameraDecoder={cameraDecoder} />
 }

@@ -11,6 +11,7 @@ import {
 export type OrganizerScannerPageProps = {
   admissionChecker: AdmissionChecker
   cameraDecoder: CameraDecoder
+  operational?: boolean
 }
 
 export type ScannerController = {

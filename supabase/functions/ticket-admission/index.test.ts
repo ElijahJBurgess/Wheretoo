@@ -244,7 +244,7 @@ Deno.test("service boundary uses exact RPC and bytea encoding and rejects DB fai
     outcome: "admitted",
     admission_label: "VIP",
   });
-  assertEquals(observed, ["server_redeem_paid_ticket", {
+  assertEquals(observed, ["server_redeem_organizer_ticket", {
     p_organizer_id: OWNER,
     p_event_id: EVENT,
     p_credential_hash: `\\x${HASH}`,
@@ -263,4 +263,9 @@ Deno.test("service boundary uses exact RPC and bytea encoding and rejects DB fai
       "Admission unavailable",
     );
   }
+});
+Deno.test("organizer scan includes safe guest and canonical previous use time", async () => {
+ const response = await createTicketAdmissionHandler(dependencies({ redeem: async () => ({ outcome: "already_used", admission_label: "VIP", buyer_name: "Alex Chen", used_at: "2026-09-10T19:42:00Z" }) }))(request());
+ assertEquals(response.status,200);
+ assertEquals(await response.json(), { outcome: "already_used", admissionLabel: "VIP", attendeeLabel: "Alex Chen", usedAt: "2026-09-10T19:42:00Z" });
 });

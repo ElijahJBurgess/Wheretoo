@@ -8,6 +8,8 @@ const inputSchema = z.strictObject({
 const admissionLabel = z.string().refine((value) => value.trim() === value && [...value].length >= 1 && [...value].length <= 80)
 const responseSchema = z.union([
   z.strictObject({ outcome: z.enum(['admitted', 'already_used', 'refunded', 'cancelled']), admissionLabel }),
+  z.strictObject({ outcome: z.enum(['admitted', 'already_used']), admissionLabel, attendeeLabel: z.string().max(200), usedAt: z.iso.datetime({ offset: true }) }),
+  z.strictObject({ outcome: z.enum(['refunded', 'cancelled']), admissionLabel, attendeeLabel: z.string().max(200) }),
   z.strictObject({ outcome: z.enum(['wrong_event', 'invalid', 'network_error']) }),
 ])
 type InvokeAdmission = (

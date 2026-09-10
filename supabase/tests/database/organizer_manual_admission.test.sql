@@ -1,0 +1,28 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions;
+select no_plan();
+\ir helpers/core_ticket_truth_lite_setup.inc
+select pg_temp.record_and_fulfill('opsmanual','opsmanual',id,session_id) from fulfillment_orders where kind='clean';
+reset role;
+create temporary table selected_ticket as select id,credential_hash from public.tickets order by id limit 1;
+grant select on selected_ticket to authenticated;
+set local role authenticated;
+select is(public.redeem_owned_ticket('a6200000-0000-4000-8000-000000000001',(select id from selected_ticket))->>'outcome','admitted','manual delegates to atomic admission');
+select is(public.redeem_owned_ticket('a6200000-0000-4000-8000-000000000001',(select id from selected_ticket))->>'outcome','already_used','manual duplicate rejected');
+select ok(public.redeem_owned_ticket('a6200000-0000-4000-8000-000000000001',(select id from selected_ticket))->>'usedAt' is not null,'actual used time returned');
+select ok(not (public.redeem_owned_ticket('a6200000-0000-4000-8000-000000000001',(select id from selected_ticket))::text ~ 'credential|stripe_|buyerEmail'),'manual result has no secret or unnecessary PII');
+reset role;
+select is((select outcome from public.server_redeem_paid_ticket('a6100000-0000-4000-8000-000000000001','a6200000-0000-4000-8000-000000000001',(select credential_hash from selected_ticket))),'already_used','QR observes manual use through same truth');
+update public.events set starts_at=now()-interval '2 hours',ends_at=now() where id='a6200000-0000-4000-8000-000000000001';
+select is(public.redeem_owned_ticket('a6200000-0000-4000-8000-000000000001',(select id from public.tickets where status='valid' limit 1))->>'outcome','invalid','server blocks stale manual page at event end');
+select is(public.get_organizer_event_metrics('a6200000-0000-4000-8000-000000000001')->>'admissionEligible','false','ended dashboard closes admission');
+select is(public.get_organizer_event_metrics('a6200000-0000-4000-8000-000000000001')->>'sold','3','ended history retained');
+select is(jsonb_array_length(public.list_organizer_event_orders('a6200000-0000-4000-8000-000000000001')->'orders'),7,'ended orders accessible');
+select set_config('request.jwt.claim.sub','a6100000-0000-4000-8000-000000000002',true);
+set local role authenticated;
+select throws_ok($$select public.redeem_owned_ticket('a6200000-0000-4000-8000-000000000001',(select id from selected_ticket))$$,'42501','Event unavailable','wrong owner cannot admit');
+select is(public.redeem_owned_ticket('a6200000-0000-4000-8000-000000000002',(select id from selected_ticket))->>'outcome','invalid','foreign ticket selector discloses no context');
+reset role;
+select ok(not has_function_privilege('anon','public.redeem_owned_ticket(uuid,uuid)','execute'),'manual requires authentication');
+select * from finish(); rollback;

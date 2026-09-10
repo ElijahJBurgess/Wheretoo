@@ -1,4 +1,5 @@
 /* eslint-disable react-hooks/refs -- the controller intentionally groups reactive state with an opaque video RefObject */
+import { dateTime } from '../../organizer-operations/OperationsUi'
 import { useEffect, type ReactNode } from 'react'
 import type { AdmissionOutcome } from '../contracts/admission'
 import type { ScannerController } from './useScannerController'
@@ -112,6 +113,7 @@ function ScanResult({ controller }: { controller: ScannerController }) {
           {result.attendeeLabel ? <div><dt>Guest</dt><dd>{result.attendeeLabel}</dd></div> : null}
         </dl>
       ) : null}
+      {result.usedAt && <p className="organizer-scanner__result-detail">{result.outcome === 'already_used' ? 'Previously admitted' : 'Checked in'} · {dateTime(result.usedAt)}</p>}
       <div className="organizer-scanner__actions">
         {result.outcome === 'network_error' ? (
           <>
