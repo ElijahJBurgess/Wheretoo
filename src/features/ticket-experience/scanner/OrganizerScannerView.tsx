@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/refs -- the controller intentionally groups reactive state with an opaque video RefObject */
-import { dateTime } from '../../organizer-operations/OperationsUi'
+import { dateTime } from '../../organizer-operations/operations.format'
 import { useEffect, type ReactNode } from 'react'
 import type { AdmissionOutcome } from '../contracts/admission'
 import type { ScannerController } from './useScannerController'
@@ -148,7 +148,7 @@ export function OrganizerScannerView({
   }, [muted, state])
 
   return (
-    <main className={`organizer-scanner organizer-scanner--${state.kind}`}>
+    <section className={`organizer-scanner organizer-scanner--${state.kind}`}>
       <header className="organizer-scanner__header">
         <div>
           <p className="organizer-scanner__brand">Whereto</p>
@@ -207,6 +207,6 @@ export function OrganizerScannerView({
           {developmentControl}
         </aside>
       ) : null}
-    </main>
+    </section>
   )
 }

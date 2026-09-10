@@ -12,6 +12,7 @@ const { refetch, useOwnedEvents, useSession } = vi.hoisted(() => ({
 
 vi.mock('../auth/SessionProvider', () => ({ useSession }))
 vi.mock('./event.queries', () => ({ useOwnedEvents }))
+vi.mock('../organizer-operations/operations.queries', () => ({ useEventMetrics: vi.fn() }))
 
 import { OrganizerEventsPage } from './OrganizerEventsPage'
 
@@ -83,7 +84,7 @@ describe('OrganizerEventsPage', () => {
     renderPage()
     expect(screen.getByText('Night Market')).toBeInTheDocument()
     expect(screen.getByText('Untitled event')).toBeInTheDocument()
-    expect(screen.getByText('Draft')).toBeInTheDocument()
+    expect(screen.getByText('Draft', { selector: 'span' })).toBeInTheDocument()
     expect(screen.getByText('Published')).toBeInTheDocument()
     expect(screen.getByText(/Starts/)).toBeInTheDocument()
     expect(screen.getAllByText(/Updated/)).toHaveLength(2)

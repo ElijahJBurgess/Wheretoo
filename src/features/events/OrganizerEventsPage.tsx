@@ -1,3 +1,5 @@
+import { useState } from 'react'
+import { EventSalesSummary } from '../organizer-operations/EventSalesSummary'
 import { Link } from 'react-router-dom'
 import { AsyncState } from '../../components/ui/AsyncState'
 import { Button } from '../../components/ui/Button'
@@ -29,31 +31,36 @@ function organizerEventStatus(event: EventRow): { label: string; style: string }
   if (event.moderation_status === 'blocked') return { label: 'Blocked', style: 'blocked' }
   if (event.moderation_status === 'removed') return { label: 'Removed', style: 'removed' }
   if (
-    event.moderation_status === 'under_review'
-    || event.moderation_status === 'not_evaluated'
-    || event.moderated_revision !== event.content_revision
+    event.moderation_status === 'under_review' ||
+    event.moderation_status === 'not_evaluated' ||
+    event.moderated_revision !== event.content_revision
   ) {
     return { label: 'Under review', style: 'under-review' }
   }
-  return { label: 'Published', style: 'published' }
+  if (event.admission_type === 'paid' && event.ends_at && Date.parse(event.ends_at) <= Date.now()) {
+    return { label: 'Ended', style: 'draft' }
+  }
+  return { label: event.admission_type === 'paid' ? 'Live' : 'Published', style: 'published' }
 }
 
 export function OrganizerEventsPage() {
+  const [filter, setFilter] = useState('All')
+  const [visible, setVisible] = useState(12)
   const sessionState = useSession()
   const organizerId = sessionState.status === 'authenticated' ? sessionState.user.id : ''
   const eventsQuery = useOwnedEvents(organizerId)
 
   if (eventsQuery.isPending || sessionState.status !== 'authenticated') {
-    return <AsyncState status="loading" title="Loading your events" />
+    return <AsyncState status='loading' title='Loading your events' />
   }
 
   if (eventsQuery.isError) {
     return (
       <AsyncState
         action={<Button onClick={() => void eventsQuery.refetch()}>Try again</Button>}
-        description="Check your connection, then try again."
-        status="error"
-        title="Your events could not load"
+        description='Check your connection, then try again.'
+        status='error'
+        title='Your events could not load'
       />
     )
   }
@@ -61,43 +68,100 @@ export function OrganizerEventsPage() {
   if (!eventsQuery.data?.length) {
     return (
       <AsyncState
-        action={<Link className="ui-button ui-button--primary" to="/organizer/events/new">Create event</Link>}
-        description="Start with the details you know. You can save a draft before publishing."
-        status="empty"
-        title="No events yet"
+        action={
+          <Link className='ui-button ui-button--primary' to='/organizer/events/new'>
+            Create event
+          </Link>
+        }
+        description='Start with the details you know. You can save a draft before publishing.'
+        status='empty'
+        title='No events yet'
       />
     )
   }
 
   return (
-    <section aria-labelledby="organizer-events-title" className="events-index">
-      <div className="events-index__header">
+    <section aria-labelledby='organizer-events-title' className='events-index'>
+      <div className='events-index__header'>
         <div>
-          <p className="organizer-eyebrow">Organizer console</p>
-          <h1 id="organizer-events-title">My Events</h1>
+          <p className='organizer-eyebrow'>Organizer console</p>
+          <h1 id='organizer-events-title'>My Events</h1>
           <p>Manage your events and track performance.</p>
         </div>
-        <Link className="ui-button ui-button--primary" to="/organizer/events/new">Create event</Link>
+        <Link className='ui-button ui-button--primary' to='/organizer/events/new'>
+          Create event
+        </Link>
       </div>
-      <ul className="event-list">
-        {eventsQuery.data.map((event) => {
+      <div className='ops-event-filters' aria-label='Event status'>
+        {['All', 'Live', 'Draft', 'Ended', 'Cancelled'].map((label) => (
+          <button
+            type='button'
+            className='ops-button'
+            aria-pressed={filter === label}
+            key={label}
+            onClick={() => {
+              setFilter(label)
+              setVisible(12)
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <ul className='event-list'>
+        {eventsQuery.data.filter((event) =>
+          filter === 'All' || organizerEventStatus(event).label === filter
+        ).slice(0, visible).map((event) => {
           const title = event.title?.trim() || 'Untitled event'
           const status = organizerEventStatus(event)
           return (
-            <li className="event-list__item" key={event.id}>
-              <Link aria-label={`${title}, ${status.label}`} to={eventDestination(event)}>
+            <li className='event-list__item' key={event.id}>
+              <Link
+                className={event.admission_type === 'paid' ? 'ops-event-row' : undefined}
+                aria-label={`${title}, ${status.label}`}
+                to={eventDestination(event)}
+              >
+                {event.admission_type === 'paid' && (
+                  <span className='ops-event-art'>
+                    {event.artwork_path?.startsWith('https://')
+                      ? <img src={event.artwork_path} alt='' />
+                      : <span aria-hidden='true'>▦</span>}
+                  </span>
+                )}
                 <span className={`event-status event-status--${status.style}`}>{status.label}</span>
                 <strong>{title}</strong>
-                <span className="event-list__dates">
+                <span className='event-list__dates'>
                   {event.starts_at ? <span>Starts {formatInstant(event.starts_at)}</span> : null}
                   <span>Updated {formatInstant(event.updated_at)}</span>
                 </span>
-                <span aria-hidden="true" className="event-list__arrow">→</span>
+                {event.admission_type === 'paid' && (
+                  <>
+                    <span className='ops-event-venue'>
+                      {[event.venue_name, event.city].filter(Boolean).join(' · ') ||
+                        'Venue to be confirmed'}
+                    </span>
+                    <EventSalesSummary ownerId={organizerId} eventId={event.id} />
+                  </>
+                )}
+                <span aria-hidden='true' className='event-list__arrow'>→</span>
               </Link>
             </li>
           )
         })}
       </ul>
+      {eventsQuery.data.filter((event) =>
+            filter === 'All' || organizerEventStatus(event).label === filter
+          ).length === 0 && <p>No {filter.toLowerCase()} events.</p>}
+      {eventsQuery.data.filter((event) =>
+            filter === 'All' || organizerEventStatus(event).label === filter
+          ).length > visible && (
+        <button
+          className='ops-button'
+          onClick={() => setVisible((value) => value + 12)}
+        >
+          Show more events
+        </button>
+      )}
     </section>
   )
 }

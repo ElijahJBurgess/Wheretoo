@@ -21,6 +21,7 @@ vi.mock('../features/events/event.queries', () => ({
   useOwnedEvent: mocks.ownedEvent, useOwnedEvents: mocks.ownedEvents,
   useSaveEventDraft: mutation, useSaveEventRevision: mutation, usePublishEvent: mutation, useCancelOwnedEvent: mutation,
 }))
+vi.mock('../features/organizer-operations/operations.queries', () => ({ useEventMetrics: () => loaded({ sold: 1, capacity: 100, grossSalesMinor: 2500 }) }))
 vi.mock('../features/organizers/organizer.queries', () => ({ useOrganizer: mocks.organizer, useSaveOrganizer: mutation }))
 vi.mock('../features/tickets/ticket.queries', () => ({ useOwnedTicketTiers: mocks.tiers, useSaveTicketTiers: mutation }))
 vi.mock('../features/tickets/publicTicketing.queries', () => ({ usePublicTicketingEvent: mocks.publicEvent }))
