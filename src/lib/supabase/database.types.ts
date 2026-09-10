@@ -1102,6 +1102,10 @@ export type Database = {
         }[]
       }
       get_my_staff_role: { Args: never; Returns: string }
+      get_organizer_event_metrics: {
+        Args: { p_event_id: string }
+        Returns: Json
+      }
       get_owned_event_requirements: {
         Args: { p_event_id: string }
         Returns: {
