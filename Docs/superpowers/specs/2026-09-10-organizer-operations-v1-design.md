@@ -1,8 +1,8 @@
-# Wheretoo V1 Organizer Operations — design and contract audit
+# Wheretoo V1 Organizer Operations — approved design
 
 Date: 2026-09-10
 
-Status: **BLOCKED before production implementation.** The visual direction and requested scope are approved by the user's request. The new backend contracts and unresolved metric definitions below are not approved by this document. No production code, migrations, provider calls, or deployment accompany this audit.
+Status: **APPROVED for sequential implementation.** Founder decisions on 2026-09-10 resolve the original audit gaps. Image #1 remains visual authority. Scope is paid events only; resend and all new email/access-token infrastructure are excluded. Existing scanner camera-factory test failure remains a recorded baseline issue, not a reason to weaken tests.
 
 ## 1. Baseline and authority
 
@@ -24,9 +24,9 @@ An organizer opens one owned event, understands its performance, finds a buyer/o
 
 Exactly four primary dashboard metrics: gross ticket sales, tickets sold against configured inventory, order count, and checked-in admissions against the approved denominator. Include a tier breakdown with sold, remaining, and gross ticket sales.
 
-Orders and search are scoped to the selected event. Search accepts only buyer name, buyer email, and order reference. Every historical order remains reachable. Each order shows each admission separately. Manual admission requires confirmation and the existing atomic authority. Refunds are whole-order only. Resend sends access to existing tickets without creating an order, ticket, or replacement admission credential. Ended events remain readable and reject new admission.
+Orders and search are scoped to the selected event. Search accepts only buyer name, buyer email, and order reference. Every historical order remains reachable. Each order shows each admission separately. Manual admission requires confirmation and the existing atomic authority. Refunds are whole-order only. Ended events remain readable and reject new admission.
 
-No map/discovery changes, buyer redesign, production deployment, cross-event customer UI, charts, advanced analytics, attribution, CRM, campaigns, team accounts, transfers, exchanges, partial refunds, payout controls, or NFC.
+No resend, email/access-token infrastructure, free-event operations, map/discovery changes, buyer redesign, production deployment, cross-event customer UI, charts, advanced analytics, attribution, CRM, campaigns, team accounts, transfers, exchanges, partial refunds, payout controls, or NFC.
 
 ## 3. Existing implementation map
 
@@ -52,49 +52,31 @@ Paths below are relative to this worktree. These findings describe committed sou
 
 Production routes are defined in `src/app/router/router.tsx`. New orders routes would be `/organizer/events/:eventId/orders` and `/organizer/events/:eventId/orders/:orderId`, beneath the existing authenticated organizer guards.
 
-## 4. Blocking gaps
+## 4. Founder-approved contracts
 
-### B1 — Canonical dashboard formulas are not yet product-defined
+The previous B1–B6 audit findings are resolved by the latest explicit instruction. New secure Wheretoo-owned read APIs, a whole-order refund adapter, and a manual admission adapter are approved. These are additive boundaries over existing truth, not changes to checkout or ticket semantics.
 
-Checkout Integrity design §8.6 names data sources, but intentionally leaves analytics out of scope. It does not define which order statuses contribute to gross sales, sold units, or order count. It also does not choose historical issued admissions versus current admissions as the check-in denominator.
+### Read APIs
 
-These choices materially change results after refunds, event cancellation, and financial review. They cannot be selected independently by UI components. The existing fixture dashboard is not authority. Section 6 isolates the known facts and the decisions required before Slice 1.
+Authenticated SQL RPCs validate `auth.uid()` against event ownership before returning any data. Base tables retain their revoked browser privileges. All operations reject free events. Readable event states include draft, published, cancelled, and derived ended; public discovery eligibility never controls owner history.
 
-### B2 — No safe organizer order projection
+- `get_organizer_event_metrics(p_event_id uuid) -> jsonb`: safe event context, historical metrics, configured capacity, current tier remaining, tier breakdown, server admission eligibility.
+- `list_organizer_event_orders(p_event_id uuid, p_search text, p_limit integer, p_cursor_created_at timestamptz, p_cursor_id uuid) -> jsonb`: event-specific substring search on name/email/order number, stable descending `(created_at,id)` cursor, default 25 and maximum 50 rows, maximum 320-character query, plus next cursor. Escape wildcard metacharacters. All canonical order statuses stay readable.
+- `get_organizer_order(p_event_id uuid, p_order_id uuid) -> jsonb`: allowlisted buyer identity, financial status, original item snapshots, each issued ticket with canonical status and timestamps, and actionable eligibility. No credentials, hashes, confirmation bearers, or provider secrets/IDs.
 
-`20260825010100_secure_paid_sales_and_tiers.sql` revokes browser table privileges on orders, items, tickets, and refunds. This is a protective boundary, not an existing data exposure. No subsequent migration supplies the requested owner-scoped list/detail/search contract.
+Unknown or corrupt data fails explicitly. Presentation does not silently turn an amount due into an amount paid, or a created timestamp into a purchase timestamp. No order-wide ticket state overrides individual admissions.
 
-Required new contract: authenticated owner-only, event-bound, allowlisted projections, bounded server pagination, search by the three authorized fields, and safe unknown/error results. Do not grant broad table SELECT or return `select *` rows. Prove organizer A cannot read B's buyer information, ticket details, or counts.
+### Manual admission
 
-### B3 — No organizer refund invocation
+`redeem_owned_ticket(p_event_id uuid, p_ticket_id uuid) -> jsonb` is an authenticated owner adapter. It resolves the existing hash server-side, invokes `server_redeem_paid_ticket`, and returns safe result context. It performs no separate ticket UPDATE or eligibility implementation. QR remains on the same SQL authority. Wrong-event input never admits and never leaks foreign PII. The existing admission response may be additively enriched with safe owned-event buyer/tier/used-time fields, with strict transport tests updated to enforce that allowlist.
 
-`server_prepare_whole_order_refund(orderId, reason)` is service-only and has no organizer identity parameter. Calling it from a browser or wrapping it without ownership validation would be unsafe. The final preparation chain requires a paid order, rejects succeeded refunds, and rejects pending/requires-action refunds. Existing helper execution is in `tests/integration/edge/task17-transaction-driver/index.ts`, not a production organizer function.
+### Whole-order refund
 
-Required new contract: verified organizer identity, event/order ownership check before provider work, approved reason mapping, existing helper reuse, safe retry/pending/failure responses, and re-read of webhook-derived truth. It must never equate a provider request acknowledgment with a durably refunded order. No second refund algorithm is proposed.
+`organizer-refund-order` accepts exactly eventId/orderId, verifies organizer identity and event/order ownership server-side, and invokes `createWholeOrderRefund` with `requested_by_customer`. No caller-selected amount, tier, ticket, provider ID, or refund-policy override. Reuse the existing Stripe dependency configuration and helper, including order-derived idempotency, destination reversal, and application-fee policy. Existing pending/completed requests are read/reconciled rather than represented as new refunds. Failed or unknown requests leave durable order/ticket state unchanged in the UI. Only a canonical backend read can display Refunded.
 
-### B4 — Transactional resend infrastructure and access recovery are missing
+### Excluded paths
 
-Missing pieces are an authenticated order-aware resend endpoint, server email transport, configured sender and runtime secret, delivery-attempt/idempotency/rate-limit policy, and safe buyer ticket-access material. This audit did not inspect or expose provider secrets; deployment configuration remains unverified.
-
-The access problem is independent of email transport: `checkout.attempt.ts` creates an independent random confirmation bearer in the buyer's browser. Orders store only `confirmation_token_hash`. `ticket-collection` hashes the presented bearer and matches that hash. The original bearer cannot be recovered from this one-way hash.
-
-Admission QR credentials can be deterministically reproduced by the existing server secret, but they are different from collection-access bearers. Do not expose or rotate either to make resend appear implemented. Do not scrape payment-provider URLs or logs to recover a bearer.
-
-A decision is required on an additional secure email-access mechanism for the existing collection, or another approved delivery mechanism for existing credentials. It must preserve existing ticket IDs, credential hashes, prior links, issuance, and buyer presentation. This is a new access contract; it is not silently included in a UI task.
-
-### B5 — Manual admission and richer scanner results need a server extension
-
-The current strict request accepts only event ID and raw QR credential; its SQL function receives only the credential hash. Organizer ticket details cannot legitimately synthesize that request from a public ticket ID.
-
-Proposed direction, requiring approval: a narrow owner-authorized ticket-ID adapter resolves the stored credential hash server-side and invokes the existing `server_redeem_paid_ticket` function. It must perform no independent ticket UPDATE. Retain wrong-event checks, event locking, coherence checks, terminal-state precedence, and the final conditional transition.
-
-Separately, the image requires current counts, buyer name, and check-in time. Existing scanner responses provide none of those. Add an explicitly allowlisted owner-only result/context projection. Return PII only for an owned, correctly matched event. A wrong-event or invalid result must not leak a buyer or ticket label. Names are buyer names unless a real ticket-holder field exists; no ticket-holder identity is currently captured.
-
-### B6 — Free-event operations have no implemented admission source
-
-Main allows free event creation, but the audited transaction/admission path is explicitly paid-ticket-only. No production RSVP issuance/redeem service or registration table was found. Database order/item money constraints are positive, and Lite checks paid event type.
-
-Free events can remain in the owned list and existing editor. Their operational metrics/admissions must be shown as unavailable unless an RSVP contract is supplied. Resolve whether this project operates paid events only; do not silently represent free-event attendance as zero or extend Core Ticket Truth to free admissions.
+Resend, email delivery, and access-token recovery are removed from this build. No disabled resend promise is needed in the UI. Free events retain existing creation/edit/publish access but do not enter paid Organizer Operations and receive no invented RSVP counts or check-in flow. The original email/free-event audit explains future work only; neither blocks this approved scope.
 
 ### Additional visual dependency — artwork availability
 
@@ -115,49 +97,47 @@ Events have `artwork_path`; the public page has limited safe URL rendering. The 
 | Event end | New valid admission rejects when `ends_at <= clock_timestamp()`. End is derived, not a new stored order/ticket status. Existing used state remains historical. |
 | Security | Ticket IDs are identifiers, not credentials. Organizer data projections exclude hashes, admission secrets, collection bearers, Stripe secrets, and unnecessary provider IDs. The existing buyer QR display and scanner input retain their separate credential contracts. |
 
-## 6. Metric boundary: exact known formulas and unresolved decisions
+## 6. Locked historical metric matrix
 
-Use one database/service projection with one authoritative snapshot time. React formats returned values and does not infer totals from a loaded order page. The My Events summary, dashboard, tier rows, and scanner count must consume the same definitions. Missing/failed data remains unavailable, never zero.
+One tested server query boundary owns these formulas. React only validates/formats the projection. All aggregation uses one database snapshot time, integer USD minor units, independent order/item/ticket aggregates, and coherent source rows. Historical purchase success is the server-written non-null `orders.paid_at` marker established by successful fulfillment, not current order status or a browser redirect. Later refunds, financial review, disputes, cancellation, or event end do not erase that marker or historical performance. An incoherent order/item/ticket source set or impossible state produces an unavailable error rather than plausible partial totals.
 
-### Existing authoritative inventory formula
-
-For tier `t` at database time `now`:
+Let `H` be event orders with a durable `paid_at` and coherent original purchase/item/ticket source snapshots. `paid`/`refunded` without the success marker, or unpaid lifecycle states with a success marker, are inconsistent and fail closed. A `requires_review`/legacy `partially_refunded` order contributes if it has prior successful purchase evidence; it does not contribute if payment was never successfully fulfilled. Review changes money/admission eligibility, not historical success.
 
 ```text
-committed(t) = SUM(order_items.quantity for t where
-  order.status IN (paid, payment_processing, requires_review, partially_refunded)
+grossSalesMinor = SUM(H.subtotal_minor)              -- before refunds; not net proceeds
+sold = SUM(H.quantity)                             -- includes later refunds/cancellations
+orderCount = COUNT(H)                              -- one per successful order, not buyer/ticket
+issued = COUNT(all coherent historically issued event tickets)
+checkedIn = COUNT(those tickets WHERE status = used AND used_at IS NOT NULL)
+capacity = SUM(quantity_total across all configured event tiers, including archived)
+
+committed(tier) = SUM(item.quantity WHERE order.status IN
+  (paid, payment_processing, requires_review, partially_refunded)
   OR (order.status IN (creating_checkout, checkout_open)
-      AND order.reservation_expires_at > now))
-
-remaining(t) = ticket_tiers.quantity_total - committed(t)
+      AND order.reservation_expires_at > snapshot_time))
+remaining(tier) = tier.quantity_total - committed(tier)
+tierSold = SUM(item.quantity belonging to H for this tier)
+tierGrossSalesMinor = SUM(item.subtotal_minor belonging to H for this tier)
 ```
 
-Source: Checkout Integrity design §9.3 and `20260902010100_add_checkout_cart_reservation.sql`. Paid cancellation at the event/ticket layer does not release paid order commitments. Full reconciled refunds release order commitments even when used tickets remain. Remaining therefore cannot safely be `capacity - valid_ticket_count` or `capacity - historical_sales`.
+No tiers means capacity is unavailable (`null`), not an invented capacity of zero. All configured tiers remain in the historical breakdown, with their current configuration name and original purchase-price subtotals; archived tiers remain labelled as such. Remaining is inventory, not a promise that an archived/cancelled/ended tier is on sale. A negative remaining or contradictory source set is an error. Historical sold can exceed configured capacity after refunds/resales; do not cap it or imply `sold + remaining = capacity`. State clearly that sales/sold totals include refunded purchases. Gross sales exclude tax and do not imply organizer take-home or payout availability.
 
-Use tier inventory as paid capacity authority, not the unrelated free-event capacity field. Decide how archived tiers contribute to the dashboard capacity denominator while preserving their historical breakdown. Do not clamp an impossible negative result into normal-looking availability; surface inconsistent data. Event admission/sales eligibility is separate from inventory remaining.
-
-### Existing authoritative check-in numerator
-
-```text
-checked_in = COUNT(owned event tickets with status = used AND used_at IS NOT NULL)
-```
-
-Source coherence and all lifecycle timestamp constraints must still pass. Refund/cancellation/end never erase those historical uses. The denominator remains a product decision.
-
-### Decisions that must be recorded before Slice 1
-
-| Metric | Option A | Option B | Why the choice matters |
+| Current order state | Historical gross/sold/orders | Inventory commitment | Historical tickets / used |
 | --- | --- | --- | --- |
-| Gross ticket sales | Lifetime successful ticket subtotals, including subsequently refunded orders | Current reconciled paid-order subtotals, excluding refunded/review orders | Full refund leaves sales unchanged under A and reduces sales under B. The term gross alone is insufficient to select refund behavior. |
-| Tickets sold | Historical successfully purchased item quantities | Current reconciled paid-order quantities | Refunded orders retain historical sales but no longer consume inventory. Used-after-refund tickets are not newly sold tickets. |
-| Order count | All event order records, including incomplete/failed attempts | Successfully purchased orders, including historical refunds | Orders table includes checkout attempts; neither existing docs nor the image specifies inclusion. Listing history does not settle the headline metric. |
-| Check-in denominator | All coherently issued historical tickets | Current `valid + used` admissions | Refunded/cancelled unused tickets remain in the first denominator and leave the second. Used history remains in both. |
-| Review/anomaly money | Include independently verified historical success with an explicit rule | Mark affected aggregates unavailable pending reconciliation | `paid_at` alone cannot resolve partial refunds, disputes, or inconsistent financial snapshots. |
-| Capacity | All configured tier inventory | Only tiers currently offered for sale | Archived tier sales and historical admissions can outlive sale availability. |
+| `creating_checkout`, `checkout_open`, unexpired hold | 0 | Item quantities | None; unexpected issuance is inconsistent |
+| `creating_checkout`, `checkout_open`, expired hold | 0 | 0 | None |
+| `payment_processing` | 0 | Item quantities | None |
+| `payment_failed`, `expired`, unpaid `cancelled` | 0 | 0 | None |
+| `paid` with successful fulfillment | Original subtotal / quantity / 1 | Item quantities | All issued / used count |
+| `refunded` with prior successful fulfillment | Original subtotal / quantity / 1 | 0 | All issued, including refunded and preserved used |
+| `refunded` before successful fulfillment | 0 | 0 | None; never synthesize issued admissions |
+| `requires_review`, legacy `partially_refunded`, previously fulfilled | Original subtotal / quantity / 1 | Item quantities | Retain all issued and used history; no new admission |
+| `requires_review`, legacy `partially_refunded`, never fulfilled | 0 | Item quantities | None |
+| Pending/failed/cancelled refund attempt | Follow current order state and prior success | Follow current order state | No optimistic ticket transition |
+| Cancelled event or ticket, successful order | Historical values unchanged | Follow order status, not ticket/event status | Retain issued and used history |
+| Ended event | Historical values unchanged | Follow order status | Retain history; reject new admission |
 
-No option has been adopted. Final approval must produce an exact inclusion matrix for every order status and each cancellation/refund/review condition, then pin it in SQL fixtures. A blocked document must not pretend that an approved, tested formula already exists.
-
-Concrete decision fixture: one order buys two GA at $20 and one VIP at $30. Initially gross is $70, quantity is 3, order count is 1, and check-in is 0/3. Admit one GA, then fully refund the order. Canonical tickets become `used/refunded/refunded`, and used time stays fixed. Option A sales remain $70 and 3; option B sales become $0 and 0. Historical admission ratio is 1/3; current ratio is 1/1. Inventory releases all three commitments under the existing contract. This difference must be resolved before implementing the UI.
+Decision fixture: one order buys two GA at $20 and one VIP at $30. Initial metrics are $70 gross, 3 sold, 1 order, 0/3 checked in. Admit one GA then fully refund: metrics remain $70 gross, 3 sold, 1 order, and become 1/3 checked in. Tickets are `used/refunded/refunded`; the used timestamp remains fixed; all three inventory commitments release. A later successful resale increases historical gross/sold/orders and the issued denominator.
 
 ## 7. Visual and interaction contract
 
@@ -171,7 +151,7 @@ Concrete decision fixture: one order buys two GA at $20 and one VIP at $30. Init
 - Scoped organizer styles prevent buyer/map visual changes. Retain existing fonts where possible; any typography change stays within organizer operations.
 - Keyboard focus, labeled inputs, semantic tables/lists, accessible dialogs, live result announcements, sufficient contrast, and reduced-motion behavior are required. Decorative effects never obscure operational outcomes.
 
-## 8. Proposed architecture after blockers are resolved
+## 8. Implementation architecture
 
 Preferred direction: additive organizer operations projections and narrow mutation adapters. Keep event/domain data and calculations server-side. Reuse existing React Query/API/schema conventions and existing session shell. Do not enable development fixture readers in production.
 
@@ -179,17 +159,12 @@ Alternatives considered: browser aggregation/direct table grants would expose ex
 
 Read boundaries authenticate and scope the selected event before querying. Order detail additionally scopes the order to that event. Safe projections include operational PII only where needed. List queries use stable bounded pagination; max page size and query-length validation live server-side. Search failures retain the previous page with an explicit failure/retry state. Changing events cannot flash the previous event's PII.
 
-Mutation boundaries return explicit success, pending/unknown, forbidden/unavailable, or failure. No optimistic money or admission status changes. Refetch metrics/order/tickets after authoritative completion. A timeout is unknown and must be reconciled rather than presented as a successful refund, send, or admission.
+Mutation boundaries return explicit success, pending/unknown, forbidden/unavailable, or failure. No optimistic money or admission status changes. Refetch metrics/order/tickets after authoritative completion. A timeout is unknown and must be reconciled rather than presented as a successful refund or admission.
 
 Ended/cancelled events continue to use owner projections, never active public discovery queries. A disabled button is convenience; the server remains the admission authority. Public View event can explain unavailability for a historical event without compromising organizer history.
 
-## 9. Required resolution before production code
+## 9. Execution authorization
 
-1. Choose and record the exact metric/status inclusion matrix and archived-tier denominator.
-2. Approve the owner-scoped order/dashboard read contracts; retain revoked base-table access.
-3. Supply or approve an organizer refund adapter around the existing helper, including reason mapping and retry semantics.
-4. Resolve transactional email and secure recovery of access to existing collections without changing ticket credentials.
-5. Approve the ticket-ID admission adapter and the safe scanner result/context fields.
-6. Confirm paid-only operations for current main, or supply the missing free-RSVP contract separately.
+All original product-contract blockers are resolved or removed from scope by the founder. Update and commit this spec and the sequential implementation plan, then execute Slice 1 and continue through the remaining active slices with RED → GREEN and scoped commits. Stop only for a newly discovered true product/contract blocker. Keep scanner baseline failures visible and preserve their meaningful assertions. No production deployment is authorized.
 
-The sequential implementation plan is `../plans/2026-09-10-organizer-operations-v1-implementation.md`. All production tasks remain gated by this section, as explicitly requested by the user.
+The plan is `../plans/2026-09-10-organizer-operations-v1-implementation.md`.

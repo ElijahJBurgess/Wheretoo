@@ -1,51 +1,51 @@
 # Wheretoo V1 Organizer Operations Implementation Plan
 
-> **For agentic workers:** Use `superpowers:executing-plans` to execute sequentially after the contract gate is resolved. Steps use checkbox syntax. Do not dispatch shared-contract slices in parallel.
+> **For agentic workers:** Use `superpowers:executing-plans` to execute sequentially under the founder-approved contracts. Steps use checkbox syntax. Do not dispatch shared-contract slices in parallel.
 
-**Goal:** Enable an organizer to operate one owned event through metrics, order lookup, individual admissions, resend, whole-order refunds, and historical access.
+**Goal:** Enable an organizer to operate one owned event through metrics, order lookup, individual admissions, whole-order refunds, and historical access.
 
 **Architecture:** Add narrow owner-authorized projections and mutation adapters around the existing transaction systems. A single tested server boundary defines metrics. React consumes safe projections and preserves failures/unknown outcomes.
 
-**Tech Stack:** Existing React/TypeScript/Vite, React Query, Supabase/PostgreSQL, Edge Functions, Stripe test-mode integration, Vitest, Deno, pgTAP, and Playwright. Transactional email transport/access is an unresolved contract, not an assumed dependency.
+**Tech Stack:** Existing React/TypeScript/Vite, React Query, Supabase/PostgreSQL, Edge Functions, Stripe test-mode integration, Vitest, Deno, pgTAP, and Playwright. Email/resend and free-event operations are excluded.
 
 **Spec:** `Docs/superpowers/specs/2026-09-10-organizer-operations-v1-design.md`.
 
-**Execution state:** **BLOCKED before Slice 1.** This is a conditional task breakdown, not an executable approval of new payment/access semantics. The design audit identifies B1–B6. The user explicitly required stopping when these contracts are missing. Exact post-refund metric assertions and resend wire contracts cannot be authored honestly until those decisions are recorded.
+**Execution state:** **AUTHORIZED.** Founder decisions resolve B1/B2/B3/B5; resend (B4) and free-event operations (B6) are excluded. The spec contains the exact historical metric matrix and approved additive contracts. Execute sequentially without another approval checkpoint; stop only for a new true product/contract blocker.
 
 ## Global constraints
 
 - Work only in `/Users/exoh/Desktop/WhereTo -  Repository/.worktrees/organizer-operations-v1`, branch `codex/organizer-operations-v1`.
 - Base HEAD: `1d87c88fbb9da4ea4bf335659de7623af084c92e`, freshly fetched `origin/main`.
 - No map/discovery changes, buyer redesign, production deployment, or copying original-checkout changes.
-- Keep one organizer-operations project; execute Slices 1–9 in order.
+- Keep one organizer-operations project; execute Slices 1–5, 7–9 in order; former Slice 6 is removed.
 - Preserve Checkout Integrity and Core Ticket Truth Lite semantics.
 - Exactly four primary dashboard metrics; no speculative analytics.
 - All reads and writes validate organizer/event ownership server-side.
 - No base-table browser grants, `select *` operational responses, secret-bearing payloads, client-side metric policy, or optimistic admission/refund success.
 - One order with three purchased units remains one order and three tickets.
 - Only whole-order refund actions; used history is terminal and immutable.
-- Resend never creates tickets, admission credentials, or orders.
+- No resend, email/access-token infrastructure, or free-event operations in this build.
 - Retain historical orders and admissions; enforce end-of-event admission server-side.
 - Each task follows RED → GREEN → relevant regression → diff review → scoped commit.
 - Use only disposable local DB targets or explicitly configured nonproduction test environments for integration proof. Do not run an unqualified hosted runner that changes a shared checkout switch.
 
-## Gate 0 — Resolve contracts, then make this plan executable
+## Contract lock — complete before code
 
-Files: this plan and the paired design document. No production files.
+- [x] Founder approves historical gross/sold/successful-order counts and used/all-issued ratio; exact matrix recorded in spec §6.
+- [x] Owner-scoped event metrics and order read RPCs approved; base-table privileges stay revoked.
+- [x] Organizer whole-order refund adapter approved; reuse existing helper with `requested_by_customer`, stable idempotency, and canonical status rereads.
+- [x] Ticket-ID manual admission adapter approved; delegate to existing atomic redemption.
+- [x] Resend/email/access infrastructure removed from active work.
+- [x] Paid events only; preserve existing free-event editor/publishing separately.
+- [x] Commit updated documents before beginning Slice 1.
 
-- [x] Inspect current main and isolate the requested worktree.
-- [x] Map routes, schema, ownership, checkout, ticket truth, admission, refunds, and email.
-- [x] Report missing contracts and separate reference visuals from backend authority.
-- [ ] Record exact metric inclusion rules for every canonical order status, refunds, cancellation, financial review, expired reservations, archived tiers, and used history. Include the decision fixture in design §6.
-- [ ] Approve the owner-scoped dashboard/order projections, including allowed fields and pagination/search bounds.
-- [ ] Approve an organizer refund adapter reusing `createWholeOrderRefund`, with reason mapping and retry/pending/unknown behavior.
-- [ ] Approve transactional delivery and secure access to existing ticket collections. Specify whether a new collection-access token mechanism is allowed while all existing ticket/admission identities and links remain intact.
-- [ ] Approve ticket-ID manual admission through the existing SQL redemption function and safe scanner context/result fields.
-- [ ] Resolve current paid-only operational coverage versus missing free-RSVP truth.
-- [ ] Replace conditional portions of this plan with the approved wire signatures and exact financial expectations; review the specification against those signatures before writing code.
-- [ ] Commit the resolved contracts: `docs: lock organizer operations data contracts`.
+## Exact service interfaces
 
-No elapsed time, test pass, or general UI approval clears this gate. The attached image approves visuals, not these absent contracts.
+Use the RPC names and signatures in spec §4. Read payloads use camelCase JSON: metrics `{event, grossSalesMinor, sold, orderCount, issued, checkedIn, capacity, tiers, admissionEligible}`; tiers `{id,name,status,capacity,sold,remaining,grossSalesMinor}`. Event context contains `{id,title,startsAt,endsAt,venueName,city,status,artworkPath}`. Dates/artwork/title/location can be null for drafts; absent draft data is never invented.
+
+Orders list returns `{orders,nextCursor}` with rows `{id,orderNumber,buyerName,buyerEmail,createdAt,paidAt,status,quantity,totalMinor,currency,items}` and purchased item snapshots `{tierName,quantity,subtotalMinor}`. Cursor is `{createdAt,id}` or null. Order detail adds `tickets: [{id,admissionLabel,status,usedAt,issuedAt}]`, `refundState` and `admissionEligible`. Empty issued tickets remains an empty array.
+
+Manual result is `{outcome,admissionLabel?,buyerName?,usedAt?}` with no secrets. The refund Edge endpoint accepts exactly `{eventId,orderId}` and returns a safe request outcome; order/ticket state is re-read from the owned detail API. Shape extensions must remain strict and tested. These additive interfaces do not change the existing buyer contracts.
 
 ## File responsibilities after the gate
 
@@ -66,13 +66,12 @@ The following names are proposed implementation locations, not existing APIs.
 | `src/features/organizer-operations/OrganizerOrderDetailPage.tsx` | Financial summary, purchased tiers, individual admissions. |
 | `src/features/organizer-operations/ManualAdmissionDialog.tsx` | Lightweight per-ticket confirmation and authoritative result. |
 | `src/features/organizer-operations/RefundOrderDialog.tsx` | Explicit whole-order confirmation and asynchronous truth. |
-| `src/features/organizer-operations/ResendTicketsAction.tsx` | Approved resend endpoint state, including provider rejection/unknown outcome. |
 | `src/features/organizer-operations/organizer-operations.css` | Scoped reference styling; no buyer/map selectors. |
 | Existing event index/dashboard/scanner and runtime files | Connect real data and Image #1 visuals without duplicate systems. |
 | `src/lib/supabase/database.types.ts` | Regenerate from the migrated disposable local schema; never hand-invent database types. |
 | `tests/e2e/organizer-operations.spec.ts` | Integrated journey and two-owner negative tests. |
 
-Refund and resend endpoint files are intentionally not specified as ready contracts. Gate 0 must define them, their transport signatures, and their tests; naming an invented endpoint cannot resolve B3/B4.
+Refund endpoint: `supabase/functions/organizer-refund-order/index.ts` and `index.test.ts`, plus `20260910010300_add_owned_refund_context.sql` for service-only owner/event/order context. Manual adapter is the authenticated RPC in the file table. Neither creates a second lifecycle engine.
 
 ## Slice 1 — Canonical organizer event metrics
 
@@ -85,7 +84,7 @@ Consumes: event/organizer identity from authenticated context, `orders`, immutab
 Produces: one owner-scoped metric snapshot containing the four primary metrics, tier breakdown, configured denominator, server time, and explicit availability status. No PII or credentials.
 
 - [ ] RED: use the existing Lite SQL fixture helper to create A/B organizers, owned events, GA/VIP inventory, and a paid 2-GA/1-VIP order. Assert aggregate quantities are 3 and order cardinality is 1; assert gross comes from historical item subtotals, not current tier prices.
-- [ ] RED: table-driven scenarios cover creating/open reservations before/after expiry, processing, failed, cancelled, expired, paid, refunded, review, legacy partial, cancelled event, used tickets, and ended event. Insert the exact approved expected numbers for every row before implementation.
+- [ ] RED: table-driven scenarios cover creating/open reservations before/after expiry, processing, failed, cancelled, expired, paid, refunded, review, legacy partial, cancelled event, used tickets, and ended event. Use the exact spec §6 matrix; review/refund after paid_at must not decrease historical values.
 - [ ] RED: reject anonymous and wrong-owner reads, preserve unavailable for incoherent money/source data, and keep used count after refund/cancellation.
 - [ ] Run the new pgTAP file on a disposable migrated database; confirm failures are absent projection/assertion failures, not an invalid fixture or missing infrastructure.
 - [ ] GREEN: implement one scoped server projection; aggregate order money independently of ticket joins to prevent multiplication; derive tiers from purchased snapshots and current configured inventory according to approved policy.
@@ -109,7 +108,7 @@ Modify: `src/features/events/OrganizerEventsPage.tsx`, its tests; `src/features/
 Consumes: Slice 1 projection and existing owned event/editor routes. Produces: operational dashboard and My Events entry points matching Image #1.
 
 - [ ] RED: clicking an owned event reaches its dashboard; Create event/Edit event preserve existing flows. Assert exactly Gross ticket sales, Tickets sold, Orders, Checked in as primary metrics and one row per tier.
-- [ ] RED: missing artwork/date/capacity has truthful fallback; query failure offers retry without 0 metrics; empty paid event shows real authoritative zero; free-event behavior matches Gate 0. Historical owner page does not depend on public event eligibility.
+- [ ] RED: missing artwork/date/capacity has truthful fallback; query failure offers retry without 0 metrics; empty paid event shows real authoritative zero; free events stay outside operations with their existing editor routes. Historical owner page does not depend on public event eligibility.
 - [ ] GREEN: add artwork/title/time/venue/status header and three primary actions. Keep desktop hierarchy, purple primary accent, dark surfaces, rounded cards. Display authoritative values without recalculating them in React.
 - [ ] GREEN: wire production to the real reader; keep demo fixtures confined to development. Remove the obsolete primary Remaining card while retaining tier remaining values.
 - [ ] Run affected event/dashboard/runtime/router tests, typecheck, and production fixture-exclusion check. Verify desktop/mobile layout in browser with frontend visual QA.
@@ -168,25 +167,15 @@ Files: `ManualAdmissionDialog.tsx`/tests, detail page tests, scanner view/contro
 - [ ] GREEN: implement Image #1 mobile hierarchy with camera permissions/unavailable handling, accessible focus/result announcements, reduced motion, and existing scan controller safeguards.
 - [ ] Run page/scanner tests and browser camera/fallback proof; commit `feat: build organizer manual and mobile check-in`.
 
-## Slice 6 — Resend Tickets
+## Former Slice 6 — removed from this build
 
-### Task 6 — Approved delivery/access contract and truthful UI
-
-Blocked specifically by B4. Gate 0 must specify endpoint, durable delivery metadata, secret configuration, collection-access mechanism, and exact tests before execution. The test email harness is not a production adapter.
-
-- [ ] RED: sender uses only the stored order buyer email; wrong owner/event fails; no arbitrary destination override. Missing config, transport rejection, timeout, duplicate click, provider retry, and delivery acknowledgment all follow the approved distinct outcomes.
-- [ ] RED: capture ticket IDs, credential hashes, item/unit identities, order count, and used timestamps before resend; after successful send and retry, assert exact equality. Existing buyer links remain valid.
-- [ ] RED: the emailed access mechanism opens the existing collection under the approved contract without exposing access material in organizer responses or logs.
-- [ ] GREEN: implement only the approved access/delivery mechanism, reusing email rendering where runtime-compatible. Include defined abuse limits/idempotency. A provider acceptance is not a claim of recipient inbox delivery.
-- [ ] GREEN: add `ResendTicketsAction.tsx` with pending, accepted, failed, and unknown outcomes; no fake sent toast or ticket minting.
-- [ ] Run endpoint/email/UI tests plus real nonproduction delivery to an explicitly authorized recipient and inspect the existing-ticket destination. Record which part is locally simulated versus provider-proven.
-- [ ] Inspect diff; commit `feat: add organizer resend for existing tickets`.
+Resend, email transport, delivery testing, and access-token infrastructure are explicitly excluded. Continue directly from Slice 5 to Slice 7; no stub endpoint or misleading action is created.
 
 ## Slice 7 — Whole-Order Refund UI
 
 ### Task 7 — Existing helper adapter, confirmation, and reconciliation
 
-Blocked specifically by B3. Gate 0 defines the organizer endpoint and approved reason mapping. Reuse `_shared/refundOrder.ts`; no parallel refund implementation.
+Use `organizer-refund-order` and the service-only owned context RPC. Reason is `requested_by_customer`; reuse `_shared/refundOrder.ts` and the existing Stripe client; no parallel refund implementation.
 
 - [ ] RED: wrong owner/event never calls Stripe or prepares another organizer's order. Client amount/tier/ticket inputs are rejected. The request invokes the existing helper with stable order idempotency and its existing transfer/application-fee policy.
 - [ ] RED: pending, failed, cancelled, timeout, existing succeeded refund, and repeated click cannot optimistically mark the order refunded or cause another refund. Retry behavior must reconcile existing state when preparation rejects an already-active/completed refund.
@@ -211,8 +200,8 @@ Files: operations projections/tests, dashboard/detail/orders/scanner tests; mini
 
 Files: `tests/e2e/organizer-operations.spec.ts`, its sanitized test setup, and `Docs/testing/organizer-operations-v1-verification.md`.
 
-- [ ] RED: automate A opening My Events → Dashboard → search Orders by name/email/reference → a three-ticket detail → confirmed manual admission → duplicate rejection → resend → full refund → historical views. Assert all four metric values against the same authoritative fixture before/after each mutation.
-- [ ] RED: B cannot inspect or mutate A's dashboard/orders/buyer/tickets/check-ins/refund/resend; wrong-event ticket selectors reject; failures retain data and never show success.
+- [ ] RED: automate A opening My Events → Dashboard → search Orders by name/email/reference → a three-ticket detail → confirmed manual admission → duplicate rejection → full refund → historical views. Assert all four metric values against the same authoritative fixture before/after each mutation.
+- [ ] RED: B cannot inspect or mutate A's dashboard/orders/buyer/tickets/check-ins/refund; wrong-event ticket selectors reject; failures retain data and never show success.
 - [ ] GREEN: close only defects found within this project. Capture desktop dashboard/orders/detail and mobile scanner/result states using synthetic non-secret UI fixtures; never record real QR credentials, bearers, or PII in screenshots/traces.
 - [ ] Run frontend visual QA with the attached image: desktop 1440px, tablet 768px, mobile 390px and 320px, long names, no artwork, empty/error/loading states, keyboard dialogs, reduced motion, no overflow. Keep screenshots local unless required as a reviewed artifact.
 - [ ] Run `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm test:functions`, `pnpm typecheck:functions`, `pnpm build`, and production fixture-exclusion verification.
@@ -234,8 +223,8 @@ This audit makes documentation changes only. The checks below concern unmodified
 - Isolated `scripts/send-ticket-ready-test.test.ts`: passed, 18 tests, without source changes.
 - Full unit suite rerun with `pnpm exec vitest run --maxWorkers=2`: 894 passed, 1 failed. `src/features/ticket-experience/runtime/production.test.tsx:33` expected one camera-factory invocation and observed two. This assertion passed in the initial run; the full baseline is not clean. No source change or timeout adjustment was made to hide either failure.
 - Isolated production-runtime test rerun: 1 passed, 1 failed with the same two-versus-one camera-factory assertion. Resolving that baseline failure is required before later implementation is declared verified.
-- No new SQL, live Stripe/Resend operation, deployment, or browser proof was performed. Product-contract blockers prevent new-feature proof; no disposable DB was configured in this worktree for this documentation-only audit. Hosted scripts were inspected, not invoked.
+- No new SQL, live Stripe/Resend operation, deployment, or browser proof was performed. This was the original documentation-only audit; no disposable DB was configured then. Hosted scripts were inspected, not invoked.
 
 ## Completion evidence required after implementation
 
-Report changed files and migrations, the exact metric matrix, test counts/results, local versus provider/browser proof, remaining gaps, and manual setup. Passing unit tests cannot substitute for owner isolation, concurrent admission proof, real refund reconciliation, or actual resend access. Until Gate 0 is resolved, report this project as blocked, not implemented.
+Report changed files and migrations, the exact metric matrix, test counts/results, local versus provider/browser proof, remaining gaps, and manual setup. Passing unit tests cannot substitute for owner isolation, concurrent admission proof, real refund reconciliation, or actual refund reconciliation. Preserve the scanner camera test baseline separately from new regressions. Stop only for new true product/contract blockers.
