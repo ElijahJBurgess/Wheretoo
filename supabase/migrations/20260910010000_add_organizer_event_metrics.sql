@@ -20,7 +20,15 @@ returns boolean language sql stable security definer set search_path = '' as $$
    o.organizer_id=e.organizer_id and e.admission_type='paid' and not o.livemode
    and o.currency='usd'
    and (o.paid_at is null or o.status in ('paid','refunded','requires_review','partially_refunded'))
-   and (o.status<>'paid' or o.paid_at is not null)
+   and (o.status<>'paid' or (o.paid_at is not null and o.refunded_at is null
+     and o.reconciliation_status='reconciled'))
+   and (o.status<>'refunded' or o.refunded_at is not null)
+   and not exists (select 1 from public.tickets t where t.order_id=o.id and (
+     (o.status='paid' and not (t.status='used'
+       or (e.status='cancelled' and t.status='cancelled')
+       or (e.status<>'cancelled' and t.status='valid')))
+     or (o.status='refunded' and t.status not in ('used','refunded'))
+   ))
    and (select count(*) between 1 and 10 and sum(i.quantity)=o.quantity
      and sum(i.subtotal_minor)=o.subtotal_minor
      and bool_and(t.event_id=o.event_id and i.currency=o.currency

@@ -23,7 +23,9 @@ reset role;
 create function pg_temp.probe(p_sql text) returns jsonb language plpgsql as $$
 declare r jsonb;
 begin
+ set local session_replication_role=replica;
  execute p_sql;
+ set local session_replication_role=origin;
  r := pg_temp.metrics();
  raise exception using errcode='PT001';
 exception when sqlstate 'PT001' then return r;
@@ -46,6 +48,8 @@ begin
 end;
 $$;
 select throws_ok($$select pg_temp.corrupt_source()$$,'P0001','Operations data unavailable','foreign order claiming owned tier/tickets cannot pollute aggregates');
+select throws_ok($$select pg_temp.probe('update public.orders set refunded_at=now() where status=''paid''')$$,'P0001','Operations data unavailable','paid order with refund timestamp fails closed');
+select throws_ok($$select pg_temp.probe('update public.orders set status=''refunded'',refunded_at=now() where status=''paid''')$$,'P0001','Operations data unavailable','refunded order with valid tickets fails closed');
 select * from public.server_redeem_paid_ticket('a6100000-0000-4000-8000-000000000001','a6200000-0000-4000-8000-000000000001',(select credential_hash from public.tickets limit 1));
 create temporary table before_used as select id,used_at from public.tickets where status='used';
 select * from public.server_record_webhook_receipt('evt_opsrefund','refund.updated',false,'re_opsrefund','2026-07-29.dahlia','2026-09-10 00:00:00+00',repeat('b',64));
