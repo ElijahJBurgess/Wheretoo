@@ -101,7 +101,7 @@ Events have `artwork_path`; the public page has limited safe URL rendering. The 
 
 One tested server query boundary owns these formulas. React only validates/formats the projection. All aggregation uses one database snapshot time, integer USD minor units, independent order/item/ticket aggregates, and coherent source rows. Historical purchase success is the server-written non-null `orders.paid_at` marker established by successful fulfillment, not current order status or a browser redirect. Later refunds, financial review, disputes, cancellation, or event end do not erase that marker or historical performance. An incoherent order/item/ticket source set or impossible state produces an unavailable error rather than plausible partial totals.
 
-Let `H` be event orders with a durable `paid_at` and coherent original purchase/item/ticket source snapshots. `paid`/`refunded` without the success marker, or unpaid lifecycle states with a success marker, are inconsistent and fail closed. A `requires_review`/legacy `partially_refunded` order contributes if it has prior successful purchase evidence; it does not contribute if payment was never successfully fulfilled. Review changes money/admission eligibility, not historical success.
+Let `H` be event orders with a durable `paid_at` and coherent original purchase/item/ticket source snapshots. `paid` without the success marker, or unpaid lifecycle states with a success marker, are inconsistent and fail closed. A refund before successful fulfillment is coherent when it has its refund timestamp and no issued tickets; it contributes zero historical purchases, as shown below. A `requires_review`/legacy `partially_refunded` order contributes if it has prior successful purchase evidence; it does not contribute if payment was never successfully fulfilled. Review changes money/admission eligibility, not historical success.
 
 ```text
 grossSalesMinor = SUM(H.subtotal_minor)              -- before refunds; not net proceeds
@@ -168,3 +168,13 @@ Ended/cancelled events continue to use owner projections, never active public di
 All original product-contract blockers are resolved or removed from scope by the founder. Update and commit this spec and the sequential implementation plan, then execute Slice 1 and continue through the remaining active slices with RED → GREEN and scoped commits. Stop only for a newly discovered true product/contract blocker. Keep scanner baseline failures visible and preserve their meaningful assertions. No production deployment is authorized.
 
 The plan is `../plans/2026-09-10-organizer-operations-v1-implementation.md`.
+
+## 10. Implemented refund reconciliation boundary
+
+The organizer endpoint uses the existing whole-order helper and its stable order idempotency key. Stripe Refund responses do not carry `livemode`; the adapter establishes test mode from the matching Charge and verifies its payment, amount, and currency before adapting the response for the existing helper. No helper policy or canonical writer is changed.
+
+The one repairable state is a previously fulfilled order in `requires_review` with `REFUND_POLICY_MISMATCH` and exactly one succeeded, unverified refund carrying that same failure. Its service-only context supplies durable economic snapshots. The browser receives only `refundState: recoverable`, never provider IDs. “Retry refund confirmation” validates the existing refund, transfer reversal, and application-fee refund using the existing recovery validator, then fills missing matching metadata. It cannot create a refund or directly mutate ticket/order truth. The existing signed `refund.updated` webhook remains the completion authority. Contradictory evidence and unrelated review states fail closed.
+
+The dialog reconciles canonical detail after both request success and ambiguous request failure. A later canonical refund overrides an earlier timeout and removes the refund action. Pending acknowledgments never display Refunded. [Stripe documents metadata changes as `refund.updated` events](https://docs.stripe.com/refunds?dashboard-or-api=api).
+
+Implementation and verification evidence: `../../testing/organizer-operations-v1-verification.md`. Local verification is separate from real Stripe delivery, physical-camera proof, and production readiness.

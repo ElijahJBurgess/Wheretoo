@@ -18,6 +18,7 @@
   },
   "include": [
     "playwright.config.ts",
+    "playwright.organizer-operations.config.ts",
     "playwright.ticket-shells.config.ts",
     "playwright.ticket-shells.production.config.ts",
     "tests/e2e"
