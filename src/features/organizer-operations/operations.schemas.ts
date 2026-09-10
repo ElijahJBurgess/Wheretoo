@@ -35,3 +35,4 @@ export const manualAdmissionSchema = z.union([
  z.strictObject({ outcome: z.enum(['refunded','cancelled']), admissionLabel: z.string().min(1).max(80), buyerName: z.string() }),
  z.strictObject({ outcome: z.enum(['invalid','wrong_event']) }),
 ])
+export const refundResponseSchema=z.strictObject({outcome:z.enum(['pending','refunded'])})

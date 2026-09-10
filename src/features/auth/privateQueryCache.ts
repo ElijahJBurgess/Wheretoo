@@ -19,4 +19,8 @@ function isPrivateIdentityQuery(query: Query): boolean {
 
 export function evictPrivateIdentityQueries(queryClient: QueryClient): void {
   queryClient.removeQueries({ predicate: isPrivateIdentityQuery })
+  const mutations = queryClient.getMutationCache()
+  for (const mutation of mutations.getAll()) {
+    if (mutation.options.mutationKey?.[0] === 'organizer-operations') mutations.remove(mutation)
+  }
 }

@@ -1742,6 +1742,10 @@ export type Database = {
           stripe_account_id: string
         }[]
       }
+      server_get_organizer_refund_context: {
+        Args: { p_event_id: string; p_order_id: string; p_organizer_id: string }
+        Returns: Json
+      }
       server_lookup_checkout_cancellation: {
         Args: { p_token_hash: string }
         Returns: {

@@ -9,3 +9,15 @@ it('evicts organizer operations PII while preserving public queries on identity 
   expect(client.getQueryData(['organizer-operations', 'owner-a', 'event-a', 'orders'])).toBeUndefined()
   expect(client.getQueryData(['tickets', 'public', 'event-a'])).toBe('public event')
 })
+it('removes pending operational mutations even when they settle after sign-out', async () => {
+ const client=new QueryClient()
+ let resolve!: (value: {buyerName:string}) => void
+ const pending=new Promise<{buyerName:string}>(done=>{resolve=done})
+ const mutation=client.getMutationCache().build(client,{mutationKey:['organizer-operations','owner','event','admit'],mutationFn:()=>pending})
+ const work=mutation.execute(undefined)
+ evictPrivateIdentityQueries(client)
+ expect(client.getMutationCache().getAll()).toHaveLength(0)
+ resolve({buyerName:'Private buyer'})
+ await work
+ expect(client.getMutationCache().getAll()).toHaveLength(0)
+})

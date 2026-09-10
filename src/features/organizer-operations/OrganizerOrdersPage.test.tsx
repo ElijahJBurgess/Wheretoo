@@ -24,3 +24,9 @@ it('keeps current rows and exposes retry when the next page fails', async () => 
  expect(await screen.findByRole('alert')).toHaveTextContent('More orders could not load')
  expect(screen.getByText('Alex Chen')).toBeVisible()
 })
+it('retains the last successful rows when a new search fails',async()=>{
+ listEventOrders.mockResolvedValueOnce({orders:[order],nextCursor:null}).mockRejectedValue(new Error('failed'));show()
+ await screen.findByText('Alex Chen');await userEvent.type(screen.getByRole('searchbox'),'absent');await userEvent.click(screen.getByRole('button',{name:'Search'}))
+ expect(await screen.findByRole('alert')).toHaveTextContent('Showing previous results')
+ expect(screen.getByText('Alex Chen')).toBeVisible()
+})

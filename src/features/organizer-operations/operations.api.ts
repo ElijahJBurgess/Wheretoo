@@ -1,5 +1,5 @@
 import { supabase } from '../../lib/supabase/client'
-import { metricsSchema, manualAdmissionSchema, orderDetailSchema, ordersPageSchema, type OrderCursor, type EventMetrics } from './operations.schemas'
+import { metricsSchema, refundResponseSchema, manualAdmissionSchema, orderDetailSchema, ordersPageSchema, type OrderCursor, type EventMetrics } from './operations.schemas'
 
 export async function getEventMetrics(eventId: string): Promise<EventMetrics> {
   const { data, error } = await supabase.rpc('get_organizer_event_metrics', { p_event_id: eventId })
@@ -34,4 +34,12 @@ export async function redeemTicket(eventId: string, ticketId: string) {
   if (error || !parsed.success) throw new Error()
   return parsed.data
  } catch { throw new Error('Admission not confirmed') }
+}
+export async function refundOrder(eventId: string, orderId: string) {
+ try {
+  const {data,error}=await supabase.functions.invoke('organizer-refund-order',{body:{eventId,orderId}})
+  const parsed=refundResponseSchema.safeParse(data)
+  if(error || !parsed.success)throw new Error()
+  return parsed.data
+ } catch {throw new Error('Refund not confirmed')}
 }
