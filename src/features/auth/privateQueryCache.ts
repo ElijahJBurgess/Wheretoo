@@ -4,6 +4,7 @@ function isPrivateIdentityQuery(query: Query): boolean {
   const [scope, family] = query.queryKey
   return (scope === 'events' && (family === 'owned' || family === 'detail'))
     || scope === 'organizer'
+    || scope === 'organizer-operations'
     || (scope === 'tickets' && family === 'owned')
     || (scope === 'payments' && family === 'connect')
     || (scope === 'moderation' && (
