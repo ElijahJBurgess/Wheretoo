@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { transpile } from 'typescript'
 import * as contracts from './edge/task17-transaction-driver/contracts'
+import { recoverExistingRefundEvidence as recoverOwnedEvidence } from '../../supabase/functions/_shared/refundEvidenceRecovery'
 
 const snapshot = { orderId: '11111111-1111-4111-8111-111111111111', paymentIntentId: 'pi_Test', chargeId: 'ch_Test', transferId: 'tr_Test', applicationFeeId: 'fee_Test', connectedAccountId: 'acct_Test', refundId: 're_Test', reversalId: 'trr_Test', feeRefundId: null }
 const evidence = () => ({
@@ -19,6 +20,22 @@ const recoveredState = () => ({
 const recoveredProjection = { ok: true, livemode: false, amount: 5500, reversal_amount: 5500, application_fee_refund_amount: 425, order_refunded: true, reconciled: true, refund_count: 1, policy_verified: true, ticket_count: 3, invalid_ticket_count: 3, refunded_ticket_count: 3 }
 
 describe('Task14 existing-refund recovery', () => {
+  it.each([[3001, 300], [7000, 700]])('uses durable organizer amounts %i/%i rather than proof-fixture constants', async (totalMinor, applicationFeeAmountMinor) => {
+    const value = evidence()
+    value.refunds.data[0].amount = totalMinor
+    Object.assign(value.transfer, { amount: totalMinor, amount_reversed: totalMinor })
+    value.transfer.reversals.data[0].amount = totalMinor
+    Object.assign(value.fee, { amount: applicationFeeAmountMinor, amount_refunded: applicationFeeAmountMinor })
+    value.feeRefunds.data[0].amount = applicationFeeAmountMinor
+    const writes: Array<{ id: string; metadata: Record<string, string> }> = []
+    await expect(recoverOwnedEvidence({ ...snapshot, totalMinor, applicationFeeAmountMinor }, {
+      read: async () => value, pause: async () => {}, update: async (id, metadata) => { writes.push({ id, metadata }) },
+    })).resolves.toMatchObject({ amount: totalMinor, application_fee_refund_amount: applicationFeeAmountMinor })
+    expect(writes).toHaveLength(1)
+    expect(writes[0]).toMatchObject({ id: snapshot.refundId, metadata: {
+      whereto_transfer_reversal_amount: String(totalMinor), whereto_application_fee_refund_amount: String(applicationFeeAmountMinor),
+    } })
+  })
   it.each([null, 'REFUND_STATE_IGNORED'])('certifies a processed receipt (%s) only with exact recovered state', (error_code) => {
     expect(contracts.certifyRecoveredRefund(recoveredState(), { processing_status: 'processed', error_code })).toEqual(recoveredProjection)
     const state = recoveredState()

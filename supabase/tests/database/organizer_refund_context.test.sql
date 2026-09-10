@@ -7,6 +7,14 @@ select pg_temp.record_and_fulfill('opsrefundscope','opsrefundscope',id,session_i
 select is(public.server_get_organizer_refund_context('a6100000-0000-4000-8000-000000000001','a6200000-0000-4000-8000-000000000001',(select id from fulfillment_orders where kind='clean'))->>'refundState','available','owned coherent paid order is eligible');
 select throws_ok($$select public.server_get_organizer_refund_context('a6100000-0000-4000-8000-000000000002','a6200000-0000-4000-8000-000000000001',(select id from fulfillment_orders where kind='clean'))$$,'42501','Order unavailable','wrong owner cannot request refund');
 select throws_ok($$select public.server_get_organizer_refund_context('a6100000-0000-4000-8000-000000000001','a6200000-0000-4000-8000-000000000002',(select id from fulfillment_orders where kind='clean'))$$,'42501','Order unavailable','wrong event cannot request refund');
+select * from public.server_record_webhook_receipt('evt_opsrecovery','refund.updated',false,'re_opsrecovery','2026-07-29.dahlia',now(),repeat('b',64));
+select r.* from public.orders o cross join lateral public.server_apply_verified_refund('evt_opsrecovery',o.id,'re_opsrecovery',o.stripe_payment_intent_id,o.stripe_charge_id,'trr_opsrecovery','fr_opsrecovery',3001,'usd','succeeded','requested_by_customer',true,true,3001,300,false,'REFUND_POLICY_MISMATCH') r where o.id=(select id from fulfillment_orders where kind='clean');
+select is(public.server_get_organizer_refund_context('a6100000-0000-4000-8000-000000000001','a6200000-0000-4000-8000-000000000001',(select id from fulfillment_orders where kind='clean'))->>'refundState','recoverable','only existing policy mismatch exposes evidence repair');
+select is(public.server_get_organizer_refund_context('a6100000-0000-4000-8000-000000000001','a6200000-0000-4000-8000-000000000001',(select id from fulfillment_orders where kind='clean'))->'recovery'->>'totalMinor','3001','repair uses durable dynamic amount');
+reset role;
+select ok(not (public.get_organizer_order('a6200000-0000-4000-8000-000000000001',(select id from fulfillment_orders where kind='clean'))::text ~ 'stripe_|paymentIntent|chargeId|recovery'),'browser detail never exposes recovery source');
+update public.orders set failure_code='DISPUTE_REQUIRES_REVIEW' where id=(select id from fulfillment_orders where kind='clean');
+select is(public.server_get_organizer_refund_context('a6100000-0000-4000-8000-000000000001','a6200000-0000-4000-8000-000000000001',(select id from fulfillment_orders where kind='clean'))->>'refundState','unavailable','unrelated reviewed orders cannot repair or create refunds');
 reset role;
 select ok(not has_function_privilege('authenticated','public.server_get_organizer_refund_context(uuid,uuid,uuid)','execute'),'browser cannot assert a service owner identity');
 select ok(not has_function_privilege('anon','public.server_get_organizer_refund_context(uuid,uuid,uuid)','execute'),'anonymous denied');
