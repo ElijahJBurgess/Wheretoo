@@ -20,6 +20,7 @@ import { dashboardScenarios, ticketCollectionScenarios } from '../fixtures/scena
 import { createCameraDecoder } from '../scanner/cameraDecoder'
 import { DevelopmentScannerPage } from '../scanner/DevelopmentScannerPage'
 import type { CameraDecoder, CameraStartResult } from '../scanner/scannerMachine'
+import { productionTicketExperienceRuntime } from './production'
 import type { TicketExperienceRuntime } from './runtime.types'
 
 const developmentCameraDecoder = createCameraDecoder()
@@ -209,8 +210,8 @@ function DevelopmentEmailRoute() {
 
 export const developmentTicketExperienceRuntime: TicketExperienceRuntime = {
   TicketCollectionRoute: DevelopmentTicketCollectionRoute,
-  OrganizerScannerRoute: DevelopmentScannerRoute,
-  OrganizerDashboardRoute: DevelopmentDashboardContent,
+  OrganizerScannerRoute: productionTicketExperienceRuntime.OrganizerScannerRoute,
+  OrganizerDashboardRoute: productionTicketExperienceRuntime.OrganizerDashboardRoute,
   developmentRoutes: [
     {
       path: '/__dev/ticket-shells/events/:eventId/dashboard',

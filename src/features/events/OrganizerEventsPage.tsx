@@ -17,6 +17,7 @@ function formatInstant(value: string): string {
 }
 
 function eventDestination(event: EventRow): string {
+  if (event.admission_type === 'paid') return `/organizer/events/${event.id}/dashboard`
   return event.status === 'draft'
     ? `/organizer/events/${event.id}/edit`
     : `/organizer/events/${event.id}`
@@ -73,8 +74,8 @@ export function OrganizerEventsPage() {
       <div className="events-index__header">
         <div>
           <p className="organizer-eyebrow">Organizer console</p>
-          <h1 id="organizer-events-title">Your events</h1>
-          <p>Draft, preview, and publish the places you are putting on.</p>
+          <h1 id="organizer-events-title">My Events</h1>
+          <p>Manage your events and track performance.</p>
         </div>
         <Link className="ui-button ui-button--primary" to="/organizer/events/new">Create event</Link>
       </div>

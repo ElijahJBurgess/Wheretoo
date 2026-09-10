@@ -31,7 +31,7 @@ describe('production ticket experience composition', () => {
     expect(first.admissionChecker.checkAdmission).toBeTypeOf('function')
     expect(first.cameraDecoder).toBe(mocks.camera.mock.results[0]!.value)
     expect(mocks.camera).toHaveBeenCalledTimes(1)
-    expect(runtime.OrganizerDashboardRoute).toBe(NotEnabledRoute)
+    expect(runtime.OrganizerDashboardRoute).not.toBe(NotEnabledRoute)
     expect(runtime.developmentRoutes).toEqual([])
   })
 })

@@ -7,6 +7,7 @@ import { TicketCollectionPage } from '../customer/TicketCollectionPage'
 import type { TicketExperienceRuntime } from './runtime.types'
 
 const reader = createTicketCollectionReader()
+const DashboardRoute = lazy(() => import('../../organizer-operations/OrganizerDashboardPage').then(module => ({ default: module.OrganizerDashboardPage })))
 const ScannerRoute = lazy(() => import('./ProductionOrganizerScannerRoute'))
 const walletProvider: WalletProvider = {
   getCapability: () => ({ kind: 'unavailable', label: 'Add to Wallet — Coming later' }),
@@ -27,6 +28,6 @@ function ProductionOrganizerScannerRoute() {
 export const productionTicketExperienceRuntime: TicketExperienceRuntime = {
   TicketCollectionRoute: ProductionTicketCollectionRoute,
   OrganizerScannerRoute: ProductionOrganizerScannerRoute,
-  OrganizerDashboardRoute: NotEnabledRoute,
+  OrganizerDashboardRoute: () => <Suspense fallback={<AsyncState status="loading" title="Loading event dashboard" />}><DashboardRoute /></Suspense>,
   developmentRoutes: [],
 }

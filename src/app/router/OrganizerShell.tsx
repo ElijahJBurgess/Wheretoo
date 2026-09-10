@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Outlet, useNavigate } from 'react-router-dom'
+import { Outlet, useNavigate, useLocation } from 'react-router-dom'
+import { OperationsLayout } from '../../features/organizer-operations/OperationsUi'
 import { OrganizerLayout } from '../../components/layout/OrganizerLayout'
 import { FormErrorSummary } from '../../components/ui/FormErrorSummary'
 import { signOut } from '../../features/auth/auth.api'
@@ -24,6 +25,9 @@ export function OrganizerShell() {
     }
   }
 
+  const { pathname } = useLocation()
+  const match = pathname.match(/^\/organizer\/events\/([^/]+)\/(dashboard|orders|check-in)(?:\/|$)/)
+  if (pathname === '/organizer/events' || match) return <OperationsLayout eventId={match?.[1]} onSignOut={() => void handleSignOut()} staffRole={staffRoleQuery.data ?? null}><FormErrorSummary errors={signOutError ? [signOutError] : []} title="Sign out failed" /><Outlet /></OperationsLayout>
   return (
     <OrganizerLayout onSignOut={() => void handleSignOut()} staffRole={staffRoleQuery.data ?? null}>
       <FormErrorSummary errors={signOutError ? [signOutError] : []} title="Sign out failed" />
