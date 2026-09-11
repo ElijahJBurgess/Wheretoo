@@ -13,7 +13,7 @@ describe('application Content Security Policy', () => {
     expect(content).toContain("script-src 'self' https://connect-js.stripe.com https://js.stripe.com")
     expect(content).toContain("frame-src https://connect-js.stripe.com https://js.stripe.com https://checkout.stripe.com https://link.com https://*.link.com")
     expect(content).toContain("connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.mapbox.com https://events.mapbox.com https://api.stripe.com https://connect-js.stripe.com https://link.com https://*.link.com")
-    expect(content).toContain("img-src 'self' data: https://*.stripe.com https://*.link.com")
+    expect(content).toContain("img-src 'self' data: https://*.stripe.com https://*.link.com https://*.supabase.co")
     expect(content).toContain("font-src 'self' data:")
     expect(content).not.toContain("script-src *")
     expect(content).not.toContain("'unsafe-eval'")

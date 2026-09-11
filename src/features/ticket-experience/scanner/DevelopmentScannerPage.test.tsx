@@ -32,7 +32,7 @@ describe('DevelopmentScannerPage', () => {
   it('submits a visibly development-only fake credential through the same controller', async () => {
     const user = userEvent.setup()
     const { checkAdmission } = renderDevelopmentPage()
-    expect(await screen.findByText('Ready to scan')).toBeVisible()
+    expect(await screen.findByText('Scan guest ticket')).toBeVisible()
 
     expect(screen.getByText('Development only')).toBeVisible()
     await user.type(screen.getByLabelText('Fake admission credential'), 'wh_test_admit_rsvp_valid')
@@ -48,7 +48,7 @@ describe('DevelopmentScannerPage', () => {
   it('does not echo the submitted credential into the result UI', async () => {
     const user = userEvent.setup()
     renderDevelopmentPage()
-    expect(await screen.findByText('Ready to scan')).toBeVisible()
+    expect(await screen.findByText('Scan guest ticket')).toBeVisible()
     const input = screen.getByLabelText('Fake admission credential')
     await user.type(input, 'private-test-credential')
     await user.click(screen.getByRole('button', { name: 'Submit fake credential' }))

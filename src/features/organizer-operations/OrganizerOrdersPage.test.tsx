@@ -24,7 +24,7 @@ const order = {
   quantity: 3,
   totalMinor: 3001,
   currency: 'usd',
-  items: [],
+  items: [{ tierName: 'General Admission', quantity: 2, subtotalMinor: 2002 }, { tierName: 'VIP', quantity: 1, subtotalMinor: 999 }],
 }
 function show() {
   render(
@@ -51,6 +51,7 @@ it('searches within the selected event and keeps one row per order', async () =>
     '/organizer/events/event/orders/order',
   )
   expect(screen.getAllByText('Alex Chen')).toHaveLength(1)
+  expect(screen.getByText('General Admission ×2 · VIP ×1')).toBeVisible()
   await userEvent.type(screen.getByRole('searchbox'), 'alex')
   await userEvent.click(screen.getByRole('button', { name: 'Search' }))
   expect(listEventOrders).toHaveBeenLastCalledWith('event', 'alex', null)

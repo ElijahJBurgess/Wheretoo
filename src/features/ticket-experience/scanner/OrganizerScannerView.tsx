@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/refs -- the controller intentionally groups reactive state with an opaque video RefObject */
 import { dateTime } from '../../organizer-operations/operations.format'
 import { useEffect, type ReactNode } from 'react'
-import type { AdmissionOutcome } from '../contracts/admission'
+import type { AdmissionCheckResult, AdmissionOutcome } from '../contracts/admission'
 import type { ScannerController } from './useScannerController'
 
 export type OrganizerScannerViewProps = {
@@ -24,20 +24,20 @@ const resultPresentation: Record<AdmissionOutcome, {
     tone: 'success',
   },
   already_used: {
-    icon: '↺',
-    title: 'Already used',
+    icon: '!',
+    title: 'Already scanned',
     detail: 'This admission was checked in previously.',
     tone: 'warning',
   },
   refunded: {
-    icon: '↺',
-    title: 'Refunded',
+    icon: '×',
+    title: 'Ticket refunded',
     detail: 'Do not admit. This ticket was refunded.',
     tone: 'danger',
   },
   cancelled: {
-    icon: '×',
-    title: 'Cancelled',
+    icon: '⊘',
+    title: 'Ticket cancelled',
     detail: 'Do not admit. This ticket was cancelled.',
     tone: 'danger',
   },
@@ -92,9 +92,7 @@ function CameraRecovery({ controller }: { controller: ScannerController }) {
   )
 }
 
-function ScanResult({ controller }: { controller: ScannerController }) {
-  if (controller.state.kind !== 'result') return null
-  const { result } = controller.state
+export function AdmissionResultView({ result, children }: { result: AdmissionCheckResult; children: ReactNode }) {
   const presentation = resultPresentation[result.outcome]
 
   return (
@@ -104,16 +102,25 @@ function ScanResult({ controller }: { controller: ScannerController }) {
       role={result.outcome === 'admitted' ? 'status' : 'alert'}
     >
       <span aria-hidden="true" className="organizer-scanner__result-icon">{presentation.icon}</span>
-      <p className="organizer-scanner__eyebrow">Admission result</p>
       <h1>{presentation.title}</h1>
-      <p className="organizer-scanner__result-detail">{presentation.detail}</p>
       {result.admissionLabel || result.attendeeLabel ? (
         <dl className="organizer-scanner__context">
-          {result.admissionLabel ? <div><dt>Admission</dt><dd>{result.admissionLabel}</dd></div> : null}
           {result.attendeeLabel ? <div><dt>Guest</dt><dd>{result.attendeeLabel}</dd></div> : null}
+          {result.admissionLabel ? <div><dt>Admission</dt><dd>{result.admissionLabel}</dd></div> : null}
         </dl>
       ) : null}
-      {result.usedAt && <p className="organizer-scanner__result-detail">{result.outcome === 'already_used' ? 'Previously admitted' : 'Checked in'} · {dateTime(result.usedAt)}</p>}
+      <p className="organizer-scanner__result-detail">{presentation.detail}</p>
+      {result.usedAt && <p className="organizer-scanner__used-time">{result.outcome === 'already_used' ? 'Previously admitted' : 'Checked in'} · <time dateTime={result.usedAt}>{dateTime(result.usedAt)}</time></p>}
+      {children}
+    </section>
+  )
+}
+
+function ScanResult({ controller }: { controller: ScannerController }) {
+  if (controller.state.kind !== 'result') return null
+  const { result } = controller.state
+  return (
+    <AdmissionResultView result={result}>
       <div className="organizer-scanner__actions">
         {result.outcome === 'network_error' ? (
           <>
@@ -130,7 +137,7 @@ function ScanResult({ controller }: { controller: ScannerController }) {
           </button>
         )}
       </div>
-    </section>
+    </AdmissionResultView>
   )
 }
 
@@ -186,7 +193,7 @@ export function OrganizerScannerView({
           <div aria-hidden="true" className="organizer-scanner__target" />
           <div className="organizer-scanner__ready-copy">
             <p className="organizer-scanner__eyebrow">Scanner ready</p>
-            <h1>Ready to scan</h1>
+            <h1>Scan guest ticket</h1>
             <p>Center one admission QR inside the frame.</p>
           </div>
         </section>

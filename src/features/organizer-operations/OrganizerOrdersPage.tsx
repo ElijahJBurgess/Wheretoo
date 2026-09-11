@@ -50,6 +50,7 @@ function EventOrders({ ownerId, eventId }: { ownerId: string; eventId: string })
         />
         <button className='ops-button ops-button--primary' type='submit'>Search</button>
       </form>
+      {query.isFetching && !query.isFetchingNextPage && rows.length > 0 && <p className='ops-note' role='status'>Updating results…</p>}
       {query.isPending && rows.length === 0
         ? <p role='status' className='operations-state'>Loading orders…</p>
         : query.isError && !query.data && rows.length === 0
@@ -71,7 +72,10 @@ function EventOrders({ ownerId, eventId }: { ownerId: string; eventId: string })
                       <span>{order.buyerEmail}</span>
                       <small>{order.orderNumber}</small>
                     </div>
-                    <span>{order.quantity} tickets</span>
+                    <span className='ops-order-tiers'>
+                      <span>{order.quantity} {order.quantity === 1 ? 'ticket' : 'tickets'}</span>
+                      <small>{order.items.map((item) => `${item.tierName} ×${item.quantity}`).join(' · ')}</small>
+                    </span>
                     <span>{money(order.totalMinor)}</span>
                     <span>
                       <span className={`ops-badge ops-badge--${order.status}`}>

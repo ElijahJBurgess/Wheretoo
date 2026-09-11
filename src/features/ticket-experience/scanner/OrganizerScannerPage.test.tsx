@@ -34,9 +34,9 @@ function renderPage(admissionChecker: AdmissionChecker, cameraDecoder: CameraDec
 describe('OrganizerScannerPage scan cycle', () => {
   it.each([
     ['admitted', 'Admitted'],
-    ['already_used', 'Already used'],
-    ['refunded', 'Refunded'],
-    ['cancelled', 'Cancelled'],
+    ['already_used', 'Already scanned'],
+    ['refunded', 'Ticket refunded'],
+    ['cancelled', 'Ticket cancelled'],
     ['wrong_event', 'Wrong event'],
     ['invalid', 'Invalid ticket'],
     ['network_error', 'Network error'],
@@ -46,15 +46,17 @@ describe('OrganizerScannerPage scan cycle', () => {
       outcome,
       admissionLabel: 'General Admission',
       attendeeLabel: 'Demo guest',
+      ...(outcome === 'admitted' || outcome === 'already_used' ? { usedAt: '2026-09-10T02:42:00Z' } : {}),
     })
     renderPage({ checkAdmission }, camera.decoder)
-    expect(await screen.findByText('Ready to scan')).toBeVisible()
+    expect(await screen.findByText('Scan guest ticket')).toBeVisible()
 
     act(() => camera.input?.onDecode(`opaque-${outcome}`))
 
     expect(await screen.findByRole('heading', { name: heading })).toBeVisible()
     expect(screen.getByText('General Admission')).toBeVisible()
     expect(screen.getByText('Demo guest')).toBeVisible()
+    if (outcome === 'admitted' || outcome === 'already_used') expect(screen.getByText(/7:42 PM/)).toBeVisible()
     expect(screen.queryByText(`opaque-${outcome}`)).not.toBeInTheDocument()
   })
 
@@ -69,7 +71,7 @@ describe('OrganizerScannerPage scan cycle', () => {
       attendeeLabel: 'Demo guest',
     })
     const view = renderPage({ checkAdmission }, camera.decoder)
-    expect(await screen.findByText('Ready to scan')).toBeVisible()
+    expect(await screen.findByText('Scan guest ticket')).toBeVisible()
     act(() => camera.input?.onDecode('opaque-value'))
 
     expect(await screen.findByRole('heading', { name: 'Admitted' })).toBeVisible()
@@ -80,7 +82,7 @@ describe('OrganizerScannerPage scan cycle', () => {
     const camera = cameraWith()
     const checkAdmission = vi.fn<AdmissionChecker['checkAdmission']>(() => new Promise(() => {}))
     renderPage({ checkAdmission }, camera.decoder)
-    expect(await screen.findByText('Ready to scan')).toBeVisible()
+    expect(await screen.findByText('Scan guest ticket')).toBeVisible()
 
     act(() => camera.input?.onDecode('opaque-value'))
 
@@ -92,7 +94,7 @@ describe('OrganizerScannerPage scan cycle', () => {
     const camera = cameraWith()
     const checkAdmission = vi.fn<AdmissionChecker['checkAdmission']>().mockResolvedValue({ outcome: 'network_error' })
     renderPage({ checkAdmission }, camera.decoder)
-    expect(await screen.findByText('Ready to scan')).toBeVisible()
+    expect(await screen.findByText('Scan guest ticket')).toBeVisible()
     act(() => camera.input?.onDecode('opaque-value'))
 
     expect(await screen.findByRole('button', { name: 'Retry check-in' })).toBeVisible()
@@ -116,7 +118,7 @@ describe('OrganizerScannerPage scan cycle', () => {
     const camera = cameraWith()
     renderPage({ checkAdmission: vi.fn() }, camera.decoder)
 
-    expect(await screen.findByText('Ready to scan')).toBeVisible()
+    expect(await screen.findByText('Scan guest ticket')).toBeVisible()
     expect(screen.queryByText('Development only')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Fake admission credential')).not.toBeInTheDocument()
   })
@@ -130,7 +132,7 @@ describe('OrganizerScannerPage scan cycle', () => {
     renderPage({
       checkAdmission: vi.fn(async () => ({ outcome: outcomes[0] })),
     }, camera.decoder)
-    expect(await screen.findByText('Ready to scan')).toBeVisible()
+    expect(await screen.findByText('Scan guest ticket')).toBeVisible()
     await user.click(screen.getByRole('button', { name: 'Mute scanner feedback' }))
 
     act(() => camera.input?.onDecode('opaque-value'))

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { EventSalesSummary } from '../organizer-operations/EventSalesSummary'
+import { EventArtwork } from '../organizer-operations/EventArtwork'
 import { Link } from 'react-router-dom'
 import { AsyncState } from '../../components/ui/AsyncState'
 import { Button } from '../../components/ui/Button'
@@ -122,11 +123,7 @@ export function OrganizerEventsPage() {
                 to={eventDestination(event)}
               >
                 {event.admission_type === 'paid' && (
-                  <span className='ops-event-art'>
-                    {event.artwork_path?.startsWith('https://')
-                      ? <img src={event.artwork_path} alt='' />
-                      : <span aria-hidden='true'>▦</span>}
-                  </span>
+                  <EventArtwork source={event.artwork_path} className='ops-event-art' />
                 )}
                 <span className={`event-status event-status--${status.style}`}>{status.label}</span>
                 <strong>{title}</strong>

@@ -40,6 +40,7 @@ function OrderDetailContent(
   return (
     <section className='operations-page ops-detail'>
       <Link className='ops-back' to={`/organizer/events/${eventId}/orders`}>← Orders</Link>
+      <p className='ops-detail-event'>{event.data?.event.title ?? 'Event operations'}</p>
       <h1>Order Details</h1>
       {selected && (
         <ManualAdmissionDialog

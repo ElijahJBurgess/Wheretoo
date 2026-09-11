@@ -55,7 +55,7 @@ export function RefundOrderDialog(
       )}
       <div className='ops-actions'>
         <button className='ops-button' disabled={mutation.isPending} onClick={onClose}>
-          {mutation.isSuccess ? 'Done' : 'Cancel'}
+          {mutation.isSuccess || confirmed ? 'Done' : 'Cancel'}
         </button>
         {!mutation.isSuccess && !confirmed && (
           <button
