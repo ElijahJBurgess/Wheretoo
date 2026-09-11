@@ -2,6 +2,8 @@
 
 Date: 2026-09-10. Branch: `codex/organizer-operations-v1`.
 
+**Subsequent finish pass:** see [the product finish report](organizer-operations-v1-finish.md) for current screen parity, real-decoder QR browser evidence, artwork verification, and the latest test counts. The sections below preserve the original implementation evidence.
+
 The approved paid-event organizer workflow is implemented: My Events → Dashboard → event Orders → individual Order Details → manual admission → whole-order refund → historical access. Image #1 remains the visual authority. The founder decisions were committed in `0c6049d` before implementation began. There is no production deployment or claim of production readiness.
 
 ## What changed

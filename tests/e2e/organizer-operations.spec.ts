@@ -1,3 +1,4 @@
+import { seedProofArtwork, serveProofArtwork } from './support/organizerArtwork'
 import { createHmac } from 'node:crypto'
 import { expect, test } from '@playwright/test'
 // Disposable local PostgREST/DB only. Auth is synthetic; all operational RPCs
@@ -32,6 +33,8 @@ async function rpc(name: string, data: unknown, token = jwt()) {
 test(
   'owned operations journey against the disposable database, desktop and mobile',
   async ({ page }, info) => {
+    seedProofArtwork()
+    await serveProofArtwork(page)
     await page.addInitScript(({ token, owner }) => {
       localStorage.setItem(
         'sb-ops-local-auth-token',
@@ -91,6 +94,7 @@ test(
         'background-color',
         'rgb(12, 21, 30)',
       )
+      if (process.env.WHERETO_OPERATIONS_ARTWORK_PROOF) await expect.poll(() => page.locator('.ops-event-art img').evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0)
       await page.screenshot({
         path: info.outputPath(`events-${viewport.width}.png`),
         fullPage: true,
@@ -103,6 +107,7 @@ test(
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,
       )
+      if (process.env.WHERETO_OPERATIONS_ARTWORK_PROOF) await expect.poll(() => page.locator('.operations-hero__image img').evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0)
       await page.screenshot({
         path: info.outputPath(`dashboard-${viewport.width}.png`),
         fullPage: true,

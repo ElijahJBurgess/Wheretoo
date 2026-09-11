@@ -1,7 +1,7 @@
 import { defineConfig } from '@playwright/test'
 export default defineConfig({
   testDir: './tests/e2e',
-  testMatch: 'organizer-operations.spec.ts',
+  testMatch: ['organizer-operations.spec.ts', 'organizer-qr.spec.ts'],
   workers: 1,
   fullyParallel: false,
   timeout: 90000,
@@ -14,7 +14,11 @@ export default defineConfig({
     trace: 'off',
     video: 'off',
   },
-  webServer: {
+  webServer: [{
+    command: 'pnpm exec deno run --allow-env --allow-net=127.0.0.1:55436,127.0.0.1:55437 tests/integration/edge/organizer-local-admission/index.ts',
+    url: 'http://127.0.0.1:55437/health',
+    reuseExistingServer: false,
+  }, {
     command: 'pnpm build && pnpm exec vite preview --host 127.0.0.1 --port 3012',
     url: 'http://127.0.0.1:3012/auth/sign-in',
     reuseExistingServer: false,
@@ -25,5 +29,5 @@ export default defineConfig({
       VITE_MAPBOX_ACCESS_TOKEN: 'ops-local-disabled',
       VITE_STRIPE_PUBLISHABLE_KEY: 'pk_test_ops_local_disabled',
     },
-  },
+  }],
 })

@@ -247,3 +247,9 @@ This audit makes documentation changes only. The checks below concern unmodified
 ## Completion evidence required after implementation
 
 Report changed files and migrations, the exact metric matrix, test counts/results, local versus provider/browser proof, remaining gaps, and manual setup. Passing unit tests cannot substitute for owner isolation, concurrent admission proof, or real provider refund reconciliation. Preserve the scanner camera test baseline separately from new regressions. Stop only for new true product/contract blockers.
+
+## Product finish pass — 2026-09-10
+
+The founder-requested continuation after `8a889fa` is complete at the local browser verification level: all nine approved screen types, tier summaries, compact details, artwork/fallback, scanner states, and retained owner-scoped cancellation result. Existing contracts remain unchanged. RED → GREEN and 1440/768/390/320 evidence are recorded in [the finish report](../../testing/organizer-operations-v1-finish.md).
+
+The complete management and real-decoder QR journeys pass against disposable local SQL. The camera-factory baseline remains a visible failing assertion. Physical-device and actual Stripe signed-webhook proof remain separate release checks; there is no deployment. No resend/free-event work was reintroduced.

@@ -178,3 +178,9 @@ The one repairable state is a previously fulfilled order in `requires_review` wi
 The dialog reconciles canonical detail after both request success and ambiguous request failure. A later canonical refund overrides an earlier timeout and removes the refund action. Pending acknowledgments never display Refunded. [Stripe documents metadata changes as `refund.updated` events](https://docs.stripe.com/refunds?dashboard-or-api=api).
 
 Implementation and verification evidence: `../../testing/organizer-operations-v1-verification.md`. Local verification is separate from real Stripe delivery, physical-camera proof, and production readiness.
+
+## Implemented presentation finish — 2026-09-10
+
+The subsequent founder finish request preserves this contract and locks the displayed result labels to **ADMITTED**, **ALREADY SCANNED**, **TICKET REFUNDED**, and **TICKET CANCELLED**. Orders expose canonical tier summaries alongside quantity. Supported Supabase artwork uses the image allowlist with a neutral fallback; no upload/moderation contract is added. A result received as admission closes remains visible only for its owner/event, with dashboard access instead of another scan.
+
+See [the finish verification report](../../testing/organizer-operations-v1-finish.md) for the complete screen comparison, four viewport sizes, actual-decoder local QR proof, current tests, intentional differences, and outstanding hardware/provider release checks.
