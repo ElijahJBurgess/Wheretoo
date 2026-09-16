@@ -10,6 +10,7 @@ const { activateMutate, saveMutate, saveRevisionMutate, useActivatePaidSales, us
 vi.mock('../auth/SessionProvider', () => ({ useSession }))
 vi.mock('../events/event.queries', () => ({ useOwnedEvent, useSaveEventRevision }))
 vi.mock('../payments/payment.queries', () => ({ useConnectStatus }))
+vi.mock('../../lib/supabase/client', () => ({ supabase: {} }))
 vi.mock('./ticket.queries', () => ({ useActivatePaidSales, useOwnedTicketTiers, useSaveTicketTiers }))
 import { OrganizerTicketTiersPage } from './OrganizerTicketTiersPage'
 
@@ -73,31 +74,49 @@ describe('OrganizerTicketTiersPage', () => {
     await waitFor(() => expect(saveMutate).toHaveBeenCalledTimes(2))
   })
 
-  it('guides incomplete Connect setup to payments and never renders a fee editor', () => {
+  it('guides an incomplete published conversion to payments and never renders a fee editor', () => {
+    useOwnedEvent.mockReturnValue({ data: { ...event, status: 'published', admission_type: 'free' }, isPending: false, isError: false, refetch: vi.fn() })
     useConnectStatus.mockReturnValue({ data: { status: 'action_required', requirements_currently_due_count: 1, requirements_past_due_count: 0, last_status_code: 'requirements_due', last_synced_at: '2026-08-25T12:00:00.000Z' }, isPending: false })
     renderPage()
     expect(useConnectStatus).toHaveBeenCalledWith('organizer-1')
-    expect(screen.getByRole('link', { name: 'Finish payment setup' })).toHaveAttribute('href', '/organizer/settings/payments')
+    expect(screen.getByRole('link', { name: 'Finish payment setup' })).toHaveAttribute('href', '/organizer/settings/payments?eventId=event-1')
     expect(screen.getByRole('button', { name: 'Save and continue to event requirements' })).toBeDisabled()
     expect(screen.queryByText(/platform fee|fee percentage|payout/i)).not.toBeInTheDocument()
+  })
+
+  it('frames draft tier setup and continues composition while Stripe is incomplete', async () => {
+    const user = userEvent.setup()
+    useConnectStatus.mockReturnValue({ data: { status: 'not_started' }, isPending: false })
+    saveMutate.mockResolvedValue([tier])
+    const { router } = renderPage()
+
+    expect(screen.getByRole('region', { name: 'Create Event' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Back to my events' })).toHaveAttribute('href', '/organizer/events/event-1/edit?step=ticket-type')
+    expect(useConnectStatus).toHaveBeenCalledWith('')
+    expect(screen.queryByRole('link', { name: 'Finish payment setup' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+
+    expect(saveMutate).toHaveBeenCalledOnce()
+    expect(router.state.location.pathname).toBe('/organizer/events/event-1/edit')
+    expect(router.state.location.search).toBe('?step=details')
   })
 
   it('routes an owned paid draft through requirements and publish without direct activation', async () => {
     const user = userEvent.setup()
     saveMutate.mockResolvedValue([tier])
     const { router } = renderPage()
-    await user.click(screen.getByRole('button', { name: 'Save and continue to event requirements' }))
+    await user.click(screen.getByRole('button', { name: /^(Continue|Save and continue to event requirements)$/ }))
     await waitFor(() => expect(saveMutate).toHaveBeenCalledOnce())
     expect(activateMutate).not.toHaveBeenCalled()
     expect(router.state.location.pathname).toBe('/organizer/events/event-1/edit')
-    expect(router.state.location.search).toBe('?step=requirements')
+    expect(router.state.location.search).toBe('?step=details')
     expect(useOwnedTicketTiers).toHaveBeenCalledWith('organizer-1', 'event-1')
   })
 
   it('uses the same owner-safe not-found state for a missing or foreign event', () => {
     useOwnedEvent.mockReturnValue({ data: null, isPending: false, isError: false, refetch: vi.fn() })
     renderPage()
-    expect(screen.getByText('Event not found')).toBeInTheDocument()
+    expect(screen.getByText('Event unavailable')).toBeInTheDocument()
     expect(screen.queryByText(/another organizer|permission|owner/i)).not.toBeInTheDocument()
   })
 
@@ -109,6 +128,23 @@ describe('OrganizerTicketTiersPage', () => {
     await user.click(screen.getByRole('button', { name: 'Remove tier General admission' }))
     await user.click(screen.getByRole('button', { name: 'Save ticket tiers' }))
     expect(saveMutate).toHaveBeenCalledWith([expect.objectContaining({ id: vipTier.id, sortOrder: 2 })])
+  })
+
+  it('retains both persisted tier IDs when two saved tiers are edited', async () => {
+    const user = userEvent.setup()
+    useOwnedTicketTiers.mockReturnValue({ data: [tier, vipTier], isPending: false, isError: false, refetch: vi.fn() })
+    saveMutate.mockResolvedValue([tier, vipTier])
+    renderPage()
+
+    const names = screen.getAllByLabelText('Name')
+    await user.type(names[0], ' updated')
+    await user.type(names[1], ' updated')
+    await user.click(screen.getByRole('button', { name: 'Save ticket tiers' }))
+
+    expect(saveMutate).toHaveBeenCalledWith([
+      expect.objectContaining({ id: tier.id, name: 'General admission updated', sortOrder: 1 }),
+      expect.objectContaining({ id: vipTier.id, name: 'VIP updated', sortOrder: 2 }),
+    ])
   })
 
   it('allocates a removed slot only to a newly added tier', async () => {
@@ -149,7 +185,7 @@ describe('OrganizerTicketTiersPage', () => {
     const { router } = renderPage()
 
     expect(useConnectStatus).toHaveBeenCalledWith('organizer-1')
-    await user.click(screen.getByRole('button', { name: 'Save and continue to event requirements' }))
+    await user.click(screen.getByRole('button', { name: /^(Continue|Save and continue to event requirements)$/ }))
 
     expect(saveMutate).toHaveBeenCalledOnce()
     expect(saveRevisionMutate).toHaveBeenCalledWith(expect.objectContaining({
@@ -181,7 +217,7 @@ describe('OrganizerTicketTiersPage', () => {
 
     await user.clear(screen.getByLabelText('Name'))
     await user.type(screen.getByLabelText('Name'), 'Evening admission')
-    await user.click(screen.getByRole('button', { name: 'Save and continue to event requirements' }))
+    await user.click(screen.getByRole('button', { name: /^(Continue|Save and continue to event requirements)$/ }))
 
     expect(saveMutate).toHaveBeenCalledWith([expect.objectContaining({ name: 'Evening admission' })])
     expect(saveRevisionMutate).not.toHaveBeenCalled()
@@ -240,7 +276,7 @@ describe('OrganizerTicketTiersPage', () => {
     await user.click(screen.getByRole('button', { name: 'Save ticket tiers' }))
     expect(await screen.findByText('Paid conversion must be completed before the event starts.', { selector: '[role="alert"] *' })).toBeInTheDocument()
     expect(saveMutate).not.toHaveBeenCalled()
-    await user.click(screen.getByRole('button', { name: 'Save and continue to event requirements' }))
+    await user.click(screen.getByRole('button', { name: /^(Continue|Save and continue to event requirements)$/ }))
     expect(await screen.findByText('Paid conversion must be completed before the event starts.', { selector: '[role="alert"] *' })).toBeInTheDocument()
     expect(useConnectStatus).toHaveBeenCalledWith('')
     expect(saveMutate).not.toHaveBeenCalled()
@@ -251,7 +287,7 @@ describe('OrganizerTicketTiersPage', () => {
   it('normalizes an owned-tier RPC EVENT_NOT_FOUND response to the safe missing state', () => {
     useOwnedTicketTiers.mockReturnValue({ data: undefined, isPending: false, isError: true, error: { message: 'EVENT_NOT_FOUND' }, refetch: vi.fn() })
     renderPage()
-    expect(screen.getByText('Event not found')).toBeInTheDocument()
+    expect(screen.getByText('Event unavailable')).toBeInTheDocument()
     expect(screen.queryByText(/EVENT_NOT_FOUND|permission|owner/i)).not.toBeInTheDocument()
   })
 
@@ -305,7 +341,7 @@ describe('OrganizerTicketTiersPage', () => {
     let resolveSave!: (value: (typeof tier)[]) => void
     saveMutate.mockReturnValue(new Promise<(typeof tier)[]>((resolve) => { resolveSave = resolve }))
     const { router } = renderPage()
-    await user.click(screen.getByRole('button', { name: 'Save and continue to event requirements' }))
+    await user.click(screen.getByRole('button', { name: /^(Continue|Save and continue to event requirements)$/ }))
     useSession.mockReturnValue({ status: 'authenticated', user: { id: 'organizer-2' } })
     await act(async () => { await router.navigate('/organizer/events/event-1/tickets?organizer=organizer-2') })
     await act(async () => { resolveSave([tier]) })
@@ -317,7 +353,7 @@ describe('OrganizerTicketTiersPage', () => {
     let resolveSave!: (value: (typeof tier)[]) => void
     saveMutate.mockReturnValue(new Promise<(typeof tier)[]>((resolve) => { resolveSave = resolve }))
     const { router, unmount } = renderPage()
-    await user.click(screen.getByRole('button', { name: 'Save and continue to event requirements' }))
+    await user.click(screen.getByRole('button', { name: /^(Continue|Save and continue to event requirements)$/ }))
     unmount()
     await act(async () => { resolveSave([tier]) })
     expect(router.state.location.pathname).toBe('/organizer/events/event-1/tickets')

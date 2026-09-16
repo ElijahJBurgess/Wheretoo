@@ -1,0 +1,42 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+select extensions.no_plan();
+\ir spec07_email_fixture.inc
+-- Deliberately tiny rollback-only proof profile; production limits stay NULL.
+update private.ticket_email_settings set limits=jsonb_set(jsonb_set(limits,'{access_ip}','[{"seconds":60,"max":3}]'),'{invalid_access_ip}','[{"seconds":60,"max":2}]');
+select extensions.is(public.server_read_ticket_email_access(null,repeat('a',64)),null::jsonb,'first malformed grant is neutral');
+select extensions.is(public.server_read_ticket_email_access(repeat('b',64),repeat('a',64)),null::jsonb,'second canonical unknown grant is neutral');
+select extensions.is(public.server_read_ticket_email_access('malformed',repeat('a',64))->>'kind','rate_limited','invalid access lane explicitly denies the third invalid grant');
+select extensions.is(public.server_read_ticket_email_access(repeat('c',64),repeat('a',64))->>'kind','rate_limited','aggregate IP limit rejects continued invalid grant traffic');
+select extensions.is((select count(*) from private.ticket_email_rate_events where lane='access_ip' and identity_hash=repeat('a',64)),3::bigint,'malformed and canonical unknown grants consume aggregate quota once each');
+select extensions.is((select count(*) from private.ticket_email_rate_events where lane='invalid_access_ip' and identity_hash=repeat('a',64)),2::bigint,'invalid lane denial does not append unlimited events');
+select extensions.is((select count(*) from private.ticket_email_rate_events where lane='verified_grant'),0::bigint,'unverified access never consumes verified-grant quota');
+select extensions.is(public.server_ticket_email_confirmation_status('paid_order',repeat('d',64),repeat('e',64)),null::jsonb,'unknown canonical paid status bearer is neutral');
+select extensions.is(public.server_ticket_email_confirmation_status('free_registration',repeat('d',64),repeat('e',64)),null::jsonb,'unknown canonical free status bearer is neutral');
+select extensions.is(public.server_ticket_email_confirmation_status('paid_order','malformed',repeat('e',64))->>'kind','rate_limited','malformed status bearer observes explicit invalid lane denial');
+select extensions.is(public.server_ticket_email_confirmation_status('invalid_kind',null,repeat('e',64))->>'kind','rate_limited','aggregate status quota denies even malformed RPC inputs');
+select extensions.is((select count(*) from private.ticket_email_rate_events where lane='access_ip' and identity_hash=repeat('e',64)),3::bigint,'status misses and malformed inputs consume aggregate allowance');
+select extensions.is((select count(*) from private.ticket_email_rate_events where lane='verified_grant'),0::bigint,'status misses do not consume verified-grant quota');
+-- A depleted aggregate bucket stops valid grants/status before their per-grant limiter.
+select pg_temp.register(1,1);
+insert into private.ticket_email_grants(id,purpose,token_hash,expires_at) values('b6930000-0000-4000-8000-000000000001','recovery',null,now()+interval '1 day');
+insert into private.ticket_email_members(grant_id,position,registration_id) select 'b6930000-0000-4000-8000-000000000001',1,id from public.free_registrations where request_id='b6300000-0000-4000-8000-000000000001';
+update private.ticket_email_grants set token_hash=repeat('f',64) where id='b6930000-0000-4000-8000-000000000001';
+select extensions.is(public.server_read_ticket_email_access(repeat('f',64),repeat('a',64))->>'kind','rate_limited','depleted aggregate bucket rejects even a valid grant');
+select extensions.is((select public.server_ticket_email_confirmation_status('free_registration',access_hash,repeat('e',64))->>'kind' from public.free_registrations where request_id='b6300000-0000-4000-8000-000000000001'),'rate_limited','depleted aggregate bucket rejects even valid status access');
+select extensions.is((select count(*) from private.ticket_email_rate_events where lane='verified_grant'),0::bigint,'aggregate denial happens before verified-grant work');
+select extensions.is(public.server_read_ticket_email_access(repeat('f',64),repeat('9',64))->>'kind','index','another IP can use the verified grant');
+select extensions.is((select count(*) from private.ticket_email_rate_events where lane='verified_grant'),1::bigint,'only the verified match uses verified-grant quota');
+select extensions.is((select count(*) from private.ticket_email_rate_events where lane like 'resend_%' or lane like 'recovery_%'),0::bigint,'access/status abuse cannot consume organizer or recovery lanes');
+select extensions.is((select count(*) from private.ticket_email_outbox where purpose='initial'),1::bigint,'invalid public traffic cannot prevent independent initial enqueue');
+select extensions.ok((select bool_and(public.server_read_ticket_email_access(encode(extensions.digest('unknown-grant-'||n,'sha256'),'hex'),repeat('a',64))->>'kind'='rate_limited') from generate_series(1,100) n),'100 canonical unknown grants remain denied after aggregate exhaustion');
+select extensions.ok((select bool_and(public.server_ticket_email_confirmation_status(case when n%2=0 then 'paid_order' else 'free_registration' end,encode(extensions.digest('unknown-status-'||n,'sha256'),'hex'),repeat('e',64))->>'kind'='rate_limited') from generate_series(1,100) n),'100 unknown paid/free status bearers remain denied after aggregate exhaustion');
+select extensions.is((select count(*) from private.ticket_email_rate_events where lane='access_ip' and identity_hash in(repeat('a',64),repeat('e',64))),6::bigint,'denied IP floods cannot append unbounded rate events');
+select extensions.is(public.server_read_ticket_email_access(repeat('f',64),repeat('8',64),-1),null::jsonb,'malformed RPC page selector is neutral without verifying the otherwise valid grant');
+select extensions.is(public.server_read_ticket_email_access(repeat('f',64),repeat('8',64),0,201),null::jsonb,'malformed RPC member selector uses the invalid allowance');
+select extensions.is(public.server_ticket_email_confirmation_status('invalid_kind',repeat('f',64),repeat('8',64))->>'kind','rate_limited','malformed RPC kind explicitly reaches invalid-lane denial');
+select extensions.is((select count(*) from private.ticket_email_rate_events where lane='verified_grant'),1::bigint,'malformed RPC selectors never consume verified-grant capacity');
+select extensions.is(public.server_read_ticket_email_access(repeat('f',64),'malformed'),null::jsonb,'malformed service IP hash is refused before any grant work');
+select extensions.is(public.server_ticket_email_confirmation_status('free_registration',repeat('f',64),null),null::jsonb,'missing service IP hash is refused before status lookup');
+select * from extensions.finish();
+rollback;

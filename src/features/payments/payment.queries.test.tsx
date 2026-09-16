@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, renderHook } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import type { PropsWithChildren } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -28,6 +28,18 @@ function createWrapper(queryClient: QueryClient) {
 
 describe('payment query contracts', () => {
   beforeEach(() => vi.clearAllMocks())
+
+
+  it('refreshes a cached Connect status on Settings entry and preserves provider read failure', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
+    client.setQueryData(paymentKeys.connect('organizer-1'), status)
+    getConnectStatus.mockRejectedValueOnce(new Error('Payment setup could not be loaded'))
+    const { result } = renderHook(() => useConnectStatus('organizer-1', { fresh: true }), { wrapper: createWrapper(client) })
+    await waitFor(() => expect(result.current.isError).toBe(true))
+    expect(getConnectStatus).toHaveBeenCalledWith('organizer-1', expect.any(Function))
+    expect(result.current.data?.status).not.toBe('not_started')
+    expect(createConnectAccountSession).not.toHaveBeenCalled()
+  })
 
   it('uses an authenticated-organizer-scoped Connect key and never enables a blank identity', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })

@@ -9,9 +9,13 @@ import {
   type ApplyDisposition,
   type ContextualModerationResult,
   type FailureDisposition,
+  type ModerationClaimEnvelope,
+  moderationClaimEnvelopeSchema,
+  type ModerationClaimResult,
   type ModerationFailureCode,
   type ModerationJob,
   moderationJobSchema,
+  type RejectionDisposition,
 } from "./contracts.ts";
 import {
   createContextualModerator,
@@ -29,7 +33,8 @@ type SafeLog = (...values: unknown[]) => void;
 
 export interface ModerationWorkerDependencies {
   workerToken: string;
-  claimJob(): Promise<ModerationJob | null>;
+  claimJob(): Promise<ModerationClaimResult | null>;
+  rejectInput(envelope: ModerationClaimEnvelope): Promise<RejectionDisposition>;
   moderate(job: ModerationJob): Promise<ContextualModerationResult>;
   applyResult(
     job: ModerationJob,
@@ -66,12 +71,12 @@ async function bearerMatches(
   return difference === 0;
 }
 
-function dbJob(row: unknown): ModerationJob {
+function dbJob(row: unknown): ModerationClaimResult {
   if (typeof row !== "object" || row === null || Array.isArray(row)) {
     throw new Error("MODERATION_JOB_INVALID");
   }
   const value = row as Record<string, unknown>;
-  return moderationJobSchema.parse({
+  const envelope = moderationClaimEnvelopeSchema.safeParse({
     evaluationId: value.evaluation_id,
     eventId: value.event_id,
     contentRevision: value.content_revision,
@@ -79,8 +84,15 @@ function dbJob(row: unknown): ModerationJob {
     queuedModerationVersion: value.queued_moderation_version,
     attemptCount: value.attempt_count,
     priorReasonCodes: value.prior_reason_codes,
+  });
+  if (!envelope.success) throw new Error("MODERATION_JOB_INVALID");
+  const job = moderationJobSchema.safeParse({
+    ...envelope.data,
     input: value.moderation_input,
   });
+  return job.success
+    ? { kind: "ready", job: job.data }
+    : { kind: "invalid_input", envelope: envelope.data };
 }
 
 export function createDatabaseDependencies(
@@ -102,6 +114,27 @@ export function createDatabaseDependencies(
         throw new Error("MODERATION_CLAIM_FAILED");
       }
       return data.length === 0 ? null : dbJob(data[0]);
+    },
+    async rejectInput(envelope) {
+      const { data, error } = await client.rpc(
+        "server_reject_moderation_evaluation_input",
+        {
+          p_evaluation_id: envelope.evaluationId,
+          p_event_id: envelope.eventId,
+          p_content_revision: envelope.contentRevision,
+          p_input_sha256: envelope.inputSha256,
+          p_queued_moderation_version: envelope.queuedModerationVersion,
+          p_attempt_count: envelope.attemptCount,
+        },
+      );
+      if (
+        error !== null || typeof data !== "string" ||
+        !["superseded", "not_found", "conflict", "schema_disagreement"]
+          .includes(data)
+      ) {
+        throw new Error("MODERATION_REJECTION_PERSIST_FAILED");
+      }
+      return data as RejectionDisposition;
     },
     async applyResult(job, result) {
       const { data, error } = await client.rpc(
@@ -161,8 +194,25 @@ export function createModerationWorkerHandler(
 
     let job: ModerationJob | null = null;
     try {
-      job = await dependencies.claimJob();
-      if (job === null) return new Response(null, { status: 204 });
+      const claim = await dependencies.claimJob();
+      if (claim === null) return new Response(null, { status: 204 });
+      if (claim.kind === "invalid_input") {
+        let disposition: RejectionDisposition | "rejection_failed";
+        try {
+          disposition = await dependencies.rejectInput(claim.envelope);
+        } catch {
+          disposition = "rejection_failed";
+        }
+        dependencies.log("moderation_worker_invalid_input", {
+          evaluationId: claim.envelope.evaluationId,
+          disposition,
+        });
+        return jsonResponse(
+          { error: { code: "MODERATION_JOB_INVALID" }, disposition },
+          500,
+        );
+      }
+      job = claim.job;
       const result = await dependencies.moderate(job);
       const disposition = await dependencies.applyResult(job, result);
       return jsonResponse({

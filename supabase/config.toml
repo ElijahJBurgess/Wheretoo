@@ -449,3 +449,32 @@ enabled = true
 # declarative_schema_path = "./schemas"
 # JSON string passed through to pg-delta SQL formatting.
 # format_options = "{\"keywordCase\":\"upper\",\"indent\":2,\"maxWidth\":80,\"commaStyle\":\"trailing\"}"
+
+[functions.free-rsvp]
+verify_jwt = false
+
+[functions.free-rsvp-status]
+verify_jwt = false
+
+# Spec 07: public POSTs use scoped proofs; worker/webhook enforce their own secrets.
+[functions.ticket-recovery-request]
+verify_jwt = false
+[functions.ticket-email-access]
+verify_jwt = false
+[functions.ticket-email-status]
+verify_jwt = false
+[functions.ticket-email-worker]
+verify_jwt = false
+[functions.ticket-email-webhook]
+verify_jwt = false
+
+# Refund history requires its own purpose-scoped email grant, never a login JWT.
+[functions.refund-detail-access]
+verify_jwt = false
+
+[functions.event-status-access]
+verify_jwt = false
+
+# Anonymous discovery uses a service-only read behind its independent rate limiter.
+[functions.public-discovery]
+verify_jwt = false

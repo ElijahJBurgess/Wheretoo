@@ -63,7 +63,7 @@ const canonicalInputSchema = z.object({
   organizer_display_name: nullableText,
 }).strict();
 
-export const moderationJobSchema = z.object({
+export const moderationClaimEnvelopeSchema = z.object({
   evaluationId: z.string().uuid(),
   eventId: z.string().uuid(),
   contentRevision: z.number().int().positive(),
@@ -71,8 +71,11 @@ export const moderationJobSchema = z.object({
   queuedModerationVersion: z.number().int().nonnegative(),
   attemptCount: z.number().int().min(1).max(3),
   priorReasonCodes: z.array(moderationReasonCodeSchema).max(12),
-  input: canonicalInputSchema,
 }).strict();
+
+export const moderationJobSchema = moderationClaimEnvelopeSchema.extend({
+  input: canonicalInputSchema,
+});
 
 const moderationResultShape = {
   outcome: z.enum([
@@ -143,7 +146,18 @@ export const contextualModerationResultSchema = z.object({
   modelVersion: opaqueProviderMetadataSchema.nullable(),
 }).strict().superRefine(validateResultSemantics);
 
+export type ModerationClaimEnvelope = z.infer<
+  typeof moderationClaimEnvelopeSchema
+>;
 export type ModerationJob = z.infer<typeof moderationJobSchema>;
+export type ModerationClaimResult =
+  | { kind: "ready"; job: ModerationJob }
+  | { kind: "invalid_input"; envelope: ModerationClaimEnvelope };
+export type RejectionDisposition =
+  | "superseded"
+  | "not_found"
+  | "conflict"
+  | "schema_disagreement";
 export type ContextualModerationResult = z.infer<
   typeof contextualModerationResultSchema
 >;

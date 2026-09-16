@@ -1,4 +1,4 @@
-import { loadConnectAndInitialize } from '@stripe/connect-js'
+import { loadConnectAndInitialize } from '@stripe/connect-js/pure'
 import {
   ConnectAccountManagement,
   ConnectAccountOnboarding,

@@ -1,11 +1,12 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link, useBeforeUnload, useBlocker, useNavigate, useParams } from 'react-router-dom'
-import { AsyncState } from '../../components/ui/AsyncState'
+import { ReadState } from '../../components/ui/ReadState'
 import { Button } from '../../components/ui/Button'
 import { Field } from '../../components/ui/Field'
 import { FormErrorSummary } from '../../components/ui/FormErrorSummary'
 import { useSession } from '../auth/SessionProvider'
 import { UnsavedChangesDialog } from '../events/UnsavedChangesDialog'
+import { EventCreationLayout } from '../events/EventCreationLayout'
 import { eventRowToFormValues } from '../events/event.api'
 import { useOwnedEvent, useSaveEventRevision } from '../events/event.queries'
 import type { EventRow } from '../events/event.types'
@@ -140,7 +141,7 @@ export function OrganizerTicketTiersPage() {
   const sessionState = useSession()
   const organizerId = sessionState.status === 'authenticated' ? sessionState.user.id : ''
   const eventQuery = useOwnedEvent(eventId, organizerId)
-  const ownedEventId = eventQuery.data?.organizer_id === organizerId ? eventQuery.data.id : ''
+  const ownedEventId = eventQuery.data?.id === eventId && eventQuery.data.organizer_id === organizerId ? eventQuery.data.id : ''
   const tiersQuery = useOwnedTicketTiers(organizerId, ownedEventId)
   const retainedTiers = tiersQuery.data?.filter((tier) => tier.status !== 'archived')
   const paidSalesAlreadyActive = eventQuery.data?.status === 'published'
@@ -150,7 +151,8 @@ export function OrganizerTicketTiersPage() {
     && retainedTiers.length <= 3
     && retainedTiers.every((tier) => tier.status === 'active')
   const freeConversionAlreadyStarted = publishedFreeConversionIsClosed(eventQuery.data, pageOpenedAt)
-  const connectRequired = ownedEventId.length > 0
+  const connectRequired = eventQuery.data?.status !== 'draft'
+    && ownedEventId.length > 0
     && tiersQuery.data !== undefined
     && !paidSalesAlreadyActive
     && !freeConversionAlreadyStarted
@@ -284,7 +286,7 @@ export function OrganizerTicketTiersPage() {
         }
       }
       leaveApprovedRef.current = true
-      void navigate(`/organizer/events/${eventId}/edit?step=requirements`)
+      void navigate(`/organizer/events/${eventId}/edit?step=${eventQuery.data?.status === 'draft' ? 'details' : 'requirements'}`)
     } catch (error) {
       if (isCurrentIdentity(identity)) setServerError(getPaidSalesErrorMessage(error))
     } finally {
@@ -293,26 +295,26 @@ export function OrganizerTicketTiersPage() {
   }
 
   if (sessionState.status !== 'authenticated' || ((eventQuery.isPending || eventQuery.data === undefined) && !eventQuery.isError)) {
-    return <AsyncState status="loading" title="Loading ticket setup" />
+    return <ReadState headingAs="h1" paused={eventQuery.fetchStatus === 'paused' || tiersQuery.fetchStatus === 'paused'} status="loading" skeleton="detail-fields" title="Loading ticket setup" />
   }
   if (eventQuery.isError) {
-    return <AsyncState action={<Button onClick={() => void eventQuery.refetch()}>Try again</Button>} description="Check your connection, then try again." status="error" title="Ticket setup could not load" />
+    return <ReadState headingAs="h1" action={<Button onClick={() => void eventQuery.refetch()}>Try again</Button>} description="Check your connection, then try again." status="unavailable" title="Ticket setup could not load" />
   }
   const event = eventQuery.data
   if (event === null || event === undefined) {
-    return <AsyncState action={<Link className="ui-button ui-button--secondary" to="/organizer/events">Back to events</Link>} description="The event may no longer be available." status="empty" title="Event not found" />
+    return <ReadState headingAs="h1" action={<Link className="ui-button ui-button--secondary" to="/organizer/events">Back to events</Link>} description="The event may no longer be available." status="unavailable" title="Event unavailable" />
   }
   if (event.admission_type !== 'paid' && !(event.status === 'published' && event.admission_type === 'free')) {
-    return <AsyncState action={<Link className="ui-button ui-button--secondary" to={`/organizer/events/${eventId}/edit`}>Edit event</Link>} description="Choose paid admission before setting up ticket tiers." status="empty" title="Ticket setup unavailable" />
+    return <ReadState headingAs="h1" action={<Link className="ui-button ui-button--secondary" to={`/organizer/events/${eventId}/edit`}>Edit event</Link>} description="Choose paid admission before setting up ticket tiers." status="unavailable" title="Ticket setup unavailable" />
   }
   if ((tiersQuery.isPending || tiersQuery.data === undefined) && !tiersQuery.isError) {
-    return <AsyncState status="loading" title="Loading ticket setup" />
+    return <ReadState headingAs="h1" paused={eventQuery.fetchStatus === 'paused' || tiersQuery.fetchStatus === 'paused'} status="loading" skeleton="detail-fields" title="Loading ticket setup" />
   }
   if (tiersQuery.isError && (typeof tiersQuery.error === 'object' && tiersQuery.error !== null && 'message' in tiersQuery.error && tiersQuery.error.message === 'EVENT_NOT_FOUND')) {
-    return <AsyncState action={<Link className="ui-button ui-button--secondary" to="/organizer/events">Back to events</Link>} description="The event may no longer be available." status="empty" title="Event not found" />
+    return <ReadState headingAs="h1" action={<Link className="ui-button ui-button--secondary" to="/organizer/events">Back to events</Link>} description="The event may no longer be available." status="unavailable" title="Event unavailable" />
   }
   if (tiersQuery.isError) {
-    return <AsyncState action={<Button onClick={() => void tiersQuery.refetch()}>Try again</Button>} description="Check your connection, then try again." status="error" title="Ticket setup could not load" />
+    return <ReadState headingAs="h1" action={<Button onClick={() => void tiersQuery.refetch()}>Try again</Button>} description="Check your connection, then try again." status="unavailable" title="Ticket setup could not load" />
   }
 
   const eventNeedsPublicationFlow = event.status === 'draft'
@@ -325,7 +327,7 @@ export function OrganizerTicketTiersPage() {
   const errors = [formError, serverError].filter((message): message is string => message !== null)
   const connectSatisfied = !connectRequired || connectReady(connectQuery.data)
 
-  return (
+  const content = (
     <section aria-labelledby="ticket-tiers-title" className="ticket-tiers-page">
       <header className="ticket-tiers-page__header">
         <div>
@@ -339,7 +341,7 @@ export function OrganizerTicketTiersPage() {
       <div className="ticket-tiers-page__grid">
         <form className="ticket-tiers-form" noValidate onSubmit={(event) => event.preventDefault()}>
           {tiers.map((tier, index) => (
-            <fieldset className="ticket-tier-card" key={tier.id ?? `new-${index}`}>
+            <fieldset disabled={pending} className="ticket-tier-card" key={tier.id ?? `new-${index}`}>
               <legend>Tier {index + 1}</legend>
               <div className="ticket-tier-card__header"><h2>{tier.name.trim() || `Ticket tier ${tier.sortOrder}`}</h2>{tiers.length > 1 ? <Button disabled={pending} onClick={() => removeTier(index)} variant="secondary">Remove tier {tier.name.trim() || tier.sortOrder}</Button> : null}</div>
               <div className="ticket-tier-card__fields">
@@ -361,10 +363,10 @@ export function OrganizerTicketTiersPage() {
           {connectSatisfied
             ? <p>{event.status === 'published' && event.admission_type === 'free' ? 'Paid conversion must be completed before the event starts. Save these tiers, then confirm the current agreement and publish.' : eventNeedsPublicationFlow ? 'Save these tiers, confirm the current agreement, and publish this version.' : 'Paid sales remain active. Save price or capacity changes from the tier form.'}</p>
             : <p>Finish secure payment setup before continuing to event requirements.</p>}
-          {connectRequired && !connectSatisfied ? <Link className="ui-button ui-button--secondary" to="/organizer/settings/payments">Finish payment setup</Link> : null}
+          {connectRequired && !connectSatisfied ? <Link className="ui-button ui-button--secondary" to={`/organizer/settings/payments?eventId=${eventId}`}>Finish payment setup</Link> : null}
           {eventNeedsPublicationFlow ? (
             <Button disabled={pending || !connectSatisfied || tiers.length < 1} onClick={() => void continueToRequirements()}>
-              {isContinuing ? 'Saving and continuing…' : 'Save and continue to event requirements'}
+              {isContinuing ? 'Saving and continuing…' : event.status === 'draft' ? 'Continue' : 'Save and continue to event requirements'}
             </Button>
           ) : null}
         </aside>
@@ -372,4 +374,7 @@ export function OrganizerTicketTiersPage() {
       {blocker.state === 'blocked' ? <UnsavedChangesDialog onLeave={() => { leaveApprovedRef.current = true; blocker.proceed() }} onStay={() => blocker.reset()} /> : null}
     </section>
   )
+  return event.status === 'draft'
+    ? <EventCreationLayout admissionType="paid" backTo={`/organizer/events/${eventId}/edit?step=ticket-type`} step={4} title="Create Event">{content}</EventCreationLayout>
+    : content
 }

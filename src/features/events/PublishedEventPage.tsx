@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, Navigate, useParams } from 'react-router-dom'
-import { AsyncState } from '../../components/ui/AsyncState'
+import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom'
+import { ReadState } from '../../components/ui/ReadState'
 import { Button } from '../../components/ui/Button'
 import { useSession } from '../auth/SessionProvider'
 import {
@@ -10,9 +10,12 @@ import {
   useWithdrawEventReview,
 } from '../moderation/moderation.queries'
 import { useOrganizer } from '../organizers/organizer.queries'
-import { useCancelOwnedEvent, useOwnedEvent } from './event.queries'
+import { useOwnedEvent } from './event.queries'
 import { EventSummary } from './EventSummary'
+import { CancellationPanel } from '../event-changes/CancellationPanel'
+import { ConfirmedEventCancellation } from '../event-changes/EventCancellationPage'
 import type { EventRow } from './event.types'
+import { EventCreationOutcome } from './EventCreationOutcome'
 
 const publishedAtFormatter = new Intl.DateTimeFormat('en-US', {
   timeZone: 'America/Los_Angeles',
@@ -60,6 +63,7 @@ function organizerStatus(event: EventRow) {
 
 export function PublishedEventPage() {
   const { eventId = '' } = useParams()
+  const [searchParams] = useSearchParams()
   const sessionState = useSession()
   const authenticatedOrganizerId = sessionState.status === 'authenticated' ? sessionState.user.id : ''
   const eventQuery = useOwnedEvent(eventId, authenticatedOrganizerId)
@@ -69,15 +73,7 @@ export function PublishedEventPage() {
   const reviewQuery = useCurrentEventReviewRequest(authenticatedOrganizerId, eventId)
   const requestReviewMutation = useRequestEventReview(authenticatedOrganizerId, eventId)
   const withdrawReviewMutation = useWithdrawEventReview(authenticatedOrganizerId, eventId)
-  const cancelMutation = useCancelOwnedEvent(authenticatedOrganizerId)
-  const [confirmCancellation, setConfirmCancellation] = useState(false)
-  const [cancellationPending, setCancellationPending] = useState(false)
-  const [cancellationError, setCancellationError] = useState<string | null>(null)
   const [cancelledEventId, setCancelledEventId] = useState<string | null>(null)
-  const cancellationActiveRef = useRef(false)
-  const cancelButtonRef = useRef<HTMLButtonElement | null>(null)
-  const cancelConfirmRef = useRef<HTMLButtonElement | null>(null)
-  const cancelStatusRef = useRef<HTMLParagraphElement | null>(null)
   const [reviewNote, setReviewNote] = useState('')
   const [reviewError, setReviewError] = useState<string | null>(null)
   const [reviewFeedback, setReviewFeedback] = useState<string | null>(null)
@@ -89,51 +85,59 @@ export function PublishedEventPage() {
     if (reviewFeedback !== null) reviewStatusRef.current?.focus()
   }, [reviewFeedback])
 
-  useEffect(() => {
-    if (confirmCancellation) cancelConfirmRef.current?.focus()
-  }, [confirmCancellation])
-
-  useEffect(() => {
-    if (cancelledEventId === eventId) cancelStatusRef.current?.focus()
-  }, [cancelledEventId, eventId])
+  if (cancelledEventId === eventId) return <ConfirmedEventCancellation eventId={eventId} ownerId={authenticatedOrganizerId} />
 
   if (
     sessionState.status !== 'authenticated' ||
     ((eventQuery.isPending || eventQuery.data === undefined) && !eventQuery.isError)
   ) {
-    return <AsyncState status="loading" title="Loading published event" />
+    return <ReadState headingAs="h1" paused={eventQuery.fetchStatus === 'paused'} status="loading" skeleton="detail-fields" title="Loading published event" />
   }
   if (eventQuery.isError) {
-    return <AsyncState action={<Button onClick={() => void eventQuery.refetch()}>Try again</Button>} description="Check your connection, then try again." status="error" title="Published event could not load" />
+    return <ReadState headingAs="h1" action={<Button onClick={() => void eventQuery.refetch()}>Try again</Button>} description="Check your connection, then try again." status="unavailable" title="Published event could not load" />
   }
   const event = eventQuery.data
   if (event === null) {
-    return <AsyncState action={<Link className="ui-button ui-button--secondary" to="/organizer/events">Back to events</Link>} description="The event may no longer be available." status="empty" title="Event not found" />
+    return <ReadState headingAs="h1" action={<Link className="ui-button ui-button--secondary" to="/organizer/events">Back to events</Link>} description="The event may no longer be available." status="unavailable" title="Event unavailable" />
   }
+  if (event.id !== eventId || event.organizer_id !== authenticatedOrganizerId) return <ReadState headingAs="h1" status="unavailable" title="Event unavailable" />
+  if (event.status === 'cancelled') return <ConfirmedEventCancellation eventId={eventId} ownerId={authenticatedOrganizerId} />
   if (event.status === 'draft') {
     return <Navigate replace to={`/organizer/events/${event.id}/edit`} />
   }
   if ((organizerQuery.isPending || organizerQuery.data === undefined) && !organizerQuery.isError) {
-    return <AsyncState status="loading" title="Loading organizer details" />
+    return <ReadState headingAs="h1" paused={organizerQuery.fetchStatus === 'paused'} status="loading" title="Loading organizer details" />
   }
   if (organizerQuery.isError) {
-    return <AsyncState action={<Button onClick={() => void organizerQuery.refetch()}>Try again</Button>} description="Check your connection, then try again." status="error" title="Organizer details could not load" />
+    return <ReadState headingAs="h1" action={<Button onClick={() => void organizerQuery.refetch()}>Try again</Button>} description="Check your connection, then try again." status="unavailable" title="Organizer details could not load" />
   }
   const organizer = organizerQuery.data
   if (organizer === null) {
-    return <AsyncState action={<Link className="ui-button ui-button--secondary" to="/organizer/events">Back to events</Link>} description="The organizer profile may no longer be available." status="empty" title="Organizer details unavailable" />
+    return <ReadState headingAs="h1" action={<Link className="ui-button ui-button--secondary" to="/organizer/events">Back to events</Link>} description="The organizer profile may no longer be available." status="unavailable" title="Organizer details unavailable" />
   }
 
   const cancellationSucceeded = cancelledEventId === eventId
   const isPublished = event.status === 'published' && !cancellationSucceeded
   const status = organizerStatus(cancellationSucceeded ? { ...event, status: 'cancelled' } : event)
-  const cancellationIsBusy = cancellationPending || cancelMutation.isPending
   const publicAvailabilityIsPending = publicEventQuery.isPending || publicEventQuery.isFetching || publicEventQuery.data === undefined
   const isPublic = isPublished && !publicEventQuery.isError && !publicAvailabilityIsPending && publicEventQuery.data !== null
   const canSetUpPaidTickets = isPublic && event.admission_type === 'free'
   const canRequestReview = isPublished && ['under_review', 'blocked', 'removed'].includes(event.moderation_status)
   const currentReview = reviewQuery.data
   const reviewIsBusy = requestReviewMutation.isPending || withdrawReviewMutation.isPending
+
+  if (searchParams.get('created') === '1') {
+    const outcomeState = publicEventQuery.isError
+      ? 'unknown'
+      : publicAvailabilityIsPending
+        ? 'loading'
+        : isPublic
+          ? 'live'
+          : status.heading === 'Under review'
+            ? 'review'
+            : 'unavailable'
+    return <EventCreationOutcome eventId={eventId} onCheck={() => void publicEventQuery.refetch()} state={outcomeState} />
+  }
 
   async function requestReview() {
     if (activeReviewActionRef.current !== null || requestReviewMutation.isPending || withdrawReviewMutation.isPending) return
@@ -149,23 +153,6 @@ export function PublishedEventPage() {
       requestButtonRef.current?.focus()
     } finally {
       activeReviewActionRef.current = null
-    }
-  }
-
-  async function cancelEvent() {
-    if (cancellationActiveRef.current || cancellationIsBusy || !isPublished) return
-    cancellationActiveRef.current = true
-    setCancellationPending(true)
-    setCancellationError(null)
-    try {
-      await cancelMutation.mutateAsync(eventId)
-      setCancelledEventId(eventId)
-      setConfirmCancellation(false)
-    } catch {
-      setCancellationError('Could not confirm cancellation. It is safe to try again.')
-    } finally {
-      cancellationActiveRef.current = false
-      setCancellationPending(false)
     }
   }
 
@@ -264,31 +251,13 @@ export function PublishedEventPage() {
           )}
         </section>
       ) : null}
-      {cancellationSucceeded ? (
-        <p ref={cancelStatusRef} role="status" tabIndex={-1}>Event cancelled. Payments have not been automatically refunded.</p>
-      ) : null}
-      {isPublished && confirmCancellation ? (
-        <section aria-labelledby="cancel-event-title" className="review-request">
-          <h2 id="cancel-event-title">Cancel this event?</h2>
-          <p>This removes the event from discovery and stops unused admissions. Used admissions keep their check-in history. Cancellation does not automatically refund payments.</p>
-          {cancellationError ? <p role="alert">{cancellationError}</p> : null}
-          <div className="published-event__actions">
-            <Button disabled={cancellationIsBusy} onClick={() => void cancelEvent()} ref={cancelConfirmRef}>
-              {cancellationIsBusy ? 'Cancelling…' : cancellationError ? 'Try cancellation again' : 'Confirm cancellation'}
-            </Button>
-            <Button disabled={cancellationIsBusy} onClick={() => {
-              setConfirmCancellation(false)
-              setCancellationError(null)
-              cancelButtonRef.current?.focus()
-            }} variant="secondary">Keep event</Button>
-          </div>
-        </section>
-      ) : null}
+      {isPublished ? <CancellationPanel key={eventId} eventId={eventId} ownerId={authenticatedOrganizerId} onConfirmed={() => setCancelledEventId(eventId)} /> : null}
       <footer className="published-event__actions">
         {canSetUpPaidTickets ? <Link className="ui-button ui-button--primary" to={`/organizer/events/${event.id}/tickets`}>Set up paid tickets</Link> : null}
         <Link className="ui-button ui-button--secondary" to={`/organizer/events/${event.id}/edit`}>Edit event</Link>
         {isPublished ? <Link className="ui-button ui-button--secondary" to={`/organizer/events/${event.id}/check-in`}>Check in guests</Link> : null}
-        {isPublished ? <Button disabled={cancellationIsBusy} onClick={() => setConfirmCancellation(true)} ref={cancelButtonRef} variant="secondary">Cancel event</Button> : null}
+        <Link className="ui-button ui-button--secondary" to={`/organizer/events/${eventId}/changes`}>Review changes and notices</Link>
+        <Link className="ui-button ui-button--secondary" to={`/organizer/events/${eventId}/cancellation`}>Cancellation status</Link>
         <Link className="ui-button ui-button--secondary" to="/organizer/events">Back to events</Link>
       </footer>
     </section>

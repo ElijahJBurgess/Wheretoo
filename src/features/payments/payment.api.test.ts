@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
+const { invoke, getSession } = vi.hoisted(() => ({ invoke: vi.fn(), getSession: vi.fn() }))
 
-vi.mock('../../lib/supabase/client', () => ({ supabase: { functions: { invoke } } }))
+vi.mock('../../lib/supabase/client', () => ({ supabase: { functions: { invoke }, auth: { getSession } } }))
 
 import { createConnectAccountSession, getConnectStatus, getExpressLoginUrl } from './payment.api'
 
@@ -15,7 +15,26 @@ const status = {
 }
 
 describe('payment API', () => {
-  beforeEach(() => vi.clearAllMocks())
+  beforeEach(() => vi.resetAllMocks())
+
+  it('binds the captured owner JWT explicitly and rejects a later identity before returning', async () => {
+    const token = crypto.randomUUID()
+    getSession.mockResolvedValue({ data: { session: { user: { id: 'a' }, access_token: token } }, error: null })
+    let active = true
+    invoke.mockImplementationOnce(async () => { active = false; return { data: { client_secret: crypto.randomUUID(), connect_status: status }, error: null } })
+    await expect(createConnectAccountSession('a', () => active)).rejects.toThrow('Payment setup could not be started')
+    expect(invoke).toHaveBeenCalledWith('stripe-connect-session', { body: {}, method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+  })
+  it('does not invoke the provider if owner changed while looking up the session', async () => {
+    getSession.mockResolvedValue({ data: { session: { user: { id: 'b' }, access_token: crypto.randomUUID() } }, error: null })
+    await expect(getExpressLoginUrl('a', () => true)).rejects.toThrow('Stripe Express could not be opened')
+    expect(invoke).not.toHaveBeenCalled()
+  })
+  it('rejects a matching owner session from a superseded lifetime before invoking', async () => {
+    getSession.mockResolvedValue({ data: { session: { user: { id: 'a' }, access_token: crypto.randomUUID() } }, error: null })
+    await expect(getConnectStatus('a', () => false)).rejects.toThrow('Payment setup could not be loaded')
+    expect(invoke).not.toHaveBeenCalled()
+  })
 
   it('loads the safe Connect status through the authenticated status function', async () => {
     invoke.mockResolvedValue({ data: status, error: null })

@@ -1,0 +1,16 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions;
+select no_plan();
+select is((private.discovery_window('today','2026-03-08T12:00:00Z')->>'start')::timestamptz,'2026-03-08T08:00:00Z'::timestamptz,'spring DST day begins PST');
+select is((private.discovery_window('today','2026-03-08T12:00:00Z')->>'end')::timestamptz,'2026-03-09T07:00:00Z'::timestamptz,'spring DST day is 23h');
+select is((private.discovery_window('today','2026-11-01T12:00:00Z')->>'start')::timestamptz,'2026-11-01T07:00:00Z'::timestamptz,'fall DST day begins PDT');
+select is((private.discovery_window('today','2026-11-01T12:00:00Z')->>'end')::timestamptz,'2026-11-02T08:00:00Z'::timestamptz,'fall DST day is 25h');
+select is((private.discovery_window('weekend','2026-09-11T12:00:00Z')->>'start')::timestamptz,'2026-09-11T07:00:00Z'::timestamptz,'Friday uses current weekend');
+select is((private.discovery_window('weekend','2026-09-13T12:00:00Z')->>'end')::timestamptz,'2026-09-14T07:00:00Z'::timestamptz,'Sunday weekend ends Monday midnight');
+select is((private.discovery_window('weekend','2026-09-14T12:00:00Z')->>'start')::timestamptz,'2026-09-18T07:00:00Z'::timestamptz,'Monday uses upcoming Friday');
+select is((private.discovery_window('upcoming','2026-02-20T12:00:00Z')->>'end')::timestamptz,'2026-03-22T07:00:00Z'::timestamptz,'30 local dates crosses DST without fixed 720h arithmetic');
+set local timezone='Asia/Tokyo';
+select is((private.discovery_window('today','2026-09-13T05:00:00Z')->>'start')::timestamptz,'2026-09-12T07:00:00Z'::timestamptz,'server session timezone cannot change LA date');
+select * from finish();
+rollback;

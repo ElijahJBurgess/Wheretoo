@@ -1,3 +1,4 @@
+import { BuyerIcon } from '../buyer-journey/BuyerPrimitives'
 import type { PublicTicketTierTuple } from './ticket.types'
 
 const usdFormatter = new Intl.NumberFormat('en-US', {
@@ -12,14 +13,15 @@ function formatTicketPrice(unitAmountMinor: number): string {
 }
 
 type TicketTierListProps = {
+  availabilityKnown?: boolean
   quantities: Readonly<Record<string, number>>
   maxTotal: number
   tiers: PublicTicketTierTuple
   onQuantityChange: (tierId: string, quantity: number) => void
 }
 
-export function TicketTierList({ quantities, maxTotal, tiers, onQuantityChange }: TicketTierListProps) {
-  const total = tiers.reduce((sum, tier) => sum + (quantities[tier.id] ?? 0), 0)
+export function TicketTierList({ quantities, maxTotal, tiers, onQuantityChange, availabilityKnown = true }: TicketTierListProps) {
+  const total = Object.values(quantities).reduce((sum, quantity) => sum + quantity, 0)
   const hasInvalidQuantity = tiers.some((tier) => {
     const quantity = quantities[tier.id] ?? 0
     return tier.availability_status === 'available' &&
@@ -36,12 +38,13 @@ export function TicketTierList({ quantities, maxTotal, tiers, onQuantityChange }
       <legend>Choose quantities</legend>
       <div className="public-ticket-tiers__options">
         {tiers.map((tier) => {
-          const available = tier.availability_status === 'available'
-          const quantity = available ? quantities[tier.id] ?? 0 : 0
+          const available = availabilityKnown && tier.availability_status === 'available'
+          const quantity = quantities[tier.id] ?? 0
           const selected = available && quantity > 0
 
           return (
             <div className={`public-ticket-tier${selected ? ' public-ticket-tier--selected' : ''}`} key={tier.id}>
+              <BuyerIcon name="ticket" className="buyer-ticket-icon" />
               <span className="public-ticket-tier__copy">
                 <span className="public-ticket-tier__header">
                   <strong>{tier.name}</strong>
@@ -50,7 +53,7 @@ export function TicketTierList({ quantities, maxTotal, tiers, onQuantityChange }
                 {tier.description === null ? null : <span>{tier.description}</span>}
               </span>
               <span className="public-ticket-tier__quantity">
-                <label htmlFor={`ticket-quantity-${tier.id}`}>{available ? 'Quantity' : 'Sold out'}</label>
+                <label htmlFor={`ticket-quantity-${tier.id}`}>{!availabilityKnown ? 'Unavailable' : available ? 'Quantity' : 'Sold out'}</label>
                 <input
                   aria-describedby="ticket-quantity-limit"
                   aria-invalid={hasInvalidQuantity || total > maxTotal ? true : undefined}

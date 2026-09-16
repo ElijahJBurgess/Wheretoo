@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react'
-import { RouterProvider, createMemoryRouter, matchRoutes } from 'react-router-dom'
+import { act, render, screen } from '@testing-library/react'
+import { Outlet, RouterProvider, createMemoryRouter, matchRoutes } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 import type { TicketExperienceRuntime } from '../../features/ticket-experience/runtime/runtime.types'
 
@@ -16,7 +16,7 @@ import {
   productionTicketExperienceRuntime,
 } from '../../features/ticket-experience/runtime/production'
 import { selectTicketExperienceEntry } from '../../../vite.config'
-import { createAppRouter } from './router'
+import { createAppRouter, createAppRoutes } from './router'
 
 function TicketRoute() {
   return null
@@ -75,6 +75,8 @@ describe('ticket experience router composition', () => {
     '/events/event-a',
     '/events/event-a/checkout',
     '/orders/confirmation-bearer',
+    '/tickets/recover',
+    '/ticket-access',
     '/organizer-terms',
     '/event-policy',
     '/auth/sign-up',
@@ -150,5 +152,132 @@ describe('ticket experience router composition', () => {
 
     expect(selectTicketExperienceEntry(html, 'serve')).toContain('/src/main.development.tsx')
     expect(selectTicketExperienceEntry(html, 'build')).toBe(html)
+  })
+})
+
+it('matches ticket recovery as a static route before the private bearer collection', () => {
+  const router = createAppRouter(runtime)
+  expect(matchRoutes(router.routes, '/tickets/recover')?.at(-1)?.route.path).toBe('/tickets/recover')
+  router.dispose()
+})
+
+
+it('attaches refund history once and preserves all payment, RSVP and delivery routes', () => {
+  const router = createAppRouter(runtime)
+  const paths = router.routes.map(route => route.path).filter(Boolean)
+  expect(new Set(paths).size).toBe(paths.length)
+  for (const path of ['/refund-details', '/tickets/recover', '/ticket-access', '/events/:eventId/rsvp', '/rsvp/:collectionBearer', '/events/:eventId/checkout', '/orders/:confirmationToken', '/tickets/:collectionBearer', '/tickets/:collectionBearer/:ticketSelector']) {
+    expect(paths.filter(value => value === path)).toHaveLength(1)
+  }
+  expect(matchRoutes(router.routes, '/refund-details')?.at(-1)?.route.lazy).toBeTypeOf('function')
+  router.dispose()
+})
+
+it('Spec10 and Spec11 have one unshadowed route each alongside original admission and financial routes', () => {
+ const router = createAppRouter(runtime)
+ const event = '11111111-1111-4111-8111-111111111111'
+ for (const path of [`/organizer/events/${event}/changes`, `/organizer/events/${event}/cancellation`, '/event-status', '/organizer/settings', ...['account','profile','payments','help','actions'].map(part=>'/organizer/settings/'+part), `/organizer/events/${event}/check-in/scan`, '/tickets/recover', '/ticket-access', '/refund-details', '/tickets/rsvp_free_original', '/tickets/paid_original']) {
+   expect(matchRoutes(router.routes,path)?.at(-1)).toBeDefined()
+ }
+ const paths: string[] = []
+ function visit(routes: typeof router.routes, parent = '') {
+  for (const route of routes) {
+   const path = route.path?.startsWith('/') ? route.path : route.path ? parent+'/'+route.path : parent
+   if (route.path) paths.push(path)
+   if (route.children) visit(route.children,path)
+  }
+ }
+ visit(router.routes)
+ expect(new Set(paths).size).toBe(paths.length)
+ router.dispose()
+})
+
+describe('sanitized route fallbacks', () => {
+  it('shows a sanitized loading state while a lazy route module is pending', async () => {
+    let resolveModule!: (module: { Component: () => React.ReactNode }) => void
+    const pendingModule = new Promise<{ Component: () => React.ReactNode }>(resolve => {
+      resolveModule = resolve
+    })
+    const boundaryRuntime: TicketExperienceRuntime = {
+      ...runtime,
+      developmentRoutes: [{ path: '/__test/slow-lazy-route', lazy: () => pendingModule }],
+    }
+    const router = createMemoryRouter(createAppRoutes(boundaryRuntime), {
+      initialEntries: ['/__test/slow-lazy-route'],
+    })
+
+    render(<RouterProvider router={router} />)
+
+    expect(await screen.findByRole('heading', { name: 'Loading page' })).toBeVisible()
+
+    await act(async () => {
+      resolveModule({ Component: () => <h1>Lazy route ready</h1> })
+      await pendingModule
+    })
+    expect(await screen.findByRole('heading', { name: 'Lazy route ready' })).toBeVisible()
+  })
+
+  it.each(['/events/checkout', '/events//checkout'])(
+    'routes the missing checkout identifier %s to checkout unavailable handling',
+    path => {
+    const router = createAppRouter(runtime)
+
+    expect(matchRoutes(router.routes, path)?.at(-1)?.route.path).toBe(path)
+    router.dispose()
+    },
+  )
+
+  it('offers a real public destination for an unmatched route without echoing the URL', async () => {
+    const privatePath = '/missing/bearer-secret-value'
+    const router = createMemoryRouter(createAppRoutes(runtime), { initialEntries: [privatePath] })
+
+    render(<RouterProvider router={router} />)
+
+    expect(await screen.findByRole('heading', { name: 'Page not found' })).toBeVisible()
+    expect(screen.getByRole('link', { name: 'Go to sign in' })).toHaveAttribute('href', '/auth/sign-in')
+    expect(document.body).not.toHaveTextContent(privatePath)
+    expect(document.body).not.toHaveTextContent('bearer-secret-value')
+  })
+
+  it('sanitizes a route render exception and keeps its parent route shell mounted', async () => {
+    function Shell() {
+      return <div data-testid="retained-shell"><Outlet /></div>
+    }
+    function BrokenRoute(): never {
+      throw new Error('render failed with bearer-secret-value')
+    }
+    const boundaryRuntime: TicketExperienceRuntime = {
+      ...runtime,
+      developmentRoutes: [{ path: '/__test/render-failure', Component: BrokenRoute }],
+    }
+    const routes = createAppRoutes(boundaryRuntime)
+    const testRoute = routes.find(route => route.path === '/__test/render-failure')!
+    const router = createMemoryRouter([
+      { Component: Shell, children: [testRoute] },
+    ], { initialEntries: ['/__test/render-failure'] })
+
+    render(<RouterProvider router={router} />)
+
+    expect(await screen.findByRole('heading', { name: 'Page unavailable' })).toBeVisible()
+    expect(screen.getByTestId('retained-shell')).toBeVisible()
+    expect(document.body).not.toHaveTextContent('bearer-secret-value')
+  })
+
+  it('sanitizes a rejected lazy route module', async () => {
+    const boundaryRuntime: TicketExperienceRuntime = {
+      ...runtime,
+      developmentRoutes: [{
+        path: '/__test/lazy-failure',
+        lazy: async () => { throw new Error('chunk URL contains token-secret-value') },
+      }],
+    }
+    const router = createMemoryRouter(createAppRoutes(boundaryRuntime), {
+      initialEntries: ['/__test/lazy-failure'],
+    })
+
+    render(<RouterProvider router={router} />)
+
+    expect(await screen.findByRole('heading', { name: 'Page unavailable' })).toBeVisible()
+    expect(document.body).not.toHaveTextContent('token-secret-value')
   })
 })

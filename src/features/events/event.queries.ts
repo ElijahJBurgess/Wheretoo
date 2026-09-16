@@ -1,3 +1,4 @@
+import { captureIdentityLifetime } from '../auth/identityLifetime'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { moderationKeys } from '../moderation/moderation.queries'
 import { ticketKeys } from '../tickets/ticket.queries'
@@ -21,9 +22,13 @@ export function useOwnedEvents(organizerId: string) {
 export function useCancelOwnedEvent(organizerId: string) {
   const queryClient = useQueryClient()
   return useMutation({
+    mutationKey: ['events', 'cancel', organizerId],
+    gcTime: 0,
+    onMutate: () => ({ isCurrent: captureIdentityLifetime(queryClient, organizerId) }),
     mutationFn: cancelOwnedEvent,
     retry: false,
-    onSuccess: async (event, eventId) => {
+    onSuccess: async (event, eventId, lifetime) => {
+      if (!lifetime?.isCurrent()) return
       if (event.id === eventId && event.organizer_id === organizerId) {
         queryClient.setQueryData(eventKeys.detail(organizerId, eventId), event)
       }
@@ -35,11 +40,22 @@ export function useCancelOwnedEvent(organizerId: string) {
   })
 }
 
-export function useOwnedEvent(eventId: string, organizerId: string) {
+type OwnedEventQueryOptions = {
+  revalidateOnMount?: boolean
+}
+
+export function useOwnedEvent(
+  eventId: string,
+  organizerId: string,
+  options?: OwnedEventQueryOptions,
+) {
   return useQuery({
     queryKey: eventKeys.detail(organizerId, eventId),
     queryFn: () => getOwnedEvent(eventId, organizerId),
     enabled: eventId.length > 0 && organizerId.length > 0,
+    ...(options?.revalidateOnMount
+      ? { staleTime: 0, refetchOnMount: 'always' as const }
+      : {}),
   })
 }
 
@@ -47,8 +63,12 @@ export function useSaveEventDraft() {
   const queryClient = useQueryClient()
 
   return useMutation({
+    mutationKey: ['events', 'save-draft'],
+    gcTime: 0,
+    onMutate: (input) => ({ isCurrent: captureIdentityLifetime(queryClient, input.organizerId) }),
     mutationFn: saveEventDraft,
-    onSuccess: async (event, input) => {
+    onSuccess: async (event, input, lifetime) => {
+      if (!lifetime?.isCurrent()) return
       if (event.organizer_id === input.organizerId) {
         queryClient.setQueryData(eventKeys.detail(input.organizerId, event.id), event)
       }
@@ -64,8 +84,12 @@ export function useSaveEventRevision() {
   const queryClient = useQueryClient()
 
   return useMutation({
+    mutationKey: ['events', 'save-revision'],
+    gcTime: 0,
+    onMutate: (input) => ({ isCurrent: captureIdentityLifetime(queryClient, input.organizerId) }),
     mutationFn: saveEventRevision,
-    onSuccess: async (event, input) => {
+    onSuccess: async (event, input, lifetime) => {
+      if (!lifetime?.isCurrent()) return
       if (event.id === input.eventId && event.organizer_id === input.organizerId) {
         queryClient.setQueryData(eventKeys.detail(input.organizerId, input.eventId), event)
       }

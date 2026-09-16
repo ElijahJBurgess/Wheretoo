@@ -28,7 +28,8 @@ export function createAdmissionChecker(invoke: InvokeAdmission = invokeAuthentic
     async checkAdmission({ eventId, credential, signal }) {
       signal?.throwIfAborted()
       const input = inputSchema.safeParse({ eventId, credential })
-      if (!input.success) return { outcome: 'network_error' }
+      if (!inputSchema.shape.eventId.safeParse(eventId).success) return { outcome: 'context_unavailable' }
+      if (!input.success) return { outcome: 'invalid' }
       try {
         const { data, error } = await invoke('ticket-admission', { body: input.data, signal })
         if (error) return { outcome: 'network_error' }

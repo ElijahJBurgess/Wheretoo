@@ -1,0 +1,21 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions;
+select no_plan();
+\ir helpers/spec09_refund_setup.inc
+reset role;
+create temporary table settings_event_before as select id,content_revision from public.events;
+create temporary table settings_orders_before as select id,to_jsonb(o) as snapshot from public.orders o;
+create temporary table settings_tickets_before as select id,to_jsonb(t) as snapshot from public.tickets t;
+select set_config('request.jwt.claim.sub','a6100000-0000-4000-8000-000000000001',true);
+set local role authenticated;
+select lives_ok($$select public.save_owned_organizer_settings('A new public name','New bio', (select updated_at from public.organizers))$$,'Public name change follows revision writer');
+reset role;
+select is((select e.content_revision - b.content_revision from public.events e join settings_event_before b using(id) where e.id='a6200000-0000-4000-8000-000000000001'),1::bigint,'Owner event revision advanced once');
+select ok(not private.event_is_publicly_eligible('a6200000-0000-4000-8000-000000000001',statement_timestamp()),'Name change does not bypass renewed publication review');
+select ok(exists(select 1 from private.event_moderation_evaluations where event_id='a6200000-0000-4000-8000-000000000001' and status='queued'),'Review work is queued by existing authority');
+select results_eq($$select id,to_jsonb(o) from public.orders o order by id$$,$$select id,snapshot from settings_orders_before order by id$$,'Orders, amounts and purchase snapshots unchanged');
+select results_eq($$select id,to_jsonb(t) from public.tickets t order by id$$,$$select id,snapshot from settings_tickets_before order by id$$,'Ticket IDs, credentials and admission history unchanged');
+select is((select e.content_revision - b.content_revision from public.events e join settings_event_before b using(id) where e.id='a6200000-0000-4000-8000-000000000002'),0::bigint,'Other organizer event unchanged');
+select * from finish();
+rollback;

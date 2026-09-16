@@ -398,6 +398,10 @@ function dependencies(
     finalizeReceipt: async () => undefined,
     getOrderSnapshot: async () => orderSnapshot(),
     getPaymentOrderSnapshot: async () => orderSnapshot(),
+    getUnattachedCheckoutSnapshot: async () => null,
+    reconcileUnattachedPaidCheckout: async () => {
+      throw new Error("unexpected unattached writer");
+    },
     retrieveSession: async () => checkoutSessionFixture(),
     retrievePaymentIntent: async () => paymentIntentFixture(),
     retrieveCharge: async () => chargeFixture(),

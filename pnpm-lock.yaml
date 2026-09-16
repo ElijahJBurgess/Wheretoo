@@ -203,6 +203,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@supabase/auth-js@2.112.3': 5b863ee2ba659b84575db1b5cec6a264c3a05ba164eb7a7e8aeb870c22900fc2
+
 importers:
 
   .:
@@ -2968,7 +2971,7 @@ snapshots:
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
 
-  '@supabase/auth-js@2.112.3':
+  '@supabase/auth-js@2.112.3(patch_hash=5b863ee2ba659b84575db1b5cec6a264c3a05ba164eb7a7e8aeb870c22900fc2)':
     dependencies:
       tslib: 2.8.1
 
@@ -3018,7 +3021,7 @@ snapshots:
 
   '@supabase/supabase-js@2.112.3':
     dependencies:
-      '@supabase/auth-js': 2.112.3
+      '@supabase/auth-js': 2.112.3(patch_hash=5b863ee2ba659b84575db1b5cec6a264c3a05ba164eb7a7e8aeb870c22900fc2)
       '@supabase/functions-js': 2.112.3
       '@supabase/postgrest-js': 2.112.3
       '@supabase/realtime-js': 2.112.3

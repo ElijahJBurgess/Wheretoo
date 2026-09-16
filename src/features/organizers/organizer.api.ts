@@ -3,6 +3,8 @@ import type { Database } from '../../lib/supabase/database.types'
 import type { OrganizerInput } from './organizer.schemas'
 
 export type Organizer = Database['public']['Tables']['organizers']['Row']
+export const organizerColumns = 'id,display_name,organizer_type,bio,website_url,base_city,country_code,onboarding_completed_at,created_at,updated_at'
+
 type OrganizerMutablePayload = Pick<
   Organizer,
   | 'display_name'
@@ -23,7 +25,7 @@ function optionalText(value: string | undefined): string | null {
 }
 
 export async function getOrganizer(userId: string): Promise<Organizer | null> {
-  const { data, error } = await supabase.from('organizers').select('*').eq('id', userId).maybeSingle()
+  const { data, error } = await supabase.from('organizers').select(organizerColumns).eq('id', userId).maybeSingle()
 
   if (error && error.code !== 'PGRST116') {
     throw error
@@ -51,13 +53,13 @@ export async function saveOrganizer(userId: string, input: OrganizerInput): Prom
             id: userId,
             ...mutablePayload,
           })
-          .select('*')
+          .select(organizerColumns)
           .single()
       : await supabase
           .from('organizers')
           .update(mutablePayload)
           .eq('id', userId)
-          .select('*')
+          .select(organizerColumns)
           .single()
 
   if (error) {

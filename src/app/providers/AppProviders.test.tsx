@@ -4,6 +4,9 @@ import type { PropsWithChildren } from 'react'
 import { RouterProvider, createMemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
+const sdkEvaluation = vi.hoisted(() => vi.fn())
+vi.mock('../../lib/supabase/client', () => { sdkEvaluation(); return { supabase: {} } })
+
 vi.mock('../../features/auth/SessionProvider', () => ({
   SessionProvider: ({ children, queryClient }: PropsWithChildren<{ queryClient?: unknown }>) => (
     <div data-has-query-client={String(Boolean(queryClient))} data-testid="session-provider">
@@ -29,6 +32,7 @@ describe('AppProviders', () => {
     )
 
     expect(screen.getByText('Query client ready')).toBeVisible()
+    expect(sdkEvaluation).not.toHaveBeenCalled()
     expect(screen.queryByTestId('session-provider')).not.toBeInTheDocument()
   })
 

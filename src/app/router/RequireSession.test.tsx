@@ -11,7 +11,8 @@ import { RequireSession } from './RequireSession'
 function SignInProbe() {
   const location = useLocation()
   const from = (location.state as { from?: { pathname?: string; search?: string } } | null)?.from
-  return <p>sign-in:{from?.pathname}{from?.search}</p>
+  const paymentEventId = (location.state as { paymentEventId?: string } | null)?.paymentEventId
+  return <><p>sign-in:{from?.pathname}{from?.search}</p><p data-testid="payment-context">{paymentEventId ?? 'none'}</p></>
 }
 
 function renderGuard() {
@@ -52,4 +53,17 @@ describe('RequireSession', () => {
 
     expect(screen.getByText('protected events')).toBeInTheDocument()
   })
+})
+
+const paymentId = '11111111-1111-4111-8111-111111111111'
+it.each([
+  [`/organizer/settings/payments?eventId=${paymentId}`, paymentId],
+  [`/organizer/settings/payments?eventId=${paymentId}&redirect=evil#evil`, paymentId],
+  [`/organizer/settings/payments?eventId=${paymentId}&eventId=${paymentId}`, 'none'],
+  ['/organizer/settings/payments?eventId=invalid', 'none'],
+  [`/organizer/events?eventId=${paymentId}`, 'none'],
+])('projects only a single validated same-event Payments ID from %s', (path, expected) => {
+  useSession.mockReturnValue({ status: 'anonymous', session: null, user: null })
+  render(<MemoryRouter initialEntries={[path]}><Routes><Route element={<RequireSession />}><Route path="*" element={<p>private</p>} /></Route><Route path="/auth/sign-in" element={<SignInProbe />} /></Routes></MemoryRouter>)
+  expect(screen.getByTestId('payment-context')).toHaveTextContent(expected)
 })

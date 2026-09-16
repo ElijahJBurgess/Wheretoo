@@ -1,0 +1,23 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions;
+select no_plan();
+\ir free_registration_fixture.inc
+select pg_temp.register(1);
+select is((select outcome from public.server_redeem_organizer_ticket('b6100000-0000-4000-8000-000000000001','b6200000-0000-4000-8000-000000000001',digest('1:1','sha256'))),'admitted','shared scanner admits free ticket');
+select is((select outcome from public.server_redeem_organizer_ticket('b6100000-0000-4000-8000-000000000001','b6200000-0000-4000-8000-000000000001',digest('1:1','sha256'))),'already_used','shared scanner rejects duplicate free ticket');
+select throws_ok($$select * from public.server_redeem_organizer_ticket('b6100000-0000-4000-8000-000000000002','b6200000-0000-4000-8000-000000000001',digest('1:1','sha256'))$$,'42501','Admission forbidden','wrong owner denied');
+select is((select outcome from public.server_redeem_organizer_ticket('b6100000-0000-4000-8000-000000000001','b6200000-0000-4000-8000-000000000002',digest('1:2','sha256'))),'wrong_event','wrong event safe result');
+select public.cancel_owned_event('b6200000-0000-4000-8000-000000000001');
+select is((select status from public.free_registrations where event_id='b6200000-0000-4000-8000-000000000001' limit 1),'cancelled','existing event cancellation invalidates free registration');
+select is((select count(*)::integer from public.tickets where event_id='b6200000-0000-4000-8000-000000000001' and status='used'),1,'cancellation preserves used history');
+select is((select count(*)::integer from public.tickets where event_id='b6200000-0000-4000-8000-000000000001' and status='cancelled'),1,'cancellation stops unused admission');
+select is(pg_temp.register(1)->>'kind','confirmed','replay keeps original confirmed receipt after cancellation');
+select is(pg_temp.register(2)->>'reason','unavailable','cancelled event rejects new registration');
+select is(public.get_public_free_rsvp('b6200000-0000-4000-8000-000000000001'),null::jsonb,'cancelled event absent from public RSVP');
+select is(jsonb_array_length(public.server_lookup_free_ticket_collection(encode(digest('proof:1','sha256'),'hex'))->'tickets'),2,'cancelled private collection preserves history');
+select is((select outcome from public.server_redeem_organizer_ticket('b6100000-0000-4000-8000-000000000001','b6200000-0000-4000-8000-000000000001',digest('1:2','sha256'))),'cancelled','unused cancelled QR returns cancelled');
+select is(private.free_reserved_admissions('b6200000-0000-4000-8000-000000000001'),1::bigint,'used capacity never released by cancellation');
+set constraints all immediate;
+select * from finish();
+rollback;

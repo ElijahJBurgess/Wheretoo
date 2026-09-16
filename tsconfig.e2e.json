@@ -2,7 +2,11 @@
   "compilerOptions": {
     "jsx": "react-jsx",
     "target": "ES2023",
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "module": "ESNext",
     "skipLibCheck": true,
     "moduleResolution": "bundler",
@@ -14,13 +18,22 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
   "include": [
     "playwright.config.ts",
     "playwright.organizer-operations.config.ts",
     "playwright.ticket-shells.config.ts",
     "playwright.ticket-shells.production.config.ts",
-    "tests/e2e"
+    "tests/e2e",
+    "playwright.spec07.config.ts",
+    "playwright.spec08.config.ts",
+    "playwright.spec09.config.ts",
+    "playwright.spec10.config.ts",
+    "playwright.spec11.config.ts",
+    "playwright.spec12.config.ts",
+    "playwright.spec13.config.ts"
   ]
 }

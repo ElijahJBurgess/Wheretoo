@@ -1,20 +1,27 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { signInWithPassword, signOutAuth, signUp } = vi.hoisted(() => ({
+const { signInWithPassword, signOutAuth, signUp, initialize } = vi.hoisted(() => ({
   signInWithPassword: vi.fn(),
   signOutAuth: vi.fn(),
   signUp: vi.fn(),
+  initialize: vi.fn(),
 }))
 
+vi.mock('../../lib/env', () => ({ publicEnv: { supabaseUrl: 'https://auth.example.invalid' } }))
+
 vi.mock('../../lib/supabase/client', () => ({
-  supabase: { auth: { signInWithPassword, signOut: signOutAuth, signUp } },
+  supabase: { auth: { signInWithPassword, signOut: signOutAuth, signUp, initialize } },
 }))
+
+vi.mock('./authTransitions', async importOriginal => ({ ...await importOriginal<typeof import('./authTransitions')>(), signOutExpectedSession: signOutAuth }))
 
 import { signInOrganizer, signOut, signUpOrganizer } from './auth.api'
 
 describe('organizer auth API', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    initialize.mockResolvedValue({ error: null })
+    Object.defineProperty(navigator, 'locks', { configurable: true, value: { request: (_name: string, _options: unknown, fn: (lock: object) => Promise<unknown>) => fn({}) } })
   })
 
   it('signs up with organizer metadata and the setup redirect', async () => {
@@ -72,12 +79,14 @@ describe('organizer auth API', () => {
     ).rejects.toBe(error)
   })
 
-  it('signs out and propagates errors', async () => {
-    signOutAuth.mockResolvedValueOnce({ error: null })
-    await expect(signOut()).resolves.toBeUndefined()
-
+  it('passes the captured session to conditional logout and propagates errors', async () => {
+    const expected = { user: { id: 'user-1' }, access_token: 'synthetic-a', refresh_token: 'synthetic-refresh-a' }
+    const result = { localSignedOut: true, remoteRevoked: true, sessionChanged: false }
+    signOutAuth.mockResolvedValueOnce(result)
+    await expect(signOut(expected)).resolves.toEqual(result)
+    expect(signOutAuth).toHaveBeenCalledWith(expect.any(Object), expected, expect.any(Function))
     const error = new Error('Could not sign out')
-    signOutAuth.mockResolvedValueOnce({ error })
-    await expect(signOut()).rejects.toBe(error)
+    signOutAuth.mockRejectedValueOnce(error)
+    await expect(signOut(expected)).rejects.toBe(error)
   })
 })

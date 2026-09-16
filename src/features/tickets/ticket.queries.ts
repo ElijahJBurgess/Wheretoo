@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { eventKeys } from '../events/event.queries'
+import { eventChangeKeys } from '../event-changes/eventChanges.queries'
 import { paymentKeys } from '../payments/payment.queries'
 import { activatePaidSales, listOwnedTicketTiers, saveTicketTiers } from './ticket.api'
 import type { TicketTiersInput } from './ticket.types'
@@ -31,6 +32,7 @@ export function useSaveTicketTiers(organizerId: string, eventId: string) {
         queryClient.invalidateQueries({ queryKey: eventKeys.ownedList(organizerId), exact: true }),
         queryClient.invalidateQueries({ queryKey: eventKeys.detail(organizerId, eventId), exact: true }),
         queryClient.invalidateQueries({ queryKey: ticketKeys.public(eventId), exact: true }),
+        queryClient.invalidateQueries({ queryKey: eventChangeKeys.context(organizerId, eventId), exact: true }),
       ])
     },
   })
@@ -51,6 +53,7 @@ export function useActivatePaidSales(organizerId: string) {
         queryClient.invalidateQueries({ queryKey: ticketKeys.owned(organizerId, requestedEventId), exact: true }),
         queryClient.invalidateQueries({ queryKey: ticketKeys.public(requestedEventId), exact: true }),
         queryClient.invalidateQueries({ queryKey: paymentKeys.connect(organizerId), exact: true }),
+        queryClient.invalidateQueries({ queryKey: eventChangeKeys.context(organizerId, requestedEventId), exact: true }),
       ])
     },
   })

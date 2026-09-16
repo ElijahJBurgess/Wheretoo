@@ -9,15 +9,17 @@ type EventScheduleLocationStepProps = {
   errors: FieldErrors<EventFormValues>
   location: NormalizedLocation | null
   onLocationChange: (location: NormalizedLocation | null) => void
+  creation?: boolean
   register: UseFormRegister<EventFormValues>
 }
 
-export function EventScheduleLocationStep({ errors, location, onLocationChange, register }: EventScheduleLocationStepProps) {
+export function EventScheduleLocationStep({ errors, location, onLocationChange, register, creation = false }: EventScheduleLocationStepProps) {
+  const Heading = creation ? 'h1' : 'h2'
   return (
     <div className="event-step">
       <header className="event-step__header">
         <p className="organizer-eyebrow">Stage 2</p>
-        <h2>Set the moment and place</h2>
+        <Heading>{creation ? 'Date & Location' : 'Set the moment and place'}</Heading>
         <p>Times are shown in Los Angeles time. Select a verified address for publishing.</p>
       </header>
       <div className="event-step__fields event-step__fields--schedule">

@@ -29,3 +29,10 @@ it('removes pending operational mutations even when they settle after sign-out',
   await work
   expect(client.getMutationCache().getAll()).toHaveLength(0)
 })
+it('evicts event change history, notice recipients and cancellation aggregates on identity changes', () => {
+  const client = new QueryClient()
+  const scopes = ['event-change-context', 'event-notice-status', 'event-cancellation-summary']
+  for (const scope of scopes) client.setQueryData([scope, 'owner-a', 'event-a'], { private: true })
+  evictPrivateIdentityQueries(client)
+  for (const scope of scopes) expect(client.getQueryData([scope, 'owner-a', 'event-a'])).toBeUndefined()
+})

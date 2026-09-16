@@ -12,7 +12,7 @@ const { refetch, useOwnedEvents, useSession } = vi.hoisted(() => ({
 
 vi.mock('../auth/SessionProvider', () => ({ useSession }))
 vi.mock('./event.queries', () => ({ useOwnedEvents }))
-vi.mock('../organizer-operations/operations.queries', () => ({ useEventMetrics: vi.fn() }))
+vi.mock('../organizer-operations/operations.queries', () => ({ useEventMetrics: () => ({ isPending: false, isError: true }) }))
 
 import { OrganizerEventsPage } from './OrganizerEventsPage'
 
@@ -52,6 +52,14 @@ describe('OrganizerEventsPage', () => {
     expect(screen.getByText('Loading your events')).toBeInTheDocument()
   })
 
+  it('explains a paused initial read even when the browser reports online', () => {
+    useOwnedEvents.mockReturnValue({ data: undefined, isPending: true, fetchStatus: 'paused', isError: false, refetch })
+    renderPage()
+    expect(screen.getByRole('heading', { name: 'Waiting for a connection' })).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveAttribute('aria-busy', 'false')
+    expect(refetch).not.toHaveBeenCalled()
+  })
+
   it('renders a retryable error', async () => {
     const user = userEvent.setup()
     useOwnedEvents.mockReturnValue({ data: undefined, isPending: false, isError: true, refetch })
@@ -66,7 +74,7 @@ describe('OrganizerEventsPage', () => {
     useOwnedEvents.mockReturnValue({ data: [], isPending: false, isError: false, refetch })
     renderPage()
     expect(screen.getByText('No events yet')).toBeInTheDocument()
-    await user.click(screen.getByRole('link', { name: 'Create event' }))
+    await user.click(screen.getByRole('link', { name: 'Create your first event' }))
     expect(await screen.findByText('new destination')).toBeInTheDocument()
   })
 
@@ -90,8 +98,15 @@ describe('OrganizerEventsPage', () => {
     expect(screen.getAllByText(/Updated/)).toHaveLength(2)
     expect(screen.queryByText(/tickets|analytics|views|revenue/i)).not.toBeInTheDocument()
 
+    expect(screen.getByRole('link', { name: /Night Market/ })).toHaveAttribute('href', '/organizer/events/event-1/edit?resume=1')
     await user.click(screen.getByRole('link', { name: /Night Market/ }))
     expect(await screen.findByText('edit destination')).toBeInTheDocument()
+  })
+
+  it('resumes a paid draft in the creation wizard instead of opening its dashboard', () => {
+    useOwnedEvents.mockReturnValue({ data: [{ ...baseEvent, admission_type: 'paid' }], isPending: false, isError: false, refetch })
+    renderPage()
+    expect(screen.getByRole('link', { name: /Night Market/ })).toHaveAttribute('href', '/organizer/events/event-1/edit?resume=1')
   })
 
   it('maps only safe lifecycle and moderation states without public eligibility claims', () => {
@@ -123,5 +138,22 @@ describe('OrganizerEventsPage', () => {
     renderPage()
     await user.click(screen.getByRole('link', { name: /Night Market/ }))
     expect(await screen.findByText('detail destination')).toBeInTheDocument()
+  })
+
+  it('distinguishes a filtered zero from a new organizer and clears only that filter', async () => {
+    useOwnedEvents.mockReturnValue({ data: [baseEvent], isPending: false, isError: false, refetch })
+    renderPage()
+    await userEvent.click(screen.getByRole('button', { name: 'Live' }))
+    expect(screen.getByRole('heading', { name: 'No matching events' })).toBeInTheDocument()
+    expect(screen.queryByText('No events yet')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Clear filter' }))
+    expect(screen.getByRole('link', { name: /Night Market/ })).toBeInTheDocument()
+  })
+
+  it('does not treat a missing successful payload as an empty organizer', () => {
+    useOwnedEvents.mockReturnValue({ data: undefined, isPending: false, isError: false, refetch })
+    renderPage()
+    expect(screen.getByRole('alert')).toHaveTextContent('Your events could not load')
+    expect(screen.queryByText('No events yet')).not.toBeInTheDocument()
   })
 })

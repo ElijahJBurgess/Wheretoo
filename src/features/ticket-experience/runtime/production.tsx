@@ -1,24 +1,18 @@
 /* eslint-disable react-refresh/only-export-components */
 import { AsyncState } from '../../../components/ui/AsyncState'
 import { lazy, Suspense } from 'react'
-import { createTicketCollectionReader } from '../adapters/ticketCollectionReader'
-import type { WalletProvider } from '../contracts/wallet'
-import { TicketCollectionPage } from '../customer/TicketCollectionPage'
 import type { TicketExperienceRuntime } from './runtime.types'
 
-const reader = createTicketCollectionReader()
+const CollectionRoute = lazy(() => import('./ProductionTicketCollectionRoute'))
 const DashboardRoute = lazy(() => import('../../organizer-operations/OrganizerDashboardPage').then(module => ({ default: module.OrganizerDashboardPage })))
 const ScannerRoute = lazy(() => import('./ProductionOrganizerScannerRoute'))
-const walletProvider: WalletProvider = {
-  getCapability: () => ({ kind: 'unavailable', label: 'Add to Wallet — Coming later' }),
-}
 
 export function NotEnabledRoute() {
-  return <AsyncState status="empty" title="Ticket experience not enabled" />
+  return <AsyncState status="unavailable" title="Ticket experience not enabled" />
 }
 
 function ProductionTicketCollectionRoute() {
-  return <TicketCollectionPage reader={reader} walletProvider={walletProvider} />
+  return <Suspense fallback={<AsyncState status="loading" title="Loading tickets" />}><CollectionRoute /></Suspense>
 }
 
 function ProductionOrganizerScannerRoute() {

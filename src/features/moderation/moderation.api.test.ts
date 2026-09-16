@@ -19,6 +19,10 @@ import {
 } from './moderation.api'
 
 const eventId = 'b4ee321a-bdf6-43b2-a7f4-d6478d942908'
+it('rejects a missing moderation queue payload rather than reporting no cases', async () => {
+  rpc.mockResolvedValueOnce({ data: null, error: null })
+  await expect(listModerationQueue(25)).rejects.toEqual(new ModerationApiError('UNAVAILABLE'))
+})
 const requirementsRow = {
   minimum_age: 'all_ages', alcohol_present: false, cannabis_present: false,
   explicit_adult_content: false, gambling_present: false, weapons_present: false,

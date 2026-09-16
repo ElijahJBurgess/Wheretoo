@@ -11,9 +11,11 @@ import { NotEnabledRoute, productionTicketExperienceRuntime as runtime } from '.
 
 describe('production ticket experience composition', () => {
   beforeEach(() => vi.clearAllMocks())
-  it('composes the real collection page with a stable reader and unavailable Wallet', () => {
+  it('loads the real collection only on entry, with a stable reader and unavailable Wallet', async () => {
     const Route = runtime.TicketCollectionRoute
     const view = render(<Route />)
+    expect(screen.getByText('Loading tickets')).toBeVisible()
+    await waitFor(() => expect(mocks.collection).toHaveBeenCalled())
     const first = mocks.collection.mock.calls[0]![0]
     view.rerender(<Route />)
     expect(mocks.collection.mock.calls[1]![0].reader).toBe(first.reader)
@@ -24,7 +26,7 @@ describe('production ticket experience composition', () => {
     const Route = runtime.OrganizerScannerRoute
     const view = render(<Route />)
     expect(screen.getByText('Loading scanner')).toBeVisible()
-    await waitFor(() => expect(mocks.scanner).toHaveBeenCalled())
+    await waitFor(() => expect(screen.queryByText('Loading scanner')).not.toBeInTheDocument())
     const first = mocks.scanner.mock.calls[0]![0]
     view.rerender(<Route />)
     expect(mocks.scanner.mock.calls[1]![0].admissionChecker).toBe(first.admissionChecker)

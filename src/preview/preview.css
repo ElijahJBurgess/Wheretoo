@@ -37,3 +37,15 @@
   .preview-hub { margin: 1.5rem auto; }
   .preview-hub li { flex-direction: column; gap: .5rem; }
 }
+
+.dev-world { border: 1px solid var(--color-border, #d7dfd9); border-radius: 12px; padding: clamp(18px, 3vw, 30px); }
+.dev-world > .ui-button { color: #fff; display: inline-flex; margin: 8px 0; }
+.dev-world details { margin-top: 16px; }
+.dev-world summary { cursor: pointer; font-weight: 600; }
+.dev-world ol { padding-left: 24px; }
+.dev-world ol li { display: list-item; border: 0; padding: 5px 0; }
+.dev-world p, .dev-world li { overflow-wrap: anywhere; }
+
+.preview-journey-nav { display: flex; justify-content: center; flex-wrap: wrap; gap: 6px; padding: 10px; background: #101014; border-bottom: 1px solid #302a39; }
+.preview-journey-nav a { padding: 6px 10px; border: 1px solid #4a3f55; border-radius: 99px; color: #cec1de; font-size: 11px; text-decoration: none; }
+.preview-journey-nav a[aria-current='page'] { background: #6b20c2; color: white; border-color: #bb85fc; }

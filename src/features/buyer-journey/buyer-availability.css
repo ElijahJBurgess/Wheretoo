@@ -1,0 +1,8 @@
+.buyer-availability .buyer-event-hero { min-height: 0; }
+.buyer-availability .buyer-event-hero__copy { padding-top: 2rem; }
+.buyer-availability .buyer-event__description { display: none; }
+.buyer-availability-review { border: 1px solid #6c587b; border-radius: 1rem; padding: 1rem; color: #e1d4ed; }
+.buyer-availability-review p { margin-top: 0; }
+.buyer-availability-review .ui-button { width: 100%; white-space: normal; }
+
+.buyer-availability .public-event__tickets > .ui-button:disabled { background: #35363e; border-color: #686872; color: #d5d4dc; opacity: 1; box-shadow: none; }

@@ -1,0 +1,32 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions;
+select no_plan();
+\ir helpers/spec10_event_history_setup.inc
+create function pg_temp.ctx() returns jsonb language sql as $$select public.get_owned_event_change_context('aa200000-0000-4000-8000-000000000001')$$;
+create temp table integration_before as select pg_temp.ctx() context;
+select public.save_owned_event_revision_if_current('aa200000-0000-4000-8000-000000000001',
+ ((pg_temp.ctx()->'current_saved'->'facts')-'disclosures')||'{"venue_name":"Integration new hall"}', pg_temp.ctx()->>'context_token');
+create temp table integration_edited as select pg_temp.ctx() context;
+select is(pg_temp.ctx()->'previous_saved',(select context->'current_saved' from integration_before),'event edit retains immutable previous saved facts');
+select is(pg_temp.ctx()->>'notice_required','true','material edit remains notice required before Settings');
+select lives_ok($$select public.save_owned_organizer_settings('Updated public organizer','Profile bio',(select updated_at from public.organizers where id=auth.uid()))$$,'Settings public name delegates to canonical revision-aware writer');
+select is(pg_temp.ctx()->>'notice_required','true','Settings cannot clear event notice requirement');
+select is(pg_temp.ctx()->>'currently_publicly_eligible','false','Settings rename retains renewed event review restriction');
+select is(pg_temp.ctx()->'current_saved'->'facts'->>'venue_name','Integration new hall','Settings preserves saved event edit');
+select is(pg_temp.ctx()->'current_publicly_eligible',(select context->'current_publicly_eligible' from integration_before),'Settings cannot rewrite authoritative previous public facts');
+select throws_ok($$select public.publish_event_if_current('aa200000-0000-4000-8000-000000000001',(select context->>'context_token' from integration_edited))$$,'P0001','EVENT_CONTEXT_CONFLICT','Settings rename makes pre-rename publication context stale');
+select throws_ok($$select public.accept_current_event_policies_if_current('aa200000-0000-4000-8000-000000000001',(select context->>'context_token' from integration_edited))$$,'P0001','EVENT_CONTEXT_CONFLICT','Settings rename cannot reuse old event acceptance');
+select throws_ok($$select public.save_owned_event_revision_if_current('aa200000-0000-4000-8000-000000000001',(select (context->'current_saved'->'facts')-'disclosures' from integration_edited),(select context->>'context_token' from integration_edited))$$,'P0001','EVENT_CONTEXT_CONFLICT','Settings rename cannot allow stale editor overwrite');
+select lives_ok($$select public.cancel_owned_event('aa200000-0000-4000-8000-000000000001')$$,'only canonical cancellation writer cancels the edited event');
+create temp table integration_cancelled as select pg_temp.ctx() context;
+select public.save_owned_organizer_settings('Updated public organizer','Bio after cancellation',(select updated_at from public.organizers where id=auth.uid()));
+select is(pg_temp.ctx()->'event'->>'status','cancelled','Settings save cannot reopen cancelled event');
+select is(pg_temp.ctx()->'current_publicly_eligible',(select context->'current_publicly_eligible' from integration_cancelled),'Settings does not rewrite cancelled public history');
+select set_config('request.jwt.claim.sub','aa100000-0000-4000-8000-000000000002',true);
+select throws_ok($$select pg_temp.ctx()$$,'P0001','EVENT_NOT_FOUND','Owner B cannot read Owner A event-change context');
+reset role;
+select is((select count(*) from public.orders where event_id='aa200000-0000-4000-8000-000000000001'),0::bigint,'free event Settings/cancellation creates no paid order');
+select is((select count(*) from public.refunds where order_id in (select id from public.orders where event_id='aa200000-0000-4000-8000-000000000001')),0::bigint,'profile and cancellation introduce no automatic refund');
+select * from finish();
+rollback;

@@ -1,0 +1,56 @@
+-- Combined payment/refund/delivery authorities; synthetic, rollback-only SQL.
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions;
+select no_plan();
+\ir helpers/spec09_refund_setup.inc
+reset role;
+create function pg_temp.oid() returns uuid language sql as $$select id from fulfillment_orders$$;
+create function pg_temp.refund_status() returns jsonb language sql as $$select public.get_organizer_refund_status('a6200000-0000-4000-8000-000000000001',pg_temp.oid())$$;
+create function pg_temp.claim_refund() returns jsonb language sql as $$select public.server_claim_owned_refund('a6100000-0000-4000-8000-000000000001','a6200000-0000-4000-8000-000000000001',pg_temp.oid())$$;
+create function pg_temp.checkout_identity() returns jsonb language sql as $$select jsonb_build_object('id',id,'request',client_request_id,'bearerHash',confirmation_token_hash,'session',stripe_checkout_session_id) from public.orders where id=pg_temp.oid()$$;
+create function pg_temp.collection() returns jsonb language sql as $$select to_jsonb(c) from public.server_lookup_paid_ticket_collection(repeat('1',64)) c$$;
+create temp table original_checkout as select pg_temp.checkout_identity() value;
+select is(pg_temp.refund_status()->>'state','ineligible','processing payment is not refundable');
+select is(pg_temp.refund_status()->>'action','none','processing payment exposes no refund action');
+select is(pg_temp.claim_refund()->>'dispatch','false','server refuses premature refund dispatch');
+create function pg_temp.unpaid_probe(s text) returns jsonb language plpgsql as $$
+declare result jsonb;
+begin
+ update public.orders set status=s where id=pg_temp.oid();
+ result:=jsonb_build_object('summary',pg_temp.refund_status(),'claim',pg_temp.claim_refund());
+ raise exception using errcode='PT089';
+exception when sqlstate 'PT089' then return result;
+end;$$;
+select is(pg_temp.unpaid_probe(s)->'summary'->>'state','ineligible',s||' payment cannot appear as refundable paid order') from unnest(array['payment_failed','cancelled','expired']) s;
+select is(pg_temp.unpaid_probe(s)->'claim'->>'dispatch','false',s||' payment cannot create provider operation') from unnest(array['payment_failed','cancelled','expired']) s;
+select is((select count(*) from private.order_refund_operations where order_id=pg_temp.oid()),0::bigint,'unpaid probes create no durable refund');
+select pg_temp.record_and_fulfill('combinedpaid','combinedpaid',id,session_id) from fulfillment_orders;
+select is(pg_temp.refund_status()->>'state','eligible','authoritative successful purchase becomes refundable');
+select is(pg_temp.collection()->>'order_status','paid','original private collection opens after fulfillment');
+select is(pg_temp.claim_refund()->>'dispatch','true','successful purchase permits first refund submission');
+create temp table original_operation as select id,idempotency_key,snapshot from private.order_refund_operations where order_id=pg_temp.oid();
+create temp table original_tickets as select * from public.tickets where order_id=pg_temp.oid();
+select public.server_note_refund_observation('a6100000-0000-4000-8000-000000000001','a6200000-0000-4000-8000-000000000001',pg_temp.oid(),'unknown',null);
+select is(pg_temp.refund_status()->>'state','unknown','lost refund response remains unknown');
+select is(pg_temp.claim_refund()->>'dispatch','false','reload resolves same operation with no new dispatch');
+select is((select confirmation_status from public.server_lookup_checkout_integrity_confirmation(repeat('1',64))),'paid','refund uncertainty does not become payment uncertainty');
+select is(pg_temp.collection()->>'order_status','paid','refund uncertainty preserves original private collection');
+select is(pg_temp.checkout_identity(),(select value from original_checkout),'refund uncertainty retains request ID bearer and hosted session');
+select public.server_note_refund_observation('a6100000-0000-4000-8000-000000000001','a6200000-0000-4000-8000-000000000001',pg_temp.oid(),'processing','re_combined');
+select is((select status from public.orders where id=pg_temp.oid()),'paid','provider acknowledgement cannot mark refund complete');
+select * from public.server_record_webhook_receipt('evt_combinedrefund','refund.updated',false,'re_combined','2026-07-29.dahlia',now(),repeat('b',64));
+select public.server_apply_verified_refund('evt_combinedrefund',id,'re_combined',stripe_payment_intent_id,stripe_charge_id,'trr_combined','fr_combined',total_minor,'usd','succeeded','requested_by_customer',true,true,total_minor,application_fee_amount_minor,true,null) from public.orders where id=pg_temp.oid();
+select is(pg_temp.refund_status()->>'state','completed','authoritative reconciliation completes original refund');
+select is(pg_temp.checkout_identity(),(select value from original_checkout),'completed refund retains original checkout identity');
+select is(pg_temp.collection()->>'order_status','refunded','original private collection still resolves after refund');
+select is((select confirmation_status from public.server_lookup_checkout_integrity_confirmation(repeat('1',64))),'refunded','buyer confirmation and collection agree on refund');
+select is((select count(*) from jsonb_array_elements(pg_temp.collection()->'tickets') t),3::bigint,'private collection preserves three original admissions');
+select results_eq($$select id,credential_hash from public.tickets where order_id=pg_temp.oid() order by id$$,$$select id,credential_hash from original_tickets order by id$$,'financial history never rotates admission credentials');
+select results_eq($$select id,idempotency_key,snapshot from private.order_refund_operations where order_id=pg_temp.oid()$$,$$select * from original_operation$$,'reload and completion preserve one immutable provider operation identity');
+select is((select count(*) from public.orders where client_request_id='a6400000-0000-4000-8000-000000000001'),1::bigint,'one order remains for original checkout request');
+select is((select count(*) from public.refunds where order_id=pg_temp.oid()),1::bigint,'one financial refund remains');
+select is((select count(*) from private.order_refund_operations where order_id=pg_temp.oid()),1::bigint,'one logical refund operation remains');
+select is((select count(*) from public.tickets where order_id=pg_temp.oid()),3::bigint,'no duplicate admissions after complete lifecycle');
+select * from finish();
+rollback;

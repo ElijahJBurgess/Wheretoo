@@ -1,0 +1,129 @@
+.buyer-rsvp h1 {
+  font-size: clamp(1.8rem,5vw,2.8rem);
+  line-height: 1.12;
+  margin: 1.5rem 0;
+}
+.buyer-rsvp .buyer-content {
+  max-width: 760px;
+  margin: auto;
+  padding-bottom: 3rem;
+}
+.buyer-rsvp section {
+  margin-bottom: 1.5rem;
+}
+.buyer-rsvp .ui-button {
+  margin-top: 1rem;
+  width: 100%;
+  white-space: normal;
+  min-height: 48px;
+}
+.rsvp-quantity {
+  display: flex;
+  gap: .7rem;
+  align-items: center;
+  padding: 1rem;
+  border: 1px solid #8d47eb;
+  border-radius: 12px;
+  background: #1c152a;
+}
+.rsvp-quantity > div {
+  flex: 1;
+  min-width: 0;
+}
+.rsvp-quantity small {
+  display: block;
+  color: #c7bed6;
+  margin-top: .3rem;
+}
+.rsvp-quantity button {
+  border: 1px solid #81718e;
+  border-radius: 50%;
+  min-width: 36px;
+  height: 36px;
+  background: #772be5;
+  color: white;
+  font-size: 1.3rem;
+}
+.rsvp-quantity button:disabled {
+  opacity: .5;
+}
+.rsvp-quantity output {
+  min-width: 1.1rem;
+  text-align: center;
+}
+.rsvp-notice {
+  padding: 1rem;
+  border: 1px solid #694786;
+  border-radius: 10px;
+  background: #20172b;
+  line-height: 1.55;
+}
+.buyer-rsvp label {
+  display: grid;
+  gap: .5rem;
+  margin: 1rem 0;
+}
+.buyer-rsvp input {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 48px;
+  border: 1px solid #71647f;
+  border-radius: 8px;
+  background: #18161d;
+  color: #fff;
+  padding: .8rem;
+  font: inherit;
+}
+.rsvp-summary {
+  margin-top: 1.75rem;
+  padding-top: 1rem;
+  border-top: 1px solid #4b4058;
+}
+.rsvp-text-button {
+  color: #d2b5ff;
+  background: none;
+  border: 0;
+  padding: .5rem 0;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.buyer-rsvp :focus-visible {
+  outline: 3px solid #d3b6ff;
+  outline-offset: 4px;
+}
+.buyer-rsvp p {
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.buyer-rsvp .buyer-event-summary {
+  margin-top: 1.4rem;
+}
+.buyer-rsvp .buyer-event-summary h2 {
+  overflow-wrap: anywhere;
+}
+@media (max-width:359px) {
+  .rsvp-quantity {
+    gap: .45rem;
+    padding: .75rem;
+  }
+  .rsvp-quantity > .buyer-icon {
+    display: none;
+  }
+  .rsvp-quantity strong {
+    font-size: .95rem;
+  }
+}
+@media (prefers-reduced-motion:reduce) {
+  .buyer-rsvp * {
+    scroll-behavior: auto!important;
+    animation: none!important;
+    transition: none!important;
+  }
+}
+
+/* Free registration collects full name and email in the reference's vertical form. */
+.buyer-rsvp .buyer-details__fields {
+  grid-template-columns: 1fr;
+  gap: 0;
+}

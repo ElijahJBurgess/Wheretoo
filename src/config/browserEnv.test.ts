@@ -36,3 +36,10 @@ describe('selectBrowserEnv', () => {
     ).toThrow('Invalid VITE_STRIPE_PUBLISHABLE_KEY')
   })
 })
+
+it('selects only a syntactically valid optional public support address', () => {
+  expect(selectBrowserEnv({ VITE_TICKET_SUPPORT_EMAIL: ' Tickets@Example.com ' })).toEqual({ VITE_TICKET_SUPPORT_EMAIL: 'tickets@example.com' })
+  expect(selectBrowserEnv({ VITE_TICKET_SUPPORT_EMAIL: 'javascript:alert(1)' })).toEqual({})
+  expect(selectBrowserEnv({ VITE_TICKET_SUPPORT_EMAIL: '' })).toEqual({})
+  expect(selectBrowserEnv({ VITE_TICKET_SUPPORT_EMAIL: 'a@example.com\nBcc: attacker@example.com' })).toEqual({})
+})

@@ -1,7 +1,7 @@
 import { type PropsWithChildren, useEffect, useId, useRef } from 'react'
 export function OperationsDialog(
-  { title, busy, onClose, children }: PropsWithChildren<
-    { title: string; busy: boolean; onClose(): void }
+  { title, busy, onClose, children, className = '' }: PropsWithChildren<
+    { title: string; busy: boolean; className?: string; onClose(): void }
   >,
 ) {
   const ref = useRef<HTMLDialogElement>(null)
@@ -18,7 +18,7 @@ export function OperationsDialog(
   }, [])
   return (
     <dialog
-      className='ops-dialog'
+      className={`ops-dialog ${className}`}
       ref={ref}
       aria-labelledby={titleId}
       onCancel={(event) => {

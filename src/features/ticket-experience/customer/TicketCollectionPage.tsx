@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Button } from '../../../components/ui/Button'
-import { AsyncState } from '../../../components/ui/AsyncState'
+import { ReadState } from '../../../components/ui/ReadState'
 import type { TicketCollectionReader, TicketCollectionResult } from '../contracts/ticketCollection'
 import type { WalletProvider } from '../contracts/wallet'
+import { BuyerIcon } from '../../buyer-journey/BuyerPrimitives'
 import { FocusedTicketView } from './FocusedTicketView'
 import { TicketCollectionOverview } from './TicketCollectionOverview'
 import { useTicketDocumentPrivacy } from './useTicketDocumentPrivacy'
@@ -12,6 +13,7 @@ export type TicketCollectionPageProps = {
   reader: TicketCollectionReader
   walletProvider: WalletProvider
   now?: () => Date
+  accessContext?: { collectionKey: string; ticketSelector?: string; ticketPath(selector: string | null): string }
 }
 
 type RequestKey = {
@@ -32,13 +34,16 @@ function ticketPath(collectionBearer: string, selector: string | null): string {
 }
 
 function TicketPageState({ children }: { children: React.ReactNode }) {
-  return <main className="ticket-page ticket-page--state">{children}</main>
+  return <main className="buyer-page buyer-state">{children}</main>
 }
 
-export function TicketCollectionPage({ reader, walletProvider, now = () => new Date() }: TicketCollectionPageProps) {
+export function TicketCollectionPage({ reader, walletProvider, now = () => new Date(), accessContext }: TicketCollectionPageProps) {
   useTicketDocumentPrivacy()
   const navigate = useNavigate()
-  const { collectionBearer = '', ticketSelector: routeSelector } = useParams()
+  const { collectionBearer: routeBearer = '', ticketSelector: legacySelector } = useParams()
+  const collectionBearer = accessContext?.collectionKey ?? routeBearer
+  const routeSelector = accessContext ? accessContext.ticketSelector : legacySelector
+  const pathForTicket = useCallback((selector: string | null) => accessContext ? accessContext.ticketPath(selector) : ticketPath(collectionBearer, selector), [accessContext, collectionBearer])
   const [requestVersion, setRequestVersion] = useState(0)
   const requestKey = useMemo(
     () => ({ collectionBearer, reader, requestVersion }),
@@ -99,7 +104,7 @@ export function TicketCollectionPage({ reader, walletProvider, now = () => new D
     if (visibleSelector !== null || pendingSelection === null) return
     const routeSelection = routeSelector ?? defaultFocusedSelector
     if (pendingSelection.updateUrl && routeSelection !== pendingSelection.selector) {
-      navigate(ticketPath(collectionBearer, pendingSelection.selector))
+      navigate(pathForTicket(pendingSelection.selector))
       return
     }
     // The prior commit contains no QR; this second commit can now mount only the selected one.
@@ -107,7 +112,7 @@ export function TicketCollectionPage({ reader, walletProvider, now = () => new D
     setVisibleSelector(pendingSelection.selector)
     setFocusSelector(pendingSelection.restoreFocus ? pendingSelection.selector : null)
     setPendingSelection(null)
-  }, [collectionBearer, defaultFocusedSelector, navigate, pendingSelection, routeSelector, visibleSelector])
+  }, [pathForTicket, defaultFocusedSelector, navigate, pendingSelection, routeSelector, visibleSelector])
 
   const selectedIndex = useMemo(
     () => readyCollection?.tickets.findIndex((ticket) => ticket.selector === visibleSelector) ?? -1,
@@ -117,7 +122,7 @@ export function TicketCollectionPage({ reader, walletProvider, now = () => new D
   if (readerState.kind === 'loading') {
     return (
       <TicketPageState>
-        <AsyncState status="loading" title="Loading tickets" description="Getting your private ticket collection." />
+        <ReadState headingAs="h1" skeleton="detail-fields" status="loading" title="Loading tickets" description="Getting your private ticket collection." />
       </TicketPageState>
     )
   }
@@ -125,10 +130,10 @@ export function TicketCollectionPage({ reader, walletProvider, now = () => new D
   if (readerState.kind === 'error') {
     return (
       <TicketPageState>
-        <AsyncState
+        <ReadState headingAs="h1"
           action={<Button onClick={() => setRequestVersion((version) => version + 1)}>Try again</Button>}
           description="Check your connection, then try the private link again."
-          status="error"
+          status="unavailable"
           title="Tickets unavailable"
         />
       </TicketPageState>
@@ -138,7 +143,7 @@ export function TicketCollectionPage({ reader, walletProvider, now = () => new D
   if (readerState.result.kind === 'empty') {
     return (
       <TicketPageState>
-        <AsyncState
+        <ReadState headingAs="h1"
           action={<Link className="ui-button ui-button--secondary" to={`/events/${encodeURIComponent(readerState.result.eventId)}`}>View event</Link>}
           description="This collection does not currently contain a ticket."
           status="empty"
@@ -151,9 +156,10 @@ export function TicketCollectionPage({ reader, walletProvider, now = () => new D
   if (readerState.result.kind !== 'ready' || readerState.result.collection.tickets.length === 0) {
     return (
       <TicketPageState>
-        <AsyncState
-          description="Return to the original event link or ticket email and try again."
-          status="error"
+        <ReadState headingAs="h1"
+          action={<Link className="ui-button ui-button--secondary" to="/tickets/recover">Find your tickets</Link>}
+          description="Return to your ticket email, or request a new link using your email address."
+          status="unavailable"
           title={readerState.result.kind === 'not_enabled' ? 'Ticket experience not enabled' : 'Tickets unavailable'}
         />
       </TicketPageState>
@@ -161,16 +167,16 @@ export function TicketCollectionPage({ reader, walletProvider, now = () => new D
   }
 
   const collection = readerState.result.collection
-  const basePath = ticketPath(collectionBearer, null)
 
-  if (pendingSelection !== null) return <main className="ticket-page" />
+  if (pendingSelection !== null) return <main className="buyer-page" />
 
   if (visibleSelector === null || (selectedIndex < 0 && collection.tickets.length > 1)) {
     return (
-      <main className="ticket-page">
+      <main className="buyer-page">
         <TicketCollectionOverview
           collectionLabel={collection.collectionLabel}
-          ticketHref={(selector) => ticketPath(collectionBearer, selector)}
+          freeEventClock={collection.registrationId ? now : undefined}
+          ticketHref={pathForTicket}
           tickets={collection.tickets}
         />
       </main>
@@ -182,11 +188,9 @@ export function TicketCollectionPage({ reader, walletProvider, now = () => new D
   if (!selectedTicket) return null
 
   return (
-    <main className="ticket-page">
-      {collection.tickets.length > 1
-        ? <Link className="ticket-page__back" to={basePath}>← Back to all tickets</Link>
-        : null}
+    <main className="buyer-page">
       <FocusedTicketView
+        backAction={collection.tickets.length > 1 ? <Link className="buyer-icon-button" aria-label="Back to all tickets" to={pathForTicket(null)}><BuyerIcon name="close" /></Link> : undefined}
         focusHeadingOnMount={focusSelector === selectedTicket.selector}
         key={selectedTicket.selector}
         nextSelector={collection.tickets[focusedIndex + 1]?.selector ?? null}

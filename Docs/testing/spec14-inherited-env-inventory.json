@@ -1,0 +1,2200 @@
+{
+  "VITE_SCREEN_PREVIEW_ENABLED": [
+    {
+      "file": "src/main.tsx",
+      "line": 15
+    },
+    {
+      "file": "src/vite-env.d.ts",
+      "line": 4
+    },
+    {
+      "file": "src/main.development.tsx",
+      "line": 15
+    }
+  ],
+  "VITE_MAPBOX_ACCESS_TOKEN": [
+    {
+      "file": "src/vite-env.d.ts",
+      "line": 5
+    },
+    {
+      "file": "src/config/browserEnv.ts",
+      "line": 5
+    },
+    {
+      "file": "src/lib/env.ts",
+      "line": 24
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 62
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 62
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 62
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 63
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 1328
+    }
+  ],
+  "VITE_STRIPE_PUBLISHABLE_KEY": [
+    {
+      "file": "src/vite-env.d.ts",
+      "line": 6
+    },
+    {
+      "file": "src/config/browserEnv.ts",
+      "line": 6
+    },
+    {
+      "file": "src/config/browserEnv.ts",
+      "line": 19
+    },
+    {
+      "file": "src/config/browserEnv.ts",
+      "line": 23
+    },
+    {
+      "file": "src/config/browserEnv.ts",
+      "line": 43
+    },
+    {
+      "file": "src/lib/env.ts",
+      "line": 25
+    },
+    {
+      "file": "scripts/dev-world/run.ts",
+      "line": 33
+    },
+    {
+      "file": "scripts/dev-world/run.ts",
+      "line": 35
+    },
+    {
+      "file": "tests/integration/testEnv.ts",
+      "line": 68
+    },
+    {
+      "file": "tests/integration/testEnv.ts",
+      "line": 111
+    },
+    {
+      "file": "tests/integration/testEnv.ts",
+      "line": 112
+    },
+    {
+      "file": "tests/integration/testEnv.ts",
+      "line": 159
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 627
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 627
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 627
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 658
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 1327
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 1340
+    }
+  ],
+  "VITE_SUPABASE_PUBLISHABLE_KEY": [
+    {
+      "file": "src/vite-env.d.ts",
+      "line": 7
+    },
+    {
+      "file": "src/config/browserEnv.ts",
+      "line": 4
+    },
+    {
+      "file": "src/lib/env.ts",
+      "line": 23
+    },
+    {
+      "file": "scripts/dev-world/run.ts",
+      "line": 67
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 626
+    }
+  ],
+  "VITE_SUPABASE_URL": [
+    {
+      "file": "src/vite-env.d.ts",
+      "line": 8
+    },
+    {
+      "file": "src/config/browserEnv.ts",
+      "line": 3
+    },
+    {
+      "file": "src/lib/env.ts",
+      "line": 22
+    },
+    {
+      "file": "scripts/dev-world/run.ts",
+      "line": 33
+    },
+    {
+      "file": "scripts/dev-world/run.ts",
+      "line": 35
+    },
+    {
+      "file": "scripts/dev-world/run.ts",
+      "line": 66
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 625
+    }
+  ],
+  "VITE_TICKET_SUPPORT_EMAIL": [
+    {
+      "file": "src/config/browserEnv.ts",
+      "line": 7
+    },
+    {
+      "file": "src/config/browserEnv.ts",
+      "line": 38
+    },
+    {
+      "file": "src/features/organizer-settings/settings.config.ts",
+      "line": 12
+    },
+    {
+      "file": "src/features/ticket-delivery/DeliverySupport.tsx",
+      "line": 2
+    }
+  ],
+  "VITE_ORGANIZER_SUPPORT_EMAIL": [
+    {
+      "file": "src/config/browserEnv.ts",
+      "line": 8
+    },
+    {
+      "file": "src/config/browserEnv.ts",
+      "line": 38
+    },
+    {
+      "file": "src/features/organizer-settings/settings.config.ts",
+      "line": 12
+    }
+  ],
+  "VITE_ACCOUNT_CLOSURE_EMAIL": [
+    {
+      "file": "src/config/browserEnv.ts",
+      "line": 9
+    },
+    {
+      "file": "src/config/browserEnv.ts",
+      "line": 38
+    },
+    {
+      "file": "src/features/organizer-settings/settings.config.ts",
+      "line": 13
+    }
+  ],
+  "VITE_TERMS_URL": [
+    {
+      "file": "src/config/browserEnv.ts",
+      "line": 10
+    },
+    {
+      "file": "src/features/organizer-settings/settings.config.ts",
+      "line": 13
+    }
+  ],
+  "VITE_PRIVACY_URL": [
+    {
+      "file": "src/config/browserEnv.ts",
+      "line": 11
+    },
+    {
+      "file": "src/features/organizer-settings/settings.config.ts",
+      "line": 13
+    }
+  ],
+  "EVENT_INCOMPLETE": [
+    {
+      "file": "src/features/tickets/paidSalesErrors.ts",
+      "line": 4
+    },
+    {
+      "file": "src/features/tickets/paidSalesErrors.ts",
+      "line": 21
+    },
+    {
+      "file": "src/features/events/publishErrors.ts",
+      "line": 14
+    },
+    {
+      "file": "src/features/events/event.types.ts",
+      "line": 19
+    }
+  ],
+  "EVENT_LOCATION_INVALID": [
+    {
+      "file": "src/features/tickets/paidSalesErrors.ts",
+      "line": 5
+    },
+    {
+      "file": "src/features/tickets/paidSalesErrors.ts",
+      "line": 22
+    },
+    {
+      "file": "src/features/events/publishErrors.ts",
+      "line": 16
+    },
+    {
+      "file": "src/features/events/event.types.ts",
+      "line": 21
+    }
+  ],
+  "EVENT_MODERATION_BLOCKED": [
+    {
+      "file": "src/features/tickets/paidSalesErrors.ts",
+      "line": 6
+    },
+    {
+      "file": "src/features/tickets/paidSalesErrors.ts",
+      "line": 23
+    },
+    {
+      "file": "src/features/events/publishErrors.ts",
+      "line": 20
+    },
+    {
+      "file": "src/features/events/event.types.ts",
+      "line": 24
+    }
+  ],
+  "EVENT_NOT_FOUND": [
+    {
+      "file": "src/features/tickets/paidSalesErrors.ts",
+      "line": 7
+    },
+    {
+      "file": "src/features/tickets/paidSalesErrors.ts",
+      "line": 24
+    },
+    {
+      "file": "src/features/tickets/OrganizerTicketTiersPage.tsx",
+      "line": 311
+    },
+    {
+      "file": "src/features/event-changes/eventChanges.api.ts",
+      "line": 12
+    },
+    {
+      "file": "src/features/checkout/checkout.api.ts",
+      "line": 10
+    },
+    {
+      "file": "src/features/checkout/checkout.api.ts",
+      "line": 24
+    },
+    {
+      "file": "src/features/checkout/checkout.recovery.ts",
+      "line": 16
+    },
+    {
+      "file": "src/features/events/publishErrors.ts",
+      "line": 12
+    },
+    {
+      "file": "src/features/events/event.types.ts",
+      "line": 17
+    },
+    {
+      "file": "src/features/moderation/moderation.api.ts",
+      "line": 82
+    },
+    {
+      "file": "supabase/functions/stripe-create-checkout/index.ts",
+      "line": 526
+    },
+    {
+      "file": "supabase/functions/report-event/index.ts",
+      "line": 129
+    }
+  ],
+  "EVENT_NOT_SELLABLE": [
+    {
+      "file": "src/features/tickets/paidSalesErrors.ts",
+      "line": 8
+    },
+    {
+      "file": "src/features/tickets/paidSalesErrors.ts",
+      "line": 25
+    },
+    {
+      "file": "src/features/checkout/checkout.api.ts",
+      "line": 11
+    },
+    {
+      "file": "src/features/checkout/checkout.api.ts",
+      "line": 25
+    },
+    {
+      "file": "src/features/checkout/checkout.recovery.ts",
+      "line": 16
+    },
+    {
+      "file": "supabase/functions/stripe-create-checkout/index.ts",
+      "line": 44
+    },
+    {
+      "file": "supabase/functions/stripe-create-checkout/index.ts",
+      "line": 526
+    },
+    {
+      "file": "supabase/functions/stripe-create-checkout/index.ts",
+      "line": 527
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 41
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 430
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 521
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 580
+    },
+    {
+      "file": "tests/integration/ticketing-final-inventory-race.sh",
+      "line": 261
+    },
+    {
+      "file": "tests/integration/stripeTestObjects.ts",
+      "line": 336
+    }
+  ],
+  "EVENT_OUTSIDE_SERVICE_AREA": [
+    {
+      "file": "src/features/tickets/paidSalesErrors.ts",
+      "line": 9
+    },
+    {
+      "file": "src/features/tickets/paidSalesErrors.ts",
+      "line": 26
+    },
+    {
+      "file": "src/features/events/publishErrors.ts",
+      "line": 17
+    },
+    {
+      "file": "src/features/events/event.types.ts",
+      "line": 22
+    }
+  ],
+  "EVENT_TIME_INVALID": [
+    {
+      "file": "src/features/tickets/paidSalesErrors.ts",
+      "line": 10
+    },
+    {
+      "file": "src/features/tickets/paidSalesErrors.ts",
+      "line": 27
+    },
+    {
+      "file": "src/features/events/publishErrors.ts",
+      "line": 15
+    },
+    {
+      "file": "src/features/events/event.types.ts",
+      "line": 20
+    }
+  ],
+  "DISCOVERY_CURSOR_INVALID": [
+    {
+      "file": "src/features/discovery/discovery.api.ts",
+      "line": 38
+    },
+    {
+      "file": "supabase/functions/public-discovery/index.ts",
+      "line": 20
+    },
+    {
+      "file": "tests/integration/edge/spec13-local/index.ts",
+      "line": 78
+    }
+  ],
+  "DISCOVERY_CURSOR_EXPIRED": [
+    {
+      "file": "src/features/discovery/discovery.api.ts",
+      "line": 38
+    },
+    {
+      "file": "supabase/functions/public-discovery/index.ts",
+      "line": 21
+    },
+    {
+      "file": "tests/integration/edge/spec13-local/index.ts",
+      "line": 79
+    }
+  ],
+  "CHECKOUT_EXPIRED": [
+    {
+      "file": "src/features/checkout/checkout.api.ts",
+      "line": 6
+    },
+    {
+      "file": "src/features/checkout/checkout.api.ts",
+      "line": 19
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 169
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 1373
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 1387
+    },
+    {
+      "file": "supabase/functions/stripe-create-checkout/index.ts",
+      "line": 38
+    },
+    {
+      "file": "supabase/functions/stripe-create-checkout/index.ts",
+      "line": 511
+    },
+    {
+      "file": "supabase/functions/stripe-create-checkout/index.ts",
+      "line": 512
+    },
+    {
+      "file": "supabase/functions/stripe-create-checkout/index.ts",
+      "line": 1077
+    },
+    {
+      "file": "supabase/functions/stripe-create-checkout/index.ts",
+      "line": 1155
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 35
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 260
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 413
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 504
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 574
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 933
+    },
+    {
+      "file": "tests/integration/stripeTestObjects.ts",
+      "line": 330
+    }
+  ],
+  "CHECKOUT_NOT_FOUND": [
+    {
+      "file": "src/features/checkout/checkout.api.ts",
+      "line": 7
+    },
+    {
+      "file": "src/features/checkout/checkout.api.ts",
+      "line": 20
+    },
+    {
+      "file": "supabase/functions/stripe-create-checkout/index.ts",
+      "line": 39
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 36
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 422
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 513
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 575
+    },
+    {
+      "file": "supabase/functions/stripe-cancel-checkout/index.ts",
+      "line": 217
+    },
+    {
+      "file": "tests/integration/stripeTestObjects.ts",
+      "line": 331
+    }
+  ],
+  "CHECKOUT_UNAVAILABLE": [
+    {
+      "file": "src/features/checkout/checkout.api.ts",
+      "line": 21
+    },
+    {
+      "file": "src/features/checkout/checkout.api.ts",
+      "line": 47
+    },
+    {
+      "file": "src/features/checkout/checkout.api.ts",
+      "line": 49
+    },
+    {
+      "file": "src/features/checkout/checkout.api.ts",
+      "line": 51
+    },
+    {
+      "file": "src/features/checkout/checkout.api.ts",
+      "line": 84
+    },
+    {
+      "file": "src/features/checkout/checkout.api.ts",
+      "line": 93
+    },
+    {
+      "file": "src/features/checkout/checkout.api.ts",
+      "line": 99
+    },
+    {
+      "file": "src/features/checkout/checkout.api.ts",
+      "line": 102
+    },
+    {
+      "file": "supabase/functions/stripe-create-checkout/index.ts",
+      "line": 40
+    },
+    {
+      "file": "supabase/functions/stripe-create-checkout/index.ts",
+      "line": 542
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 37
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 77
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 424
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 515
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 576
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 627
+    },
+    {
+      "file": "supabase/functions/stripe-cancel-checkout/index.ts",
+      "line": 38
+    },
+    {
+      "file": "supabase/functions/stripe-cancel-checkout/index.ts",
+      "line": 228
+    },
+    {
+      "file": "supabase/functions/stripe-cancel-checkout/index.ts",
+      "line": 231
+    },
+    {
+      "file": "supabase/functions/stripe-cancel-checkout/index.ts",
+      "line": 258
+    },
+    {
+      "file": "supabase/functions/stripe-cancel-checkout/index.ts",
+      "line": 266
+    },
+    {
+      "file": "tests/integration/stripeTestObjects.ts",
+      "line": 332
+    }
+  ],
+  "EVENT_TIME_ZONE": [
+    {
+      "file": "src/features/events/event.time.ts",
+      "line": 1
+    },
+    {
+      "file": "src/features/events/event.time.ts",
+      "line": 7
+    }
+  ],
+  "EVENT_DISCLOSURES_REQUIRED": [
+    {
+      "file": "src/features/events/publishErrors.ts",
+      "line": 5
+    },
+    {
+      "file": "src/features/events/publishErrors.ts",
+      "line": 21
+    }
+  ],
+  "EVENT_POLICY_ACCEPTANCE_REQUIRED": [
+    {
+      "file": "src/features/events/publishErrors.ts",
+      "line": 6
+    },
+    {
+      "file": "src/features/events/publishErrors.ts",
+      "line": 22
+    }
+  ],
+  "EVENT_PUBLIC_HISTORY_UNKNOWN": [
+    {
+      "file": "src/features/events/publishErrors.ts",
+      "line": 7
+    },
+    {
+      "file": "src/features/events/publishErrors.ts",
+      "line": 24
+    }
+  ],
+  "EVENT_NOT_OWNED": [
+    {
+      "file": "src/features/events/publishErrors.ts",
+      "line": 13
+    },
+    {
+      "file": "src/features/events/event.types.ts",
+      "line": 18
+    }
+  ],
+  "MODERATION_CONFLICT": [
+    {
+      "file": "src/features/moderation/moderation.api.ts",
+      "line": 83
+    }
+  ],
+  "EVENT_ID": [
+    {
+      "file": "supabase/functions/stripe-webhook/webhookFixtures.ts",
+      "line": 9
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/webhookFixtures.ts",
+      "line": 81
+    }
+  ],
+  "TICKET_MANIFEST": [
+    {
+      "file": "supabase/functions/stripe-webhook/webhookFixtures.ts",
+      "line": 31
+    }
+  ],
+  "EVENT_PATTERN": [
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 26
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 436
+    }
+  ],
+  "CHECKOUT_EVENT_TYPES": [
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 44
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 2134
+    }
+  ],
+  "CHECKOUT_LINE_COUNT_MISMATCH": [
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 108
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 315
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 1071
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 1074
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 1077
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 91
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 418
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 509
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 647
+    }
+  ],
+  "CHECKOUT_ITEM_BINDING_MISSING": [
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 109
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 312
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 1104
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 1109
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 1112
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 1118
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 1123
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 1126
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 1130
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 1164
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 88
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 415
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 506
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 644
+    }
+  ],
+  "CHECKOUT_ITEM_BINDING_DUPLICATE": [
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 110
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 311
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 1083
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 1135
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 87
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 414
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 505
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 643
+    }
+  ],
+  "CHECKOUT_ITEM_BINDING_UNKNOWN": [
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 111
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 313
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 1137
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 89
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 416
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 507
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 645
+    }
+  ],
+  "CHECKOUT_LINE_TIER_MISMATCH": [
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 112
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 318
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 1086
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 94
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 421
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 512
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 650
+    }
+  ],
+  "CHECKOUT_LINE_QUANTITY_MISMATCH": [
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 113
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 317
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 1145
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 93
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 420
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 511
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 649
+    }
+  ],
+  "CHECKOUT_LINE_AMOUNT_MISMATCH": [
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 114
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 314
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 1091
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 1155
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 90
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 417
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 508
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 646
+    }
+  ],
+  "CHECKOUT_LINE_CURRENCY_MISMATCH": [
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 115
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 316
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 1149
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 92
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 419
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 510
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 648
+    }
+  ],
+  "CHECKOUT_AGGREGATE_MISMATCH": [
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 116
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 310
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 1159
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 1172
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 86
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 410
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 501
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 642
+    }
+  ],
+  "CHECKOUT_RECONCILIATION_REVIEW_MISMATCH": [
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 319
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 560
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 721
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 735
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 1497
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 95
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 423
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 514
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 651
+    }
+  ],
+  "STRIPE_OBJECT_INVALID": [
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 333
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 372
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 400
+    },
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 1219
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 110
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 454
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 544
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 666
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 854
+    }
+  ],
+  "STRIPE_OBJECT_GRAPH_INCOMPLETE": [
+    {
+      "file": "supabase/functions/stripe-webhook/index.ts",
+      "line": 348
+    }
+  ],
+  "DISCOVERY_QUERY_INVALID": [
+    {
+      "file": "supabase/functions/public-discovery/index.ts",
+      "line": 19
+    },
+    {
+      "file": "supabase/functions/public-discovery/index.ts",
+      "line": 117
+    },
+    {
+      "file": "tests/integration/edge/spec13-local/index.ts",
+      "line": 80
+    }
+  ],
+  "DISCOVERY_UNAVAILABLE": [
+    {
+      "file": "supabase/functions/public-discovery/index.ts",
+      "line": 28
+    },
+    {
+      "file": "supabase/functions/public-discovery/index.ts",
+      "line": 121
+    },
+    {
+      "file": "supabase/functions/public-discovery/index.ts",
+      "line": 130
+    },
+    {
+      "file": "supabase/functions/public-discovery/index.ts",
+      "line": 141
+    },
+    {
+      "file": "supabase/functions/public-discovery/index.ts",
+      "line": 148
+    },
+    {
+      "file": "supabase/functions/public-discovery/index.ts",
+      "line": 156
+    },
+    {
+      "file": "supabase/functions/public-discovery/index.ts",
+      "line": 182
+    },
+    {
+      "file": "supabase/functions/public-discovery/index.ts",
+      "line": 194
+    }
+  ],
+  "DISCOVERY_RATE_LIMITED": [
+    {
+      "file": "supabase/functions/public-discovery/index.ts",
+      "line": 133
+    }
+  ],
+  "DISCOVERY_TRUSTED_IP_HEADER": [
+    {
+      "file": "supabase/functions/public-discovery/index.ts",
+      "line": 162
+    }
+  ],
+  "DISCOVERY_RATE_SECRET": [
+    {
+      "file": "supabase/functions/public-discovery/index.ts",
+      "line": 164
+    }
+  ],
+  "DISCOVERY_TRUSTED_IP_HEADER_VERIFIED": [
+    {
+      "file": "supabase/functions/public-discovery/index.ts",
+      "line": 169
+    }
+  ],
+  "RESEND_WEBHOOK_SECRET": [
+    {
+      "file": "supabase/functions/ticket-email-webhook/index.ts",
+      "line": 48
+    },
+    {
+      "file": "tests/integration/edge/spec09-local/index.ts",
+      "line": 89
+    },
+    {
+      "file": "tests/integration/edge/spec10-local/index.ts",
+      "line": 89
+    },
+    {
+      "file": "tests/integration/edge/spec07-local/index.ts",
+      "line": 100
+    }
+  ],
+  "MODERATION_JOB_INVALID": [
+    {
+      "file": "supabase/functions/moderate-event-queue/index.ts",
+      "line": 71
+    }
+  ],
+  "MODERATION_CLAIM_FAILED": [
+    {
+      "file": "supabase/functions/moderate-event-queue/index.ts",
+      "line": 102
+    }
+  ],
+  "MODERATION_APPLY_FAILED": [
+    {
+      "file": "supabase/functions/moderate-event-queue/index.ts",
+      "line": 125
+    }
+  ],
+  "MODERATION_FAILURE_PERSIST_FAILED": [
+    {
+      "file": "supabase/functions/moderate-event-queue/index.ts",
+      "line": 144
+    }
+  ],
+  "STRIPE_REQUEST_ATTEMPT_ENVELOPE_SECONDS": [
+    {
+      "file": "supabase/functions/stripe-create-checkout/index.ts",
+      "line": 15
+    },
+    {
+      "file": "supabase/functions/stripe-create-checkout/index.ts",
+      "line": 1153
+    },
+    {
+      "file": "supabase/functions/_shared/stripeClient.ts",
+      "line": 8
+    }
+  ],
+  "STRIPE_MINIMUM_CHECKOUT_LIFETIME_SECONDS": [
+    {
+      "file": "supabase/functions/stripe-create-checkout/index.ts",
+      "line": 33
+    },
+    {
+      "file": "supabase/functions/stripe-create-checkout/index.ts",
+      "line": 1152
+    }
+  ],
+  "CHECKOUT_ALREADY_EXISTS": [
+    {
+      "file": "supabase/functions/stripe-create-checkout/index.ts",
+      "line": 36
+    },
+    {
+      "file": "supabase/functions/stripe-create-checkout/index.ts",
+      "line": 535
+    },
+    {
+      "file": "supabase/functions/stripe-create-checkout/index.ts",
+      "line": 536
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 33
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 411
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 502
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 572
+    },
+    {
+      "file": "tests/integration/stripeTestObjects.ts",
+      "line": 328
+    }
+  ],
+  "CHECKOUT_DISABLED": [
+    {
+      "file": "supabase/functions/stripe-create-checkout/index.ts",
+      "line": 37
+    },
+    {
+      "file": "supabase/functions/stripe-create-checkout/index.ts",
+      "line": 517
+    },
+    {
+      "file": "supabase/functions/stripe-create-checkout/index.ts",
+      "line": 518
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 34
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 412
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 503
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 573
+    },
+    {
+      "file": "tests/integration/stripeTestObjects.ts",
+      "line": 329
+    }
+  ],
+  "STRIPE_REQUEST_FAILED": [
+    {
+      "file": "supabase/functions/stripe-create-checkout/index.ts",
+      "line": 51
+    },
+    {
+      "file": "supabase/functions/stripe-create-checkout/index.ts",
+      "line": 1116
+    },
+    {
+      "file": "supabase/functions/stripe-create-checkout/index.ts",
+      "line": 1173
+    },
+    {
+      "file": "supabase/functions/stripe-create-checkout/index.ts",
+      "line": 1234
+    },
+    {
+      "file": "supabase/functions/stripe-connect-status/index.ts",
+      "line": 73
+    },
+    {
+      "file": "supabase/functions/stripe-connect-session/connect.ts",
+      "line": 214
+    },
+    {
+      "file": "supabase/functions/stripe-connect-session/index.ts",
+      "line": 151
+    },
+    {
+      "file": "supabase/functions/stripe-connect-session/index.ts",
+      "line": 166
+    },
+    {
+      "file": "supabase/functions/_shared/contracts.ts",
+      "line": 9
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 48
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 56
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 83
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 455
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 545
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 587
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 599
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 636
+    },
+    {
+      "file": "supabase/functions/stripe-express-login/index.ts",
+      "line": 71
+    },
+    {
+      "file": "supabase/functions/stripe-express-login/index.ts",
+      "line": 74
+    },
+    {
+      "file": "supabase/functions/stripe-cancel-checkout/index.ts",
+      "line": 28
+    },
+    {
+      "file": "supabase/functions/stripe-cancel-checkout/index.ts",
+      "line": 241
+    },
+    {
+      "file": "supabase/functions/stripe-cancel-checkout/index.ts",
+      "line": 287
+    },
+    {
+      "file": "tests/integration/stripeTestObjects.ts",
+      "line": 343
+    }
+  ],
+  "CHECKOUT_INPUT_INVALID": [
+    {
+      "file": "supabase/functions/stripe-create-checkout/index.ts",
+      "line": 505
+    },
+    {
+      "file": "tests/integration/ticketing-final-inventory-race.sh",
+      "line": 262
+    }
+  ],
+  "CHECKOUT_CREATION_FAILED": [
+    {
+      "file": "supabase/functions/stripe-create-checkout/index.ts",
+      "line": 540
+    },
+    {
+      "file": "supabase/functions/stripe-create-checkout/index.ts",
+      "line": 970
+    },
+    {
+      "file": "supabase/functions/stripe-create-checkout/index.ts",
+      "line": 1007
+    }
+  ],
+  "TICKET_EMAIL_WORKER_SECRET": [
+    {
+      "file": "supabase/functions/ticket-email-worker/index.ts",
+      "line": 43
+    },
+    {
+      "file": "scripts/verify-spec07-production.ts",
+      "line": 10
+    },
+    {
+      "file": "tests/integration/edge/spec09-local/index.ts",
+      "line": 131
+    },
+    {
+      "file": "tests/integration/edge/spec10-local/index.ts",
+      "line": 131
+    },
+    {
+      "file": "tests/integration/edge/spec07-local/index.ts",
+      "line": 142
+    }
+  ],
+  "TICKET_EMAIL_WORKER_ENABLED": [
+    {
+      "file": "supabase/functions/ticket-email-worker/index.ts",
+      "line": 45
+    },
+    {
+      "file": "tests/integration/edge/spec09-local/index.ts",
+      "line": 130
+    },
+    {
+      "file": "tests/integration/edge/spec10-local/index.ts",
+      "line": 130
+    },
+    {
+      "file": "tests/integration/edge/spec07-local/index.ts",
+      "line": 141
+    }
+  ],
+  "TICKET_EMAIL_FROM": [
+    {
+      "file": "supabase/functions/ticket-email-worker/index.ts",
+      "line": 55
+    },
+    {
+      "file": "tests/integration/edge/spec09-local/index.ts",
+      "line": 132
+    },
+    {
+      "file": "tests/integration/edge/spec10-local/index.ts",
+      "line": 132
+    },
+    {
+      "file": "tests/integration/edge/spec07-local/index.ts",
+      "line": 143
+    }
+  ],
+  "RESEND_API_KEY": [
+    {
+      "file": "supabase/functions/ticket-email-worker/index.ts",
+      "line": 56
+    },
+    {
+      "file": "scripts/verify-spec07-production.ts",
+      "line": 9
+    },
+    {
+      "file": "scripts/verify-ticket-shell-production.ts",
+      "line": 24
+    },
+    {
+      "file": "scripts/send-ticket-ready-test.tsx",
+      "line": 109
+    },
+    {
+      "file": "tests/integration/edge/spec09-local/index.ts",
+      "line": 134
+    },
+    {
+      "file": "tests/integration/edge/spec10-local/index.ts",
+      "line": 134
+    },
+    {
+      "file": "tests/integration/edge/spec07-local/index.ts",
+      "line": 145
+    }
+  ],
+  "TICKET_EMAIL_SUPPORT_EMAIL": [
+    {
+      "file": "supabase/functions/ticket-email-worker/index.ts",
+      "line": 65
+    },
+    {
+      "file": "tests/integration/edge/spec09-local/index.ts",
+      "line": 133
+    },
+    {
+      "file": "tests/integration/edge/spec10-local/index.ts",
+      "line": 133
+    },
+    {
+      "file": "tests/integration/edge/spec07-local/index.ts",
+      "line": 144
+    }
+  ],
+  "TICKET_EMAIL_PAYLOAD_KEY_ID": [
+    {
+      "file": "supabase/functions/_shared/ticketEmailWorker.ts",
+      "line": 45
+    },
+    {
+      "file": "tests/integration/edge/spec09-local/index.ts",
+      "line": 136
+    },
+    {
+      "file": "tests/integration/edge/spec10-local/index.ts",
+      "line": 136
+    },
+    {
+      "file": "tests/integration/edge/spec07-local/index.ts",
+      "line": 147
+    }
+  ],
+  "TICKET_EMAIL_PAYLOAD_KEYS_JSON": [
+    {
+      "file": "supabase/functions/_shared/ticketEmailWorker.ts",
+      "line": 47
+    },
+    {
+      "file": "scripts/verify-spec07-production.ts",
+      "line": 10
+    },
+    {
+      "file": "tests/integration/edge/spec09-local/index.ts",
+      "line": 137
+    },
+    {
+      "file": "tests/integration/edge/spec10-local/index.ts",
+      "line": 137
+    },
+    {
+      "file": "tests/integration/edge/spec07-local/index.ts",
+      "line": 148
+    }
+  ],
+  "STRIPE_API_VERSION": [
+    {
+      "file": "supabase/functions/_shared/stripeClient.ts",
+      "line": 5
+    },
+    {
+      "file": "supabase/functions/_shared/stripeClient.ts",
+      "line": 17
+    }
+  ],
+  "STRIPE_REQUEST_TIMEOUT_MS": [
+    {
+      "file": "supabase/functions/_shared/stripeClient.ts",
+      "line": 6
+    },
+    {
+      "file": "supabase/functions/_shared/stripeClient.ts",
+      "line": 9
+    },
+    {
+      "file": "supabase/functions/_shared/stripeClient.ts",
+      "line": 18
+    }
+  ],
+  "STRIPE_MAX_NETWORK_RETRIES": [
+    {
+      "file": "supabase/functions/_shared/stripeClient.ts",
+      "line": 7
+    },
+    {
+      "file": "supabase/functions/_shared/stripeClient.ts",
+      "line": 9
+    },
+    {
+      "file": "supabase/functions/_shared/stripeClient.ts",
+      "line": 19
+    }
+  ],
+  "CHECKOUT_OPERATIONAL_CONTRACT_VERSION": [
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 1
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 17
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 1005
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 1024
+    }
+  ],
+  "STRIPE_EVENT_PATTERN": [
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 467
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 1035
+    }
+  ],
+  "CHECKOUT_CREATE_ERROR_CODES": [
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 570
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 863
+    }
+  ],
+  "CHECKOUT_UNCERTAIN_ERROR_CODES": [
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 594
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 869
+    }
+  ],
+  "CHECKOUT_CREATE_FAILURE_STAGES": [
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 602
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 1095
+    }
+  ],
+  "CHECKOUT_CREATE_PROVIDER_RESULTS": [
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 614
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 1102
+    }
+  ],
+  "CHECKOUT_SUMMARY_FIELDS": [
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 673
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 686
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 748
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 751
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 755
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 787
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 791
+    },
+    {
+      "file": "supabase/functions/_shared/operationalLog.ts",
+      "line": 820
+    }
+  ],
+  "TICKET_EMAIL_RATE_SECRET": [
+    {
+      "file": "supabase/functions/_shared/ticketEmailHttp.ts",
+      "line": 362
+    },
+    {
+      "file": "scripts/verify-spec07-production.ts",
+      "line": 10
+    }
+  ],
+  "TICKET_EMAIL_TRUSTED_IP_HEADER": [
+    {
+      "file": "supabase/functions/_shared/ticketEmailHttp.ts",
+      "line": 367
+    }
+  ],
+  "TICKET_EMAIL_PUBLIC_ENABLED": [
+    {
+      "file": "supabase/functions/_shared/ticketEmailHttp.ts",
+      "line": 373
+    }
+  ],
+  "MODERATION_WORKER_TOKEN": [
+    {
+      "file": "supabase/functions/_shared/env.ts",
+      "line": 19
+    }
+  ],
+  "STRIPE_RESTRICTED_KEY": [
+    {
+      "file": "supabase/functions/_shared/env.ts",
+      "line": 77
+    },
+    {
+      "file": "tests/integration/testEnv.ts",
+      "line": 74
+    },
+    {
+      "file": "tests/integration/testEnv.ts",
+      "line": 139
+    },
+    {
+      "file": "tests/integration/testEnv.ts",
+      "line": 140
+    },
+    {
+      "file": "tests/integration/testEnv.ts",
+      "line": 145
+    },
+    {
+      "file": "tests/integration/testEnv.ts",
+      "line": 146
+    },
+    {
+      "file": "tests/integration/testEnv.ts",
+      "line": 165
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 611
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 617
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 1345
+    }
+  ],
+  "STRIPE_WEBHOOK_SECRET": [
+    {
+      "file": "supabase/functions/_shared/env.ts",
+      "line": 83
+    },
+    {
+      "file": "tests/integration/testEnv.ts",
+      "line": 75
+    },
+    {
+      "file": "tests/integration/testEnv.ts",
+      "line": 143
+    },
+    {
+      "file": "tests/integration/testEnv.ts",
+      "line": 144
+    },
+    {
+      "file": "tests/integration/testEnv.ts",
+      "line": 148
+    },
+    {
+      "file": "tests/integration/testEnv.ts",
+      "line": 149
+    },
+    {
+      "file": "tests/integration/testEnv.ts",
+      "line": 166
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 617
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 1346
+    }
+  ],
+  "STRIPE_THIN_WEBHOOK_SECRET": [
+    {
+      "file": "supabase/functions/_shared/env.ts",
+      "line": 94
+    }
+  ],
+  "SUPABASE_URL": [
+    {
+      "file": "supabase/functions/_shared/env.ts",
+      "line": 106
+    }
+  ],
+  "SUPABASE_SERVICE_ROLE_KEY": [
+    {
+      "file": "supabase/functions/_shared/env.ts",
+      "line": 114
+    },
+    {
+      "file": "scripts/verify-spec07-production.ts",
+      "line": 9
+    }
+  ],
+  "APP_BASE_URL": [
+    {
+      "file": "supabase/functions/_shared/env.ts",
+      "line": 119
+    },
+    {
+      "file": "scripts/dev-world/run.ts",
+      "line": 80
+    },
+    {
+      "file": "scripts/dev-world/run.ts",
+      "line": 93
+    },
+    {
+      "file": "tests/integration/edge/spec09-local/index.ts",
+      "line": 135
+    },
+    {
+      "file": "tests/integration/edge/spec10-local/index.ts",
+      "line": 135
+    },
+    {
+      "file": "tests/integration/edge/spec07-local/index.ts",
+      "line": 146
+    },
+    {
+      "file": "tests/integration/edge/dev-world-probe/index.ts",
+      "line": 13
+    }
+  ],
+  "TICKET_CREDENTIAL_SECRET": [
+    {
+      "file": "supabase/functions/_shared/ticketCredentials.ts",
+      "line": 9
+    },
+    {
+      "file": "scripts/verify-spec07-production.ts",
+      "line": 9
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 1035
+    }
+  ],
+  "CHECKOUT_CANCELLED": [
+    {
+      "file": "supabase/functions/stripe-cancel-checkout/index.ts",
+      "line": 307
+    }
+  ],
+  "RESEND_TEST_FROM": [
+    {
+      "file": "scripts/send-ticket-ready-test.tsx",
+      "line": 110
+    }
+  ],
+  "VERCEL_ENV": [
+    {
+      "file": "scripts/dev-world/run.ts",
+      "line": 27
+    }
+  ],
+  "EVENT_CONTEXT_CONFLICT": [
+    {
+      "file": "tests/integration/spec10-event-history-review-concurrency.py",
+      "line": 126
+    },
+    {
+      "file": "tests/integration/spec10-event-history-concurrency.py",
+      "line": 107
+    }
+  ],
+  "CHECKOUT_SWITCH_READ_FILE": [
+    {
+      "file": "tests/integration/run-ticketing-database.sh",
+      "line": 69
+    },
+    {
+      "file": "tests/integration/run-ticketing-database.sh",
+      "line": 72
+    }
+  ],
+  "CHECKOUT_SWITCH_STATE_FILE": [
+    {
+      "file": "tests/integration/run-ticketing-database.sh",
+      "line": 70
+    },
+    {
+      "file": "tests/integration/run-ticketing-database.sh",
+      "line": 75
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 48
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 203
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 207
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 215
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 239
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 240
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 723
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 1316
+    }
+  ],
+  "CHECKOUT_URL_OPEN": [
+    {
+      "file": "tests/integration/stripeTestObjects.ts",
+      "line": 48
+    },
+    {
+      "file": "tests/integration/stripeTestObjects.ts",
+      "line": 79
+    },
+    {
+      "file": "tests/integration/stripeTestObjects.ts",
+      "line": 108
+    },
+    {
+      "file": "tests/integration/stripeTestObjects.ts",
+      "line": 267
+    }
+  ],
+  "CHECKOUT_DIAGNOSTIC_CURL_CONFIG": [
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 41
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 987
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 1007
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 1196
+    }
+  ],
+  "CHECKOUT_DIAGNOSTIC_RESPONSE": [
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 42
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 988
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 1197
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 1198
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 1200
+    }
+  ],
+  "CHECKOUT_SWITCH_CAPTURED": [
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 52
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 216
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 238
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 724
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 1317
+    }
+  ],
+  "STRIPE_SECRET_KEY": [
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 611
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 617
+    }
+  ],
+  "STRIPE_API_KEY": [
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 611
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 617
+    }
+  ],
+  "CHECKOUT_DIAGNOSTIC_RESPONSE_FILE": [
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 1200
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 1203
+    }
+  ],
+  "CHECKOUT_SESSION_LIST_FAILED": [
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 1234
+    },
+    {
+      "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+      "line": 376
+    },
+    {
+      "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+      "line": 381
+    },
+    {
+      "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+      "line": 2580
+    }
+  ],
+  "CHECKOUT_SESSION_RETRIEVE_FAILED": [
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 1235
+    },
+    {
+      "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+      "line": 396
+    },
+    {
+      "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+      "line": 2582
+    }
+  ],
+  "CHECKOUT_FIXTURE_BINDING_FAILED": [
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 1236
+    },
+    {
+      "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+      "line": 338
+    },
+    {
+      "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+      "line": 347
+    },
+    {
+      "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+      "line": 351
+    }
+  ],
+  "CHECKOUT_SESSION_CANDIDATE_MISMATCH": [
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 1242
+    },
+    {
+      "file": "tests/integration/run-stripe-ticketing-proof.sh",
+      "line": 1247
+    },
+    {
+      "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+      "line": 386
+    },
+    {
+      "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+      "line": 2581
+    }
+  ]
+}

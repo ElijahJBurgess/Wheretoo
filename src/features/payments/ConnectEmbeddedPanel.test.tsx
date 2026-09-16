@@ -37,9 +37,9 @@ describe('ConnectEmbeddedPanel', () => {
         />,
       )
 
-      expect(await screen.findByRole('alert')).toHaveTextContent('Secure payment setup could not load')
+      expect(await screen.findByRole('alert')).toHaveTextContent('Something went wrong')
       chunkIsAvailable = true
-      await user.click(screen.getByRole('button', { name: 'Retry secure setup' }))
+      await user.click(screen.getByRole('button', { name: 'Try again' }))
       expect(await screen.findByText('Embedded setup loaded')).toBeInTheDocument()
       expect(loadEmbedded.mock.calls.length).toBeGreaterThanOrEqual(2)
     } finally {

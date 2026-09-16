@@ -1,0 +1,21 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions;
+select no_plan();
+create temp table unaffected as select (select count(*) from private.checkout_rate_limit_buckets) checkout,(select count(*) from private.ticket_email_rate_events) email,(select count(*) from private.free_rsvp_rate_buckets) rsvp;
+select is((select count(*) from generate_series(1,60) where (public.server_consume_discovery_read_rate_limit(repeat('a',64))->>'allowed')::boolean),60::bigint,'sixty reads allowed in independent bucket');
+select is(public.server_consume_discovery_read_rate_limit(repeat('a',64))->>'allowed','false','sixty-first read rejected');
+select ok((public.server_consume_discovery_read_rate_limit(repeat('a',64))->>'retryAfterSeconds')::integer between 1 and 60,'denial provides remaining fixed-window seconds');
+select is(public.server_consume_discovery_read_rate_limit(repeat('b',64))->>'allowed','true','another trusted identity retains quota');
+select is((select count(*) from private.checkout_rate_limit_buckets),(select checkout from unaffected),'discovery never consumes checkout quota');
+select is((select count(*) from private.ticket_email_rate_events),(select email from unaffected),'discovery never consumes email quota');
+select is((select count(*) from private.free_rsvp_rate_buckets),(select rsvp from unaffected),'discovery never consumes RSVP quota');
+select throws_ok($$select public.server_consume_discovery_read_rate_limit('192.0.2.1')$$,'22023','DISCOVERY_QUERY_INVALID','raw identity cannot be stored');
+insert into private.discovery_read_rate_buckets(identity_hash,window_start,attempts)
+select lpad(to_hex(n),64,'0'),date_trunc('minute',clock_timestamp())-interval '2 hours',1 from generate_series(1,150) n;
+select public.server_consume_discovery_read_rate_limit(repeat('c',64));
+select is((select count(*) from private.discovery_read_rate_buckets where window_start<clock_timestamp()-interval '1 hour'),50::bigint,'one request cleans at most 100 old buckets');
+select public.server_consume_discovery_read_rate_limit(repeat('c',64));
+select is((select count(*) from private.discovery_read_rate_buckets where window_start<clock_timestamp()-interval '1 hour'),0::bigint,'later traffic clears remaining expired backlog');
+select * from finish();
+rollback;

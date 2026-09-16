@@ -6,7 +6,6 @@ import type { AdmissionChecker, AdmissionCheckResult } from '../contracts/admiss
 import type { TicketCollectionReader } from '../contracts/ticketCollection'
 import { DevelopmentQrLabPage } from '../customer/DevelopmentQrLabPage'
 import { TicketCollectionPage } from '../customer/TicketCollectionPage'
-import { useTicketDocumentPrivacy } from '../customer/useTicketDocumentPrivacy'
 import { EventDashboardPage } from '../dashboard/EventDashboardPage'
 import { EmailPreviewPage } from '../email/EmailPreviewPage'
 import { emailPreviewScenarios } from '../email/emailPreviewScenarios'
@@ -24,6 +23,7 @@ import { productionTicketExperienceRuntime } from './production'
 import type { TicketExperienceRuntime } from './runtime.types'
 
 const developmentCameraDecoder = createCameraDecoder()
+const developmentNow = () => new Date('2026-09-03T12:00:00Z')
 const developmentManualCameraDecoder: CameraDecoder = {
   async start() { return { kind: 'ready' } },
   stop() {},
@@ -65,29 +65,25 @@ function DevelopmentTicketCollectionRoute() {
   const { collectionBearer } = useParams()
 
   if (collectionBearer === 'wh_test_collection_loading') {
-    return <TicketCollectionPage reader={developmentTicketLoadingReader} walletProvider={fixtureWalletProvider} />
+    return <TicketCollectionPage now={developmentNow} reader={developmentTicketLoadingReader} walletProvider={fixtureWalletProvider} />
   }
 
   if (collectionBearer === 'wh_test_collection_error') {
-    return <TicketCollectionPage reader={developmentTicketErrorReader} walletProvider={fixtureWalletProvider} />
+    return <TicketCollectionPage now={developmentNow} reader={developmentTicketErrorReader} walletProvider={fixtureWalletProvider} />
   }
 
   if (!hasOwnScenario(ticketCollectionScenarios, collectionBearer)) {
-    return <DevelopmentUnavailableTicketRoute />
+    const ProductionTicketCollectionRoute = productionTicketExperienceRuntime.TicketCollectionRoute
+    return <ProductionTicketCollectionRoute />
   }
 
   return (
     <TicketCollectionPage
+      now={developmentNow}
       reader={fixtureTicketCollectionReader}
       walletProvider={fixtureWalletProvider}
     />
   )
-}
-
-function DevelopmentUnavailableTicketRoute() {
-  useTicketDocumentPrivacy()
-
-  return <AsyncState status="error" title="Development scenario unavailable" />
 }
 
 function DevelopmentDashboardContent() {

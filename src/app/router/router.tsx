@@ -1,18 +1,58 @@
+import { captureEventStatusAccess } from '../../features/event-changes/eventStatus.session'
+import { captureTicketAccess } from '../../features/ticket-delivery/delivery.session'
 import type { ComponentType } from 'react'
-import { Navigate, createBrowserRouter, type RouteObject } from 'react-router-dom'
+import { createBrowserRouter, type RouteObject } from 'react-router-dom'
+import { DiscoveryHomeRedirect } from '../../features/discovery/DiscoveryHomeRedirect'
 import type { TicketExperienceRuntime } from '../../features/ticket-experience/runtime/runtime.types'
+import { RouteErrorFallback, RouteLoadingFallback, UnmatchedRouteFallback } from './RouteFallback'
 
 const lazyComponent = <T extends Record<K, ComponentType>, K extends keyof T>(
   load: () => Promise<T>,
   exportName: K,
 ) => async () => ({ Component: (await load())[exportName] })
 
-export function createAppRouter(runtime: TicketExperienceRuntime) {
+
+function withSanitizedErrorFallback(routes: RouteObject[]): RouteObject[] {
+  return routes.map(route => {
+    const errorElement = route.errorElement ?? <RouteErrorFallback />
+    const hydrateFallbackElement = route.hydrateFallbackElement ?? <RouteLoadingFallback />
+    if (route.index === true) return { ...route, errorElement, hydrateFallbackElement }
+    return {
+      ...route,
+      children: route.children ? withSanitizedErrorFallback(route.children) : undefined,
+      errorElement,
+      hydrateFallbackElement,
+    }
+  })
+}
+
+export function createAppRoutes(runtime: TicketExperienceRuntime) {
+  captureEventStatusAccess()
+  captureTicketAccess()
   const routes: RouteObject[] = [
-    { path: '/', element: <Navigate replace to="/auth/sign-in" /> },
+    { path: '/tickets/recover', lazy: lazyComponent(() => import('../../features/ticket-delivery/TicketRecoveryPage'), 'TicketRecoveryPage') },
+    { path: '/ticket-access', lazy: lazyComponent(() => import('../../features/ticket-delivery/TicketEmailAccessPage'), 'TicketEmailAccessPage') },
+    { path: '/event-status', lazy: lazyComponent(() => import('../../features/event-changes/EventStatusPage'), 'EventStatusPage') },
+    { path: '/refund-details', lazy: lazyComponent(() => import('../../features/refunds/RefundDetailsPage'), 'RefundDetailsPage') },
+    { path: '/events/:eventId/rsvp', lazy: lazyComponent(() => import('../../features/rsvp/RsvpPage'), 'RsvpPage') },
+    { path: '/rsvp/:collectionBearer', lazy: lazyComponent(() => import('../../features/rsvp/RsvpConfirmationPage'), 'RsvpConfirmationPage') },
+    { path: '/', element: <DiscoveryHomeRedirect /> },
+    { path: '/discover', lazy: lazyComponent(() => import('../../features/discovery/DiscoveryPage'), 'DiscoveryPage') },
+    {
+      path: '/events/checkout',
+      lazy: lazyComponent(() => import('../../features/checkout/CheckoutPage'), 'CheckoutPage'),
+    },
+    {
+      path: '/events//checkout',
+      lazy: lazyComponent(() => import('../../features/checkout/CheckoutPage'), 'CheckoutPage'),
+    },
     {
       path: '/events/:eventId',
       lazy: lazyComponent(() => import('../../features/tickets/PublicTicketEventPage'), 'PublicTicketEventPage'),
+    },
+    {
+      path: '/events/:eventId/tickets',
+      lazy: lazyComponent(() => import('../../features/tickets/PublicTicketEventPage'), 'PublicTicketSelectionPage'),
     },
     {
       path: '/events/:eventId/checkout',
@@ -95,11 +135,16 @@ export function createAppRouter(runtime: TicketExperienceRuntime) {
                       ),
                     },
                     {
-                      path: '/organizer/settings/payments',
-                      lazy: lazyComponent(
-                        () => import('../../features/payments/OrganizerPaymentsPage'),
-                        'OrganizerPaymentsPage',
-                      ),
+                      path: '/organizer/settings',
+                      lazy: lazyComponent(() => import('../../features/organizer-settings/SettingsLayout'), 'SettingsLayout'),
+                      children: [
+                        { index: true, lazy: lazyComponent(() => import('../../features/organizer-settings/SettingsLayout'), 'SettingsIndexPage') },
+                        { path: 'account', lazy: lazyComponent(() => import('../../features/organizer-settings/AccountSecurityPage'), 'AccountSecurityPage') },
+                        { path: 'profile', lazy: lazyComponent(() => import('../../features/organizer-settings/OrganizerProfilePage'), 'OrganizerProfilePage') },
+                        { path: 'payments', lazy: lazyComponent(() => import('../../features/payments/OrganizerPaymentsPage'), 'OrganizerPaymentsPage') },
+                        { path: 'help', lazy: lazyComponent(() => import('../../features/organizer-settings/HelpLegalPage'), 'HelpLegalPage') },
+                        { path: 'actions', lazy: lazyComponent(() => import('../../features/organizer-settings/AccountActionsPage'), 'AccountActionsPage') },
+                      ],
                     },
                     {
                       path: '/organizer/events/new',
@@ -109,6 +154,8 @@ export function createAppRouter(runtime: TicketExperienceRuntime) {
                       path: '/organizer/events/:eventId/edit',
                       lazy: lazyComponent(() => import('../../features/events/EventEditorPage'), 'EventEditorPage'),
                     },
+                    { path: '/organizer/events/:eventId/changes', lazy: lazyComponent(() => import('../../features/event-changes/EventChangesPage'), 'EventChangesPage') },
+                    { path: '/organizer/events/:eventId/cancellation', lazy: lazyComponent(() => import('../../features/event-changes/EventCancellationPage'), 'EventCancellationPage') },
                     {
                       path: '/organizer/events/:eventId/preview',
                       lazy: lazyComponent(() => import('../../features/events/EventPreviewPage'), 'EventPreviewPage'),
@@ -124,6 +171,8 @@ export function createAppRouter(runtime: TicketExperienceRuntime) {
                       path: '/organizer/events/:eventId/dashboard',
                       Component: runtime.OrganizerDashboardRoute,
                     },
+                    { path: '/organizer/events/:eventId/registrations', lazy: lazyComponent(() => import('../../features/organizer-operations/OrganizerRegistrationLookup'), 'OrganizerRegistrationLookup') },
+                    { path: '/organizer/events/:eventId/registrations/:registrationId', lazy: lazyComponent(() => import('../../features/organizer-operations/OrganizerRegistrationDetailPage'), 'OrganizerRegistrationDetailPage') },
                     {
                       path: '/organizer/events/:eventId/orders',
                       lazy: lazyComponent(() => import('../../features/organizer-operations/OrganizerOrdersPage'), 'OrganizerOrdersPage'),
@@ -134,7 +183,14 @@ export function createAppRouter(runtime: TicketExperienceRuntime) {
                     },
                     {
                       path: '/organizer/events/:eventId/check-in',
-                      Component: runtime.OrganizerScannerRoute,
+                      lazy: lazyComponent(() => import('../../features/organizer-operations/CheckInLayout'), 'CheckInLayout'),
+                      children: [
+                        { index: true, lazy: lazyComponent(() => import('../../features/organizer-operations/CheckInHomePage'), 'CheckInHomePage') },
+                        { path: 'scan', Component: runtime.OrganizerScannerRoute },
+                        { path: 'find', lazy: lazyComponent(() => import('../../features/organizer-operations/FindGuestPage'), 'FindGuestPage') },
+                        { path: 'find/registrations/:registrationId/:ticketId', lazy: lazyComponent(() => import('../../features/organizer-operations/FreeGuestTicketDetailPage'), 'FreeGuestTicketDetailPage') },
+                        { path: 'find/:orderId/:ticketId', lazy: lazyComponent(() => import('../../features/organizer-operations/GuestTicketDetailPage'), 'GuestTicketDetailPage') },
+                      ],
                     },
                     {
                       path: '/organizer/events/:eventId',
@@ -149,7 +205,12 @@ export function createAppRouter(runtime: TicketExperienceRuntime) {
       ],
     },
     ...runtime.developmentRoutes,
+    { path: '*', element: <UnmatchedRouteFallback /> },
   ]
 
-  return createBrowserRouter(routes)
+  return withSanitizedErrorFallback(routes)
+}
+
+export function createAppRouter(runtime: TicketExperienceRuntime) {
+  return createBrowserRouter(createAppRoutes(runtime))
 }

@@ -5,14 +5,31 @@ export const money = (minor: number) =>
     currency: 'USD',
     maximumFractionDigits: minor % 100 ? 2 : 0,
   }).format(minor / 100)
-export const dateTime = (value: string | null) =>
-  value
-    ? new Intl.DateTimeFormat('en-US', {
+export function dateTime(value: string | null, timezone = 'America/Los_Angeles') {
+  if (!value) return 'Date to be confirmed'
+  const instant = new Date(value)
+  if (Number.isNaN(instant.getTime())) return 'Date unavailable'
+  try {
+    return new Intl.DateTimeFormat('en-US', {
       dateStyle: 'medium',
       timeStyle: 'short',
-      timeZone: 'America/Los_Angeles',
-    }).format(new Date(value))
-    : 'Date to be confirmed'
+      timeZone: timezone,
+    }).format(instant)
+  } catch {
+    return 'Date unavailable'
+  }
+}
+export function timeZoneLabel(timezone: string) {
+  try {
+    const part = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      timeZoneName: 'longGeneric',
+    }).formatToParts(new Date('2026-01-15T12:00:00Z')).find(({ type }) => type === 'timeZoneName')
+    return part?.value ?? timezone
+  } catch {
+    return 'Timezone unavailable'
+  }
+}
 export function eventLabel(event: EventMetrics['event']) {
   if (event.status === 'cancelled') return 'Cancelled'
   if (event.status === 'draft') return 'Draft'

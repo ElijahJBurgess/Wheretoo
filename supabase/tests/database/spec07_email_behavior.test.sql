@@ -1,0 +1,50 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+select extensions.no_plan();
+\ir spec07_email_fixture.inc
+create temp table proof(k text primary key,v jsonb);
+grant select on proof to authenticated;
+insert into proof values('receipt',pg_temp.register(1,2));
+select extensions.is((select count(*) from private.ticket_email_outbox),1::bigint,'free confirmation atomically enqueues one initial email');
+select pg_temp.register(1,2);
+select extensions.is((select count(*) from private.ticket_email_outbox),1::bigint,'registration replay does not duplicate delivery');
+insert into proof select 'before',jsonb_agg(to_jsonb(t) order by id) from public.tickets t;
+-- Preparing 60 days ahead uses event end+24h, without a 30-day cap.
+update public.events set starts_at=now()+interval '60 days',ends_at=now()+interval '60 days 2 hours' where id='b6200000-0000-4000-8000-000000000001';
+insert into proof values('claim',pg_temp.email_claim());
+insert into proof select 'context',public.server_prepare_ticket_email_context((v->>'id')::uuid,(v->>'lease_id')::uuid) from proof where k='claim';
+select extensions.is((select v->>'kind' from proof where k='context'),'ready','initial context prepares');
+select extensions.ok((select (v->>'expiresAt')::timestamptz>now()+interval '60 days' from proof where k='context'),'advance purchase link survives until its event');
+select extensions.is((select (v->>'expiresAt')::timestamptz from proof where k='context'),(select ends_at+interval '24 hours' from public.events where id='b6200000-0000-4000-8000-000000000001'),'expiry equals canonical end+24h');
+select extensions.ok((select public.server_save_ticket_email_payload((v->>'id')::uuid,(v->>'lease_id')::uuid,repeat('a',64),pg_temp.envelope()) from proof where k='claim'),'grant hash and retry ciphertext persist atomically');
+select extensions.ok(not (select public.server_save_ticket_email_payload((v->>'id')::uuid,(v->>'lease_id')::uuid,repeat('b',64),pg_temp.envelope()) from proof where k='claim'),'preparation cannot replace hash or payload');
+insert into proof select 'dispatch',public.server_begin_ticket_email_dispatch((v->>'id')::uuid,(v->>'lease_id')::uuid) from proof where k='claim';
+select extensions.is((select state from private.ticket_email_outbox),'sending','sending is durable before provider request');
+select extensions.ok((select first_possible_dispatch_at is not null from private.ticket_email_outbox),'fixed first possible dispatch anchor persists');
+select extensions.ok((select public.server_finish_ticket_email_dispatch((v->>'id')::uuid,(v->>'lease_id')::uuid,'unknown') from proof where k='claim'),'lost response records unknown');
+select extensions.is((select state from private.ticket_email_outbox),'unknown','unknown is not failed');
+select extensions.ok((select public.server_observe_ticket_email('fixture-webhook',(v->>'id')::uuid,'provider-fixture','delivered',now()) from proof where k='claim'),'signed-observation persistence resolves lost response by attempt and provider ID');
+select extensions.is((select state from private.ticket_email_outbox),'accepted','verified evidence resolves unknown');
+select extensions.is((select observation from private.ticket_email_outbox),'delivered','delivery observation is separate from acceptance');
+select extensions.ok((select public.server_observe_ticket_email('fixture-webhook',(v->>'id')::uuid,'provider-fixture','delivered',now()) from proof where k='claim'),'identical observation replay accepted');
+select extensions.ok(not (select public.server_observe_ticket_email('fixture-wrong',(v->>'id')::uuid,'different-provider-id','sent',now()) from proof where k='claim'),'different provider ID rejected');
+select extensions.ok((select public.server_observe_ticket_email('fixture-late',(v->>'id')::uuid,'provider-fixture','sent',now()-interval '1 hour') from proof where k='claim'),'out-of-order sent evidence retained');
+select extensions.is((select observation from private.ticket_email_outbox),'delivered','late sent event does not regress delivery observation');
+select extensions.is((public.server_read_ticket_email_access(repeat('a',64),repeat('1',64))->>'total')::int,1,'grant authorizes exactly one source');
+select extensions.is(public.server_read_ticket_email_access(repeat('a',64),repeat('1',64),0,2),null::jsonb,'cannot select an ungranted source');
+select extensions.is(public.server_read_ticket_email_access(repeat('b',64),repeat('1',64)),null::jsonb,'wrong hash cannot read a collection');
+select extensions.is((public.server_read_ticket_email_access(repeat('a',64),repeat('1',64),0,1)->>'sourceKind'),'free_registration','free member delegates existing free projection');
+select extensions.is((select jsonb_agg(to_jsonb(t) order by id) from public.tickets t),(select v from proof where k='before'),'delivery and recovery do not change ticket IDs, credentials or history');
+-- Existing grants do not track subsequent reschedules.
+update public.events set starts_at=now()+interval '70 days',ends_at=now()+interval '70 days 2 hours' where id='b6200000-0000-4000-8000-000000000001';
+select extensions.is((public.server_read_ticket_email_access(repeat('a',64),repeat('1',64))->>'expiresAt')::timestamptz,(select (v->>'expiresAt')::timestamptz from proof where k='context'),'reading after reschedule never extends expiry');
+select extensions.throws_ok($$update private.ticket_email_grants set expires_at=expires_at+interval '1 day'$$,'P0001','Immutable email grant','stored expiry cannot be rewritten');
+select extensions.throws_ok($$delete from private.ticket_email_members$$,'P0001','Unexpired access must be retained','unexpired members survive retention');
+-- Public callers cannot reach service access or outbox RPCs.
+select extensions.ok(not has_function_privilege('anon','public.server_read_ticket_email_access(text,text,integer,integer)','execute'),'anonymous cannot bypass Edge access boundary');
+select extensions.ok(not has_function_privilege('authenticated','public.server_claim_ticket_email()','execute'),'organizer cannot claim encrypted outbox');
+set local role authenticated;
+select extensions.is(public.request_ticket_email_resend('b6200000-0000-4000-8000-000000000001','free_registration',(select (v->>'registrationId')::uuid from proof where k='receipt'),'b6700000-0000-4000-8000-000000000001')->>'kind','queued','owner can enqueue resend to recorded email');
+reset role;
+select * from extensions.finish();
+rollback;

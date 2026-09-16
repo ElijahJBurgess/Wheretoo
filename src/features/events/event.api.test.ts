@@ -252,6 +252,11 @@ describe('owned event API', () => {
     )
   })
 
+  it.each([null, {}, 'bad'])('rejects a malformed event list instead of claiming the organizer has no events: %j', async (data) => {
+    order.mockResolvedValue({ data, error: null })
+    await expect(listOwnedEvents('organizer-1')).rejects.toThrow()
+  })
+
   it('maps a persisted database row to the single editor form contract', () => {
     expect(eventRowToFormValues(event)).toEqual({
       ...values,

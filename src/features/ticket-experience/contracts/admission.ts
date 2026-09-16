@@ -6,6 +6,7 @@ export type AdmissionOutcome =
   | 'wrong_event'
   | 'invalid'
   | 'network_error'
+  | 'context_unavailable'
 
 export type AdmissionCheckResult = {
   outcome: AdmissionOutcome

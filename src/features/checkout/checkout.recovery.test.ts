@@ -1,0 +1,125 @@
+import { beforeEach, expect, it, vi } from 'vitest'
+import { getOrCreateCheckoutAttempt, getStoredCheckoutAttempt, getVerifiedCheckoutAssociation } from './checkout.attempt'
+import { submitCheckoutAttempt, cancelCheckoutAttempt, releaseRejectedCheckoutAttempt } from './checkout.recovery'
+const { createCheckout, cancelCheckout, getOrderConfirmation } = vi.hoisted(() => ({ createCheckout: vi.fn(), cancelCheckout: vi.fn(), getOrderConfirmation: vi.fn() }))
+vi.mock('./checkout.api', () => ({ createCheckout, cancelCheckout }))
+vi.mock('../orders/order.api', () => ({ getOrderConfirmation }))
+const submission = { eventId: 'eb0fd9d5-d7d5-45dd-a99f-0c8a191bdc6f', buyerName: 'Buyer', buyerEmail: 'buyer@example.com', items: [{ tierId: '900a9142-9111-4f87-84d5-b8545a94c7fb', quantity: 2 }] }
+beforeEach(() => { sessionStorage.clear(); vi.resetAllMocks() })
+it('records submission before transport and holds identity after a timeout', async () => {
+  createCheckout.mockImplementation(() => { expect(getStoredCheckoutAttempt(submission.eventId)?.lifecycle).toBe('submitted'); throw new Error('timeout') })
+  const result = await submitCheckoutAttempt(submission, submission.eventId)
+  expect(result.kind).toBe('unknown')
+  await expect(getOrCreateCheckoutAttempt({ ...submission, buyerEmail: 'changed@example.com' })).rejects.toThrow()
+  expect(getVerifiedCheckoutAssociation(result.bearer!)?.selectionPath).toBe(`/events/${submission.eventId}/tickets?item=900a9142-9111-4f87-84d5-b8545a94c7fb%3A2`)
+})
+it('checks status and never creates on unknown retry status', async () => {
+  createCheckout.mockRejectedValue(new Error('timeout'))
+  await submitCheckoutAttempt(submission, submission.eventId)
+  getOrderConfirmation.mockRejectedValue({ code: 'ORDER_NOT_FOUND' })
+  expect((await submitCheckoutAttempt(submission, submission.eventId)).kind).toBe('unknown')
+  expect(createCheckout).toHaveBeenCalledTimes(1)
+})
+it('requires explicit same-input replay after a successful status check', async () => {
+  createCheckout.mockRejectedValueOnce(new Error('timeout')).mockResolvedValueOnce('https://checkout.stripe.com/c/pay/cs_test_original')
+  const first = await submitCheckoutAttempt(submission, submission.eventId)
+  getOrderConfirmation.mockResolvedValue({ status: 'processing' })
+  expect((await submitCheckoutAttempt(submission, submission.eventId)).kind).toBe('order')
+  expect(createCheckout).toHaveBeenCalledTimes(1)
+  const replay = await submitCheckoutAttempt(submission, submission.eventId, true)
+  expect(replay.kind).toBe('hosted')
+  expect(createCheckout.mock.calls[1]).toEqual(createCheckout.mock.calls[0])
+  expect(replay.bearer).toBe(first.bearer)
+})
+it('allows an explicit edit only after the first definitive stock rejection', async () => {
+  createCheckout.mockRejectedValue({ code: 'TIER_SOLD_OUT' })
+  const result = await submitCheckoutAttempt(submission, submission.eventId)
+  expect(result.kind).toBe('stock')
+  expect(releaseRejectedCheckoutAttempt(result.bearer!)).toBe(true)
+  await expect(getOrCreateCheckoutAttempt({ ...submission, buyerEmail: 'other@example.com' })).resolves.toBeDefined()
+})
+it('does not unlock an attempt rejected for stock after an earlier uncertainty', async () => {
+  createCheckout.mockRejectedValueOnce(new Error('timeout')).mockRejectedValueOnce({ code: 'TIER_SOLD_OUT' })
+  const first = await submitCheckoutAttempt(submission, submission.eventId)
+  getOrderConfirmation.mockResolvedValue({ status: 'processing' })
+  const retry = await submitCheckoutAttempt(submission, submission.eventId, true)
+  expect(retry.kind).toBe('unknown')
+  expect(releaseRejectedCheckoutAttempt(first.bearer!)).toBe(false)
+})
+it('keeps an expired database attempt locked until strict cancellation succeeds', async () => {
+  createCheckout.mockRejectedValue(new Error('timeout'))
+  const first = await submitCheckoutAttempt(submission, submission.eventId)
+  getOrderConfirmation.mockResolvedValue({ status: 'expired' })
+  cancelCheckout.mockRejectedValue(new Error('provider uncertain'))
+  expect((await cancelCheckoutAttempt(first.bearer!)).kind).toBe('order')
+  await expect(getOrCreateCheckoutAttempt({ ...submission, buyerEmail: 'other@example.com' })).rejects.toThrow()
+  cancelCheckout.mockResolvedValue(undefined)
+  expect((await cancelCheckoutAttempt(first.bearer!)).kind).toBe('cancelled')
+  await expect(getOrCreateCheckoutAttempt({ ...submission, buyerEmail: 'other@example.com' })).resolves.toBeDefined()
+})
+it('reconciles cancellation losing a race to paid without clearing identity', async () => {
+  createCheckout.mockRejectedValue(new Error('timeout'))
+  const first = await submitCheckoutAttempt(submission, submission.eventId)
+  cancelCheckout.mockRejectedValue(new Error('complete'))
+  getOrderConfirmation.mockResolvedValue({ status: 'paid' })
+  const result = await cancelCheckoutAttempt(first.bearer!)
+  expect(result.kind === 'order' && result.order.status).toBe('paid')
+  expect(getStoredCheckoutAttempt(submission.eventId)?.confirmationBearer).toBe(first.bearer)
+})
+it('deduplicates concurrent submission and cancellation never overlaps its creation', async () => {
+  let finish!: (url: string) => void
+  createCheckout.mockImplementation(() => new Promise<string>((resolve) => { finish = resolve }))
+  const first = submitCheckoutAttempt(submission, submission.eventId)
+  const second = submitCheckoutAttempt(submission, submission.eventId)
+  await vi.waitFor(() => expect(createCheckout).toHaveBeenCalledTimes(1))
+  const bearer = getStoredCheckoutAttempt(submission.eventId)!.confirmationBearer
+  const cancel = cancelCheckoutAttempt(bearer)
+  expect(cancelCheckout).not.toHaveBeenCalled()
+  finish('https://checkout.stripe.com/c/pay/cs_test_original')
+  await Promise.all([first, second, cancel])
+  expect(cancelCheckout).toHaveBeenCalledTimes(1)
+})
+it('refuses to recreate a replay identity after all session storage disappears', async () => {
+  createCheckout.mockRejectedValueOnce(new Error('timeout'))
+  const first = await submitCheckoutAttempt(submission, submission.eventId)
+  sessionStorage.clear()
+  getOrderConfirmation.mockResolvedValue({ status: 'processing' })
+  await expect(submitCheckoutAttempt(submission, submission.eventId, true, first.bearer)).rejects.toThrow()
+  expect(createCheckout).toHaveBeenCalledTimes(1)
+  expect(sessionStorage.length).toBe(0)
+})
+it('rejects a different concurrent submission instead of giving it the original hosted result', async () => {
+  let finish!: (url: string) => void
+  createCheckout.mockImplementation(() => new Promise<string>((resolve) => { finish = resolve }))
+  const first = submitCheckoutAttempt(submission, submission.eventId)
+  await vi.waitFor(() => expect(createCheckout).toHaveBeenCalledTimes(1))
+  const different = submitCheckoutAttempt({ ...submission, buyerEmail: 'different@example.com' }, submission.eventId)
+  finish('https://checkout.stripe.com/c/pay/cs_test_original')
+  await expect(different).rejects.toThrow()
+  await first
+  expect(createCheckout).toHaveBeenCalledTimes(1)
+})
+it.each(['lifecycle', 'verifiedEventId', 'selection'])('does not invoke creation when %s was not persisted', async (field) => {
+  await getOrCreateCheckoutAttempt(submission)
+  const write = Storage.prototype.setItem
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+    if (key.endsWith(submission.eventId)) { const record = JSON.parse(value); delete record[field]; write.call(this, key, JSON.stringify(record)) }
+    else write.call(this, key, value)
+  })
+  await expect(submitCheckoutAttempt(submission, submission.eventId)).rejects.toThrow()
+  expect(createCheckout).not.toHaveBeenCalled()
+  vi.restoreAllMocks()
+})
+it.each(['EVENT_NOT_SELLABLE', 'CONNECT_NOT_READY', 'CONNECT_ACTION_REQUIRED'])('classifies first definitive %s as unavailable without inventing sales closure', async (code) => {
+  createCheckout.mockRejectedValue({ code })
+  const result = await submitCheckoutAttempt(submission, submission.eventId)
+  expect(result.kind).toBe('unavailable')
+  expect(releaseRejectedCheckoutAttempt(result.bearer!)).toBe(true)
+})
+it('keeps generic availability rejection unknown after an earlier uncertainty', async () => {
+  createCheckout.mockRejectedValueOnce(new Error('timeout')).mockRejectedValueOnce({ code: 'EVENT_NOT_SELLABLE' })
+  const first = await submitCheckoutAttempt(submission, submission.eventId)
+  getOrderConfirmation.mockResolvedValue({ status: 'processing' })
+  expect((await submitCheckoutAttempt(submission, submission.eventId, true, first.bearer)).kind).toBe('unknown')
+  expect(releaseRejectedCheckoutAttempt(first.bearer!)).toBe(false)
+})

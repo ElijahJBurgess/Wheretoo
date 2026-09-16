@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { AsyncState } from '../../components/ui/AsyncState'
+import { ReadState } from '../../components/ui/ReadState'
 import { Button } from '../../components/ui/Button'
 import { useStaffContext } from './staffContext'
 import { ModerationApiError } from './moderation.api'
@@ -114,12 +114,12 @@ export function ModerationCasePage() {
     [caseQuery.data],
   )
 
-  if (caseQuery.isPending) return <AsyncState status="loading" title="Loading moderation case" />
+  if (caseQuery.isPending) return <ReadState headingAs="h1" paused={caseQuery.fetchStatus === 'paused'} status="loading" skeleton="detail-fields" title="Loading moderation case" />
   if (caseQuery.isError) {
-    return <AsyncState action={<Button onClick={() => void caseQuery.refetch()}>Try again</Button>} description="Check your connection, then try again." status="error" title="Moderation case could not load" />
+    return <ReadState headingAs="h1" action={<Button onClick={() => void caseQuery.refetch()}>Try again</Button>} description="Check your connection, then try again." status="unavailable" title="Moderation case could not load" />
   }
   if (caseQuery.data === null || caseQuery.data === undefined) {
-    return <AsyncState action={<Link className="ui-button ui-button--secondary" to="/moderation">Back to queue</Link>} description="The event may no longer exist or may not be available to staff." status="empty" title="Moderation case not found" />
+    return <ReadState headingAs="h1" action={<Link className="ui-button ui-button--secondary" to="/moderation">Back to queue</Link>} description="The event may no longer exist or may not be available to staff." status="unavailable" title="Moderation case unavailable" />
   }
 
   const currentCase = caseQuery.data

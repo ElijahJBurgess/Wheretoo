@@ -75,10 +75,22 @@ export const orderDetailSchema = orderSummarySchema.extend({
       issuedAt: z.iso.datetime({ offset: true }),
     }).refine((ticket) => (ticket.status === 'used') === (ticket.usedAt !== null)),
   ),
+  paymentAfterInvalidation: z.literal(true).optional(),
   refundState: z.enum(['available', 'pending', 'refunded', 'unavailable', 'recoverable']),
   admissionEligible: z.boolean(),
-}).refine((order) => order.tickets.length === (order.paidAt ? order.quantity : 0))
-export type OrderDetail = z.infer<typeof orderDetailSchema>
+}).refine((order) => order.paymentAfterInvalidation === true
+  ? order.status === 'requires_review' && order.paidAt !== null && order.quantity > 0 && order.totalMinor > 0
+    && order.tickets.length === 0 && !order.admissionEligible && order.refundState === 'unavailable'
+  : order.tickets.length === (order.paidAt ? order.quantity : 0))
+export const orderDetailV2Schema = orderDetailSchema.safeExtend({
+  subtotalMinor: count,
+  taxMinor: count,
+  items: z.array(z.strictObject({ tierName: z.string(), quantity: count.positive(), subtotalMinor: count, unitAmountMinor: count })),
+}).refine(order => order.subtotalMinor + order.taxMinor === order.totalMinor
+  && order.items.reduce((sum, item) => sum + item.subtotalMinor, 0) === order.subtotalMinor
+  && order.items.every(item => item.unitAmountMinor * item.quantity === item.subtotalMinor))
+export type OrderDetail = z.infer<typeof orderDetailV2Schema>
+export type OrderFilter = 'all' | 'paid' | 'refunded'
 export const manualAdmissionSchema = z.union([
   z.strictObject({
     outcome: z.enum(['admitted', 'already_used']),
@@ -94,3 +106,20 @@ export const manualAdmissionSchema = z.union([
   z.strictObject({ outcome: z.enum(['invalid', 'wrong_event']) }),
 ])
 export const refundResponseSchema = z.strictObject({ outcome: z.enum(['pending', 'refunded']) })
+
+export const admissionCursorSchema = z.strictObject({
+  createdAt: z.iso.datetime({ offset: true }), orderId: z.uuid(), orderItemId: z.uuid(),
+  unitSequence: z.number().int().min(1).max(10),
+})
+export const admissionRowSchema = z.strictObject({
+  ticketId: z.uuid(), orderId: z.uuid(), orderNumber: z.string().min(1),
+  buyerName: z.string(), buyerEmail: z.string(), admissionLabel: z.string().min(1).max(80),
+  ticketPosition: z.number().int().min(1).max(10), ticketTotal: z.number().int().min(1).max(10),
+  status: z.enum(['valid', 'used', 'refunded', 'cancelled']), usedAt: z.iso.datetime({ offset: true }).nullable(),
+}).refine(row => row.ticketPosition <= row.ticketTotal && (row.status === 'used') === (row.usedAt !== null))
+export const admissionPageSchema = z.strictObject({
+  admissions: z.array(admissionRowSchema).max(50), nextCursor: admissionCursorSchema.nullable(),
+})
+export type AdmissionCursor = z.infer<typeof admissionCursorSchema>
+export type AdmissionPage = z.infer<typeof admissionPageSchema>
+export type ManualAdmissionResult = z.infer<typeof manualAdmissionSchema>

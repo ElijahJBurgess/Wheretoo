@@ -12,7 +12,6 @@ import { signUpSchema, type SignUpInput } from './auth.schemas'
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Account creation failed. Try again.'
 }
-
 export function SignUpPage() {
   const navigate = useNavigate()
   const [serverError, setServerError] = useState<string | null>(null)
@@ -44,30 +43,30 @@ export function SignUpPage() {
   }, () => setServerError(null))
 
   return (
-    <AuthLayout>
-      <section aria-labelledby="signup-title" className="auth-panel">
-        <p className="auth-panel__eyebrow">Organizer access</p>
-        <h1 id="signup-title">Create organizer account</h1>
-        <p className="auth-panel__intro">Start with your account. You’ll set up your public organizer profile next.</p>
+    <AuthLayout hero headerAction={<Link className="onboarding__header-link" to="/auth/sign-in">Log in</Link>}>
+      <section aria-labelledby="signup-title" className="onboarding-form onboarding-form--signup">
+        <h1 id="signup-title">Create your<br /> organizer account</h1>
+        <p className="onboarding__intro">Bring people together.<br />We’ll handle the rest.</p>
         <FormErrorSummary
           errors={summaryErrors}
           title={serverError ? 'Account creation failed' : 'Check the highlighted fields'}
         />
         <form className="auth-form" noValidate onSubmit={submit}>
           <Field error={errors.fullName?.message} label="Full name" name="fullName">
-            <input autoComplete="name" {...register('fullName')} />
+            <input autoComplete="name" placeholder="Your full name" {...register('fullName')} />
           </Field>
           <Field error={errors.email?.message} label="Email" name="email">
-            <input autoComplete="email" inputMode="email" type="email" {...register('email')} />
+            <input autoComplete="email" inputMode="email" placeholder="you@yourcompany.com" type="email" {...register('email')} />
           </Field>
           <Field error={errors.password?.message} label="Password" name="password">
-            <input autoComplete="new-password" type="password" {...register('password')} />
+            <input autoComplete="new-password" placeholder="Create a password" type="password" {...register('password')} />
           </Field>
           <Button disabled={isSubmitting} type="submit">
-            {isSubmitting ? 'Creating account…' : 'Create organizer account'}
+            {isSubmitting ? 'Creating account…' : 'Create account'}
           </Button>
         </form>
-        <p className="auth-panel__alternate">Already have an organizer account? <Link to="/auth/sign-in">Sign in</Link></p>
+        <p className="onboarding__legal">By creating an account, you agree to our <Link to="/organizer-terms">Organizer Terms</Link> and Privacy Policy.</p>
+        <p className="onboarding__alternate">Already have an account? <Link to="/auth/sign-in">Log in</Link></p>
       </section>
     </AuthLayout>
   )

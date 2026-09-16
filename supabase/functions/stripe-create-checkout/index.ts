@@ -1118,6 +1118,12 @@ export function createStripeCreateCheckoutHandler(
         failureStage = "stripe_session_response";
         try {
           validated = validateSession(sessionValue, expected);
+          if (
+            validated.id !== reservation.existingCheckoutSessionId ||
+            validated.status !== "open"
+          ) {
+            throw new CheckoutHttpError(502, "INVALID_STRIPE_SESSION");
+          }
         } catch (error) {
           failureReleaseOrigin = "attached-session";
           throw error;

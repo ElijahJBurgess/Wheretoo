@@ -1,3 +1,5 @@
+import { freeCollectionFromProjection } from "./freeCollection.ts";
+import { hashFreeLocator } from "../_shared/freeRegistration.ts";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getCorsHeaders, handleCorsPreflight } from "../_shared/cors.ts";
 import { getServiceClient } from "../_shared/database.ts";
@@ -13,29 +15,10 @@ import {
 } from "../stripe-create-checkout/index.ts";
 
 type TicketStatus = "valid" | "used" | "refunded" | "cancelled";
-type TicketDisplay =
-  & {
-    selector: string;
-    eventId: string;
-    eventName: string;
-    startsAt: string;
-    endsAt: string;
-    venueName: string;
-    admissionLabel: string;
-    position: number;
-    totalInCollection: number;
-    attendeeLabel?: string;
-    directionsUrl?: string;
-  }
-  & (
-    | { status: "valid"; admissionCredential: string }
-    | { status: Exclude<TicketStatus, "valid">; admissionCredential: null }
-  );
-type TicketCollection = {
-  collectionLabel: string;
-  eventId: string;
-  tickets: readonly TicketDisplay[];
-};
+import type {
+  TicketCollection,
+  TicketDisplay,
+} from "../../../src/features/ticket-experience/contracts/ticketCollection.ts";
 type TicketCollectionResult =
   | { kind: "ready"; collection: TicketCollection }
   | { kind: "empty"; eventId: string }
@@ -45,6 +28,7 @@ type TicketCollectionResult =
 export interface TicketCollectionDependencies {
   appOrigin: string;
   findCollection(tokenHash: string): Promise<unknown>;
+  findFreeCollection?(tokenHash: string): Promise<unknown>;
   getCredentialSecret(): Uint8Array;
 }
 
@@ -62,6 +46,14 @@ function count(value: unknown): value is number {
 function label(value: unknown): value is string {
   return typeof value === "string" && value.trim() === value &&
     [...value].length >= 1 && [...value].length <= 80;
+}
+function validTimezone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
 }
 function timestamp(value: unknown): value is string {
   return typeof value === "string" && Number.isFinite(Date.parse(value));
@@ -142,10 +134,14 @@ function hashesEqual(derived: Uint8Array, storedHex: string): boolean {
   return difference === 0;
 }
 
-async function collectionFromProjection(
+export async function collectionFromProjection(
   value: unknown,
   getSecret: () => Uint8Array,
 ): Promise<TicketCollection | null> {
+  const extended = isRecord(value) &&
+    Object.hasOwn(value, "event_facts_available");
+  const factsAvailable = !extended ||
+    (isRecord(value) && value.event_facts_available === true);
   if (
     !isRecord(value) ||
     !exact(value, [
@@ -159,12 +155,37 @@ async function collectionFromProjection(
       "quantity",
       "items",
       "tickets",
+      ...(extended
+        ? [
+          "event_facts_available",
+          "event_updated",
+          "event_timezone",
+          "event_address",
+        ]
+        : []),
     ]) ||
     typeof value.event_id !== "string" || !uuid.test(value.event_id) ||
-    typeof value.event_title !== "string" ||
-    value.event_title.trim().length === 0 ||
-    !timestamp(value.event_starts_at) || !timestamp(value.event_ends_at) ||
-    Date.parse(value.event_ends_at) <= Date.parse(value.event_starts_at) ||
+    (extended &&
+      (typeof value.event_facts_available !== "boolean" ||
+        typeof value.event_updated !== "boolean")) ||
+    (factsAvailable
+      ? typeof value.event_title !== "string" ||
+        value.event_title.trim().length === 0 ||
+        !timestamp(value.event_starts_at) || !timestamp(value.event_ends_at) ||
+        Date.parse(value.event_ends_at) <= Date.parse(value.event_starts_at) ||
+        (extended &&
+          (typeof value.event_timezone !== "string" ||
+            !validTimezone(value.event_timezone) ||
+            (value.event_address !== null &&
+              typeof value.event_address !== "string")))
+      : [
+        value.event_title,
+        value.event_starts_at,
+        value.event_ends_at,
+        value.event_venue_name,
+        value.event_timezone,
+        value.event_address,
+      ].some((v) => v !== null)) ||
     (value.event_venue_name !== null &&
       typeof value.event_venue_name !== "string") ||
     (value.order_status !== "paid" && value.order_status !== "refunded") ||
@@ -206,8 +227,12 @@ async function collectionFromProjection(
     : "valid";
   const ids = new Set<string>();
   const hashes = new Set<string>();
-  const verifiedSources: { id: string; status: TicketStatus; hash: string }[] =
-    [];
+  const verifiedSources: {
+    id: string;
+    status: TicketStatus;
+    hash: string;
+    usedAt?: string;
+  }[] = [];
   for (const [index, ticket] of value.tickets.entries()) {
     const source = expected[index];
     if (
@@ -219,6 +244,7 @@ async function collectionFromProjection(
         "admission_label",
         "status",
         "credential_hash",
+        ...(extended ? ["used_at"] : []),
       ]) ||
       typeof ticket.id !== "string" || !uuid.test(ticket.id) ||
       ids.has(ticket.id) ||
@@ -228,7 +254,11 @@ async function collectionFromProjection(
       (ticket.status !== "used" && ticket.status !== allowedUnusedStatus) ||
       typeof ticket.credential_hash !== "string" ||
       !/^[a-f0-9]{64}$/.test(ticket.credential_hash) ||
-      hashes.has(ticket.credential_hash)
+      hashes.has(ticket.credential_hash) ||
+      (extended &&
+        (ticket.status === "used"
+          ? !timestamp(ticket.used_at)
+          : ticket.used_at !== null))
     ) return null;
     ids.add(ticket.id);
     hashes.add(ticket.credential_hash);
@@ -236,6 +266,9 @@ async function collectionFromProjection(
       id: ticket.id,
       status: ticket.status === "used" ? "used" : allowedUnusedStatus,
       hash: ticket.credential_hash,
+      ...(extended && ticket.status === "used"
+        ? { usedAt: ticket.used_at as string }
+        : {}),
     });
   }
 
@@ -251,10 +284,32 @@ async function collectionFromProjection(
     tickets.push({
       selector: ticket.id,
       eventId: value.event_id,
-      eventName: value.event_title,
-      startsAt: value.event_starts_at,
-      endsAt: value.event_ends_at,
-      venueName: value.event_venue_name ?? "Venue to be announced",
+      eventName: factsAvailable
+        ? String(value.event_title)
+        : "Event details unavailable",
+      startsAt: factsAvailable ? value.event_starts_at as string : null,
+      endsAt: factsAvailable ? value.event_ends_at as string : null,
+      venueName: factsAvailable
+        ? value.event_venue_name as string | null ?? "Venue to be announced"
+        : "Venue unavailable",
+      ...(extended
+        ? {
+          eventFactsAvailable: factsAvailable,
+          eventUpdated: value.event_updated as boolean,
+          eventStatus: value.event_status as "published" | "cancelled",
+          ...(factsAvailable
+            ? { timezone: value.event_timezone as string }
+            : {}),
+          ...(ticket.usedAt ? { usedAt: ticket.usedAt } : {}),
+          ...(typeof value.event_address === "string" && value.event_address
+            ? {
+              directionsUrl:
+                "https://www.google.com/maps/search/?api=1&query=" +
+                encodeURIComponent(value.event_address),
+            }
+            : {}),
+        }
+        : {}),
       admissionLabel: expected[index].label,
       position: index + 1,
       totalInCollection: value.quantity,
@@ -265,7 +320,9 @@ async function collectionFromProjection(
   }
   return allHashesMatch
     ? {
-      collectionLabel: `${value.event_title} tickets`,
+      collectionLabel: `${
+        factsAvailable ? value.event_title : "Event"
+      } tickets`,
       eventId: value.event_id,
       tickets,
     }
@@ -291,7 +348,20 @@ export function createTicketCollectionHandler(
       return response({ kind: "unavailable" }, 405, headers);
     }
     try {
-      const tokenHash = await hashConfirmationBearer(await readBearer(request));
+      const bearer = await readBearer(request);
+      if (bearer.length === 48 && bearer.startsWith("rsvp_")) {
+        const hash = await hashFreeLocator(bearer);
+        const collection = dependencies.findFreeCollection
+          ? await freeCollectionFromProjection(
+            await dependencies.findFreeCollection(hash),
+            dependencies.getCredentialSecret,
+          )
+          : null;
+        return collection
+          ? response({ kind: "ready", collection }, 200, headers)
+          : response({ kind: "unavailable" }, 404, headers);
+      }
+      const tokenHash = await hashConfirmationBearer(bearer);
       const collection = await collectionFromProjection(
         await dependencies.findCollection(tokenHash),
         dependencies.getCredentialSecret,
@@ -310,6 +380,14 @@ export function handler(request: Request): Promise<Response> {
   return createTicketCollectionHandler({
     appOrigin: getAppBaseUrl(),
     findCollection: defaultFindCollection,
+    findFreeCollection: async (hash) => {
+      const { data, error } = await getServiceClient().rpc(
+        "server_lookup_free_ticket_collection",
+        { p_access_hash: hash },
+      );
+      if (error) throw new Error("Collection unavailable");
+      return data;
+    },
     getCredentialSecret: getTicketCredentialSecret,
   })(request);
 }

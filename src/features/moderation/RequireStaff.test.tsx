@@ -48,6 +48,12 @@ describe('RequireStaff', () => {
     expect(screen.getByText('Moderation access required')).toBeInTheDocument()
     expect(screen.queryByText('protected moderation')).not.toBeInTheDocument()
   })
+  it('does not classify a missing role response as authoritative denial', () => {
+    useStaffRole.mockReturnValue({ data: undefined, isPending: false, isError: false, refetch })
+    renderGuard()
+    expect(screen.getByRole('alert')).toHaveTextContent('Moderation access could not be confirmed')
+    expect(screen.queryByText('Moderation access required')).not.toBeInTheDocument()
+  })
 
   it('retries a bounded role-query failure without rendering staff content', async () => {
     const user = userEvent.setup()

@@ -7,8 +7,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const { clearCheckoutAttemptForConfirmation, retry, useOrderConfirmation } = vi.hoisted(() => ({
   clearCheckoutAttemptForConfirmation: vi.fn(), retry: vi.fn(), useOrderConfirmation: vi.fn(),
 }))
+vi.mock('../ticket-delivery/delivery.public-api', () => ({ publicTicketDeliveryApi: { status: () => new Promise(() => {}) } }))
 vi.mock('./order.queries', () => ({ useOrderConfirmation }))
-vi.mock('../checkout/checkout.attempt', () => ({ clearCheckoutAttemptForConfirmation }))
+vi.mock('../checkout/checkout.attempt', async (original) => ({ ...(await original<typeof import('../checkout/checkout.attempt')>()), clearCheckoutAttemptForConfirmation }))
 
 import { OrderConfirmationPage } from './OrderConfirmationPage'
 
@@ -76,10 +77,10 @@ describe('OrderConfirmationPage', () => {
 
   it.each([
     ['paid', "You're all set", 'Payment confirmed'],
-    ['payment_failed', 'Payment could not be confirmed', 'No ticket was issued'],
-    ['cancelled', 'Checkout cancelled', 'No payment was completed'],
-    ['expired', 'Checkout expired', 'Choose a ticket again'],
-    ['refunded', 'This order was refunded', 'This ticket is no longer valid'],
+    ['payment_failed', 'Payment failed', 'No ticket was issued'],
+    ['cancelled', 'Checkout cancelled', 'This checkout was cancelled'],
+    ['expired', 'Checkout expired', 'This checkout window has ended'],
+    ['refunded', 'This order was refunded', 'The full order refund is confirmed'],
     ['requires_review', 'Order needs review', 'reviewing this order'],
   ] as const)('renders persisted %s truth with one semantic heading', (status, heading, copy) => {
     useOrderConfirmation.mockReturnValue({ data: { ...confirmation, status }, isPending: false, isError: false, isTimedOut: false, retry })
@@ -99,7 +100,7 @@ describe('OrderConfirmationPage', () => {
     expect(screen.getByText('$100.00', { selector: '.confirmation-card__total' })).toBeInTheDocument()
     expect(screen.getByText('Civic Center Plaza')).toBeInTheDocument()
     expect(screen.getByText('WT-260901-0042')).toBeInTheDocument()
-    expect(screen.queryByText(/email|buyer|fee|stripe|destination|ticket id|order item|unit sequence/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/buyer|fee|stripe|destination|ticket id|order item|unit sequence/i)).not.toBeInTheDocument()
     expect(document.body).not.toHaveTextContent('c9300000-0000-4000-8000-000000000001')
   })
 
@@ -109,14 +110,21 @@ describe('OrderConfirmationPage', () => {
     expect(clearCheckoutAttemptForConfirmation).not.toHaveBeenCalled()
   })
 
-  it.each(['paid', 'payment_failed', 'cancelled', 'expired', 'refunded'] as const)(
-    'clears the matching tab attempt after persisted %s truth',
+  it.each(['payment_failed', 'cancelled', 'expired'] as const)(
+    'does not unlock replacement merely from persisted %s truth',
     (status) => {
       useOrderConfirmation.mockReturnValue({ data: { ...confirmation, status }, isPending: false, isError: false, isTimedOut: false, retry })
       renderPage()
-      expect(clearCheckoutAttemptForConfirmation).toHaveBeenCalledWith(token)
+      expect(clearCheckoutAttemptForConfirmation).not.toHaveBeenCalled()
     },
   )
+
+  it.each(['paid', 'refunded'] as const)('releases a completed %s attempt independently of unresolved email delivery', (status) => {
+    useOrderConfirmation.mockReturnValue({ data: { ...confirmation, status }, isPending: false, isError: false, isTimedOut: false, retry })
+    renderPage()
+    expect(clearCheckoutAttemptForConfirmation).toHaveBeenCalledWith(token)
+    if (status === 'paid') expect(screen.getByRole('link', { name: 'View tickets' })).toHaveAttribute('href', `/tickets/${token}`)
+  })
 
   it('formats a same-day schedule once in the event timezone', () => {
     renderPage()
@@ -171,8 +179,8 @@ describe('OrderConfirmationPage', () => {
 
   it.each([
     [{ data: undefined, isPending: true, isError: false, isTimedOut: false }, 'Loading order', 'status'],
-    [{ data: undefined, isPending: false, isError: true, isTimedOut: false }, 'Order could not load', 'alert'],
-    [{ data: null, isPending: false, isError: false, isTimedOut: false }, 'Order not found', 'alert'],
+    [{ data: undefined, isPending: false, isError: true, isTimedOut: false }, 'Unable to confirm payment', 'alert'],
+    [{ data: null, isPending: false, isError: false, isTimedOut: false }, 'Unable to confirm payment', 'alert'],
   ] as const)('gives every standalone state one h1 and safe recovery', (state, heading, role) => {
     useOrderConfirmation.mockReturnValue({ ...state, retry })
     renderPage()
@@ -180,4 +188,15 @@ describe('OrderConfirmationPage', () => {
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
     expect(screen.getByRole(role)).toBeInTheDocument()
   })
+})
+
+
+it('attaches authorized refund history without presenting a new purchase or active ticket', () => {
+  useOrderConfirmation.mockReturnValue({ data: { ...confirmation, status: 'refunded' }, isPending: false, isError: false, isTimedOut: false, retry })
+  renderPage()
+  expect(screen.getByText('Order #WT-260901-0042')).toBeVisible()
+  expect(screen.getByText(/Previously used tickets keep their check-in history/)).toBeVisible()
+  expect(screen.queryByRole('link', { name: 'View tickets' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Add to calendar' })).not.toBeInTheDocument()
+  expect(document.body).not.toHaveTextContent(token)
 })

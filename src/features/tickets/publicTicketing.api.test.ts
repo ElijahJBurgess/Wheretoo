@@ -60,6 +60,17 @@ const freeProjection = {
 describe('public ticketing API', () => {
   beforeEach(() => rpc.mockClear())
 
+  it.each([null, {}, 'bad'])('does not turn a malformed public projection into absence or issue a fallback read: %j', async (data) => {
+    rpc.mockResolvedValue({ data, error: null })
+    await expect(getPublicEventTicketing(eventId)).rejects.toThrow()
+    expect(rpc).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects a malformed free-event fallback instead of displaying not-found', async () => {
+    rpc.mockResolvedValueOnce({ data: [], error: null }).mockResolvedValueOnce({ data: null, error: null })
+    await expect(getPublicEventTicketing(eventId)).rejects.toThrow()
+  })
+
   it('uses an isolated nonpersistent anonymous auth client to avoid sharing GoTrue storage', () => {
     expect(createClient).toHaveBeenCalledWith(
       'https://whereto.example.supabase.co',
@@ -110,6 +121,14 @@ describe('public ticketing API', () => {
 
     await expect(getPublicEventTicketing(eventId)).resolves.toEqual(projection)
     expect(rpc).toHaveBeenCalledTimes(1)
+  })
+
+  it('accepts the existing RPC free-event shell with exactly zero paid tiers', async () => {
+    rpc.mockResolvedValue({ data: [{ event: freeProjection, tiers: [] }], error: null })
+    await expect(getPublicEventTicketing(eventId)).resolves.toEqual({ event: freeProjection, tiers: [] })
+    expect(rpc).toHaveBeenCalledTimes(1)
+    rpc.mockResolvedValue({ data: [{ event: freeProjection, tiers: projection.tiers }], error: null })
+    await expect(getPublicEventTicketing(eventId)).rejects.toMatchObject({ code: 'INVALID_RESPONSE' })
   })
 
   it('does not hide a paid-projection error behind a free-event fallback', async () => {

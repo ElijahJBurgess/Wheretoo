@@ -1,0 +1,15 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions;
+select no_plan();
+select has_table('public','free_registration_requests','durable request receipts exist');
+select has_table('public','free_registrations','free registrations exist separately from paid orders');
+select has_column('public','tickets','registration_id','existing tickets have free source');
+select has_function('public','server_confirm_free_registration',array['uuid','uuid','text','text','integer','text','jsonb'],'atomic registration contract exists');
+select has_function('public','server_resolve_free_registration',array['uuid','text'],'proof-bound resolution exists');
+select has_function('public','server_lookup_free_ticket_collection',array['text'],'free private collection exists');
+select has_function('public','get_public_free_rsvp',array['uuid'],'public eligibility and capacity projection exists');
+select has_function('public','get_organizer_free_registration_metrics',array['uuid'],'owner free metrics exists');
+select has_function('public','get_organizer_free_admissions',array['uuid','text','integer','jsonb'],'owner narrow search exists');
+select * from finish();
+rollback;

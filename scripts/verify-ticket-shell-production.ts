@@ -168,7 +168,11 @@ function builtFiles(directory: string): string[] {
 }
 
 function containsResendTooling(contents: string) {
-  const matches = contents.matchAll(/\bresend\b/gi)
+  // Product copy and domain names now legitimately say "resend". The source
+  // graph still forbids the SDK; built checks target provider fingerprints and
+  // executable resend calls rather than ordinary interface text.
+  if (/api\.resend\.com|\[Resend API Error\]|\b(?:new|class)\s+Resend\b/.test(contents)) return true
+  const matches = contents.matchAll(/\bresend(?=\s*\()/g)
 
   for (const match of matches) {
     const index = match.index

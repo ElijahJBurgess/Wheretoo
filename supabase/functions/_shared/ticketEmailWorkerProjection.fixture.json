@@ -1,0 +1,43 @@
+{
+  "kind": "ready",
+  "grantId": "92c38781-b675-42cc-b2b6-430515999178",
+  "payload": null,
+  "purpose": "initial",
+  "sources": [
+    {
+      "email": "guest!vip@example.invalid",
+      "endsAt": "2026-09-24T00:49:33.246523+00:00",
+      "reason": null,
+      "eventId": "a6200000-0000-4000-8000-000000000001",
+      "eligible": true,
+      "quantity": 2,
+      "sourceId": "269fe3e2-1c26-4447-9cc5-16a2b55b5cc4",
+      "startsAt": "2026-09-23T22:49:33.246523+00:00",
+      "timezone": "America/Los_Angeles",
+      "eventName": "Checkout Integrity Fulfillment Event",
+      "venueName": "Integrity Hall",
+      "admissions": [
+        {
+          "status": "used",
+          "usedAt": "2026-09-11T22:48:33.246523+00:00",
+          "position": 1,
+          "admissionLabel": "General Admission"
+        },
+        {
+          "status": "valid",
+          "usedAt": null,
+          "position": 2,
+          "admissionLabel": "VIP"
+        }
+      ],
+      "sourceKind": "paid_order",
+      "organizerId": "a6100000-0000-4000-8000-000000000001",
+      "recipientName": "Canonical Guest"
+    }
+  ],
+  "overflow": false,
+  "attemptId": "3e71c1a8-2f16-4afe-90ea-736333cd16e3",
+  "expiresAt": "2026-09-15T00:49:33.246523+00:00",
+  "preparedAt": "2026-09-11T22:49:33.527046+00:00",
+  "scheduledEndAt": "2026-09-14T00:49:33.246523+00:00"
+}

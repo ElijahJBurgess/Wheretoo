@@ -1,0 +1,22 @@
+.buyer-recovery__content { width: min(100% - 2.5rem, 36rem); margin: 4rem auto; text-align: center; }
+.buyer-recovery__mark { display: grid; place-items: center; width: 3.5rem; height: 3.5rem; margin: 0 auto 1.5rem; border: 1px solid currentColor; border-radius: 50%; font-size: 1.75rem; }
+.buyer-recovery__content h1 { font-size: clamp(1.75rem, 6vw, 2.5rem); line-height: 1.15; overflow-wrap: anywhere; }
+.buyer-recovery__content p { line-height: 1.6; }
+.buyer-recovery__actions { display: grid; gap: .75rem; margin-top: 2rem; }
+.buyer-recovery__actions .ui-button { white-space: normal; min-height: 2.75rem; }
+.buyer-recovery__selection { padding: 1rem; text-align: left; list-style: none; border-block: 1px solid #d9d6cf; }
+.buyer-recovery__selection li { margin-block: .75rem; overflow-wrap: anywhere; }
+.buyer-recovery button:focus-visible, .buyer-recovery a:focus-visible { outline: 3px solid currentColor; outline-offset: 4px; }
+@media (max-width: 390px) { .buyer-recovery__content { margin-top: 2.5rem; } }
+@media (prefers-reduced-motion: reduce) { .buyer-recovery * { animation: none !important; transition: none !important; } }
+
+/* R06 status colors distinguish uncertain payment from failure or cancellation. */
+.buyer-recovery--unknown .buyer-recovery__mark { color: #eeb457; background: #38280e; border-color: #eeb457; }
+.buyer-recovery--failure .buyer-recovery__mark { color: #ff746f; background: #301619; border-color: #ff746f; }
+.buyer-recovery--neutral .buyer-recovery__mark { color: #bdb9c9; background: #1c1b22; border-color: #aaa5b8; }
+.buyer-recovery__selection { border-color: #45404b; background: #121216; border-radius: .75rem; }
+.buyer-confirmation--processing .buyer-confirmation__seal { color: #c78cff; background: #241136; border-color: #a952ff; }
+.buyer-confirmation:is(.buyer-confirmation--cancelled, .buyer-confirmation--expired) .buyer-confirmation__seal { color: #bdb9c9; border-color: #aaa5b8; background: #1c1b22; }
+.buyer-confirmation--paid .buyer-confirmation__seal { color: #83edb1; border-color: #65d99a; background: #10281c; box-shadow: 0 0 20px #65d99a26; }
+
+.buyer-recovery__actions > .ui-button:first-child { display: flex; align-items: center; justify-content: center; width: 100%; color: #fff; background: #862bfa; border: 1px solid #ac61ff; text-decoration: none; }

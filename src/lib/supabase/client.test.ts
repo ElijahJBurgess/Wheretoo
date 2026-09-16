@@ -15,12 +15,15 @@ const { createClient, configuredClient, runtimeEnv } = vi.hoisted(() => {
   }
 })
 
-vi.mock('@supabase/supabase-js', () => ({ createClient }))
+vi.mock('@supabase/supabase-js', async importOriginal => ({ ...await importOriginal<typeof import('@supabase/supabase-js')>(), createClient }))
 vi.mock('../env', () => ({ publicEnv: runtimeEnv }))
 
+import { authTransitionLock } from '../../features/auth/authTransitions'
 import { createWheretoClient, supabase } from './client'
 
 const expectedAuthOptions = {
+  lock: authTransitionLock,
+  lockAcquireTimeout: 15_000,
   persistSession: true,
   autoRefreshToken: true,
   detectSessionInUrl: true,
@@ -39,7 +42,7 @@ describe('Supabase client boundary', () => {
     expect(createClient).toHaveBeenCalledWith(
       'https://factory.example.supabase.co',
       'factory-publishable',
-      { auth: expectedAuthOptions },
+      { global: { fetch: expect.any(Function) }, auth: { ...expectedAuthOptions, storageKey: 'sb-factory-auth-token' } },
     )
   })
 
@@ -48,7 +51,7 @@ describe('Supabase client boundary', () => {
     expect(createClient).toHaveBeenCalledWith(
       'https://runtime.example.supabase.co',
       'runtime-publishable',
-      { auth: expectedAuthOptions },
+      { global: { fetch: expect.any(Function) }, auth: { ...expectedAuthOptions, storageKey: 'sb-runtime-auth-token' } },
     )
   })
 })

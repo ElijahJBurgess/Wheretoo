@@ -10,19 +10,22 @@ const categoryLabels: Record<(typeof eventCategories)[number], string> = {
 
 type EventDetailsStepProps = {
   errors: FieldErrors<EventFormValues>
+  creation?: boolean
+  artworkPath?: string | null
   register: UseFormRegister<EventFormValues>
 }
 
-export function EventDetailsStep({ errors, register }: EventDetailsStepProps) {
+export function EventDetailsStep({ errors, register, creation = false, artworkPath }: EventDetailsStepProps) {
+  const Heading = creation ? 'h1' : 'h2'
   return (
     <div className="event-step">
       <header className="event-step__header">
         <p className="organizer-eyebrow">Stage 1</p>
-        <h2>Give the event a clear shape</h2>
+        <Heading>{creation ? 'Event Basics' : 'Give the event a clear shape'}</Heading>
         <p>Start with the public basics. Every field can stay in draft until you are ready.</p>
       </header>
       <div className="event-step__fields">
-        <Field error={errors.title?.message} label="Event title" name="title">
+        <Field error={errors.title?.message} label={creation ? 'Event name' : 'Event title'} name="title">
           <input maxLength={120} placeholder="Neighborhood night market" {...register('title')} />
         </Field>
         <Field error={errors.description?.message} label="Description" name="description">
@@ -34,14 +37,17 @@ export function EventDetailsStep({ errors, register }: EventDetailsStepProps) {
             {eventCategories.map((category) => <option key={category} value={category}>{categoryLabels[category]}</option>)}
           </select>
         </Field>
-        <fieldset className="event-choice-group">
+        {!creation ? <><fieldset className="event-choice-group">
           <legend>Admission</legend>
           <label><input type="radio" value="free" {...register('admissionType')} /><span><strong>Free</strong><small>Ready for this milestone</small></span></label>
           <label><input type="radio" value="paid" {...register('admissionType')} /><span><strong>Paid</strong><small>Set ticket tiers after saving this draft</small></span></label>
         </fieldset>
         <Field error={errors.capacity?.message} label="Capacity (optional)" name="capacity">
           <input min="1" inputMode="numeric" type="number" {...register('capacity', { setValueAs: (value) => value === '' || value === null || value === undefined ? null : Number(value) })} />
-        </Field>
+        </Field></> : <div>
+          <p className="ui-field__label">Event artwork</p>
+          {artworkPath && /^https?:\/\//i.test(artworkPath) ? <img className="event-creation__artwork" src={artworkPath} alt="Event artwork" /> : <p className="event-creation__artwork-note">Artwork upload is not available yet. You can save your event and continue.</p>}
+        </div>}
       </div>
     </div>
   )

@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 import type { AdmissionChecker, AdmissionOutcome } from '../contracts/admission'
 import type { CameraDecoder, CameraStartFailure } from './scannerMachine'
+import { AdmissionResultView } from './OrganizerScannerView'
 import { OrganizerScannerPage } from './OrganizerScannerPage'
 
 function cameraWith(result: { kind: 'ready' | CameraStartFailure } = { kind: 'ready' }) {
@@ -139,4 +140,15 @@ describe('OrganizerScannerPage scan cycle', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Admitted' })).toBeVisible())
     expect(vibrate).not.toHaveBeenCalled()
   })
+})
+
+it('uses manual duplicate copy and the supplied timezone for original server time', () => {
+  render(<AdmissionResultView source='manual' timeZone='UTC' result={{ outcome: 'already_used', usedAt: '2026-09-10T02:42:00Z' }}>Done</AdmissionResultView>)
+  expect(screen.getByRole('heading', { name: 'Already checked in' })).toBeVisible()
+  expect(screen.getByText(/2:42 AM/)).toBeVisible()
+})
+
+it('asks manual operators to recheck status before retrying an uncertain admission', () => {
+  render(<AdmissionResultView source='manual' result={{ outcome: 'network_error' }}>Done</AdmissionResultView>)
+  expect(screen.getByText('Admission was not confirmed. Do not admit yet. Recheck the ticket status before retrying.')).toBeVisible()
 })

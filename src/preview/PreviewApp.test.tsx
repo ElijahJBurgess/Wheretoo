@@ -5,6 +5,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PreviewApp } from './PreviewApp'
 import { previewSections } from './catalog'
 import snapshots from './screens.json'
+import { buyerScreens } from './buyerScreens'
+
+vi.mock('qrcode.react', () => ({ QRCodeCanvas: () => <canvas aria-label="Admission QR code" /> }))
 
 const slugs = [...new Set(previewSections.flatMap((section) => section.screens.flatMap((entry) => entry.slug ? [entry.slug] : [])))]
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
@@ -13,11 +16,14 @@ describe('development screen hub', () => {
   it('lists every requested section and distinguishes missing screens and runtime dependencies', () => {
     window.history.replaceState({}, '', '/preview')
     render(<PreviewApp />)
-    expect(screen.getAllByRole('heading', { level: 2 })).toHaveLength(4)
-    expect(screen.getAllByText('Preview not available')).toHaveLength(5)
+    expect(screen.getByRole('heading', { name: 'Buyer Journey' })).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Shared states' })).toBeVisible()
+    expect(screen.queryByText('Not built yet')).not.toBeInTheDocument()
+    const previewLinks = screen.getAllByRole('link').map(link => link.getAttribute('href'))
+    for (const buyer of buyerScreens) expect(previewLinks).toContain(`/preview/${buyer.slug}`)
     expect(screen.getByText('Runtime data required')).toBeInTheDocument()
-    expect(screen.getAllByRole('link')).toHaveLength(20)
-    for (const link of screen.getAllByRole('link')) expect(link.getAttribute('href')).toMatch(/^\/preview\//)
+    expect(screen.getByRole('link', { name: 'Open live buyer flow' })).toHaveAttribute('href', '/events/8ad057c1-f7b1-4aec-90cb-260908000011')
+    expect(previewLinks.filter(href => href?.startsWith('/preview/'))).toHaveLength(previewSections.flatMap(section => section.screens).filter(screen => screen.slug).length)
   })
 
   it.each(slugs)('opens %s directly with no service calls and a route back to the hub', (slug) => {
@@ -28,7 +34,7 @@ describe('development screen hub', () => {
     expect(view.container.querySelector('h1')).not.toBeNull()
     expect(screen.queryByText('Screen not found')).not.toBeInTheDocument()
     const snapshot = view.container.querySelector('[inert]')
-    if (Object.hasOwn(snapshots, slug)) {
+    if (Object.hasOwn(snapshots, slug) && !buyerScreens.some(buyer => buyer.slug === slug)) {
       expect(snapshot).not.toBeNull()
       expect(snapshot?.querySelector('[href], [action], [formaction], script, iframe, object, embed')).toBeNull()
     }

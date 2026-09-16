@@ -1,0 +1,12 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions;
+select plan(6);
+select has_function('public','get_owned_event_change_context',array['uuid'],'owner context includes immutable saved and public history');
+select has_function('public','save_owned_event_revision_if_current',array['uuid','jsonb','text'],'save checks expected whole context');
+select has_function('public','save_owned_event_requirements_if_current',array['uuid','jsonb','text'],'requirements check expected whole context');
+select has_function('public','accept_current_event_policies_if_current',array['uuid','text'],'acceptance checks expected whole context');
+select has_function('public','publish_event_if_current',array['uuid','text'],'publish checks expected whole context');
+select has_table('private','event_change_snapshots','immutable facts live in the private schema');
+select * from finish();
+rollback;

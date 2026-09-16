@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { EventSalesSummary } from '../organizer-operations/EventSalesSummary'
 import { EventArtwork } from '../organizer-operations/EventArtwork'
 import { Link } from 'react-router-dom'
-import { AsyncState } from '../../components/ui/AsyncState'
+import { ReadState } from '../../components/ui/ReadState'
 import { Button } from '../../components/ui/Button'
 import { useSession } from '../auth/SessionProvider'
 import { useOwnedEvents } from './event.queries'
@@ -20,10 +20,9 @@ function formatInstant(value: string): string {
 }
 
 function eventDestination(event: EventRow): string {
+  if (event.status === 'draft') return `/organizer/events/${event.id}/edit?resume=1`
   if (event.admission_type === 'paid') return `/organizer/events/${event.id}/dashboard`
-  return event.status === 'draft'
-    ? `/organizer/events/${event.id}/edit`
-    : `/organizer/events/${event.id}`
+  return `/organizer/events/${event.id}`
 }
 
 function organizerEventStatus(event: EventRow): { label: string; style: string } {
@@ -52,12 +51,12 @@ export function OrganizerEventsPage() {
   const eventsQuery = useOwnedEvents(organizerId)
 
   if (eventsQuery.isPending || sessionState.status !== 'authenticated') {
-    return <AsyncState status='loading' title='Loading your events' />
+    return <ReadState headingAs="h1" paused={eventsQuery.fetchStatus === 'paused'} status='loading' skeleton='event-cards' title='Loading your events' />
   }
 
-  if (eventsQuery.isError) {
+  if (eventsQuery.isError || !Array.isArray(eventsQuery.data)) {
     return (
-      <AsyncState
+      <ReadState headingAs="h1"
         action={<Button onClick={() => void eventsQuery.refetch()}>Try again</Button>}
         description='Check your connection, then try again.'
         status='error'
@@ -66,12 +65,12 @@ export function OrganizerEventsPage() {
     )
   }
 
-  if (!eventsQuery.data?.length) {
+  if (eventsQuery.data.length === 0) {
     return (
-      <AsyncState
+      <ReadState headingAs="h1"
         action={
           <Link className='ui-button ui-button--primary' to='/organizer/events/new'>
-            Create event
+            Create your first event
           </Link>
         }
         description='Start with the details you know. You can save a draft before publishing.'
@@ -148,7 +147,7 @@ export function OrganizerEventsPage() {
       </ul>
       {eventsQuery.data.filter((event) =>
             filter === 'All' || organizerEventStatus(event).label === filter
-          ).length === 0 && <p>No {filter.toLowerCase()} events.</p>}
+          ).length === 0 && <ReadState status='empty' title='No matching events' description='Try another event status.' action={<Button onClick={() => { setFilter('All'); setVisible(12) }}>Clear filter</Button>} />}
       {eventsQuery.data.filter((event) =>
             filter === 'All' || organizerEventStatus(event).label === filter
           ).length > visible && (

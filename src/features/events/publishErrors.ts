@@ -2,6 +2,11 @@ import type { PublishEventErrorCode } from './event.types'
 
 type ModerationPublishErrorCode =
   | PublishEventErrorCode
+  | 'CONNECT_NOT_READY'
+  | 'CONNECT_ACTION_REQUIRED'
+  | 'TIER_NOT_ACTIVE'
+  | 'TIER_INVALID'
+  | 'TIER_LIMIT_EXCEEDED'
   | 'EVENT_DISCLOSURES_REQUIRED'
   | 'EVENT_POLICY_ACCEPTANCE_REQUIRED'
   | 'EVENT_PUBLIC_HISTORY_UNKNOWN'
@@ -9,6 +14,11 @@ type ModerationPublishErrorCode =
   | 'POLICY_REQUIREMENTS_INVALID'
 
 export const publishErrorCopy: Record<ModerationPublishErrorCode, string> = {
+  CONNECT_NOT_READY: 'Complete Stripe setup before publishing paid tickets.',
+  CONNECT_ACTION_REQUIRED: 'Update your Stripe account requirements before publishing paid tickets.',
+  TIER_NOT_ACTIVE: 'Add at least one active ticket tier before publishing.',
+  TIER_INVALID: 'Review your saved ticket prices and capacities before publishing.',
+  TIER_LIMIT_EXCEEDED: 'Use no more than three ticket tiers.',
   EVENT_NOT_FOUND: 'This event could not be found.',
   EVENT_NOT_OWNED: 'This event is not available to this organizer.',
   EVENT_INCOMPLETE: 'Complete every required event detail before publishing.',

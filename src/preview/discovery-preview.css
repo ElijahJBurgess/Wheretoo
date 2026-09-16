@@ -1,0 +1,8 @@
+.discovery-preview { min-height: 100vh; background: #08090c; }
+.discovery-preview__controls { position: relative; z-index: 30; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-bottom: 1px solid #41364b; color: #eee7f4; background: #17131b; font-family: 'Manrope Variable', Manrope, sans-serif; }
+.discovery-preview__controls p { display: grid; gap: 2px; margin: 0; font-size: 11px; }
+.discovery-preview__controls p span { color: #a99db3; font-size: 9px; }
+.discovery-preview__controls > div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
+.discovery-preview__controls button { min-height: 36px; border: 1px solid #554760; border-radius: 999px; padding: 6px 10px; color: #d8cde0; background: #100e13; font: inherit; font-size: 10px; cursor: pointer; }
+.discovery-preview__controls button[aria-pressed='true'] { border-color: #ca83f9; color: #16091f; background: #bd67f5; }
+@media (max-width: 700px) { .discovery-preview__controls { align-items: flex-start; flex-direction: column; } .discovery-preview__controls > div { justify-content: flex-start; } }

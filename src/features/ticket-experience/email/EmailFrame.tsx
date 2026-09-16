@@ -20,6 +20,9 @@ type EmailFrameProps = {
   recipientLabel: string
   children: ReactNode
   viewTicketsUrl?: string
+  privacyLabel?: string
+  actionLabel?: string
+  supportEmail?: string
 }
 
 export function EmailFrame({
@@ -29,6 +32,9 @@ export function EmailFrame({
   recipientLabel,
   children,
   viewTicketsUrl,
+  actionLabel = 'View Tickets',
+  privacyLabel = 'This private link opens your ticket collection. Keep it to yourself.',
+  supportEmail,
 }: EmailFrameProps) {
   return (
     <Html lang="en">
@@ -44,10 +50,11 @@ export function EmailFrame({
             {children}
             {viewTicketsUrl ? (
               <>
-                <Button href={viewTicketsUrl} style={emailStyles.button}>View Tickets</Button>
-                <Text style={emailStyles.privacy}>This private link opens your ticket collection. Keep it to yourself.</Text>
+                <Button href={viewTicketsUrl} style={emailStyles.button}>{actionLabel}</Button>
+                <Text style={emailStyles.privacy}>{privacyLabel}</Text>
               </>
             ) : null}
+            {supportEmail ? <Text style={emailStyles.privacy}>Need help? Reply to this email or contact {supportEmail}.</Text> : null}
             <Hr style={emailStyles.rule} />
           </Section>
           <Text style={emailStyles.footer}>Whereto · Find your next night out.</Text>

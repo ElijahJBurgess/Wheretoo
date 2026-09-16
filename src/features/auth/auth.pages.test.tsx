@@ -52,7 +52,7 @@ describe('organizer auth pages', () => {
     await user.type(screen.getByLabelText('Full name'), 'A')
     await user.type(screen.getByLabelText('Email'), 'invalid')
     await user.type(screen.getByLabelText('Password'), '1234567')
-    await user.click(screen.getByRole('button', { name: 'Create organizer account' }))
+    await user.click(screen.getByRole('button', { name: 'Create account' }))
 
     expect(await screen.findAllByRole('alert')).toHaveLength(4)
     expect(screen.getByText('Check the highlighted fields')).toBeInTheDocument()
@@ -67,7 +67,7 @@ describe('organizer auth pages', () => {
     renderSignUp()
     await fillSignup(user)
 
-    await user.click(screen.getByRole('button', { name: 'Create organizer account' }))
+    await user.click(screen.getByRole('button', { name: 'Create account' }))
 
     expect(await screen.findByText('Email already registered')).toBeInTheDocument()
     expect(screen.getByLabelText('Full name')).toHaveValue('Avery Stone')
@@ -81,7 +81,7 @@ describe('organizer auth pages', () => {
     renderSignUp()
     await fillSignup(user)
 
-    await user.click(screen.getByRole('button', { name: 'Create organizer account' }))
+    await user.click(screen.getByRole('button', { name: 'Create account' }))
     expect(screen.getByRole('button', { name: 'Creating account…' })).toBeDisabled()
 
     resolveSignup({ needsEmailConfirmation: false })
@@ -94,7 +94,7 @@ describe('organizer auth pages', () => {
     renderSignUp()
     await fillSignup(user)
 
-    await user.click(screen.getByRole('button', { name: 'Create organizer account' }))
+    await user.click(screen.getByRole('button', { name: 'Create account' }))
     expect(await screen.findByText('check-email destination')).toBeInTheDocument()
   })
 

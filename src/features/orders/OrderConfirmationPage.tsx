@@ -1,101 +1,34 @@
+import { TicketDeliveryNotice } from '../ticket-delivery/TicketDeliveryNotice'
 import { Button } from '../../components/ui/Button'
-import { AsyncState } from '../../components/ui/AsyncState'
-import { useEffect } from 'react'
+import { ReadState } from '../../components/ui/ReadState'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { clearCheckoutAttemptForConfirmation } from '../checkout/checkout.attempt'
-import type { OrderConfirmation } from './order.types'
+import { clearCheckoutAttemptForConfirmation, getVerifiedCheckoutAssociation } from '../checkout/checkout.attempt'
+import { cancelCheckoutAttempt } from '../checkout/checkout.recovery'
+import { BuyerHeader } from '../buyer-journey/BuyerPrimitives'
+import { BuyerRecoveryView } from '../buyer-journey/BuyerRecoveryView'
+import { OrderConfirmationView } from '../buyer-journey/OrderConfirmationView'
 import { useOrderConfirmation } from './order.queries'
-
-type ConfirmationStatus = OrderConfirmation['status']
-
-const statusCopy: Record<ConfirmationStatus, { heading: string; message: string; mark: string }> = {
-  processing: {
-    heading: 'Confirming your payment',
-    message: 'Waiting for secure payment confirmation. Keep this page open.',
-    mark: '…',
-  },
-  paid: {
-    heading: "You're all set",
-    message: 'Payment confirmed. Your order is ready.',
-    mark: '✓',
-  },
-  payment_failed: {
-    heading: 'Payment could not be confirmed',
-    message: 'No ticket was issued. Check your payment details before trying again.',
-    mark: '!',
-  },
-  cancelled: {
-    heading: 'Checkout cancelled',
-    message: 'No payment was completed. Choose tickets again from the event page.',
-    mark: '×',
-  },
-  expired: {
-    heading: 'Checkout expired',
-    message: 'Choose a ticket again from the event page.',
-    mark: '×',
-  },
-  refunded: {
-    heading: 'This order was refunded',
-    message: 'This ticket is no longer valid.',
-    mark: '↺',
-  },
-  requires_review: {
-    heading: 'Order needs review',
-    message: 'We are reviewing this order. Keep this confirmation link for updates.',
-    mark: '!',
-  },
-}
-
-const terminalStatuses = new Set<ConfirmationStatus>([
-  'paid',
-  'payment_failed',
-  'cancelled',
-  'expired',
-  'refunded',
-])
-
-function formatMinorUsd(minor: number): string {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(minor / 100)
-}
-
-function formatSchedule(event: OrderConfirmation['event']): string {
-  const start = new Date(event.startsAt)
-  const end = new Date(event.endsAt)
-  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) return 'Schedule unavailable'
-  try {
-    const date = new Intl.DateTimeFormat('en-US', {
-      timeZone: event.timezone,
-      weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
-    })
-    const time = new Intl.DateTimeFormat('en-US', {
-      timeZone: event.timezone,
-      hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
-    })
-    const startDate = date.format(start)
-    const endDate = date.format(end)
-    return startDate === endDate
-      ? `${startDate}, ${time.format(start)}–${time.format(end)}`
-      : `${startDate}, ${time.format(start)}–${endDate}, ${time.format(end)}`
-  } catch {
-    return 'Schedule unavailable'
-  }
-}
 
 function StandaloneState({
   action,
+  paused,
   description,
   status,
   title,
 }: {
   action?: React.ReactNode
+  paused?: boolean
   description: string
   status: 'loading' | 'error'
   title: string
 }) {
+  if (status === 'error') return <BuyerRecoveryView announcementRole="alert" title={title} description={description} action={action} />
   return (
-    <main className="confirmation-layout">
+    <main className="buyer-page buyer-state">
+      <BuyerHeader />
       <h1 className="confirmation-state__title">{title}</h1>
-      <AsyncState action={action} description={description} status={status} title="Order status" />
+      <ReadState paused={paused} skeleton="detail-fields" action={action} description={description} status={status} title="Order status" />
     </main>
   )
 }
@@ -103,86 +36,68 @@ function StandaloneState({
 function OrderConfirmationRoute({ confirmationToken }: { confirmationToken: string }) {
   const confirmation = useOrderConfirmation(confirmationToken)
   const status = confirmation.data?.status
-
   useEffect(() => {
-    if (status !== undefined && terminalStatuses.has(status)) {
-      clearCheckoutAttemptForConfirmation(confirmationToken)
-    }
+    if (status === 'paid' || status === 'refunded') clearCheckoutAttemptForConfirmation(confirmationToken)
   }, [confirmationToken, status])
 
+  const [association] = useState(() => getVerifiedCheckoutAssociation(confirmationToken))
+  const [busy, setBusy] = useState(false)
+  const [verified, setVerified] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+  const mounted = useRef(true)
+  const lock = useRef(false)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+
+  async function retry() {
+    if (lock.current) return
+    lock.current = true
+    setBusy(true)
+    try { await confirmation.retry() }
+    finally { lock.current = false; if (mounted.current) setBusy(false) }
+  }
+  async function verifyReplacement() {
+    if (lock.current) return
+    lock.current = true
+    setBusy(true)
+    setMessage(null)
+    try {
+      const result = await cancelCheckoutAttempt(confirmationToken)
+      if (!mounted.current) return
+      if (result.kind === 'cancelled') setVerified(true)
+      else { setMessage('Unable to confirm that checkout has ended. Keep this order and check again.'); await confirmation.retry() }
+    } finally { lock.current = false; if (mounted.current) setBusy(false) }
+  }
+  const retryAction = <Button disabled={busy} onClick={() => void retry()} type="button">{busy ? 'Checking status…' : 'Check again'}</Button>
+
   if (confirmation.isPending) {
-    return <StandaloneState description="Checking the latest persisted order status." status="loading" title="Loading order" />
+    return <StandaloneState paused={confirmation.fetchStatus === 'paused'} description="Checking the latest persisted order status." status="loading" title="Loading order" />
   }
   if (confirmation.isError) {
     return (
       <StandaloneState
-        action={<Button onClick={() => void confirmation.retry()} type="button">Try again</Button>}
-        description="Check your connection, then try again."
+        action={<Button disabled={busy} onClick={() => void retry()} type="button">Try again</Button>}
+        description="The payment result is unknown. Keep this order link and check again before starting another checkout."
         status="error"
-        title="Order could not load"
+        title="Unable to confirm payment"
       />
     )
   }
   if (confirmation.data === null || confirmation.data === undefined) {
-    return <StandaloneState description="This confirmation link is invalid or unavailable." status="error" title="Order not found" />
+    return <StandaloneState action={retryAction} description="The order could not be found. This does not confirm payment failed. Keep this link and check again." status="error" title="Unable to confirm payment" />
   }
 
-  const confirmedStatus = confirmation.data.status
-  const copy = confirmation.isTimedOut && confirmedStatus === 'processing'
-    ? {
-      heading: 'Confirmation is taking longer',
-      message: 'Payment confirmation is still processing. Check again when you are ready.',
-      mark: '…',
-    }
-    : statusCopy[confirmedStatus]
-
-  return (
-    <main className={`confirmation-layout confirmation-layout--${confirmedStatus}`}>
-      <article className="confirmation-card">
-        <header className="confirmation-card__header">
-          <p className="public-event__eyebrow">Order status</p>
-          <span aria-hidden="true" className="confirmation-card__seal">{copy.mark}</span>
-          <h1>{copy.heading}</h1>
-          <p aria-live="polite" role="status">{copy.message}</p>
-        </header>
-
-        <section aria-labelledby="confirmation-event-title" className="confirmation-card__event">
-          <p className="confirmation-card__label">Event</p>
-          <h2 id="confirmation-event-title">{confirmation.data.event.title}</h2>
-          <p>{formatSchedule(confirmation.data.event)}</p>
-          <p>{confirmation.data.event.venueName ?? 'Venue to be announced'}</p>
-        </section>
-
-        <section aria-labelledby="confirmation-items-title" className="confirmation-card__event">
-          <p className="confirmation-card__label">Tickets</p>
-          <h2 id="confirmation-items-title">Your order</h2>
-          <ul>
-            {confirmation.data.items.map((item) => (
-              <li key={item.tierName}>
-                <span>{item.tierName} × {item.quantity}</span>{' '}
-                <span>{formatMinorUsd(item.subtotalMinor)}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-
-        <dl className="confirmation-card__facts">
-          <div><dt>Quantity</dt><dd>{confirmation.data.quantity} admissions</dd></div>
-          <div><dt>Subtotal</dt><dd>{formatMinorUsd(confirmation.data.subtotalMinor)}</dd></div>
-          <div><dt>Tax</dt><dd>{formatMinorUsd(confirmation.data.taxAmountMinor)}</dd></div>
-          <div><dt>Total</dt><dd className="confirmation-card__total">{formatMinorUsd(confirmation.data.totalMinor)}</dd></div>
-          <div><dt>Order</dt><dd>{confirmation.data.orderNumber}</dd></div>
-        </dl>
-
-        {confirmedStatus === 'paid'
-          ? <Link className="ui-button ui-button--primary" reloadDocument to={`/tickets/${encodeURIComponent(confirmationToken)}`}>View tickets</Link>
-          : null}
-        {confirmation.isTimedOut && confirmedStatus === 'processing'
-          ? <Button onClick={() => void confirmation.retry()} type="button">Check again</Button>
-          : null}
-      </article>
-    </main>
-  )
+  return <OrderConfirmationView
+    order={confirmation.data}
+    browseAction={confirmation.data.status !== 'processing' ? <Link className="ui-button buyer-secondary" to="/discover">Browse events</Link> : undefined}
+    deliveryNotice={confirmation.data.status === 'paid' ? <TicketDeliveryNotice collectionBearer={confirmationToken} /> : undefined}
+    isTimedOut={confirmation.isTimedOut}
+    ticketAction={<Link className="ui-button buyer-primary" reloadDocument to={`/tickets/${encodeURIComponent(confirmationToken)}`}>View tickets</Link>}
+    retryAction={retryAction}
+    recoveryAction={association && status && ['payment_failed', 'cancelled', 'expired'].includes(status) ? <>
+      {message ? <p role="status">{message}</p> : null}
+      {verified ? <Link className="ui-button buyer-primary" to={association.selectionPath}>Choose tickets</Link> : <Button disabled={busy} onClick={() => void verifyReplacement()} type="button">{busy ? 'Verifying checkout…' : 'Verify before choosing tickets'}</Button>}
+    </> : undefined}
+  />
 }
 
 export function OrderConfirmationPage() {

@@ -195,6 +195,13 @@ describe('ticket shell production build boundary', () => {
     expect(inspectBuiltOutput(directory)).toEqual([])
   })
 
+  it('allows ticket resend interface copy and domain state without bundling the provider', async () => {
+    const directory = await writeGraph({
+      'application.js': 'const text="Resend tickets? Confirm and resend"; const state={resend:"queued"}; const route="/ticket-resends";',
+    })
+    expect(inspectBuiltOutput(directory)).toEqual([])
+  })
+
   it('detects Resend provider output without relying on one SDK URL', async () => {
     const directory = await writeGraph({
       'application.js': 'console.error("[Resend API Error]")',

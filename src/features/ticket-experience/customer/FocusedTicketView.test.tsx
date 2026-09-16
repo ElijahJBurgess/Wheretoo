@@ -93,11 +93,11 @@ describe('FocusedTicketView', () => {
     expect(screen.queryByTestId('admission-qr')).not.toBeInTheDocument()
   })
 
-  it('renders safe directions and a nonfunctional wallet presentation', () => {
+  it('renders safe directions and omits unsupported wallet actions', () => {
     renderFocused(ticket())
 
     expect(screen.getByRole('link', { name: 'Get directions' })).toHaveAttribute('rel', 'noreferrer')
-    expect(screen.getByRole('button', { name: 'Add to Wallet — Coming later' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: /wallet/i })).not.toBeInTheDocument()
   })
 
   it('omits directions when no URL is available', () => {
@@ -115,4 +115,24 @@ describe('AdmissionQr', () => {
     expect(view.container.innerHTML).not.toContain('credential-only-for-renderer')
     expect(qrCanvas).toHaveBeenLastCalledWith(expect.objectContaining({ value: 'credential-only-for-renderer' }))
   })
+})
+
+it('removes an already mounted QR when the event ends', async()=>{
+ vi.useFakeTimers();vi.setSystemTime(new Date('2027-01-01T12:00:00Z'))
+ try{
+  const {act}=await import('@testing-library/react')
+  renderFocused(ticket({endsAt:'2027-01-01T12:00:01Z'}),()=>new Date())
+  expect(screen.getByTestId('admission-qr')).toBeInTheDocument()
+  await act(async()=>{vi.advanceTimersByTime(1100)})
+  expect(screen.queryByTestId('admission-qr')).toBeNull();expect(screen.getByRole('heading',{name:'Event ended'})).toBeInTheDocument()
+ }finally{vi.useRealTimers()}
+})
+
+
+it('attaches refund support only to refunded tickets without manufacturing a reference or QR', () => {
+  renderFocused(ticket({ status: 'refunded', admissionCredential: null }))
+  expect(screen.getByText(/Previously used tickets keep their check-in history/)).toBeVisible()
+  expect(screen.queryByText(/Order #/)).not.toBeInTheDocument()
+  expect(screen.queryByTestId('admission-qr')).not.toBeInTheDocument()
+  expect(screen.queryByRole('link', { name: /recover/i })).not.toBeInTheDocument()
 })

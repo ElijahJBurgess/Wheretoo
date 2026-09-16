@@ -1,0 +1,966 @@
+[
+  {
+    "file": "src/features/organizer-settings/settings.profile.api.ts",
+    "line": 33,
+    "kind": "rpc",
+    "target": "save_owned_organizer_settings",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260916010000_add_owned_organizer_settings.sql",
+      "arguments": "p_display_name text, p_bio text, p_expected_updated_at timestamptz"
+    }
+  },
+  {
+    "file": "src/features/tickets/ticket.api.ts",
+    "line": 44,
+    "kind": "rpc",
+    "target": "list_owned_ticket_tiers",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260825010100_secure_paid_sales_and_tiers.sql",
+      "arguments": "p_event_id uuid"
+    }
+  },
+  {
+    "file": "src/features/tickets/ticket.api.ts",
+    "line": 51,
+    "kind": "rpc",
+    "target": "save_ticket_tiers",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260826011475_restore_ticket_tier_owner_precheck.sql",
+      "arguments": "p_event_id uuid, p_tiers jsonb"
+    }
+  },
+  {
+    "file": "src/features/tickets/ticket.api.ts",
+    "line": 60,
+    "kind": "rpc",
+    "target": "activate_paid_sales",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260825010195_clean_serialized_paid_activation.sql",
+      "arguments": "p_event_id uuid"
+    }
+  },
+  {
+    "file": "src/features/tickets/publicTicketing.api.ts",
+    "line": 35,
+    "kind": "rpc",
+    "target": "get_public_event_ticketing",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260902010100_add_checkout_cart_reservation.sql",
+      "arguments": "p_event_id uuid"
+    }
+  },
+  {
+    "file": "src/features/tickets/publicTicketing.api.ts",
+    "line": 49,
+    "kind": "rpc",
+    "target": "get_public_event",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260826010400_route_public_reads_through_eligibility.sql",
+      "arguments": "p_event_id uuid"
+    }
+  },
+  {
+    "file": "src/features/event-changes/eventChanges.api.ts",
+    "line": 26,
+    "kind": "rpc",
+    "target": "get_owned_event_change_context",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260915010000_add_event_change_history.sql",
+      "arguments": "p_event_id uuid"
+    }
+  },
+  {
+    "file": "src/features/event-changes/eventChanges.api.ts",
+    "line": 31,
+    "kind": "rpc",
+    "target": "save_owned_event_revision_if_current",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260915010000_add_event_change_history.sql",
+      "arguments": "p_event_id uuid,p_event jsonb,p_expected_context text"
+    }
+  },
+  {
+    "file": "src/features/event-changes/eventChanges.api.ts",
+    "line": 36,
+    "kind": "rpc",
+    "target": "save_owned_event_requirements_if_current",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260915010000_add_event_change_history.sql",
+      "arguments": "p_event_id uuid,p_requirements jsonb,p_expected_context text"
+    }
+  },
+  {
+    "file": "src/features/event-changes/eventChanges.api.ts",
+    "line": 40,
+    "kind": "rpc",
+    "target": "accept_current_event_policies_if_current",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260915010000_add_event_change_history.sql",
+      "arguments": "p_event_id uuid,p_expected_context text"
+    }
+  },
+  {
+    "file": "src/features/event-changes/eventChanges.api.ts",
+    "line": 44,
+    "kind": "rpc",
+    "target": "publish_event_if_current",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260915010000_add_event_change_history.sql",
+      "arguments": "p_event_id uuid,p_expected_context text"
+    }
+  },
+  {
+    "file": "src/features/event-changes/eventChanges.api.ts",
+    "line": 48,
+    "kind": "rpc",
+    "target": "preview_owned_event_notice",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260915010200_add_event_notices.sql",
+      "arguments": "p_event_id uuid,p_purpose text"
+    }
+  },
+  {
+    "file": "src/features/event-changes/eventChanges.api.ts",
+    "line": 54,
+    "kind": "rpc",
+    "target": "submit_owned_event_notice",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260915010200_add_event_notices.sql",
+      "arguments": "p_event_id uuid,p_purpose text,p_preview_token text,p_request_id uuid"
+    }
+  },
+  {
+    "file": "src/features/event-changes/eventChanges.api.ts",
+    "line": 58,
+    "kind": "rpc",
+    "target": "get_owned_event_notice_status",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260915010200_add_event_notices.sql",
+      "arguments": "p_event_id uuid,p_purpose text"
+    }
+  },
+  {
+    "file": "src/features/event-changes/eventChanges.api.ts",
+    "line": 65,
+    "kind": "rpc",
+    "target": "get_owned_event_cancellation_summary",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260915010150_add_owned_event_cancellation_summary.sql",
+      "arguments": "p_event_id uuid"
+    }
+  },
+  {
+    "file": "src/features/ticket-delivery/delivery.api.ts",
+    "line": 6,
+    "kind": "rpc",
+    "target": "get_ticket_email_delivery",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260913010200_add_ticket_email_entry_points.sql",
+      "arguments": "p_event_id uuid,p_source_kind text,p_source_id uuid"
+    }
+  },
+  {
+    "file": "src/features/ticket-delivery/delivery.api.ts",
+    "line": 13,
+    "kind": "rpc",
+    "target": "request_ticket_email_resend",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260913010200_add_ticket_email_entry_points.sql",
+      "arguments": "p_event_id uuid,p_source_kind text,p_source_id uuid,p_request_id uuid"
+    }
+  },
+  {
+    "file": "src/features/ticket-delivery/delivery.api.ts",
+    "line": 19,
+    "kind": "rpc",
+    "target": "get_ticket_email_resend_status",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260913010500_add_resend_request_status.sql",
+      "arguments": "p_event_id uuid,p_source_kind text,p_source_id uuid,p_request_id uuid"
+    }
+  },
+  {
+    "file": "src/features/ticket-delivery/delivery.api.ts",
+    "line": 26,
+    "kind": "rpc",
+    "target": "get_organizer_free_registration_detail",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260913010200_add_ticket_email_entry_points.sql",
+      "arguments": "p_event_id uuid,p_registration_id uuid"
+    }
+  },
+  {
+    "file": "src/features/ticket-delivery/delivery.api.ts",
+    "line": 33,
+    "kind": "rpc",
+    "target": "get_organizer_free_admissions",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260912010300_add_free_owner_reads_and_rate_limit.sql",
+      "arguments": "p_event_id uuid,p_search text default '',p_limit integer default 25,p_cursor jsonb default null"
+    }
+  },
+  {
+    "file": "src/features/organizer-operations/operations.api.ts",
+    "line": 18,
+    "kind": "rpc",
+    "target": "get_organizer_event_metrics",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260910010000_add_organizer_event_metrics.sql",
+      "arguments": "p_event_id uuid"
+    }
+  },
+  {
+    "file": "src/features/organizer-operations/operations.api.ts",
+    "line": 28,
+    "kind": "rpc",
+    "target": "list_organizer_event_orders_filtered",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260911010000_extend_spec04_organizer_reads.sql",
+      "arguments": "p_event_id uuid, p_search text default '', p_status text default 'all', p_limit integer default 25, p_cursor_created_at timestamptz default null, p_cursor_id uuid default null"
+    }
+  },
+  {
+    "file": "src/features/organizer-operations/operations.api.ts",
+    "line": 45,
+    "kind": "rpc",
+    "target": "get_organizer_order",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260915010100_add_cancellation_summary.sql",
+      "arguments": "p_event_id uuid,p_order_id uuid"
+    }
+  },
+  {
+    "file": "src/features/organizer-operations/operations.api.ts",
+    "line": 58,
+    "kind": "rpc",
+    "target": "get_organizer_order_v2",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260911010000_extend_spec04_organizer_reads.sql",
+      "arguments": "p_event_id uuid, p_order_id uuid"
+    }
+  },
+  {
+    "file": "src/features/organizer-operations/operations.api.ts",
+    "line": 72,
+    "kind": "rpc",
+    "target": "redeem_owned_ticket",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260912010200_extend_shared_admission_for_free_sources.sql",
+      "arguments": "p_event_id uuid,p_ticket_id uuid"
+    }
+  },
+  {
+    "file": "src/features/organizer-operations/operations.api.ts",
+    "line": 83,
+    "kind": "invoke",
+    "target": "organizer-refund-order",
+    "lastDefinition": null
+  },
+  {
+    "file": "src/features/organizer-operations/operations.api.ts",
+    "line": 96,
+    "kind": "rpc",
+    "target": "list_organizer_event_admissions",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260911020000_add_owned_admission_search.sql",
+      "arguments": "p_event_id uuid, p_search text default '', p_limit integer default 25, p_cursor jsonb default null"
+    }
+  },
+  {
+    "file": "src/features/refunds/refunds.api.ts",
+    "line": 9,
+    "kind": "rpc",
+    "target": "get_organizer_refund_status",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260914010000_add_refund_operations.sql",
+      "arguments": "p_event_id uuid,p_order_id uuid"
+    }
+  },
+  {
+    "file": "src/features/refunds/refunds.api.ts",
+    "line": 18,
+    "kind": "invoke",
+    "target": "organizer-refund-order",
+    "lastDefinition": null
+  },
+  {
+    "file": "src/features/refunds/refunds.api.ts",
+    "line": 33,
+    "kind": "rpc",
+    "target": "get_organizer_refund_notice_status",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260914010200_add_refund_notice.sql",
+      "arguments": "p_event_id uuid,p_order_id uuid"
+    }
+  },
+  {
+    "file": "src/features/orders/order.api.ts",
+    "line": 95,
+    "kind": "invoke",
+    "target": "order-confirmation",
+    "lastDefinition": null
+  },
+  {
+    "file": "src/features/events/event.api.ts",
+    "line": 113,
+    "kind": "from",
+    "target": "events",
+    "lastDefinition": null
+  },
+  {
+    "file": "src/features/events/event.api.ts",
+    "line": 131,
+    "kind": "from",
+    "target": "events",
+    "lastDefinition": null
+  },
+  {
+    "file": "src/features/events/event.api.ts",
+    "line": 168,
+    "kind": "from",
+    "target": "events",
+    "lastDefinition": null
+  },
+  {
+    "file": "src/features/events/event.api.ts",
+    "line": 173,
+    "kind": "from",
+    "target": "events",
+    "lastDefinition": null
+  },
+  {
+    "file": "src/features/events/event.api.ts",
+    "line": 196,
+    "kind": "rpc",
+    "target": "save_owned_event_revision",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260915010000_add_event_change_history.sql",
+      "arguments": "p_event_id uuid,p_event jsonb"
+    }
+  },
+  {
+    "file": "src/features/events/event.api.ts",
+    "line": 207,
+    "kind": "rpc",
+    "target": "publish_event",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260915010000_add_event_change_history.sql",
+      "arguments": "p_event_id uuid"
+    }
+  },
+  {
+    "file": "src/features/events/event.api.ts",
+    "line": 221,
+    "kind": "rpc",
+    "target": "cancel_owned_event",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260907010300_preserve_lite_ticket_invalidation.sql",
+      "arguments": "p_event_id uuid"
+    }
+  },
+  {
+    "file": "src/features/organizers/organizer.api.ts",
+    "line": 28,
+    "kind": "from",
+    "target": "organizers",
+    "lastDefinition": null
+  },
+  {
+    "file": "src/features/organizers/organizer.api.ts",
+    "line": 51,
+    "kind": "from",
+    "target": "organizers",
+    "lastDefinition": null
+  },
+  {
+    "file": "src/features/organizers/organizer.api.ts",
+    "line": 59,
+    "kind": "from",
+    "target": "organizers",
+    "lastDefinition": null
+  },
+  {
+    "file": "src/features/moderation/moderation.api.ts",
+    "line": 164,
+    "kind": "rpc",
+    "target": "get_required_event_policies",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260826010200_add_event_policy_acceptance.sql",
+      "arguments": ""
+    }
+  },
+  {
+    "file": "src/features/moderation/moderation.api.ts",
+    "line": 171,
+    "kind": "rpc",
+    "target": "get_owned_event_requirements",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260826010200_add_event_policy_acceptance.sql",
+      "arguments": "p_event_id uuid"
+    }
+  },
+  {
+    "file": "src/features/moderation/moderation.api.ts",
+    "line": 182,
+    "kind": "rpc",
+    "target": "save_owned_event_requirements",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260915010000_add_event_change_history.sql",
+      "arguments": "p_event_id uuid,p_requirements jsonb"
+    }
+  },
+  {
+    "file": "src/features/moderation/moderation.api.ts",
+    "line": 197,
+    "kind": "rpc",
+    "target": "accept_current_event_policies",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260915010000_add_event_change_history.sql",
+      "arguments": "p_event_id uuid"
+    }
+  },
+  {
+    "file": "src/features/moderation/moderation.api.ts",
+    "line": 205,
+    "kind": "rpc",
+    "target": "request_event_review",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260826010800_add_review_requests_and_reports.sql",
+      "arguments": "p_event_id uuid, p_organizer_note text"
+    }
+  },
+  {
+    "file": "src/features/moderation/moderation.api.ts",
+    "line": 213,
+    "kind": "rpc",
+    "target": "get_current_event_review_request",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260826010900_add_current_review_request_projection.sql",
+      "arguments": "p_event_id uuid"
+    }
+  },
+  {
+    "file": "src/features/moderation/moderation.api.ts",
+    "line": 223,
+    "kind": "rpc",
+    "target": "withdraw_event_review",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260826010800_add_review_requests_and_reports.sql",
+      "arguments": "p_event_id uuid"
+    }
+  },
+  {
+    "file": "src/features/moderation/moderation.api.ts",
+    "line": 231,
+    "kind": "rpc",
+    "target": "get_my_staff_role",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260826010700_add_staff_moderation_operations.sql",
+      "arguments": ""
+    }
+  },
+  {
+    "file": "src/features/moderation/moderation.api.ts",
+    "line": 242,
+    "kind": "rpc",
+    "target": "list_moderation_queue",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260826010950_complete_staff_console_projection.sql",
+      "arguments": "p_limit integer"
+    }
+  },
+  {
+    "file": "src/features/moderation/moderation.api.ts",
+    "line": 257,
+    "kind": "rpc",
+    "target": "get_moderation_case",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260826011000_remove_staff_case_notes.sql",
+      "arguments": "p_event_id uuid"
+    }
+  },
+  {
+    "file": "src/features/moderation/moderation.api.ts",
+    "line": 268,
+    "kind": "rpc",
+    "target": "moderate_event",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260826010750_harden_staff_moderation_operations.sql",
+      "arguments": "p_event_id uuid, p_expected_content_revision bigint, p_expected_input_sha256 text, p_expected_moderation_version bigint, p_action text, p_reason_code text, p_internal_note text"
+    }
+  },
+  {
+    "file": "src/features/moderation/moderation.api.ts",
+    "line": 315,
+    "kind": "rpc",
+    "target": "get_public_event",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260826010400_route_public_reads_through_eligibility.sql",
+      "arguments": "p_event_id uuid"
+    }
+  },
+  {
+    "file": "src/features/moderation/moderation.api.ts",
+    "line": 331,
+    "kind": "invoke",
+    "target": "report-event",
+    "lastDefinition": null
+  },
+  {
+    "file": "supabase/functions/public-discovery/index.ts",
+    "line": 136,
+    "kind": "rpc",
+    "target": "server_get_public_discovery_events",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260917010000_add_public_discovery_read.sql",
+      "arguments": "p_query jsonb"
+    }
+  },
+  {
+    "file": "supabase/functions/ticket-email-webhook/index.ts",
+    "line": 59,
+    "kind": "rpc",
+    "target": "server_observe_ticket_email",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260913010600_add_email_retention_and_recipient_suppression.sql",
+      "arguments": "p_webhook_id text,p_attempt_id uuid,p_provider_id text,p_kind text,p_observed_at timestamptz"
+    }
+  },
+  {
+    "file": "supabase/functions/stripe-create-checkout/index.ts",
+    "line": 759,
+    "kind": "rpc",
+    "target": "server_get_checkout_preflight",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260902010100_add_checkout_cart_reservation.sql",
+      "arguments": "p_event_id uuid, p_tier_ids uuid[]"
+    }
+  },
+  {
+    "file": "supabase/functions/ticket-email-worker/index.ts",
+    "line": 73,
+    "kind": "rpc",
+    "target": "server_enqueue_refund_notices",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260914010200_add_refund_notice.sql",
+      "arguments": "p_limit integer default 25"
+    }
+  },
+  {
+    "file": "supabase/functions/stripe-connect-session/connect.ts",
+    "line": 57,
+    "kind": "from",
+    "target": "organizer_stripe_accounts",
+    "lastDefinition": null
+  },
+  {
+    "file": "supabase/functions/stripe-connect-session/connect.ts",
+    "line": 71,
+    "kind": "from",
+    "target": "organizer_stripe_accounts",
+    "lastDefinition": null
+  },
+  {
+    "file": "supabase/functions/report-event/index.ts",
+    "line": 67,
+    "kind": "rpc",
+    "target": "server_submit_event_report",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260826010850_harden_review_reports_lint.sql",
+      "arguments": "p_event_id uuid, p_reporter_fingerprint text, p_network_fingerprint text, p_reason text"
+    }
+  },
+  {
+    "file": "supabase/functions/_shared/ticketEmailWorker.ts",
+    "line": 159,
+    "kind": "rpc",
+    "target": "server_claim_ticket_email",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260913010100_add_ticket_email_worker_contracts.sql",
+      "arguments": ""
+    }
+  },
+  {
+    "file": "supabase/functions/_shared/ticketEmailWorker.ts",
+    "line": 166,
+    "kind": "rpc",
+    "target": "server_stop_ticket_email",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260913010100_add_ticket_email_worker_contracts.sql",
+      "arguments": "p_attempt_id uuid,p_lease_id uuid,p_reason text"
+    }
+  },
+  {
+    "file": "supabase/functions/_shared/ticketEmailWorker.ts",
+    "line": 190,
+    "kind": "rpc",
+    "target": "server_prepare_ticket_email_context",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260915010200_add_event_notices.sql",
+      "arguments": "p_attempt_id uuid,p_lease_id uuid,p_recovery_email text default null"
+    }
+  },
+  {
+    "file": "supabase/functions/_shared/ticketEmailWorker.ts",
+    "line": 387,
+    "kind": "rpc",
+    "target": "server_save_ticket_email_payload",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260913010100_add_ticket_email_worker_contracts.sql",
+      "arguments": "p_attempt_id uuid,p_lease_id uuid,p_token_hash text,p_payload jsonb"
+    }
+  },
+  {
+    "file": "supabase/functions/_shared/ticketEmailWorker.ts",
+    "line": 411,
+    "kind": "rpc",
+    "target": "server_begin_ticket_email_dispatch",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260915010200_add_event_notices.sql",
+      "arguments": "p_attempt_id uuid,p_lease_id uuid"
+    }
+  },
+  {
+    "file": "supabase/functions/_shared/ticketEmailWorker.ts",
+    "line": 414,
+    "kind": "rpc",
+    "target": "server_finish_ticket_email_dispatch",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260913010600_add_email_retention_and_recipient_suppression.sql",
+      "arguments": "p_attempt_id uuid,p_lease_id uuid,p_outcome text,p_provider_id text default null"
+    }
+  },
+  {
+    "file": "supabase/functions/_shared/freeRsvpHandler.ts",
+    "line": 148,
+    "kind": "rpc",
+    "target": "server_consume_free_rsvp_rate_limit",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260912010300_add_free_owner_reads_and_rate_limit.sql",
+      "arguments": "p_identity_hash text,p_operation text"
+    }
+  },
+  {
+    "file": "supabase/functions/_shared/ticketEmailHttp.ts",
+    "line": 309,
+    "kind": "rpc",
+    "target": "server_read_ticket_email_access",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260915010300_add_approved_private_event_facts.sql",
+      "arguments": "p_token_hash text,p_ip_hash text,p_page integer default 0,p_member integer default null"
+    }
+  },
+  {
+    "file": "supabase/functions/_shared/auth.ts",
+    "line": 29,
+    "kind": "from",
+    "target": "organizers",
+    "lastDefinition": null
+  },
+  {
+    "file": "supabase/functions/ticket-admission/index.ts",
+    "line": 75,
+    "kind": "rpc",
+    "target": "server_redeem_organizer_ticket",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260912010200_extend_shared_admission_for_free_sources.sql",
+      "arguments": "p_organizer_id uuid,p_event_id uuid,p_credential_hash bytea"
+    }
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 232,
+    "kind": "from",
+    "target": "refunds",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 275,
+    "kind": "from",
+    "target": "stripe_webhook_events",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 340,
+    "kind": "from",
+    "target": "events",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 410,
+    "kind": "from",
+    "target": "organizers",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 689,
+    "kind": "rpc",
+    "target": "get_public_event",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260826010400_route_public_reads_through_eligibility.sql",
+      "arguments": "p_event_id uuid"
+    }
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 757,
+    "kind": "from",
+    "target": "organizers",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 804,
+    "kind": "from",
+    "target": "events",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 813,
+    "kind": "from",
+    "target": "events",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 835,
+    "kind": "from",
+    "target": "ticket_tiers",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 873,
+    "kind": "from",
+    "target": "ticket_tiers",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 950,
+    "kind": "from",
+    "target": "ticket_tiers",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 1070,
+    "kind": "from",
+    "target": "organizers",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 1076,
+    "kind": "from",
+    "target": "events",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 1085,
+    "kind": "from",
+    "target": "events",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 1107,
+    "kind": "from",
+    "target": "tickets",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 1126,
+    "kind": "from",
+    "target": "events",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 1132,
+    "kind": "from",
+    "target": "orders",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 1148,
+    "kind": "from",
+    "target": "order_items",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 1154,
+    "kind": "from",
+    "target": "tickets",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 1159,
+    "kind": "from",
+    "target": "refunds",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 1171,
+    "kind": "from",
+    "target": "ticket_tiers",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 1213,
+    "kind": "from",
+    "target": "stripe_webhook_events",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 1542,
+    "kind": "from",
+    "target": "stripe_webhook_events",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 1560,
+    "kind": "from",
+    "target": "stripe_webhook_events",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 1579,
+    "kind": "from",
+    "target": "orders",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 1812,
+    "kind": "from",
+    "target": "orders",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 1816,
+    "kind": "from",
+    "target": "events",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 1829,
+    "kind": "from",
+    "target": "refunds",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 1865,
+    "kind": "from",
+    "target": "tickets",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 1877,
+    "kind": "from",
+    "target": "tickets",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 2005,
+    "kind": "from",
+    "target": "stripe_webhook_events",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 2024,
+    "kind": "from",
+    "target": "organizers",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 2077,
+    "kind": "from",
+    "target": "events",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 2108,
+    "kind": "rpc",
+    "target": "get_public_event",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260826010400_route_public_reads_through_eligibility.sql",
+      "arguments": "p_event_id uuid"
+    }
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 2111,
+    "kind": "from",
+    "target": "ticket_tiers",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 2246,
+    "kind": "from",
+    "target": "order_items",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 2247,
+    "kind": "from",
+    "target": "tickets",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 2311,
+    "kind": "from",
+    "target": "stripe_webhook_events",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 2344,
+    "kind": "from",
+    "target": "events",
+    "lastDefinition": null
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 2347,
+    "kind": "rpc",
+    "target": "get_public_event",
+    "lastDefinition": {
+      "migration": "supabase/migrations/20260826010400_route_public_reads_through_eligibility.sql",
+      "arguments": "p_event_id uuid"
+    }
+  },
+  {
+    "file": "tests/integration/edge/task17-transaction-driver/index.ts",
+    "line": 2489,
+    "kind": "from",
+    "target": "tickets",
+    "lastDefinition": null
+  }
+]

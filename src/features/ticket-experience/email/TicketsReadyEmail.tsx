@@ -8,12 +8,12 @@ const admissionStyle = {
   border: '1px dashed #dedce8',
   borderRadius: '12px',
   padding: '14px 16px',
-  backgroundColor: '#f7f7fb',
+  backgroundColor: '#24202f',
 }
 
 const admissionPositionStyle = {
   margin: '0 0 4px',
-  color: '#6f6a7d',
+  color: '#c6bbd6',
   fontSize: '11px',
   fontWeight: '700',
   letterSpacing: '0.6px',
@@ -22,7 +22,7 @@ const admissionPositionStyle = {
 
 const admissionLabelStyle = {
   margin: '0',
-  color: '#19162c',
+  color: '#ffffff',
   fontSize: '16px',
   fontWeight: '700',
 }
@@ -35,8 +35,9 @@ export function TicketsReadyEmail(props: TicketsReadyProps) {
       recipientLabel={props.recipientLabel}
       title={`${props.eventName} tickets are ready`}
       viewTicketsUrl={props.viewTicketsUrl}
+      supportEmail={props.supportEmail}
     >
-      <Text style={emailStyles.text}>Your admission collection is ready. Open one ticket at a time when you arrive.</Text>
+      <Text style={emailStyles.text}>You have {props.admissions.length} existing {props.admissions.length === 1 ? 'ticket' : 'tickets'}. Open one ticket at a time when you arrive. Used tickets remain in your collection as history.</Text>
       <Section style={emailStyles.facts}>
         <Text style={emailStyles.fact}><strong>When</strong><br />{props.startsAtLabel}</Text>
         <Text style={emailStyles.fact}><strong>Where</strong><br />{props.venueName}</Text>
@@ -46,9 +47,11 @@ export function TicketsReadyEmail(props: TicketsReadyProps) {
           <Section key={admission.positionLabel} style={admissionStyle}>
             <Text style={admissionPositionStyle}>{admission.positionLabel}</Text>
             <Text style={admissionLabelStyle}>{admission.admissionLabel}</Text>
+            {admission.statusLabel ? <Text style={emailStyles.fact}>{admission.statusLabel}{admission.usedAtLabel ? ` · ${admission.usedAtLabel}` : ''}</Text> : null}
           </Section>
         ))}
       </Section>
+      {props.expiresAtLabel ? <Text style={emailStyles.privacy}>This link expires {props.expiresAtLabel}.</Text> : null}
     </EmailFrame>
   )
 }

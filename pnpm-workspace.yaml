@@ -1,3 +1,5 @@
 allowBuilds:
   deno: true
   esbuild: true
+patchedDependencies:
+  '@supabase/auth-js@2.112.3': patches/auth-js@2.112.3.patch

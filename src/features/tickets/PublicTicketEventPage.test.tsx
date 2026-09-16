@@ -71,11 +71,11 @@ const freePublicEvent = {
   tiers: [] as const,
 }
 
-function renderPage() {
+function renderPage(search = '') {
   const router = createMemoryRouter([
     { path: '/events/:eventId', element: <PublicTicketEventPage /> },
     { path: '/events/:eventId/checkout', element: <p>Checkout destination</p> },
-  ], { initialEntries: [`/events/${eventId}`] })
+  ], { initialEntries: [`/events/${eventId}${search}`] })
   return { router, ...render(<RouterProvider router={router} />) }
 }
 
@@ -99,7 +99,7 @@ describe('PublicTicketEventPage', () => {
     expect(screen.queryByText(/6b849|platform fee|destination|stripe|reserved_quantity/i)).not.toBeInTheDocument()
   })
 
-  it('renders the free public shell and reporting without ticket or checkout controls', () => {
+  it('renders free RSVP entry without paid checkout controls', () => {
     usePublicTicketingEvent.mockReturnValue({
       data: freePublicEvent,
       isPending: false,
@@ -110,7 +110,7 @@ describe('PublicTicketEventPage', () => {
     renderPage()
 
     expect(screen.getByRole('heading', { name: 'Night Market' })).toBeInTheDocument()
-    expect(screen.getByText('Free event')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Free RSVP' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Report this event' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Choose your ticket' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Continue to checkout' })).not.toBeInTheDocument()
@@ -134,7 +134,7 @@ describe('PublicTicketEventPage', () => {
     expect(router.state.location.search).not.toMatch(/price|fee|currency|stripe|destination/i)
   })
 
-  it('clears a selection after its exact tier becomes unavailable, even if it later returns', async () => {
+  it('retains a selection after availability changes and requires explicit review', async () => {
     const user = userEvent.setup()
     const { router } = renderPage()
     await user.type(screen.getByRole('spinbutton', { name: 'General admission quantity' }), '1')
@@ -148,7 +148,8 @@ describe('PublicTicketEventPage', () => {
     })
     await act(async () => { await router.navigate(`/events/${eventId}?refresh=availability`) })
 
-    expect(screen.getByRole('button', { name: 'Continue to checkout' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Sold out' })).toBeDisabled()
+    expect(screen.getByRole('spinbutton', { name: 'General admission quantity' })).toHaveValue(1)
 
     usePublicTicketingEvent.mockReturnValue({
       data: publicEvent,
@@ -159,7 +160,9 @@ describe('PublicTicketEventPage', () => {
     await act(async () => { await router.navigate(`/events/${eventId}?refresh=available-again`) })
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Continue to checkout' })).toBeDisabled())
-    expect(screen.getByRole('spinbutton', { name: 'General admission quantity' })).toHaveValue(0)
+    expect(screen.getByRole('spinbutton', { name: 'General admission quantity' })).toHaveValue(1)
+    await user.click(screen.getByRole('button', { name: 'Confirm updated selection' }))
+    expect(screen.getByRole('button', { name: 'Continue to checkout' })).toBeEnabled()
   })
 
   it('preserves a selected available tier when unrelated tiers are added, reordered, or change availability', async () => {
@@ -192,7 +195,7 @@ describe('PublicTicketEventPage', () => {
     expect(screen.getByRole('button', { name: 'Continue to checkout' })).toBeEnabled()
   })
 
-  it('clears selected-tier availability urgently before a rapid sold-out to available update', async () => {
+  it('requires review after a rapid sold-out to available update without erasing quantity', async () => {
     const user = userEvent.setup()
     const { router } = renderPage()
     await user.type(screen.getByRole('spinbutton', { name: 'General admission quantity' }), '1')
@@ -209,7 +212,7 @@ describe('PublicTicketEventPage', () => {
     usePublicTicketingEvent.mockReturnValue({ data: publicEvent, isPending: false, isError: false, refetch: vi.fn() })
     await act(async () => { await router.navigate(`/events/${eventId}?refresh=rapid-available`) })
 
-    expect(screen.getByRole('spinbutton', { name: 'General admission quantity' })).toHaveValue(0)
+    expect(screen.getByRole('spinbutton', { name: 'General admission quantity' })).toHaveValue(1)
     expect(screen.getByRole('button', { name: 'Continue to checkout' })).toBeDisabled()
   })
 
@@ -299,7 +302,7 @@ describe('PublicTicketEventPage', () => {
     expect(screen.queryByRole('button', { name: 'Report this event' })).not.toBeInTheDocument()
   })
 
-  it('labels an event with no purchasable tiers as unavailable instead of enabling checkout', () => {
+  it('labels a nonempty all-sold-out tier list as Sold out and disables both purchase actions', () => {
     usePublicTicketingEvent.mockReturnValue({
       data: { ...publicEvent, tiers: [{ ...publicEvent.tiers[0], availability_status: 'sold_out' }] },
       isPending: false,
@@ -308,8 +311,9 @@ describe('PublicTicketEventPage', () => {
     })
     renderPage()
 
-    expect(screen.getByText('Tickets are currently unavailable')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Continue to checkout' })).toBeDisabled()
+    expect(screen.getAllByText('Sold out').length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: 'Sold out' })).toBeDisabled()
+    expect(screen.queryByRole('link', { name: /Get tickets/ })).not.toBeInTheDocument()
   })
 
   it('keeps an aggregate-overflow cart on the event with live feedback', async () => {
@@ -338,4 +342,68 @@ describe('PublicTicketEventPage', () => {
 
     expect(screen.getByRole('button', { name: 'Continue to checkout' })).toBeDisabled()
   })
+})
+
+
+describe('Spec08 availability recovery', () => {
+  beforeEach(() => {
+    usePublicTicketingEvent.mockReturnValue({ data: publicEvent, isPending: false, isError: false, refetch: vi.fn() })
+    useReportPublicEvent.mockReturnValue({ isPending: false, mutateAsync, reset: resetReport })
+  })
+  it('keeps mixed availability purchasable without calling the event sold out', () => {
+    usePublicTicketingEvent.mockReturnValue({ data: { ...publicEvent, tiers: [publicEvent.tiers[0], { ...publicEvent.tiers[1], availability_status: 'sold_out' }] }, isPending: false, isError: false })
+    renderPage()
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'General admission quantity' }), { target: { value: '2' } })
+    expect(screen.getByRole('button', { name: 'Continue to checkout' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: 'Sold out' })).not.toBeInTheDocument()
+  })
+  it('does not call a stale sold-out projection current inventory truth', () => {
+    usePublicTicketingEvent.mockReturnValue({ data: { ...publicEvent, tiers: publicEvent.tiers.map(t => ({ ...t, availability_status: 'sold_out' })) }, isPending: false, isError: true, error: new PublicTicketingError('RETRYABLE'), refetch: vi.fn() })
+    renderPage()
+    expect(screen.getByRole('button', { name: 'Tickets unavailable' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'Sold out' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Sales closed')).not.toBeInTheDocument()
+  })
+  it('restores the whole explicit checkout selection from its bounded URL', () => {
+    renderPage(`?item=${tierId}:2&item=${publicEvent.tiers[1]!.id}:1`)
+    expect(screen.getByRole('spinbutton', { name: 'General admission quantity' })).toHaveValue(2)
+    expect(screen.getByRole('spinbutton', { name: 'VIP quantity' })).toHaveValue(1)
+  })
+  it('never silently purchases the remaining part of a cart after one tier disappears', async () => {
+    const user = userEvent.setup(); const { router } = renderPage()
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'General admission quantity' }), { target: { value: '2' } })
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'VIP quantity' }), { target: { value: '1' } })
+    usePublicTicketingEvent.mockReturnValue({ data: { ...publicEvent, tiers: [publicEvent.tiers[0]] }, isPending: false, isError: false, refetch: vi.fn() })
+    await act(async () => { await router.navigate(`/events/${eventId}?refresh=removed`) })
+    expect(screen.getByRole('button', { name: 'Continue to checkout' })).toBeDisabled()
+    expect(screen.getByText(/VIP × 1/)).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Remove unavailable tickets' }))
+    expect(screen.getByRole('button', { name: 'Continue to checkout' })).toBeEnabled()
+    await user.click(screen.getByRole('button', { name: 'Continue to checkout' }))
+    expect(router.state.location.search).toBe(`?item=${tierId}%3A2`)
+  })
+  it('requires buyer review after a selected tier price changes', async () => {
+    const user = userEvent.setup(); const { router } = renderPage()
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'General admission quantity' }), { target: { value: '2' } })
+    usePublicTicketingEvent.mockReturnValue({ data: { ...publicEvent, tiers: [{ ...publicEvent.tiers[0], unit_amount_minor: 3200 }, publicEvent.tiers[1]] }, isPending: false, isError: false, refetch: vi.fn() })
+    await act(async () => { await router.navigate(`/events/${eventId}?refresh=price`) })
+    expect(screen.getByText('$32.00')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Continue to checkout' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: 'Confirm updated selection' }))
+    expect(screen.getByRole('button', { name: 'Continue to checkout' })).toBeEnabled()
+  })
+})
+
+it('removing an unavailable line does not silently accept another selected line price change', async () => {
+  usePublicTicketingEvent.mockReturnValue({ data: publicEvent, isPending: false, isError: false, refetch: vi.fn() })
+  useReportPublicEvent.mockReturnValue({ isPending: false, mutateAsync, reset: resetReport })
+  const user = userEvent.setup(); const { router } = renderPage()
+  fireEvent.change(screen.getByRole('spinbutton', { name: 'General admission quantity' }), { target: { value: '2' } })
+  fireEvent.change(screen.getByRole('spinbutton', { name: 'VIP quantity' }), { target: { value: '1' } })
+  usePublicTicketingEvent.mockReturnValue({ data: { ...publicEvent, tiers: [{ ...publicEvent.tiers[0], unit_amount_minor: 3200 }] }, isPending: false, isError: false, refetch: vi.fn() })
+  await act(async () => { await router.navigate(`/events/${eventId}?refresh=combined`) })
+  await user.click(screen.getByRole('button', { name: 'Remove unavailable tickets' }))
+  expect(screen.getByRole('button', { name: 'Continue to checkout' })).toBeDisabled()
+  await user.click(screen.getByRole('button', { name: 'Confirm updated selection' }))
+  expect(screen.getByRole('button', { name: 'Continue to checkout' })).toBeEnabled()
 })

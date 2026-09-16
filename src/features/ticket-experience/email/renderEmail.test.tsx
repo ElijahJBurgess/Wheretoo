@@ -87,3 +87,30 @@ describe('emailRenderer privacy and content boundaries', () => {
     expect(output.text).not.toMatch(/\$|amount|business days|original payment|card ending/i)
   })
 })
+
+describe('delivery and recovery emails', () => {
+  it('preserves mixed admission history and gives a support reply destination', async () => {
+    const output = await emailRenderer.render({ kind: 'tickets_ready', props: { ...paidTicketsReadyProps, supportEmail: 'help@example.invalid', expiresAtLabel: 'November 12 at 8 PM PST', admissions: [{ admissionLabel: 'General Admission', positionLabel: 'Ticket 1 of 2', statusLabel: 'Used', usedAtLabel: 'September 11 at 7 PM PDT' }, { admissionLabel: 'General Admission', positionLabel: 'Ticket 2 of 2', statusLabel: 'Valid' }] } })
+    expect(output.text).toContain('Used')
+    expect(output.text).toContain('Valid')
+    expect(output.text).toContain('September 11 at 7 PM PDT')
+    expect(output.text).toContain('2 existing tickets')
+    expect(output.text).toContain('help@example.invalid')
+    expect(output.text).toContain('November 12 at 8 PM PST')
+    expect(output.html).toContain('#12101d')
+  })
+  it('renders a recovery count, fixed lifetime, and separate existing collections', async () => {
+    const output = await emailRenderer.render({kind:'ticket_recovery',props:{recipientLabel:'there',collectionCount:3,ticketCount:5,viewTicketsUrl:'https://tickets.example.invalid/ticket-access#em1_test',supportEmail:'help@example.invalid'}})
+    expect(output.text).toContain('5 existing tickets')
+    expect(output.text).toContain('3 separate collections')
+    expect(output.text).toContain('24 hours')
+    expect(output.text).toMatch(/View my tickets/i)
+    expect(output.html).not.toMatch(/qr.?code|admission.?credential|<img/i)
+  })
+  it('overflow uses neutral configured support without an access link or truncated count', async () => {
+    const output = await emailRenderer.render({kind:'ticket_recovery',props:{recipientLabel:'there',overflow:true,supportEmail:'help@example.invalid'}})
+    expect(output.text).toContain('help@example.invalid')
+    expect(output.text).not.toMatch(/View my tickets|200|24 hours|em1_|ticket-access/i)
+    expect(output.text).toContain('help you recover access')
+  })
+})

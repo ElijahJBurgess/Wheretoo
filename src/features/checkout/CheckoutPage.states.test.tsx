@@ -50,7 +50,7 @@ describe('CheckoutState', () => {
   it('identifies the whole multi-tier cart as unavailable when one selected tier is sold out', () => {
     useCheckoutPublicEvent.mockReturnValue({
       data: {
-        event: { title: 'Night Market' },
+        event: { id: eventId, title: 'Night Market' },
         tiers: [
           { id: availableTierId, name: 'General admission', unit_amount_minor: 2_500, availability_status: 'available' },
           { id: soldOutTierId, name: 'VIP', unit_amount_minor: 7_500, availability_status: 'sold_out' },
@@ -69,8 +69,8 @@ describe('CheckoutState', () => {
       </MemoryRouter>,
     )
 
-    expect(screen.getByRole('heading', { level: 1, name: 'This cart is unavailable' })).toBeInTheDocument()
-    expect(screen.getByText('Choose available tickets to continue.')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Return to event' })).toHaveAttribute('href', `/events/${eventId}`)
+    expect(screen.getByRole('heading', { level: 1, name: 'Review your selection' })).toBeInTheDocument()
+    expect(screen.getByText(/Your full selection is kept here/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Edit selection' })).toHaveAttribute('href', `/events/${eventId}/tickets?item=${soldOutTierId}%3A1&item=${availableTierId}%3A1`)
   })
 })

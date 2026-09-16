@@ -1,0 +1,37 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions;
+select no_plan();
+\ir helpers/spec09_refund_setup.inc
+select pg_temp.record_and_fulfill('spec10summary','spec10summary',id,session_id) from fulfillment_orders;
+reset role;
+create function pg_temp.summary() returns jsonb language sql as $$select public.get_owned_event_cancellation_summary('a6200000-0000-4000-8000-000000000001')$$;
+select is(pg_temp.summary()->'paid'->>'receivedOrders','1','received orders count sources not admissions');
+select is(pg_temp.summary()->'paid'->>'eligibleAmountMinor','7000','eligible amount uses canonical order total');
+select is(pg_temp.summary()->'tickets'->>'issued','3','ticket units counted separately');
+set local role authenticated;
+select public.cancel_owned_event('a6200000-0000-4000-8000-000000000001');
+reset role;
+select is(pg_temp.summary()->>'eventStatus','cancelled','canonical cancellation status independent');
+select is(pg_temp.summary()->'tickets'->>'cancelledUnused','3','current unused cancellations');
+select is(pg_temp.summary()->'paid'->>'eligibleOrders','1','cancellation does not dispatch refund');
+select is((select count(*) from private.order_refund_operations),0::bigint,'no automatic refund');
+select is((select count(*) from private.ticket_email_outbox),0::bigint,'no automatic cancellation email');
+select public.server_claim_owned_refund('a6100000-0000-4000-8000-000000000001','a6200000-0000-4000-8000-000000000001',(select id from fulfillment_orders));
+select public.server_note_refund_observation('a6100000-0000-4000-8000-000000000001','a6200000-0000-4000-8000-000000000001',(select id from fulfillment_orders),'unknown');
+select is(pg_temp.summary()->'paid'->>'unknownOrders','1','Spec09 durable unknown counted truthfully');
+select is(pg_temp.summary()->'paid'->>'eligibleAmountMinor','0','unknown operations excluded from new dispatch amount');
+select is(pg_temp.summary()->'paid'->>'notConfirmedRefundedOrders','1','remaining label does not promise refund eligibility');
+select ok(not (pg_temp.summary()::text ~ 'example.invalid|credential|stripe_|confirmation'),'aggregate allowlist excludes buyer and private material');
+select set_config('request.jwt.claim.sub','a6100000-0000-4000-8000-000000000002',true);
+select throws_ok($$select pg_temp.summary()$$,'42501','Event unavailable','owner boundary enforced');
+reset role;
+\ir free_registration_fixture.inc
+select pg_temp.register(10,2);
+select public.cancel_owned_event('b6200000-0000-4000-8000-000000000001');
+select is(public.get_owned_event_cancellation_summary('b6200000-0000-4000-8000-000000000001')->'free'->>'registrations','1','real free registration counted separately');
+select is(public.get_owned_event_cancellation_summary('b6200000-0000-4000-8000-000000000001')->'free'->>'admissions','2','free admission units remain truthful');
+select is(public.get_owned_event_cancellation_summary('b6200000-0000-4000-8000-000000000001')->'paid','null'::jsonb,'free finance is not applicable rather than zero-dollar order');
+select is((select count(*) from public.orders where event_id='b6200000-0000-4000-8000-000000000001'),0::bigint,'free fixture has no paid order');
+select ok(not has_function_privilege('anon','public.get_owned_event_cancellation_summary(uuid)','execute'),'private summary not public');
+select * from finish();rollback;

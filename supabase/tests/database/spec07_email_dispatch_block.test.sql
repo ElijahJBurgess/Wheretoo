@@ -1,0 +1,31 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+select extensions.no_plan();
+\ir spec07_email_fixture.inc
+update private.ticket_email_settings set enabled_at=null;
+select pg_temp.register(n,1,2,'Bulk Guest','bulk-block@example.invalid') from generate_series(300,500) n;
+create temp table blocked_attempts(n integer primary key,id uuid,lease uuid,context jsonb,dispatch jsonb,before_retry jsonb);
+insert into blocked_attempts select n,('b6900000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,('b6910000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,null,null,null from generate_series(1,3) n;
+insert into private.ticket_email_outbox(id,purpose,request_id,recovery_payload,lease_id,lease_until)
+select id,'recovery',id,pg_temp.envelope(),lease,now()+interval '2 minutes' from blocked_attempts;
+update blocked_attempts set context=public.server_prepare_ticket_email_context(id,lease,'bulk-block@example.invalid');
+select extensions.ok((select bool_and((context->>'overflow')::boolean) from blocked_attempts),'all three recovery attempts prepare real 201-source overflow');
+select extensions.ok((select bool_and(public.server_save_ticket_email_payload(id,lease,repeat(n::text,64),pg_temp.envelope())) from blocked_attempts),'overflow payloads persist before later recipient suppression');
+update blocked_attempts set dispatch=public.server_begin_ticket_email_dispatch(id,lease) where n in(2,3);
+select extensions.ok((select public.server_finish_ticket_email_dispatch(id,lease,'unknown') from blocked_attempts where n=2),'one overflow send has an uncertain transport result');
+update private.ticket_email_outbox set lease_until=now()+interval '2 minutes' where id=(select id from blocked_attempts where n=2);
+update blocked_attempts b set before_retry=to_jsonb(q) from private.ticket_email_outbox q where b.id=q.id and n=2;
+select extensions.ok((select public.server_observe_ticket_email('overflow-bounce',id,'overflow-provider','bounced',now()) from blocked_attempts where n=3),'correlated bounce on another attempt blocks the shared recipient');
+select extensions.is((select public.server_begin_ticket_email_dispatch(id,lease) from blocked_attempts where n=1),null::jsonb,'late recipient block refuses overflow first dispatch');
+select extensions.is((select state from private.ticket_email_outbox where id=(select id from blocked_attempts where n=1)),'suppressed','never-dispatched overflow becomes Suppressed');
+select extensions.is((select dispatch_count from private.ticket_email_outbox where id=(select id from blocked_attempts where n=1)),0,'blocked first dispatch never increments its attempt count');
+select extensions.is((select dispatch_stopped_reason from private.ticket_email_outbox where id=(select id from blocked_attempts where n=1)),'recipient_blocked','overflow records the explicit recipient block');
+select extensions.ok((select public.server_observe_ticket_email('overflow-complaint',id,'overflow-provider','complained',now()) from blocked_attempts where n=3),'later correlated complaint retains the recipient block');
+select extensions.is((select public.server_begin_ticket_email_dispatch(id,lease) from blocked_attempts where n=2),null::jsonb,'late recipient block refuses an Unknown overflow retry');
+select extensions.is((select state from private.ticket_email_outbox where id=(select id from blocked_attempts where n=2)),'unknown','possibly-dispatched overflow remains Unknown');
+select extensions.is((select dispatch_count from private.ticket_email_outbox where id=(select id from blocked_attempts where n=2)),1,'blocked retry does not increment dispatch count');
+select extensions.is((select payload from private.ticket_email_outbox where id=(select id from blocked_attempts where n=2)),(select before_retry->'payload' from blocked_attempts where n=2),'recipient suppression preserves immutable retry payload');
+select extensions.is((select first_possible_dispatch_at from private.ticket_email_outbox where id=(select id from blocked_attempts where n=2)),(select (before_retry->>'first_possible_dispatch_at')::timestamptz from blocked_attempts where n=2),'recipient suppression preserves first possible dispatch anchor');
+select extensions.is((select 'ticket-email/'||id from private.ticket_email_outbox where id=(select id from blocked_attempts where n=2)),(select dispatch->>'idempotencyKey' from blocked_attempts where n=2),'recipient suppression preserves exact idempotency key');
+select * from extensions.finish();
+rollback;

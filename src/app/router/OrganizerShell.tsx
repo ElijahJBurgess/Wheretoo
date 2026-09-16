@@ -1,35 +1,39 @@
-import { useState } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { OperationsLayout } from '../../features/organizer-operations/OperationsUi'
 import { OrganizerLayout } from '../../components/layout/OrganizerLayout'
 import { FormErrorSummary } from '../../components/ui/FormErrorSummary'
-import { signOut } from '../../features/auth/auth.api'
+import { useSignOut } from '../../features/auth/SignOutProvider'
 import { useSession } from '../../features/auth/SessionProvider'
 import { useStaffRole } from '../../features/moderation/moderation.queries'
+import { useOwnedEvent } from '../../features/events/event.queries'
+import { z } from 'zod'
 
 export function OrganizerShell() {
   const navigate = useNavigate()
   const sessionState = useSession()
   const staffUserId = sessionState.status === 'authenticated' ? sessionState.user.id : ''
   const staffRoleQuery = useStaffRole(staffUserId)
-  const [signOutError, setSignOutError] = useState<string | null>(null)
-
+  const controller = useSignOut()
+  const signOutError = controller.error
   async function handleSignOut() {
-    setSignOutError(null)
-
-    try {
-      await signOut()
-      navigate('/auth/sign-in', { replace: true })
-    } catch (error) {
-      setSignOutError(error instanceof Error ? error.message : 'Sign out failed. Try again.')
-    }
+    if (sessionState.status !== 'authenticated') return
+    const result = await controller.signOut(sessionState.session)
+    if (result.localSignedOut && result.isCurrent()) navigate('/auth/sign-in', { replace: true })
   }
 
-  const { pathname } = useLocation()
-  const match = pathname.match(/^\/organizer\/events\/([^/]+)\/(dashboard|orders|check-in)(?:\/|$)/)
-  if (pathname === '/organizer/events' || match) return <OperationsLayout eventId={match?.[1]} onSignOut={() => void handleSignOut()} staffRole={staffRoleQuery.data ?? null}><FormErrorSummary errors={signOutError ? [signOutError] : []} title="Sign out failed" /><Outlet /></OperationsLayout>
+  const { pathname, search } = useLocation()
+  const match = pathname.match(/^\/organizer\/events\/([^/]+)\/(dashboard|orders|check-in|registrations)(?:\/|$)/)
+  const eventId = pathname.match(/^\/organizer\/events\/([^/]+)(?:\/|$)/)?.[1] ?? ''
+  const ownedEvent = useOwnedEvent(z.uuid().safeParse(eventId).success ? eventId : '', staffUserId)
+  const admissionType = ownedEvent.data?.admission_type
+  const query = new URLSearchParams(search)
+  const creationEdit = pathname.endsWith('/edit') && (query.get('resume') === '1' || query.get('saved') === '1' || ['basics', 'date-location', 'ticket-type', 'details', 'requirements'].includes(query.get('step') ?? ''))
+  const creationDetail = ownedEvent.data?.status === 'draft' && (pathname.endsWith('/tickets') || pathname.endsWith('/preview'))
+  const creationOutcome = query.get('created') === '1' && pathname === `/organizer/events/${eventId}`
+  if (pathname === '/organizer/setup' || pathname === '/organizer/settings/payments' || pathname === '/organizer/events/new' || creationEdit || creationDetail || creationOutcome) return <Outlet />
+  if (pathname === '/organizer/events' || pathname.startsWith('/organizer/settings') || match) return <OperationsLayout eventId={match?.[1]} admissionType={admissionType === 'paid' || admissionType === 'free' ? admissionType : null} signOutPending={controller.pending} onSignOut={() => void handleSignOut()} staffRole={staffRoleQuery.data ?? null}><FormErrorSummary errors={signOutError ? [signOutError] : []} title="Sign out failed" /><Outlet /></OperationsLayout>
   return (
-    <OrganizerLayout onSignOut={() => void handleSignOut()} staffRole={staffRoleQuery.data ?? null}>
+    <OrganizerLayout signOutPending={controller.pending} onSignOut={() => void handleSignOut()} staffRole={staffRoleQuery.data ?? null}>
       <FormErrorSummary errors={signOutError ? [signOutError] : []} title="Sign out failed" />
       <Outlet />
     </OrganizerLayout>

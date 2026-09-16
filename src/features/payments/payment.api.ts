@@ -35,8 +35,17 @@ function isConnectStatus(value: unknown): value is ConnectStatus {
     typeof value.last_synced_at === 'string'
 }
 
-async function invokePaymentFunction(name: string): Promise<unknown> {
-  const { data, error } = await supabase.functions.invoke(name, { body: {}, method: 'POST' })
+async function invokePaymentFunction(name: string, userId?: string, isCurrent: () => boolean = () => true): Promise<unknown> {
+  let headers: { Authorization: string } | undefined
+  if (userId !== undefined) {
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+    if (sessionError || !sessionData.session || sessionData.session.user.id !== userId || !isCurrent()) throw new Error('Organizer session changed')
+    // Pin the initiating JWT so a later SDK token lookup cannot send this action as another owner.
+    headers = { Authorization: `Bearer ${sessionData.session.access_token}` }
+  }
+  if (!isCurrent()) throw new Error('Organizer session changed')
+  const { data, error } = await supabase.functions.invoke(name, { body: {}, method: 'POST', ...(headers ? { headers } : {}) })
+  if (!isCurrent()) throw new Error('Organizer session changed')
 
   if (error !== null) {
     throw error
@@ -45,9 +54,9 @@ async function invokePaymentFunction(name: string): Promise<unknown> {
   return data
 }
 
-export async function getConnectStatus(): Promise<ConnectStatus> {
+export async function getConnectStatus(userId?: string, isCurrent?: () => boolean): Promise<ConnectStatus> {
   try {
-    const data = await invokePaymentFunction('stripe-connect-status')
+    const data = await invokePaymentFunction('stripe-connect-status', userId, isCurrent)
     if (!isConnectStatus(data)) throw new Error('Unsafe status response')
     return data
   } catch {
@@ -55,9 +64,9 @@ export async function getConnectStatus(): Promise<ConnectStatus> {
   }
 }
 
-export async function createConnectAccountSession(): Promise<ConnectAccountSession> {
+export async function createConnectAccountSession(userId?: string, isCurrent?: () => boolean): Promise<ConnectAccountSession> {
   try {
-    const data = await invokePaymentFunction('stripe-connect-session')
+    const data = await invokePaymentFunction('stripe-connect-session', userId, isCurrent)
     if (!isRecord(data) || typeof data.client_secret !== 'string' || !isConnectStatus(data.connect_status)) {
       throw new Error('Unsafe session response')
     }
@@ -68,9 +77,9 @@ export async function createConnectAccountSession(): Promise<ConnectAccountSessi
   }
 }
 
-export async function getExpressLoginUrl(): Promise<string> {
+export async function getExpressLoginUrl(userId?: string, isCurrent?: () => boolean): Promise<string> {
   try {
-    const data = await invokePaymentFunction('stripe-express-login')
+    const data = await invokePaymentFunction('stripe-express-login', userId, isCurrent)
     if (!isRecord(data) || typeof data.url !== 'string') throw new Error('Unsafe login response')
 
     const url = new URL(data.url)

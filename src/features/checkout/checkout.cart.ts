@@ -12,17 +12,12 @@ export function encodeCheckoutCart(items: readonly CheckoutItem[]): string {
 
 export function parseCheckoutCart(
   search: string | URLSearchParams,
-  knownTierIds: readonly string[],
+  _knownTierIds?: readonly string[],
 ): CheckoutItem[] | null {
+  void _knownTierIds // Membership is reviewed separately; existing callers may still supply this argument.
   const params = typeof search === 'string' ? new URLSearchParams(search) : search
   if ([...params.keys()].some((key) => key !== 'item')) return null
 
-  const known = new Set(
-    knownTierIds.flatMap((tierId) => {
-      const parsed = lowercaseRfcUuidSchema.safeParse(tierId)
-      return parsed.success ? [parsed.data] : []
-    }),
-  )
   const rawItems = params.getAll('item').map((value) => {
     const match = /^([a-fA-F0-9-]{36}):(\d+)$/.exec(value)
     return match === null ? null : { tierId: match[1], quantity: Number(match[2]) }
@@ -30,6 +25,10 @@ export function parseCheckoutCart(
   if (rawItems.some((item) => item === null)) return null
 
   const parsed = checkoutItemsSchema.safeParse(rawItems)
-  if (!parsed.success || parsed.data.some((item) => !known.has(item.tierId))) return null
+  if (!parsed.success) return null
   return parsed.data
+}
+
+export function checkoutSelectionPath(eventId: string, items: readonly CheckoutItem[]): string {
+  return `/events/${lowercaseRfcUuidSchema.parse(eventId)}/tickets?${encodeCheckoutCart(items)}`
 }

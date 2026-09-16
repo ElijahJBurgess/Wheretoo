@@ -33,7 +33,7 @@ const nullableDisclosureFields = [
   'minimum_age', 'alcohol_present', 'cannabis_present', 'explicit_adult_content',
   'gambling_present', 'weapons_present', 'high_risk_activity',
 ] as const
-const requirementsRpcRowSchema = z.strictObject({
+export const requirementsRpcRowSchema = z.strictObject({
   minimum_age: z.string().nullable(), alcohol_present: z.boolean().nullable(), cannabis_present: z.boolean().nullable(), explicit_adult_content: z.boolean().nullable(),
   gambling_present: z.boolean().nullable(), weapons_present: z.boolean().nullable(), high_risk_activity: z.boolean().nullable(), needs_acceptance: z.boolean(),
   organizer_terms_label: z.string(), organizer_terms_version_id: z.string(), organizer_terms_stage: z.string(), organizer_terms_url: z.string(),
@@ -99,7 +99,7 @@ function parseContract<T>(schema: z.ZodType<T>, value: unknown): T {
   return parsed.data
 }
 
-function requirementsFromRpc(row: z.infer<typeof requirementsRpcRowSchema>): EventRequirements {
+export function requirementsFromRpc(row: z.infer<typeof requirementsRpcRowSchema>): EventRequirements {
   return parseContract(eventRequirementsSchema, {
     minimumAge: row.minimum_age ?? 'all_ages',
     alcoholPresent: row.alcohol_present ?? false,
@@ -241,7 +241,7 @@ export async function getMyStaffRole(): Promise<StaffRole | null> {
 export async function listModerationQueue(limit: number): Promise<ModerationQueueItem[]> {
   const { data, error } = await supabase.rpc('list_moderation_queue', { p_limit: limit })
   if (error) throw safeError(error)
-  const rows = parseContract(z.array(moderationQueueRpcRowSchema), data ?? [])
+  const rows = parseContract(z.array(moderationQueueRpcRowSchema), data)
   return rows.map((row) => {
     return parseContract(moderationQueueItemSchema, {
     eventId: row.event_id, organizerId: row.organizer_id, moderationStatus: row.moderation_status, contentRevision: row.content_revision,

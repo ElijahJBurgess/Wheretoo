@@ -115,6 +115,26 @@ export type CheckoutReconciliationCode =
   | "CHECKOUT_LINE_CURRENCY_MISMATCH"
   | "CHECKOUT_AGGREGATE_MISMATCH";
 
+export interface UnattachedCheckoutSnapshot extends OrderSnapshot {
+  checkoutRequestId: string;
+  checkoutExpiresAt: number;
+  createDigest: string;
+  snapshotDigest: string;
+}
+
+export interface UnattachedFulfillmentSnapshot extends FulfillmentSnapshot {
+  expectedSnapshotDigest: string;
+  checkoutExpiresAt: number;
+  paymentAffected: boolean;
+}
+
+export interface UnattachedApplyResult {
+  orderId: string;
+  orderStatus: string;
+  ticketCount: number;
+  disposition: "fulfilled" | "review" | "replay";
+}
+
 export interface CheckoutReconciliationReviewSnapshot {
   stripeEventId: string;
   orderId: string;
@@ -238,6 +258,14 @@ export interface StripeWebhookDependencies {
     checkoutSessionId: string,
   ): Promise<OrderSnapshot | null>;
   getPaymentOrderSnapshot(orderId: string): Promise<OrderSnapshot | null>;
+  getUnattachedCheckoutSnapshot(
+    orderId: string,
+    sessionId: string,
+    stripeEventId: string,
+  ): Promise<UnattachedCheckoutSnapshot | null>;
+  reconcileUnattachedPaidCheckout(
+    value: UnattachedFulfillmentSnapshot,
+  ): Promise<UnattachedApplyResult>;
   retrieveSession(
     id: string,
     params: Stripe.Checkout.SessionRetrieveParams,
@@ -281,6 +309,7 @@ export interface StripeWebhookDependencies {
 }
 
 interface NormalizedEvent {
+  platformContext: boolean;
   id: string;
   type: string;
   livemode: false;
@@ -484,6 +513,8 @@ function normalizeEvent(value: unknown): NormalizedEvent {
     objectId,
     apiVersion,
     createdAt,
+    platformContext: (value.account === undefined || value.account === null) &&
+      (value.context === undefined || value.context === null),
   };
 }
 
@@ -699,6 +730,123 @@ async function defaultGetOrderSnapshot(orderId: string, sessionId: string) {
   return orderSnapshotFromRpc(data, sessionId);
 }
 
+async function defaultGetUnattachedCheckoutSnapshot(
+  orderId: string,
+  sessionId: string,
+  stripeEventId: string,
+): Promise<UnattachedCheckoutSnapshot | null> {
+  const { data, error } = await getServiceClient().rpc(
+    "server_get_unattached_checkout_review_snapshot",
+    {
+      p_order_id: orderId,
+      p_session_id: sessionId,
+      p_stripe_event_id: stripeEventId,
+    },
+  );
+  if (error !== null) throwRpc(error);
+  const order = orderSnapshotFromRpc(data);
+  if (order === null) return null;
+  const row = parseRpcSingle(data);
+  const expiry = typeof row.checkout_expires_at === "string"
+    ? Date.parse(row.checkout_expires_at) / 1000
+    : NaN;
+  if (
+    order.orderId !== orderId || order.checkoutSessionId !== sessionId ||
+    typeof row.checkout_request_id !== "string" ||
+    !UUID_PATTERN.test(row.checkout_request_id) ||
+    typeof row.create_digest !== "string" ||
+    !/^[a-f0-9]{64}$/.test(row.create_digest) ||
+    /^0+$/.test(row.create_digest) ||
+    typeof row.snapshot_digest !== "string" ||
+    !/^[a-f0-9]{64}$/.test(row.snapshot_digest) ||
+    !Number.isSafeInteger(expiry) || expiry <= 0
+  ) throw new Error("invalid database response");
+  return {
+    ...order,
+    checkoutRequestId: row.checkout_request_id,
+    checkoutExpiresAt: expiry,
+    createDigest: row.create_digest,
+    snapshotDigest: row.snapshot_digest,
+  };
+}
+
+async function defaultReconcileUnattachedPaidCheckout(
+  value: UnattachedFulfillmentSnapshot,
+): Promise<UnattachedApplyResult> {
+  const { data, error } = await getServiceClient().rpc(
+    "server_reconcile_unattached_paid_checkout",
+    {
+      p_order_id: value.orderId,
+      p_session_id: value.checkoutSessionId,
+      p_stripe_event_id: value.stripeEventId,
+      p_expected_snapshot_digest: value.expectedSnapshotDigest,
+      p_payment_snapshot: {
+        payment_intent_id: value.paymentIntentId,
+        charge_id: value.chargeId,
+        transfer_id: value.transferId,
+        application_fee_id: value.applicationFeeId,
+        balance_transaction_id: value.balanceTransactionId,
+        customer_id: value.customerId,
+        mode: value.mode,
+        payment_status: value.paymentStatus,
+        currency: value.currency,
+        subtotal_minor: value.subtotalMinor,
+        total_minor: value.totalMinor,
+        application_fee_amount_minor: value.applicationFeeAmountMinor,
+        destination_account_id: value.destinationAccountId,
+        checkout_expires_at: value.checkoutExpiresAt,
+        payment_affected: value.paymentAffected,
+      },
+      p_ticket_manifest: value.ticketManifest,
+    },
+  );
+  if (error !== null) throwRpc(error);
+  const row = parseRpcSingle(data);
+  if (
+    !exactKeys(row, [
+      "order_id",
+      "order_status",
+      "ticket_count",
+      "disposition",
+    ]) ||
+    row.order_id !== value.orderId || typeof row.order_status !== "string" ||
+    ![
+      "paid",
+      "partially_refunded",
+      "refunded",
+      "requires_review",
+      "expired",
+      "cancelled",
+      "payment_failed",
+    ].includes(row.order_status) ||
+    !Number.isSafeInteger(row.ticket_count) ||
+    (row.ticket_count as number) < 0 || (row.ticket_count as number) > 10 ||
+    (row.disposition !== "fulfilled" && row.disposition !== "review" &&
+      row.disposition !== "replay")
+  ) throw new Error("invalid database response");
+  const result: UnattachedApplyResult = {
+    orderId: row.order_id, orderStatus: row.order_status,
+    ticketCount: row.ticket_count as number, disposition: row.disposition,
+  };
+  validateUnattachedResult(result, value.orderId, value.ticketManifest.length);
+  return result;
+}
+
+function validateUnattachedResult(result: UnattachedApplyResult, orderId: string, quantity: number): void {
+  const full = result.ticketCount === quantity;
+  const valid = result.disposition === "fulfilled"
+    ? result.orderStatus === "paid" && full
+    : result.disposition === "replay"
+    ? ["paid", "partially_refunded", "refunded"].includes(result.orderStatus) && full
+    : result.disposition === "review"
+    ? (["expired", "cancelled", "payment_failed", "requires_review"].includes(result.orderStatus) && result.ticketCount === 0) ||
+      (result.orderStatus === "requires_review" && full)
+    : false;
+  if (result.orderId !== orderId || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 10 || !valid) {
+    throw new Error("invalid database response");
+  }
+}
+
 async function defaultGetPaymentOrderSnapshot(orderId: string) {
   const { data, error } = await getServiceClient().rpc(
     "server_get_checkout_integrity_payment_snapshot",
@@ -828,6 +976,8 @@ export function createDefaultStripeWebhookDependencies(): StripeWebhookDependenc
     finalizeReceipt: defaultFinalizeReceipt,
     getOrderSnapshot: defaultGetOrderSnapshot,
     getPaymentOrderSnapshot: defaultGetPaymentOrderSnapshot,
+    getUnattachedCheckoutSnapshot: defaultGetUnattachedCheckoutSnapshot,
+    reconcileUnattachedPaidCheckout: defaultReconcileUnattachedPaidCheckout,
     retrieveSession: (id, params) =>
       stripe.checkout.sessions.retrieve(id, params),
     retrievePaymentIntent: (id) => stripe.paymentIntents.retrieve(id),
@@ -1225,6 +1375,112 @@ async function reviewKnownCheckoutValidationFailure(
   return true;
 }
 
+async function createTicketManifest(
+  order: OrderSnapshot,
+  dependencies: StripeWebhookDependencies,
+): Promise<TicketManifestEntry[]> {
+  const secret = dependencies.getTicketCredentialSecret();
+  const ticketManifest: TicketManifestEntry[] = [];
+  for (
+    const item of [...order.items].sort((a, b) =>
+      a.orderItemId.localeCompare(b.orderItemId)
+    )
+  ) {
+    for (
+      let unitSequence = 1;
+      unitSequence <= item.quantity;
+      unitSequence++
+    ) {
+      // Only the one-way hash crosses the database/operational boundary.
+      const hash = await hashAdmissionCredential(
+        await derivePaidAdmissionCredential(secret, {
+          orderItemId: item.orderItemId,
+          unitSequence,
+        }),
+      );
+      ticketManifest.push({
+        order_item_id: item.orderItemId,
+        unit_sequence: unitSequence,
+        admission_label: item.tierName,
+        credential_hash: Array.from(
+          hash,
+          (byte) => byte.toString(16).padStart(2, "0"),
+        ).join(""),
+      });
+    }
+  }
+  return ticketManifest;
+}
+
+async function dispatchUnattachedPaidCheckout(
+  event: NormalizedEvent,
+  session: Record<string, unknown>,
+  orderId: string,
+  sessionId: string,
+  dependencies: StripeWebhookDependencies,
+): Promise<void> {
+  if (!event.platformContext) permanent("PAYMENT_SNAPSHOT_MISMATCH");
+  const order = await dependencies.getUnattachedCheckoutSnapshot(
+    orderId,
+    sessionId,
+    event.id,
+  );
+  if (order === null) permanent("PAYMENT_SNAPSHOT_MISMATCH");
+  if (
+    session.object !== "checkout.session" || session.livemode !== false ||
+    session.mode !== "payment" || session.payment_status !== "paid" ||
+    session.status !== "complete" ||
+    session.client_reference_id !== order.orderId ||
+    session.expires_at !== order.checkoutExpiresAt
+  ) permanent("PAYMENT_SNAPSHOT_MISMATCH");
+  validateMetadata(session.metadata, order);
+  validateCheckoutLines(session, order);
+  // The original create contract has immutable tier names and no discounts/tax.
+  const lines =
+    (session.line_items as { data: Record<string, unknown>[] }).data;
+  for (const line of lines) {
+    const product =
+      (line.price as { product: Record<string, unknown> }).product;
+    const item = order.items.find((i) =>
+      i.orderItemId ===
+        (product.metadata as Record<string, unknown>).whereto_order_item_id
+    )!;
+    if (
+      product.name !== item.tierName || line.description !== item.tierName ||
+      line.amount_tax !== 0 || line.amount_discount !== 0
+    ) permanent("PAYMENT_SNAPSHOT_MISMATCH");
+  }
+  const intent = validatePaymentIntent(session.payment_intent, order);
+  if (intent.status !== "succeeded") permanent("PAYMENT_SNAPSHOT_MISMATCH");
+  if (intent.charge === null) retryableProviderSnapshot();
+  const charge = validateCharge(intent.charge, order, intent.id);
+  const result = await dependencies.reconcileUnattachedPaidCheckout({
+    stripeEventId: event.id,
+    orderId,
+    checkoutSessionId: sessionId,
+    paymentIntentId: intent.id,
+    chargeId: charge.id,
+    transferId: charge.transferId,
+    applicationFeeId: charge.applicationFeeId,
+    balanceTransactionId: charge.balanceTransactionId,
+    customerId: charge.customerId,
+    mode: "payment",
+    paymentStatus: "paid",
+    currency: order.currency,
+    subtotalMinor: order.subtotalMinor,
+    totalMinor: order.totalMinor,
+    applicationFeeAmountMinor: order.applicationFeeAmountMinor,
+    destinationAccountId: order.destinationAccountId,
+    expectedSnapshotDigest: order.snapshotDigest,
+    checkoutExpiresAt: order.checkoutExpiresAt,
+    paymentAffected: charge.amountRefunded > 0 || charge.refunded ||
+      charge.disputed,
+    ticketManifest: await createTicketManifest(order, dependencies),
+  });
+  validateUnattachedResult(result, orderId, order.items.reduce((sum, item) => sum + item.quantity, 0));
+
+}
+
 async function currentSessionSnapshot(
   event: NormalizedEvent,
   dependencies: StripeWebhookDependencies,
@@ -1256,7 +1512,21 @@ async function currentSessionSnapshot(
   }
   const orderId = metadataOrderId(value.metadata);
   const order = await dependencies.getOrderSnapshot(orderId, sessionId);
-  if (order === null) permanent("PAYMENT_SNAPSHOT_MISMATCH");
+  if (order === null) {
+    if (
+      value.payment_status !== "paid" || value.status !== "complete" ||
+      (event.type !== "checkout.session.completed" &&
+        event.type !== "checkout.session.async_payment_succeeded")
+    ) permanent("PAYMENT_SNAPSHOT_MISMATCH");
+    await dispatchUnattachedPaidCheckout(
+      event,
+      value,
+      orderId,
+      sessionId,
+      dependencies,
+    );
+    return null;
+  }
   let paymentIntent: {
     id: string;
     status: string;
@@ -1450,36 +1720,10 @@ async function dispatchCheckout(
       (sum, item) => sum + item.quantity,
       0,
     );
-    const secret = dependencies.getTicketCredentialSecret();
-    const ticketManifest: TicketManifestEntry[] = [];
-    for (
-      const item of [...current.order.items].sort((a, b) =>
-        a.orderItemId.localeCompare(b.orderItemId)
-      )
-    ) {
-      for (
-        let unitSequence = 1;
-        unitSequence <= item.quantity;
-        unitSequence++
-      ) {
-        // Only the one-way hash crosses the database/operational boundary.
-        const hash = await hashAdmissionCredential(
-          await derivePaidAdmissionCredential(secret, {
-            orderItemId: item.orderItemId,
-            unitSequence,
-          }),
-        );
-        ticketManifest.push({
-          order_item_id: item.orderItemId,
-          unit_sequence: unitSequence,
-          admission_label: item.tierName,
-          credential_hash: Array.from(
-            hash,
-            (byte) => byte.toString(16).padStart(2, "0"),
-          ).join(""),
-        });
-      }
-    }
+    const ticketManifest = await createTicketManifest(
+      current.order,
+      dependencies,
+    );
     const fulfillment = await dependencies.fulfillPaidOrder({
       ...current.payment,
       paymentIntentId: current.paymentIntent.id,

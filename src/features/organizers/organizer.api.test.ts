@@ -73,7 +73,7 @@ describe('organizer API', () => {
     await expect(getOrganizer('user-1')).resolves.toEqual(organizer)
 
     expect(from).toHaveBeenCalledWith('organizers')
-    expect(lookupSelect).toHaveBeenCalledWith('*')
+    expect(lookupSelect).toHaveBeenCalledWith('id,display_name,organizer_type,bio,website_url,base_city,country_code,onboarding_completed_at,created_at,updated_at')
     expect(lookupEq).toHaveBeenCalledWith('id', 'user-1')
     expect(maybeSingle).toHaveBeenCalledOnce()
   })
@@ -113,7 +113,7 @@ describe('organizer API', () => {
       onboarding_completed_at: expect.any(String),
     })
     expect(update).not.toHaveBeenCalled()
-    expect(mutationSelect).toHaveBeenCalledWith('*')
+    expect(mutationSelect).toHaveBeenCalledWith('id,display_name,organizer_type,bio,website_url,base_city,country_code,onboarding_completed_at,created_at,updated_at')
     expect(single).toHaveBeenCalledOnce()
   })
 
@@ -135,7 +135,7 @@ describe('organizer API', () => {
     })
     expect(updateEq).toHaveBeenCalledWith('id', 'user-1')
     expect(insert).not.toHaveBeenCalled()
-    expect(mutationSelect).toHaveBeenCalledWith('*')
+    expect(mutationSelect).toHaveBeenCalledWith('id,display_name,organizer_type,bio,website_url,base_city,country_code,onboarding_completed_at,created_at,updated_at')
     expect(single).toHaveBeenCalledOnce()
   })
 

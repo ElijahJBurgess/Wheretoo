@@ -12,6 +12,7 @@ export type OrganizerScannerPageProps = {
   admissionChecker: AdmissionChecker
   cameraDecoder: CameraDecoder
   operational?: boolean
+  onReset?(): void
 }
 
 export type ScannerController = {
@@ -27,6 +28,7 @@ export type ScannerController = {
 export function useScannerController({
   admissionChecker,
   cameraDecoder,
+  onReset,
 }: OrganizerScannerPageProps): ScannerController {
   const { eventId } = useParams()
   const [state, dispatch] = useReducer(reduceScanner, initialScannerState)
@@ -119,14 +121,16 @@ export function useScannerController({
   }, [admissionChecker, eventId, state])
 
   const restartCamera = useCallback(() => {
+    onReset?.()
     dispatch({ type: 'return_to_scan' })
     setCameraCycle((cycle) => cycle + 1)
-  }, [])
+  }, [onReset])
 
   const scanNext = useCallback(() => {
+    onReset?.()
     dispatch({ type: 'scan_next' })
     setCameraCycle((cycle) => cycle + 1)
-  }, [])
+  }, [onReset])
 
   return {
     state,

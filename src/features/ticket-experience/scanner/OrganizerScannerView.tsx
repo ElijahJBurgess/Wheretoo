@@ -53,10 +53,16 @@ const resultPresentation: Record<AdmissionOutcome, {
     detail: 'This QR is not a valid admission for this event.',
     tone: 'danger',
   },
+  context_unavailable: {
+    icon: '!',
+    title: 'Check-in unavailable',
+    detail: 'The event could not be confirmed. Do not admit. Return to the event check-in page.',
+    tone: 'danger',
+  },
   network_error: {
     icon: '⌁',
     title: 'Network error',
-    detail: 'Admission was not confirmed. Check the connection and retry.',
+    detail: 'Admission was not confirmed. Do not admit yet. Retry this same ticket to confirm its status.',
     tone: 'offline',
   },
 }
@@ -92,7 +98,7 @@ function CameraRecovery({ controller }: { controller: ScannerController }) {
   )
 }
 
-export function AdmissionResultView({ result, children }: { result: AdmissionCheckResult; children: ReactNode }) {
+export function AdmissionResultView({ result, children, source = 'scanner', timeZone }: { result: AdmissionCheckResult; children: ReactNode; source?: 'scanner' | 'manual'; timeZone?: string }) {
   const presentation = resultPresentation[result.outcome]
 
   return (
@@ -102,15 +108,15 @@ export function AdmissionResultView({ result, children }: { result: AdmissionChe
       role={result.outcome === 'admitted' ? 'status' : 'alert'}
     >
       <span aria-hidden="true" className="organizer-scanner__result-icon">{presentation.icon}</span>
-      <h1>{presentation.title}</h1>
+      <h1>{source === 'manual' && result.outcome === 'already_used' ? 'Already checked in' : presentation.title}</h1>
       {result.admissionLabel || result.attendeeLabel ? (
         <dl className="organizer-scanner__context">
           {result.attendeeLabel ? <div><dt>Guest</dt><dd>{result.attendeeLabel}</dd></div> : null}
           {result.admissionLabel ? <div><dt>Admission</dt><dd>{result.admissionLabel}</dd></div> : null}
         </dl>
       ) : null}
-      <p className="organizer-scanner__result-detail">{presentation.detail}</p>
-      {result.usedAt && <p className="organizer-scanner__used-time">{result.outcome === 'already_used' ? 'Previously admitted' : 'Checked in'} · <time dateTime={result.usedAt}>{dateTime(result.usedAt)}</time></p>}
+      <p className="organizer-scanner__result-detail">{source === 'manual' && result.outcome === 'network_error' ? 'Admission was not confirmed. Do not admit yet. Recheck the ticket status before retrying.' : source === 'manual' && result.outcome === 'invalid' ? 'This admission is not valid for check-in. Do not admit.' : presentation.detail}</p>
+      {result.usedAt && <p className="organizer-scanner__used-time">{result.outcome === 'already_used' ? 'Previously admitted' : 'Checked in'} · <time dateTime={result.usedAt}>{dateTime(result.usedAt, timeZone)}</time></p>}
       {children}
     </section>
   )

@@ -1,0 +1,43 @@
+{
+  "name": "1 Market Street",
+  "name_preferred": "",
+  "mapbox_id": "spec14.address.1",
+  "feature_type": "address",
+  "address": "1 Market Street",
+  "full_address": "1 Market Street, San Francisco, California 94105, United States",
+  "place_formatted": "San Francisco, California 94105, United States",
+  "context": {
+    "country": {
+      "id": "us",
+      "name": "United States",
+      "country_code": "US",
+      "country_code_alpha_3": "USA"
+    },
+    "region": {
+      "id": "ca",
+      "name": "California",
+      "region_code": "CA",
+      "region_code_full": "US-CA"
+    },
+    "postcode": {
+      "id": "94105",
+      "name": "94105"
+    },
+    "place": {
+      "id": "sf",
+      "name": "San Francisco"
+    }
+  },
+  "language": "en",
+  "maki": "marker",
+  "poi_category": [],
+  "brand": "",
+  "brand_id": "",
+  "external_ids": {},
+  "metadata": {},
+  "coordinates": {
+    "longitude": -122.3958,
+    "latitude": 37.7936,
+    "accuracy": "rooftop"
+  }
+}

@@ -96,7 +96,8 @@ select is(has_table_privilege('authenticated','public.tickets','SELECT'),false,'
 select is(has_table_privilege('authenticated','public.tickets','UPDATE'),false,'authenticated cannot redeem by direct update');
 select is(has_table_privilege('service_role','public.tickets','SELECT'),true,'service role retains ticket reads');
 select is((select count(*) from pg_tables where schemaname in ('public','private') and tablename ~ '(admission|redemption|collection|keyring)'),0::bigint,'no admission collection redemption ledger or keyring added');
-select is((select count(*) from pg_trigger where tgrelid='public.tickets'::regclass and not tgisinternal and tgtype::int & 8 = 8),0::bigint,'no ticket delete trigger blocks scoped elevated cleanup');
+select is((select count(*) from pg_trigger where tgrelid='public.tickets'::regclass and not tgisinternal and tgtype::int & 8 = 8 and tgname <> 'tickets_free_source_identity'),0::bigint,'no additional delete guard changes paid cleanup');
+with removed as (delete from public.tickets where id=(select id from schema_ticket) returning id) select is(count(*),1::bigint,'paid ticket cleanup remains allowed with free-source protection') from removed;
 select is((select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
   where n.nspname in ('public','private') and p.proname in ('server_fulfill_paid_order','fulfill_paid_order') and p.pronargs=17 and p.pronargdefaults=0),2::bigint,'only required seventeen-argument wrappers exist');
 select is(has_function_privilege('anon','public.server_fulfill_paid_order(text,uuid,text,text,text,text,text,text,text,text,text,text,bigint,bigint,bigint,text,jsonb)','EXECUTE'),false,'anonymous cannot fulfill');

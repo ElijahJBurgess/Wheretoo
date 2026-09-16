@@ -1,0 +1,2882 @@
+{
+  "count": 121,
+  "migrations": [
+    {
+      "path": "supabase/migrations/20260824010000_create_organizers_and_events.sql",
+      "sha256": "0fe4e1d4a36e27a5ea90d73839e8a034eacc1632bd9b9c1aa6269813aa61ec4d",
+      "functions": [
+        "public.set_updated_at",
+        "public.sync_event_location"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260824010100_secure_organizer_event_publishing.sql",
+      "sha256": "e645c13b2847b12b7799115b7a8d54e39e95c18d4d0a66f9b375f6348475dbbd",
+      "functions": [
+        "public.publish_event"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260824010200_harden_event_publishing_validation.sql",
+      "sha256": "20a30e9f4e6b7751b0c28f44c9b0c791dfd0c5ea8519bf2edd4a83cb5f5cfebc",
+      "functions": [
+        "public.publish_event"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260825010000_create_ticketing_payments_schema.sql",
+      "sha256": "658dd1a382d179a4ce73796889c6f98a7a0e4c7c63626f4d747f33b333a23f8b",
+      "functions": []
+    },
+    {
+      "path": "supabase/migrations/20260825010050_harden_ticketing_payment_schema.sql",
+      "sha256": "45ec47d313b1bf0cd4cb4044702c3838281403a2505d9c37dedc3e4989938b4c",
+      "functions": []
+    },
+    {
+      "path": "supabase/migrations/20260825010100_secure_paid_sales_and_tiers.sql",
+      "sha256": "ce9e4e8cd2588069cb87261b28a18b4fb090e9b5abc9b15ab202c8492c3b0e61",
+      "functions": [
+        "public.list_owned_ticket_tiers",
+        "public.save_ticket_tiers",
+        "public.activate_paid_sales",
+        "public.get_public_event_ticketing",
+        "public.publish_event"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260825010150_clean_paid_sales_activation.sql",
+      "sha256": "b6d2d45f1b9d5b75b6b945c8945b0f5c10ae5a790aca2ae0097e99080ea584f5",
+      "functions": [
+        "public.activate_paid_sales"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260825010175_harden_paid_tier_management.sql",
+      "sha256": "480308cc429aac379155f57988c0e5c21346a1cd06deee7f6df554cf0a278119",
+      "functions": [
+        "public.save_ticket_tiers",
+        "public.activate_paid_sales",
+        "public.publish_event"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260825010190_serialize_paid_event_operations.sql",
+      "sha256": "ce11495fea9347f8d62ab6ce33737544123abe9399f3ea3b7f0906130aaf708a",
+      "functions": [
+        "public.lock_event_ticketing_operation",
+        "public.save_ticket_tiers",
+        "public.activate_paid_sales_locked",
+        "public.activate_paid_sales",
+        "public.publish_event"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260825010195_clean_serialized_paid_activation.sql",
+      "sha256": "2f96b7ccbd8ccff668b4397cc8513b61b9f6f3710733a5b902522e308a15a6e1",
+      "functions": [
+        "public.activate_paid_sales"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260825010200_create_order_inventory_functions.sql",
+      "sha256": "bbb3a2e0c2a7fb2714b3517688b5760215ada5d8ebea72871462a04bd0116ea2",
+      "functions": [
+        "private.reserve_checkout",
+        "private.attach_checkout_session",
+        "private.cancel_checkout_reservation",
+        "private.expire_checkout_reservations"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260825010205_restrict_ticketing_lock_helpers.sql",
+      "sha256": "6589977545c2f81b62e35016e14c1912c3ec29e597801bed5f2e500485294726",
+      "functions": []
+    },
+    {
+      "path": "supabase/migrations/20260825010210_harden_checkout_reservations.sql",
+      "sha256": "7865ea9b96943558010cc29b4d33de563e213607a38fe2eee3a79756e7d1b5a3",
+      "functions": [
+        "private.reserve_checkout",
+        "public.server_reserve_checkout",
+        "public.server_attach_checkout_session",
+        "public.server_cancel_checkout_reservation",
+        "public.server_expire_checkout_reservations"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260825010220_finalize_checkout_reservation_ordering.sql",
+      "sha256": "b17598ad103e33812d3e9b7453d3361ff53b550f6422bcf16e126038529bbacd",
+      "functions": [
+        "private.reserve_checkout"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260825010300_create_payment_fulfillment_functions.sql",
+      "sha256": "b6112bded7c5d5e2533180812a077f8ec650295ea678d965bf34765bba2ae4f2",
+      "functions": [
+        "private.record_webhook_receipt",
+        "private.lock_payment_order",
+        "private.assert_payment_snapshot",
+        "private.fulfill_paid_order",
+        "private.mark_payment_processing",
+        "private.mark_payment_failed",
+        "private.apply_refund",
+        "private.apply_dispute",
+        "public.server_record_webhook_receipt",
+        "public.server_fulfill_paid_order",
+        "public.server_mark_payment_processing",
+        "public.server_mark_payment_failed",
+        "public.server_apply_refund",
+        "public.server_apply_dispute"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260825010310_preserve_terminal_fulfillment_state.sql",
+      "sha256": "c58d9303c4d47005525b2a5981fabab5c325c0a90af6ae333b1379a93fa14fc4",
+      "functions": [
+        "private.fulfill_paid_order"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260825010320_preserve_terminal_refund_state.sql",
+      "sha256": "c83c1775ba7d1675b1a6836fec895bd2cedbfae9be2e7bc1b4bd0b70fbdfa5c5",
+      "functions": [
+        "private.apply_refund"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260825010330_accept_stripe_identifier_case.sql",
+      "sha256": "e678e98a4a0d57c2a1957134d3716bb49660f4d45123cadae6430493de1a9b76",
+      "functions": [
+        "private.record_webhook_receipt",
+        "private.attach_checkout_session"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260825010340_bind_refunds_to_payment.sql",
+      "sha256": "f6fc590e43b098791b18b901d1d5443e1ddf337cc1e7c2335118f04a1ae01108",
+      "functions": [
+        "private.apply_refund",
+        "public.server_apply_refund"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260825010350_persist_monotonic_disputes.sql",
+      "sha256": "d6245578f0202d9105de8a82067e655a22a90dbbaad04c3144c3c746245654c2",
+      "functions": [
+        "private.apply_dispute",
+        "public.server_apply_dispute"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260825010360_acknowledge_ignored_dispute_events.sql",
+      "sha256": "ef729b522bfdec9c230ac0f9ded392f76cfd31992bf59d29b4cca1984a95643d",
+      "functions": [
+        "private.apply_dispute"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260825010370_harden_hosted_checkout_retry.sql",
+      "sha256": "de7b00cd340ea1d536e370ebc82015560a796cc4af8bcd71241f6b95fe033062",
+      "functions": [
+        "private.checkout_integration_identifier",
+        "private.checkout_request_digest",
+        "private.populate_checkout_request_snapshot",
+        "private.reserve_checkout",
+        "public.server_reserve_checkout",
+        "private.attach_checkout_session",
+        "private.assert_payment_snapshot",
+        "private.get_checkout_preflight",
+        "public.server_get_checkout_preflight",
+        "private.lookup_checkout_cancellation",
+        "public.server_lookup_checkout_cancellation",
+        "private.consume_checkout_rate_limit",
+        "public.server_consume_checkout_rate_limit"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260825010380_freeze_checkout_create_snapshot.sql",
+      "sha256": "e0183a274d3c0071952f5ad727fd48f6d5ba50702808622a3a924c7eb531bb0f",
+      "functions": [
+        "private.populate_checkout_request_snapshot"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260825010390_add_checkout_expiry_headroom.sql",
+      "sha256": "077362531f4a874a6784520e611137a9f8a72b98ca2897e57c6cbdf143ec760e",
+      "functions": [
+        "private.checkout_expiry_from",
+        "private.populate_checkout_request_snapshot"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260825010400_cover_stripe_retry_envelope.sql",
+      "sha256": "322f7611c8fff43e807ff1eefb1167d0041c89690e058874ce364e435ecff86a",
+      "functions": [
+        "private.checkout_expiry_from"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260825010410_cover_ambiguous_user_retry.sql",
+      "sha256": "3fada1d75be97641c41d683473a48a95abcfed8175326097203a1965ad9668f4",
+      "functions": [
+        "private.checkout_expiry_from"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260825010420_add_webhook_reconciliation_boundary.sql",
+      "sha256": "1a115975ff541d0746c5e9daaf95eeaa1024b8168a5edb58538ee8cae5fd3c07",
+      "functions": [
+        "private.finalize_webhook_receipt",
+        "private.get_webhook_order_snapshot",
+        "public.server_finalize_webhook_receipt",
+        "public.server_get_webhook_order_snapshot"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260825010430_harden_webhook_reconciliation.sql",
+      "sha256": "08b04adfc7eb29aa84b46baa6af955ced623a6e8d719773fda381ef4ee7306fa",
+      "functions": [
+        "private.get_webhook_payment_order_snapshot",
+        "public.server_get_webhook_payment_order_snapshot",
+        "private.persist_connect_status_if_current",
+        "public.server_persist_connect_status_if_current",
+        "private.mark_payment_requires_review",
+        "public.server_mark_payment_requires_review",
+        "private.apply_verified_refund",
+        "public.server_apply_verified_refund",
+        "private.apply_verified_dispute",
+        "public.server_apply_verified_dispute"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260825010440_add_connect_refresh_sequence.sql",
+      "sha256": "e111ba6b257fa4c46442a49fbb8751125f637a5dde82781e8ff416141c5600d6",
+      "functions": [
+        "private.begin_connect_refresh",
+        "public.server_begin_connect_refresh",
+        "private.persist_connect_status_if_current",
+        "public.server_persist_connect_status_if_current"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260825010450_remove_legacy_connect_refresh_cas.sql",
+      "sha256": "ffd0e2754fc4b267358897314dcd29e72e7c1d74b6193c4f4550e81d382b0454",
+      "functions": [
+        "private.persist_connect_status_if_current"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260825010460_add_order_confirmation_projection.sql",
+      "sha256": "fc0a1c7a683f4068661647682153e97e05adecbd53dc35551c10b8d4151c4691",
+      "functions": [
+        "private.order_confirmation_status",
+        "private.lookup_order_confirmation",
+        "public.server_lookup_order_confirmation"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260825010470_map_partial_refunds_to_refunded_confirmation.sql",
+      "sha256": "a24e4f139324a6d10437b325d50da9c0300918d41155cb40072e5eca70ed3dfa",
+      "functions": [
+        "private.order_confirmation_status"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260825010480_accept_stripe_connect_status_codes.sql",
+      "sha256": "bb94664d329602cf046cd185d9d02f9e9d92b73b5fdf23e406d1556b136a6256",
+      "functions": [
+        "private.persist_connect_status_if_current"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260825010490_recover_verified_refund_tickets.sql",
+      "sha256": "4ffba1ecddf61adb54a66c69f8de8088f12b2a4708e3294c0a6d62043a495520",
+      "functions": [
+        "private.reconcile_verified_refund_ticket"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260825010500_reconcile_refund_ticket_on_retry.sql",
+      "sha256": "414e0621d62ae3ffdcf411b9f747b92dbaa018ea24e71071ab70fafbc9fb7905",
+      "functions": []
+    },
+    {
+      "path": "supabase/migrations/20260825010510_clean_payment_review_lock.sql",
+      "sha256": "a5e6803ae62621fec04a309bf309fafca05afa59c8b7a13909c18d2947eb9dd5",
+      "functions": [
+        "private.mark_payment_requires_review"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260826010000_create_moderation_foundation.sql",
+      "sha256": "2373bd972f08ff5887a519bc657cbd9b3434d8f090f6fcab74ad36a0f80b1c31",
+      "functions": [
+        "private.reject_immutable_moderation_record_change",
+        "private.guard_public_eligibility_interval_change"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260826010050_tighten_moderation_foundation.sql",
+      "sha256": "75f2e82af8da139e98e6fd940004c9d985b410fa5459791196ccffcb124e89d7",
+      "functions": []
+    },
+    {
+      "path": "supabase/migrations/20260826010100_migrate_legacy_moderation.sql",
+      "sha256": "da9215847634f19c56528bcf557f6d16170e5fd1aa15af75acd42fd30c23ee69",
+      "functions": [
+        "private.classify_legacy_event_moderation",
+        "private.initialize_event_public_eligibility_interval"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260826010150_harden_legacy_moderation_migration.sql",
+      "sha256": "b7ebd76e396778336b7f0f2ee4771933bd5cdd4644cf30589fe5f81311e929f9",
+      "functions": [
+        "private.reconcile_legacy_moderation_events"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260826010200_add_event_policy_acceptance.sql",
+      "sha256": "757da2ce5a1a5c8e612cf2edf54a52e9e2750f6b08ebd36e028ff51fea5fe50f",
+      "functions": [
+        "private.policy_environment_matches_current_requirements",
+        "private.production_policy_configuration_is_ready",
+        "private.configure_policy_environment",
+        "public.get_required_event_policies",
+        "public.get_owned_event_requirements",
+        "public.accept_current_event_policies"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260826010250_clean_policy_environment_configuration.sql",
+      "sha256": "aecd39f17d2308498c8664f4bc8f440eac8d191f8a59b361f4a24acbb0c1ee9e",
+      "functions": [
+        "private.configure_policy_environment"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260826010300_add_moderation_eligibility_functions.sql",
+      "sha256": "8f21cb3ef41694da10a19261c27924c6ff31afae213a7bee7911f99fc97ddac6",
+      "functions": [
+        "private.compute_event_moderation_input",
+        "private.compute_event_input_sha256",
+        "private.event_meets_public_candidate",
+        "private.transition_event_public_eligibility",
+        "public.publish_event"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260826010350_enforce_current_publish_policy_pair.sql",
+      "sha256": "1ef945427fb94a63067601a0f2077ae64374145cc3df58a2773cf87c01bd9454",
+      "functions": [
+        "public.publish_event"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260826010400_route_public_reads_through_eligibility.sql",
+      "sha256": "0535cf1ca443d1340b90b925989faca21fa7ac095639a8a6269db991e3695c56",
+      "functions": [
+        "private.event_is_publicly_eligible",
+        "private.public_event_projection",
+        "public.get_public_event",
+        "public.get_public_event_ticketing",
+        "public.get_public_map_events"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260826010450_harden_public_eligibility_reads.sql",
+      "sha256": "662a42e4ca43e4c8435fd500fc5fe097b6fe03037ad2004c441f42e798cc6d5c",
+      "functions": [
+        "private.event_has_current_public_eligibility",
+        "private.event_is_publicly_eligible",
+        "public.get_public_map_events"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260826010500_add_published_event_revision_paths.sql",
+      "sha256": "a7b34659dfeacffea33d19983dcb126e00137cd571deba596b4af7e3cb4c7068",
+      "functions": [
+        "private.invalidate_event_public_revision",
+        "public.save_owned_event_revision",
+        "public.save_owned_event_requirements",
+        "public.save_ticket_tiers",
+        "public.save_owned_organizer_profile",
+        "private.require_organizer_profile_revision_boundary"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260826010550_harden_deterministic_revision_evaluation.sql",
+      "sha256": "a145a3fd96ebf7df760142aab19edc9fc6350b999352b7e26078e374084a2dd5",
+      "functions": [
+        "private.invalidate_event_public_revision"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260826010575_harden_revision_payload_types.sql",
+      "sha256": "3dd1be47a406c241fa9246b4dea97213dd5b2aa9ff2e6c82421291567054bee6",
+      "functions": [
+        "public.save_owned_event_revision",
+        "public.save_owned_organizer_profile"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260826010600_add_contextual_moderation_queue.sql",
+      "sha256": "35b4c189948ed9a699b0c342e1d22b55d847f4abb8877152c2b3e7321d02e086",
+      "functions": [
+        "public.server_claim_moderation_evaluation",
+        "public.server_apply_moderation_evaluation",
+        "public.server_fail_moderation_evaluation"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260826010650_harden_contextual_moderation_queue.sql",
+      "sha256": "f0b9e414cf56743d6c18fee2ed18cefaeedc33fe67cd8a04251988bc9f643564",
+      "functions": [
+        "public.server_claim_moderation_evaluation",
+        "public.server_apply_moderation_evaluation",
+        "public.server_fail_moderation_evaluation"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260826010675_digest_contextual_moderation_metadata.sql",
+      "sha256": "13e0ca7ced4c7905415d348b4bf3a39d400466e235e5226281d2a18843d5f217",
+      "functions": [
+        "public.server_apply_moderation_evaluation"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260826010700_add_staff_moderation_operations.sql",
+      "sha256": "2d8c99657213594c921638182bf6503e9a424373daeb342926a8f6bd7813f360",
+      "functions": [
+        "private.get_active_staff_role",
+        "private.require_active_staff_role",
+        "public.get_my_staff_role",
+        "public.list_moderation_queue",
+        "public.get_moderation_case",
+        "public.moderate_event",
+        "public.resolve_legacy_public_history"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260826010750_harden_staff_moderation_operations.sql",
+      "sha256": "3bee537c780c2073d14ee5994475cefc78129bfa70beb2c2cc6d089eb0eaaaae",
+      "functions": [
+        "private.transition_event_public_eligibility",
+        "public.moderate_event",
+        "public.resolve_legacy_public_history",
+        "public.get_moderation_case"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260826010800_add_review_requests_and_reports.sql",
+      "sha256": "c02d6857018af28b4b2cb6d187ce628f5872903ca751c737dc4326bca8acd63e",
+      "functions": [
+        "public.request_event_review",
+        "public.withdraw_event_review",
+        "private.resolve_current_review_request_from_staff_action",
+        "public.server_submit_event_report",
+        "public.server_expire_event_report_fingerprints"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260826010850_harden_review_reports_lint.sql",
+      "sha256": "6ce60caaad8884c63fce6a72e4c33414346596fa369580ecd8f97bacf37a2230",
+      "functions": [
+        "public.server_submit_event_report"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260826010875_harden_report_privacy_and_retention.sql",
+      "sha256": "1e645bcbf7f2a6006dc71aaa980437e4adf92f2b6850b1dc518bcf06dd4f5ce9",
+      "functions": [
+        "public.server_expire_event_report_fingerprints"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260826010900_add_current_review_request_projection.sql",
+      "sha256": "62ba9df707cbc0fcc16594224793ee5d4b33f1f9c3dc4dbc4834139011ef3e25",
+      "functions": [
+        "public.get_current_event_review_request"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260826010950_complete_staff_console_projection.sql",
+      "sha256": "4d81b4b5b8bd33b4b3cd6873b4bb063bc7eadbd8051d6bfa3690c3e5fd5cd9cf",
+      "functions": [
+        "public.list_moderation_queue",
+        "public.get_moderation_case"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260826011000_remove_staff_case_notes.sql",
+      "sha256": "7148658ed0bbf52c2af6809e8a030df68ac4131c958ee21ef5f82b0456b22f67",
+      "functions": [
+        "public.get_moderation_case"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260826011100_clear_low_risk_under_review_publish.sql",
+      "sha256": "f84279f9bca8c2c27665a88ae8ce14e1388f633b744a87bc5620649dade51dd1",
+      "functions": [
+        "public.publish_event"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260826011200_preserve_current_human_and_system_holds.sql",
+      "sha256": "3daf7ed6529e312d60e07309dcfb6ffd02decd63ec2d68999bbaf250e18b9a39",
+      "functions": [
+        "public.publish_event"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260826011250_support_active_event_republication.sql",
+      "sha256": "e5328871a87556a8d2f10476dfabc3f11e85420bb80d7a2e3ed90c4a0d32d5d7",
+      "functions": [
+        "public.publish_event"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260826011300_harden_production_policy_urls.sql",
+      "sha256": "4780dc8e610a611864b9b6f40f050a5c2d960cb5d79855e04c9e513516d9e754",
+      "functions": [
+        "private.is_canonical_production_policy_url",
+        "private.policy_environment_matches_current_requirements",
+        "private.configure_policy_environment"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260826011350_schedule_report_retention.sql",
+      "sha256": "8822db4fecce3a14ccc31fc633187e2f015de08b89ccf33ff3d7ba4a478e3a49",
+      "functions": []
+    },
+    {
+      "path": "supabase/migrations/20260826011400_guard_started_free_event_payment_mutations.sql",
+      "sha256": "596615882093b5ca1ac784fa770690b7e3809ecd6a0b30df67022b21a60d5beb",
+      "functions": [
+        "public.save_ticket_tiers",
+        "public.save_owned_event_revision"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260826011450_reject_policy_url_dot_segments.sql",
+      "sha256": "43a7e81ed1d33176961c7530cb822363310c4400c80710ac1f12e7f2726357c6",
+      "functions": [
+        "private.is_canonical_production_policy_url"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260826011475_restore_ticket_tier_owner_precheck.sql",
+      "sha256": "55e0b25ab401d8803487afcfb33dcca9f0b2d3301e8ee1ec67c4c949a73f64b4",
+      "functions": [
+        "public.save_ticket_tiers"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260902010000_expand_checkout_integrity_schema.sql",
+      "sha256": "14527508c13dc22a1bf2d6073eb6f3b1cab6288c0723baced596bb7ee73fc0df",
+      "functions": [
+        "private.reserve_checkout"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260902010050_serialize_checkout_admission.sql",
+      "sha256": "0909198c93db9bb5e131e05f03e7b526a05b730953974b30d1ae52a616ed6ef0",
+      "functions": [
+        "private.reserve_checkout"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260902010100_add_checkout_cart_reservation.sql",
+      "sha256": "f4d233283b2b784e3db3d5f6a26be6bf71fd8fe2b0187c007935d52d505d612b",
+      "functions": [
+        "private.calculate_checkout_money",
+        "private.checkout_cart_request_digest",
+        "private.get_checkout_preflight",
+        "public.server_get_checkout_preflight",
+        "private.reserve_checkout",
+        "public.server_reserve_checkout",
+        "public.get_public_event_ticketing"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260902010150_fix_checkout_cart_validation.sql",
+      "sha256": "b902e605252a125cbf28fc839e5fb0685f03bbdc9d1190a4a702bb03a7ffae21",
+      "functions": []
+    },
+    {
+      "path": "supabase/migrations/20260902010175_fix_checkout_cart_event_lookup.sql",
+      "sha256": "991bc5d8e9452c43af576339b4acccb475b6387447c8cd15d838de828bc687e1",
+      "functions": []
+    },
+    {
+      "path": "supabase/migrations/20260902010180_fix_checkout_cart_sum_qualification.sql",
+      "sha256": "8db9393e577dcd4019e6137a7fe11b0975687b5f0f4aeb7ed9753bfe0b93bed3",
+      "functions": []
+    },
+    {
+      "path": "supabase/migrations/20260902010185_fix_checkout_cart_sum_columns.sql",
+      "sha256": "2845eeb5daae2c4f735720e048871e92dcac7bdc21206e820d61953e5685ca9e",
+      "functions": []
+    },
+    {
+      "path": "supabase/migrations/20260902010190_fix_checkout_cart_money.sql",
+      "sha256": "cc44a75a6026883b5c11e10e26cf9055f3ad30abec83f11a627fa8696354d67c",
+      "functions": [
+        "private.calculate_checkout_money"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260902010200_schedule_checkout_reservation_expiry.sql",
+      "sha256": "3b2d036c102592592ab8c6a08e4da5da8a56b031d4b11f8c0d7c668dbcdc88f0",
+      "functions": [
+        "private.expire_checkout_reservations"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260902010250_expand_checkout_cart_tier_cardinality.sql",
+      "sha256": "e93722eccbaeb621721d32c205e70eeacded20a5681d0c8801e5121346cd0026",
+      "functions": []
+    },
+    {
+      "path": "supabase/migrations/20260902010300_add_checkout_item_reconciliation.sql",
+      "sha256": "6a67696d707823379c5ca81f05ac42286fd2fb38c9756b6dc6c875376d2cce18",
+      "functions": [
+        "private.get_checkout_integrity_order_snapshot",
+        "private.get_checkout_integrity_payment_snapshot",
+        "public.server_get_checkout_integrity_order_snapshot",
+        "public.server_get_checkout_integrity_payment_snapshot",
+        "private.lock_payment_order",
+        "private.mark_checkout_reconciliation_review",
+        "public.server_mark_checkout_reconciliation_review",
+        "private.fulfill_paid_order",
+        "public.server_fulfill_paid_order"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260902010350_bind_fulfillment_snapshot_lifecycle.sql",
+      "sha256": "26deba41e300890519c5bd398c6982612b8ee7e9073727a917505ac4b56cbbc3",
+      "functions": [
+        "private.fulfill_paid_order"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260902010400_enforce_whole_order_refund_safety.sql",
+      "sha256": "49077c3df10f9cad52056e0d2d1c87a2d0a5f5417270ad97a5e0b1240966580e",
+      "functions": [
+        "private.reconcile_verified_refund_ticket",
+        "private.apply_verified_refund",
+        "public.server_apply_verified_refund",
+        "private.prepare_whole_order_refund",
+        "public.server_prepare_whole_order_refund",
+        "private.apply_refund"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260902010450_fix_whole_order_refund_transitions.sql",
+      "sha256": "cee961fe1a3f12d1a469e4d6d0efdc5e280a2275e49fd0fc3fa8052643655e34",
+      "functions": [
+        "private.prepare_whole_order_refund",
+        "public.server_prepare_whole_order_refund",
+        "private.apply_verified_refund",
+        "public.server_apply_verified_refund"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260902010475_harden_refund_review_recovery.sql",
+      "sha256": "8ea446f3fbac3d12a817a26abd7349e6eefaefe297cf9ebabf77846519cd511c",
+      "functions": [
+        "private.prepare_whole_order_refund",
+        "public.server_prepare_whole_order_refund",
+        "private.apply_verified_refund",
+        "public.server_apply_verified_refund"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260902010500_add_checkout_confirmation_v2.sql",
+      "sha256": "f5f81b67d7a845712345bd27e56f716312b3b8fe858a0af0c685cfaa352d6af6",
+      "functions": [
+        "private.lookup_checkout_integrity_confirmation",
+        "public.server_lookup_checkout_integrity_confirmation"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260902010550_add_scoped_checkout_fixture_moderation.sql",
+      "sha256": "bee4f0fb457d17e22005747d7fb4f8208fcb76cc3998c215ce6054e897d9ea79",
+      "functions": [
+        "public.server_claim_checkout_integrity_fixture_evaluation"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260902010600_remove_single_ticket_checkout_contract.sql",
+      "sha256": "550110ff26618ffd628c1e4c2f39e3f7bda1d48d769b5e761cb633f71796f301",
+      "functions": [
+        "private.fulfill_paid_order"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260907010000_integrate_core_ticket_truth_lite_fulfillment.sql",
+      "sha256": "57fffc8a13d5756d91659778f59c59dba5bf1a17f5922976eaf9e15afc41b7fe",
+      "functions": [
+        "private.guard_ticket_identity_and_transition",
+        "private.get_checkout_integrity_order_snapshot",
+        "private.fulfill_paid_order",
+        "public.server_fulfill_paid_order"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260907010100_add_lite_ticket_collection.sql",
+      "sha256": "4ec2c513c843ca6c6b4b562fda26d9d0b24ddf5257172e181cbc8b5874ecbd23",
+      "functions": [
+        "public.server_lookup_paid_ticket_collection"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260907010200_add_atomic_lite_redemption.sql",
+      "sha256": "2e4f747f52e6a9ce175e3f4e349b80409c2db7de7094cd31f2693dfde5e40d59",
+      "functions": [
+        "public.server_redeem_paid_ticket"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260907010300_preserve_lite_ticket_invalidation.sql",
+      "sha256": "1c876fc9be5fd1ee4d47efc2b21eb2e742d467ac159d9b7bfe80be60495d71bf",
+      "functions": [
+        "public.cancel_owned_event"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260909010100_allow_checkout_preflight_status_refresh.sql",
+      "sha256": "c27f96ae8a0e3fed8f766e1754a942e08b3579fa2a975c806a1f08648c4d83f0",
+      "functions": [
+        "private.get_checkout_preflight"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260910010000_add_organizer_event_metrics.sql",
+      "sha256": "d139f84ea59dee83b7ccdb97d277792654867f0bcd06086505622e6e86821570",
+      "functions": [
+        "private.require_owned_paid_event",
+        "private.organizer_order_coherent",
+        "public.get_organizer_event_metrics"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260910010100_add_organizer_order_reads.sql",
+      "sha256": "fca019ef4789b320547195f4e57286b2b126f2cc98d2ba367516af68da3d899a",
+      "functions": [
+        "private.organizer_order_summary",
+        "public.list_organizer_event_orders"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260910010150_add_organizer_order_detail.sql",
+      "sha256": "16b900923f416f1e01d6c624158f59e8808a10eebaca5cc9744b642dc21ad16d",
+      "functions": [
+        "private.organizer_refund_state",
+        "public.get_organizer_order"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260910010200_add_owned_manual_admission.sql",
+      "sha256": "a54a24ae5ecd95a34b97b88a8fdc534187fd8c0017aae0a50fb449b1b2ca5c41",
+      "functions": [
+        "public.server_redeem_organizer_ticket",
+        "public.redeem_owned_ticket"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260910010300_add_owned_refund_context.sql",
+      "sha256": "2df8cab4e5633b28f0432e5fa3d38ec30f57a9ad177332b071a99c1400d57e2d",
+      "functions": [
+        "public.server_get_organizer_refund_context"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260910010350_add_owned_refund_evidence_recovery.sql",
+      "sha256": "e5c0a7dee07303941f3c3694d7db97657dc8b0d21ef81024ab24cc2536969fcb",
+      "functions": [
+        "private.organizer_refund_state",
+        "public.server_get_organizer_refund_context"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260911010000_extend_spec04_organizer_reads.sql",
+      "sha256": "5440b5da911f41bbf02d00887b150cafc3216ec7537516f72cc19b48a6bee028",
+      "functions": [
+        "public.list_organizer_event_orders_filtered",
+        "public.get_organizer_order_v2"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260911020000_add_owned_admission_search.sql",
+      "sha256": "924607fad436ea332b57e6746377011b978fe9ac153ddfe4603e0b92d93ec486",
+      "functions": [
+        "public.list_organizer_event_admissions"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260912010000_create_free_registration_source.sql",
+      "sha256": "51ed1d796e6e85141db8ae3769972b10ebfdccbf12223ee335cf2b30c1e2b685",
+      "functions": [
+        "private.free_reserved_admissions",
+        "private.free_registration_is_coherent",
+        "private.guard_free_source_identity",
+        "private.guard_free_ticket_source",
+        "private.check_free_source_complete",
+        "private.guard_registered_free_event",
+        "private.cancel_free_event_sources",
+        "private.guard_free_registration_insert"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260912010100_add_atomic_free_registration.sql",
+      "sha256": "1f23b4320b4829d7e5ff866a9e19422d7551586b1e447f5ca8062f6ac6201a87",
+      "functions": [
+        "public.server_confirm_free_registration",
+        "public.server_resolve_free_registration",
+        "public.server_lookup_free_ticket_collection",
+        "public.get_public_free_rsvp"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260912010200_extend_shared_admission_for_free_sources.sql",
+      "sha256": "1b49b7ea57d5513d615d78e10f8fa84b9d008e708a7b50cacd981b467690d2c6",
+      "functions": [
+        "public.server_redeem_organizer_ticket",
+        "public.redeem_owned_ticket"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260912010300_add_free_owner_reads_and_rate_limit.sql",
+      "sha256": "396ce9caa7469097105e0e0de7b09669dc217007166abc0586161b2e9e98965c",
+      "functions": [
+        "private.require_owned_free_event",
+        "public.get_organizer_free_registration_metrics",
+        "public.get_organizer_free_admissions",
+        "public.server_consume_free_rsvp_rate_limit"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260913010000_create_ticket_email_foundation.sql",
+      "sha256": "e32b9372d01e1b74617bd5bd27ce1deaeda79cf60701d1a7435b3d084675023b",
+      "functions": [
+        "private.protect_ticket_email_ledger",
+        "private.ticket_email_source",
+        "private.consume_ticket_email_limits",
+        "private.ticket_email_fingerprint"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260913010100_add_ticket_email_worker_contracts.sql",
+      "sha256": "35582054de9ae816c32f69d13327d715e1bf664157b31d8684cf7a5ac2881acd",
+      "functions": [
+        "public.server_claim_ticket_email",
+        "public.server_prepare_ticket_email_context",
+        "private.ticket_email_envelope_valid",
+        "public.server_save_ticket_email_payload",
+        "public.server_begin_ticket_email_dispatch",
+        "public.server_finish_ticket_email_dispatch",
+        "public.server_stop_ticket_email",
+        "public.server_observe_ticket_email"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260913010200_add_ticket_email_entry_points.sql",
+      "sha256": "125ea58b4b05c7dd6a44281b78aa433cd0b60e25be5e05dabab35fe685ed1a5e",
+      "functions": [
+        "private.enqueue_initial_ticket_email",
+        "public.server_confirm_free_registration",
+        "public.get_ticket_email_delivery",
+        "public.request_ticket_email_resend",
+        "public.server_request_ticket_recovery",
+        "public.get_organizer_free_registration_detail",
+        "public.server_ticket_email_confirmation_status",
+        "public.server_fulfill_paid_order"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260913010300_add_scoped_ticket_email_access.sql",
+      "sha256": "79f266935753582a9f4b4e3be9e52e92fe8a51ab1c7f3a6a18390e3eaeb202e2",
+      "functions": [
+        "public.server_read_ticket_email_access",
+        "public.server_revoke_ticket_email_grant",
+        "public.server_prune_ticket_email_history"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260913010400_preserve_initial_email_deduplication.sql",
+      "sha256": "e9c88333b3723235ae03b9c91b7d17b8f9339b07414838269e3e15b093ec254d",
+      "functions": [
+        "private.enqueue_initial_ticket_email"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260913010500_add_resend_request_status.sql",
+      "sha256": "90ebf6a29827e2c8563438f238486a389ee0effc4685316c958bafa31ce2960d",
+      "functions": [
+        "public.get_ticket_email_resend_status"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260913010600_add_email_retention_and_recipient_suppression.sql",
+      "sha256": "8a515c6e3c1db0ffcfc7e0f9f5979e19c138b41daf238e84741f46730e6cf08c",
+      "functions": [
+        "private.protect_ticket_email_ledger",
+        "private.ticket_email_source",
+        "public.server_prepare_ticket_email_context",
+        "public.server_begin_ticket_email_dispatch",
+        "public.server_finish_ticket_email_dispatch",
+        "public.server_observe_ticket_email",
+        "public.server_prune_ticket_email_history",
+        "public.server_clear_ticket_email_recipient_block"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260914010000_add_refund_operations.sql",
+      "sha256": "71b20bd532e2c9383bd67403b6aebd1423ef81e5fdcd007b6743af1d0da5f6bf",
+      "functions": [
+        "private.protect_order_refund_operation",
+        "private.require_refund_order",
+        "private.order_refund_state",
+        "public.get_organizer_refund_status",
+        "public.server_claim_owned_refund",
+        "public.server_note_refund_observation",
+        "public.server_read_owned_refund_operation",
+        "private.complete_refund_operation",
+        "private.ticket_email_source"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260914010200_add_refund_notice.sql",
+      "sha256": "ced8020e7258bd67ebc337b7b1ff26ecedcf816a0dd8b3d25da0f2ca3a5c509a",
+      "functions": [
+        "private.refund_detail",
+        "private.refund_notice_source",
+        "public.server_enqueue_refund_notices",
+        "public.server_prepare_ticket_email_context",
+        "public.server_begin_ticket_email_dispatch",
+        "public.server_read_ticket_email_access",
+        "public.server_read_refund_detail_access",
+        "public.get_organizer_refund_notice_status"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260914010800_restore_checkout_preflight_cardinality.sql",
+      "sha256": "aacdd9ac89db57528f9a077db387e4f4740b274a6c03c9d66e7921c9f6906dab",
+      "functions": []
+    },
+    {
+      "path": "supabase/migrations/20260915010000_add_event_change_history.sql",
+      "sha256": "60a8e0c07ad10a1f9c69b7b83b117ec33d071b47a35958815b8269e1b51ba751",
+      "functions": [
+        "private.guard_event_change_snapshot",
+        "private.event_change_facts",
+        "private.event_material_change_fields",
+        "private.lock_event_change_rows",
+        "private.capture_event_change_facts",
+        "private.capture_deferred_event_change",
+        "private.event_change_context_token",
+        "private.lock_owned_event_change_context",
+        "private.assert_event_change_context",
+        "public.get_owned_event_change_context",
+        "private.mark_event_change_notice_submitted",
+        "public.save_owned_event_revision",
+        "public.save_owned_event_revision_if_current",
+        "public.save_owned_event_requirements",
+        "public.save_owned_event_requirements_if_current",
+        "public.accept_current_event_policies",
+        "public.accept_current_event_policies_if_current",
+        "public.publish_event",
+        "public.publish_event_if_current"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260915010100_add_cancellation_summary.sql",
+      "sha256": "a574a9d82019ba2799ae2f76586344d100309bb6807491e0cc21232364393555",
+      "functions": [
+        "private.is_payment_after_invalidation_without_tickets",
+        "private.organizer_order_coherent",
+        "public.get_organizer_order"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260915010150_add_owned_event_cancellation_summary.sql",
+      "sha256": "b3be55446a0ad98f5c58f6ec80c1f81ffc389f74d7f34a5cb2e6c82861f3e4f2",
+      "functions": [
+        "public.get_owned_event_cancellation_summary"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260915010200_add_event_notices.sql",
+      "sha256": "f225cdce7d8c152faf58690db39d08b83c4cb71a9a58eab02694092fd90d5b72",
+      "functions": [
+        "private.protect_event_notice_receipt",
+        "private.event_notice_detail",
+        "private.event_notice_source",
+        "private.event_notice_audience",
+        "public.preview_owned_event_notice",
+        "public.submit_owned_event_notice",
+        "private.event_notice_attempt_source",
+        "public.server_prepare_ticket_email_context",
+        "public.server_begin_ticket_email_dispatch",
+        "public.get_owned_event_notice_status",
+        "public.server_read_event_status_access",
+        "private.supersede_event_change_notices",
+        "public.server_read_ticket_email_access"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260915010300_add_approved_private_event_facts.sql",
+      "sha256": "cb96bf4eb2150c1f4b3d8b8499854dfed94fe703ba052a0c8227d8a938588abf",
+      "functions": [
+        "private.approved_event_ticket_facts",
+        "public.server_lookup_paid_ticket_collection",
+        "public.server_lookup_free_ticket_collection",
+        "public.server_read_ticket_email_access"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260916010000_add_owned_organizer_settings.sql",
+      "sha256": "c580aedd239056b80a62f3d15e94ec3171e6633eb196d6110d6ec2131b39d99e",
+      "functions": [
+        "public.save_owned_organizer_settings"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260917010000_add_public_discovery_read.sql",
+      "sha256": "3997ca5e3d8464eb09c5fde77fe8a1267bf291290609c7b99b3b3c7e1f969d4b",
+      "functions": [
+        "private.discovery_window",
+        "private.discovery_encode_cursor",
+        "public.server_get_public_discovery_events"
+      ]
+    },
+    {
+      "path": "supabase/migrations/20260917010100_add_discovery_read_rate_limit.sql",
+      "sha256": "9deac7d41a9cd1bc540319d48e279bdb1032b0d3450ed676604a174341320f00",
+      "functions": [
+        "public.server_consume_discovery_read_rate_limit"
+      ]
+    }
+  ],
+  "functionDefinitionHistory": {
+    "public.set_updated_at": [
+      {
+        "migration": "supabase/migrations/20260824010000_create_organizers_and_events.sql",
+        "arguments": ""
+      }
+    ],
+    "public.sync_event_location": [
+      {
+        "migration": "supabase/migrations/20260824010000_create_organizers_and_events.sql",
+        "arguments": ""
+      }
+    ],
+    "public.publish_event": [
+      {
+        "migration": "supabase/migrations/20260824010100_secure_organizer_event_publishing.sql",
+        "arguments": "p_event_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260824010200_harden_event_publishing_validation.sql",
+        "arguments": "p_event_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260825010100_secure_paid_sales_and_tiers.sql",
+        "arguments": "p_event_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260825010175_harden_paid_tier_management.sql",
+        "arguments": "p_event_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260825010190_serialize_paid_event_operations.sql",
+        "arguments": "p_event_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260826010300_add_moderation_eligibility_functions.sql",
+        "arguments": "p_event_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260826010350_enforce_current_publish_policy_pair.sql",
+        "arguments": "p_event_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260826011100_clear_low_risk_under_review_publish.sql",
+        "arguments": "p_event_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260826011200_preserve_current_human_and_system_holds.sql",
+        "arguments": "p_event_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260826011250_support_active_event_republication.sql",
+        "arguments": "p_event_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260915010000_add_event_change_history.sql",
+        "arguments": "p_event_id uuid"
+      }
+    ],
+    "public.list_owned_ticket_tiers": [
+      {
+        "migration": "supabase/migrations/20260825010100_secure_paid_sales_and_tiers.sql",
+        "arguments": "p_event_id uuid"
+      }
+    ],
+    "public.save_ticket_tiers": [
+      {
+        "migration": "supabase/migrations/20260825010100_secure_paid_sales_and_tiers.sql",
+        "arguments": "p_event_id uuid, p_tiers jsonb"
+      },
+      {
+        "migration": "supabase/migrations/20260825010175_harden_paid_tier_management.sql",
+        "arguments": "p_event_id uuid, p_tiers jsonb"
+      },
+      {
+        "migration": "supabase/migrations/20260825010190_serialize_paid_event_operations.sql",
+        "arguments": "p_event_id uuid, p_tiers jsonb"
+      },
+      {
+        "migration": "supabase/migrations/20260826010500_add_published_event_revision_paths.sql",
+        "arguments": "p_event_id uuid, p_tiers jsonb"
+      },
+      {
+        "migration": "supabase/migrations/20260826011400_guard_started_free_event_payment_mutations.sql",
+        "arguments": "p_event_id uuid, p_tiers jsonb"
+      },
+      {
+        "migration": "supabase/migrations/20260826011475_restore_ticket_tier_owner_precheck.sql",
+        "arguments": "p_event_id uuid, p_tiers jsonb"
+      }
+    ],
+    "public.activate_paid_sales": [
+      {
+        "migration": "supabase/migrations/20260825010100_secure_paid_sales_and_tiers.sql",
+        "arguments": "p_event_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260825010150_clean_paid_sales_activation.sql",
+        "arguments": "p_event_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260825010175_harden_paid_tier_management.sql",
+        "arguments": "p_event_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260825010190_serialize_paid_event_operations.sql",
+        "arguments": "p_event_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260825010195_clean_serialized_paid_activation.sql",
+        "arguments": "p_event_id uuid"
+      }
+    ],
+    "public.get_public_event_ticketing": [
+      {
+        "migration": "supabase/migrations/20260825010100_secure_paid_sales_and_tiers.sql",
+        "arguments": "p_event_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260826010400_route_public_reads_through_eligibility.sql",
+        "arguments": "p_event_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260902010100_add_checkout_cart_reservation.sql",
+        "arguments": "p_event_id uuid"
+      }
+    ],
+    "public.lock_event_ticketing_operation": [
+      {
+        "migration": "supabase/migrations/20260825010190_serialize_paid_event_operations.sql",
+        "arguments": "p_event_id uuid"
+      }
+    ],
+    "public.activate_paid_sales_locked": [
+      {
+        "migration": "supabase/migrations/20260825010190_serialize_paid_event_operations.sql",
+        "arguments": "p_event_id uuid, p_require_draft_paid boolean"
+      }
+    ],
+    "private.reserve_checkout": [
+      {
+        "migration": "supabase/migrations/20260825010200_create_order_inventory_functions.sql",
+        "arguments": "p_event_id uuid, p_tier_id uuid, p_name text, p_email text, p_client_request_id uuid, p_confirmation_token_hash text"
+      },
+      {
+        "migration": "supabase/migrations/20260825010210_harden_checkout_reservations.sql",
+        "arguments": "p_event_id uuid, p_tier_id uuid, p_name text, p_email text, p_client_request_id uuid, p_confirmation_token_hash text"
+      },
+      {
+        "migration": "supabase/migrations/20260825010220_finalize_checkout_reservation_ordering.sql",
+        "arguments": "p_event_id uuid, p_tier_id uuid, p_name text, p_email text, p_client_request_id uuid, p_confirmation_token_hash text"
+      },
+      {
+        "migration": "supabase/migrations/20260825010370_harden_hosted_checkout_retry.sql",
+        "arguments": "p_event_id uuid, p_tier_id uuid, p_name text, p_email text, p_client_request_id uuid, p_confirmation_token_hash text"
+      },
+      {
+        "migration": "supabase/migrations/20260902010000_expand_checkout_integrity_schema.sql",
+        "arguments": "p_event_id uuid, p_tier_id uuid, p_name text, p_email text, p_client_request_id uuid, p_confirmation_token_hash text"
+      },
+      {
+        "migration": "supabase/migrations/20260902010050_serialize_checkout_admission.sql",
+        "arguments": "p_event_id uuid, p_tier_id uuid, p_name text, p_email text, p_client_request_id uuid, p_confirmation_token_hash text"
+      },
+      {
+        "migration": "supabase/migrations/20260902010100_add_checkout_cart_reservation.sql",
+        "arguments": "p_event_id uuid, p_items jsonb, p_name text, p_email text, p_client_request_id uuid, p_confirmation_token_hash text"
+      }
+    ],
+    "private.attach_checkout_session": [
+      {
+        "migration": "supabase/migrations/20260825010200_create_order_inventory_functions.sql",
+        "arguments": "p_order_id uuid, p_session_id text, p_expires_at timestamptz"
+      },
+      {
+        "migration": "supabase/migrations/20260825010330_accept_stripe_identifier_case.sql",
+        "arguments": "p_order_id uuid, p_session_id text, p_expires_at timestamptz"
+      },
+      {
+        "migration": "supabase/migrations/20260825010370_harden_hosted_checkout_retry.sql",
+        "arguments": "p_order_id uuid, p_session_id text, p_expires_at timestamptz"
+      }
+    ],
+    "private.cancel_checkout_reservation": [
+      {
+        "migration": "supabase/migrations/20260825010200_create_order_inventory_functions.sql",
+        "arguments": "p_order_id uuid, p_reason text"
+      }
+    ],
+    "private.expire_checkout_reservations": [
+      {
+        "migration": "supabase/migrations/20260825010200_create_order_inventory_functions.sql",
+        "arguments": "p_now timestamptz"
+      },
+      {
+        "migration": "supabase/migrations/20260902010200_schedule_checkout_reservation_expiry.sql",
+        "arguments": "p_now timestamptz"
+      }
+    ],
+    "public.server_reserve_checkout": [
+      {
+        "migration": "supabase/migrations/20260825010210_harden_checkout_reservations.sql",
+        "arguments": "p_event_id uuid, p_tier_id uuid, p_name text, p_email text, p_client_request_id uuid, p_confirmation_token_hash text"
+      },
+      {
+        "migration": "supabase/migrations/20260825010370_harden_hosted_checkout_retry.sql",
+        "arguments": "p_event_id uuid, p_tier_id uuid, p_name text, p_email text, p_client_request_id uuid, p_confirmation_token_hash text"
+      },
+      {
+        "migration": "supabase/migrations/20260902010100_add_checkout_cart_reservation.sql",
+        "arguments": "p_event_id uuid, p_items jsonb, p_name text, p_email text, p_client_request_id uuid, p_confirmation_token_hash text"
+      }
+    ],
+    "public.server_attach_checkout_session": [
+      {
+        "migration": "supabase/migrations/20260825010210_harden_checkout_reservations.sql",
+        "arguments": "p_order_id uuid, p_session_id text, p_expires_at timestamptz"
+      }
+    ],
+    "public.server_cancel_checkout_reservation": [
+      {
+        "migration": "supabase/migrations/20260825010210_harden_checkout_reservations.sql",
+        "arguments": "p_order_id uuid, p_reason text"
+      }
+    ],
+    "public.server_expire_checkout_reservations": [
+      {
+        "migration": "supabase/migrations/20260825010210_harden_checkout_reservations.sql",
+        "arguments": "p_now timestamptz"
+      }
+    ],
+    "private.record_webhook_receipt": [
+      {
+        "migration": "supabase/migrations/20260825010300_create_payment_fulfillment_functions.sql",
+        "arguments": "p_stripe_event_id text, p_event_type text, p_livemode boolean, p_stripe_object_id text, p_api_version text, p_stripe_created_at timestamptz, p_payload_sha256 text"
+      },
+      {
+        "migration": "supabase/migrations/20260825010330_accept_stripe_identifier_case.sql",
+        "arguments": "p_stripe_event_id text, p_event_type text, p_livemode boolean, p_stripe_object_id text, p_api_version text, p_stripe_created_at timestamptz, p_payload_sha256 text"
+      }
+    ],
+    "private.lock_payment_order": [
+      {
+        "migration": "supabase/migrations/20260825010300_create_payment_fulfillment_functions.sql",
+        "arguments": "p_order_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260902010300_add_checkout_item_reconciliation.sql",
+        "arguments": "p_order_id uuid"
+      }
+    ],
+    "private.assert_payment_snapshot": [
+      {
+        "migration": "supabase/migrations/20260825010300_create_payment_fulfillment_functions.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_checkout_session_id text, p_payment_intent_id text, p_mode text, p_payment_status text, p_currency text, p_subtotal_minor bigint, p_total_minor bigint, p_application_fee_amount_minor bigint, p_destination_account_id text"
+      },
+      {
+        "migration": "supabase/migrations/20260825010370_harden_hosted_checkout_retry.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_checkout_session_id text, p_payment_intent_id text, p_mode text, p_payment_status text, p_currency text, p_subtotal_minor bigint, p_total_minor bigint, p_application_fee_amount_minor bigint, p_destination_account_id text"
+      }
+    ],
+    "private.fulfill_paid_order": [
+      {
+        "migration": "supabase/migrations/20260825010300_create_payment_fulfillment_functions.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_checkout_session_id text, p_payment_intent_id text, p_charge_id text, p_transfer_id text, p_application_fee_id text, p_balance_transaction_id text, p_customer_id text, p_mode text, p_payment_status text, p_currency text, p_subtotal_minor bigint, p_total_minor bigint, p_application_fee_amount_minor bigint, p_destination_account_id text"
+      },
+      {
+        "migration": "supabase/migrations/20260825010310_preserve_terminal_fulfillment_state.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_checkout_session_id text, p_payment_intent_id text, p_charge_id text, p_transfer_id text, p_application_fee_id text, p_balance_transaction_id text, p_customer_id text, p_mode text, p_payment_status text, p_currency text, p_subtotal_minor bigint, p_total_minor bigint, p_application_fee_amount_minor bigint, p_destination_account_id text"
+      },
+      {
+        "migration": "supabase/migrations/20260902010300_add_checkout_item_reconciliation.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_checkout_session_id text, p_payment_intent_id text, p_charge_id text, p_transfer_id text, p_application_fee_id text, p_balance_transaction_id text, p_customer_id text, p_mode text, p_payment_status text, p_currency text, p_subtotal_minor bigint, p_total_minor bigint, p_application_fee_amount_minor bigint, p_destination_account_id text"
+      },
+      {
+        "migration": "supabase/migrations/20260902010350_bind_fulfillment_snapshot_lifecycle.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_checkout_session_id text, p_payment_intent_id text, p_charge_id text, p_transfer_id text, p_application_fee_id text, p_balance_transaction_id text, p_customer_id text, p_mode text, p_payment_status text, p_currency text, p_subtotal_minor bigint, p_total_minor bigint, p_application_fee_amount_minor bigint, p_destination_account_id text"
+      },
+      {
+        "migration": "supabase/migrations/20260902010600_remove_single_ticket_checkout_contract.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_checkout_session_id text, p_payment_intent_id text, p_charge_id text, p_transfer_id text, p_application_fee_id text, p_balance_transaction_id text, p_customer_id text, p_mode text, p_payment_status text, p_currency text, p_subtotal_minor bigint, p_total_minor bigint, p_application_fee_amount_minor bigint, p_destination_account_id text"
+      },
+      {
+        "migration": "supabase/migrations/20260907010000_integrate_core_ticket_truth_lite_fulfillment.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_checkout_session_id text, p_payment_intent_id text, p_charge_id text, p_transfer_id text, p_application_fee_id text, p_balance_transaction_id text, p_customer_id text, p_mode text, p_payment_status text, p_currency text, p_subtotal_minor bigint, p_total_minor bigint, p_application_fee_amount_minor bigint, p_destination_account_id text, p_ticket_manifest jsonb"
+      }
+    ],
+    "private.mark_payment_processing": [
+      {
+        "migration": "supabase/migrations/20260825010300_create_payment_fulfillment_functions.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_checkout_session_id text, p_payment_intent_id text, p_mode text, p_payment_status text, p_currency text, p_subtotal_minor bigint, p_total_minor bigint, p_application_fee_amount_minor bigint, p_destination_account_id text"
+      }
+    ],
+    "private.mark_payment_failed": [
+      {
+        "migration": "supabase/migrations/20260825010300_create_payment_fulfillment_functions.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_checkout_session_id text, p_payment_intent_id text, p_mode text, p_payment_status text, p_currency text, p_subtotal_minor bigint, p_total_minor bigint, p_application_fee_amount_minor bigint, p_destination_account_id text, p_failure_code text"
+      }
+    ],
+    "private.apply_refund": [
+      {
+        "migration": "supabase/migrations/20260825010300_create_payment_fulfillment_functions.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_stripe_refund_id text, p_amount_minor bigint, p_currency text, p_status text, p_reason text, p_reverse_transfer boolean, p_refund_application_fee boolean"
+      },
+      {
+        "migration": "supabase/migrations/20260825010320_preserve_terminal_refund_state.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_stripe_refund_id text, p_amount_minor bigint, p_currency text, p_status text, p_reason text, p_reverse_transfer boolean, p_refund_application_fee boolean"
+      },
+      {
+        "migration": "supabase/migrations/20260825010340_bind_refunds_to_payment.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_stripe_refund_id text, p_payment_intent_id text, p_charge_id text, p_amount_minor bigint, p_currency text, p_status text, p_reason text, p_reverse_transfer boolean, p_refund_application_fee boolean"
+      },
+      {
+        "migration": "supabase/migrations/20260902010400_enforce_whole_order_refund_safety.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_stripe_refund_id text, p_payment_intent_id text, p_charge_id text, p_amount_minor bigint, p_currency text, p_status text, p_reason text, p_reverse_transfer boolean, p_refund_application_fee boolean"
+      }
+    ],
+    "private.apply_dispute": [
+      {
+        "migration": "supabase/migrations/20260825010300_create_payment_fulfillment_functions.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_stripe_dispute_id text, p_charge_id text, p_status text, p_amount_minor bigint, p_currency text, p_recovery_status text"
+      },
+      {
+        "migration": "supabase/migrations/20260825010350_persist_monotonic_disputes.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_stripe_dispute_id text, p_charge_id text, p_status text, p_amount_minor bigint, p_currency text, p_recovery_status text"
+      },
+      {
+        "migration": "supabase/migrations/20260825010360_acknowledge_ignored_dispute_events.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_stripe_dispute_id text, p_charge_id text, p_status text, p_amount_minor bigint, p_currency text, p_recovery_status text"
+      }
+    ],
+    "public.server_record_webhook_receipt": [
+      {
+        "migration": "supabase/migrations/20260825010300_create_payment_fulfillment_functions.sql",
+        "arguments": "p_stripe_event_id text, p_event_type text, p_livemode boolean, p_stripe_object_id text, p_api_version text, p_stripe_created_at timestamptz, p_payload_sha256 text"
+      }
+    ],
+    "public.server_fulfill_paid_order": [
+      {
+        "migration": "supabase/migrations/20260825010300_create_payment_fulfillment_functions.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_checkout_session_id text, p_payment_intent_id text, p_charge_id text, p_transfer_id text, p_application_fee_id text, p_balance_transaction_id text, p_customer_id text, p_mode text, p_payment_status text, p_currency text, p_subtotal_minor bigint, p_total_minor bigint, p_application_fee_amount_minor bigint, p_destination_account_id text"
+      },
+      {
+        "migration": "supabase/migrations/20260902010300_add_checkout_item_reconciliation.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_checkout_session_id text, p_payment_intent_id text, p_charge_id text, p_transfer_id text, p_application_fee_id text, p_balance_transaction_id text, p_customer_id text, p_mode text, p_payment_status text, p_currency text, p_subtotal_minor bigint, p_total_minor bigint, p_application_fee_amount_minor bigint, p_destination_account_id text"
+      },
+      {
+        "migration": "supabase/migrations/20260907010000_integrate_core_ticket_truth_lite_fulfillment.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_checkout_session_id text, p_payment_intent_id text, p_charge_id text, p_transfer_id text, p_application_fee_id text, p_balance_transaction_id text, p_customer_id text, p_mode text, p_payment_status text, p_currency text, p_subtotal_minor bigint, p_total_minor bigint, p_application_fee_amount_minor bigint, p_destination_account_id text, p_ticket_manifest jsonb"
+      },
+      {
+        "migration": "supabase/migrations/20260913010200_add_ticket_email_entry_points.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_checkout_session_id text, p_payment_intent_id text, p_charge_id text, p_transfer_id text, p_application_fee_id text, p_balance_transaction_id text, p_customer_id text, p_mode text, p_payment_status text, p_currency text, p_subtotal_minor bigint, p_total_minor bigint, p_application_fee_amount_minor bigint, p_destination_account_id text, p_ticket_manifest jsonb"
+      }
+    ],
+    "public.server_mark_payment_processing": [
+      {
+        "migration": "supabase/migrations/20260825010300_create_payment_fulfillment_functions.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_checkout_session_id text, p_payment_intent_id text, p_mode text, p_payment_status text, p_currency text, p_subtotal_minor bigint, p_total_minor bigint, p_application_fee_amount_minor bigint, p_destination_account_id text"
+      }
+    ],
+    "public.server_mark_payment_failed": [
+      {
+        "migration": "supabase/migrations/20260825010300_create_payment_fulfillment_functions.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_checkout_session_id text, p_payment_intent_id text, p_mode text, p_payment_status text, p_currency text, p_subtotal_minor bigint, p_total_minor bigint, p_application_fee_amount_minor bigint, p_destination_account_id text, p_failure_code text"
+      }
+    ],
+    "public.server_apply_refund": [
+      {
+        "migration": "supabase/migrations/20260825010300_create_payment_fulfillment_functions.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_stripe_refund_id text, p_amount_minor bigint, p_currency text, p_status text, p_reason text, p_reverse_transfer boolean, p_refund_application_fee boolean"
+      },
+      {
+        "migration": "supabase/migrations/20260825010340_bind_refunds_to_payment.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_stripe_refund_id text, p_payment_intent_id text, p_charge_id text, p_amount_minor bigint, p_currency text, p_status text, p_reason text, p_reverse_transfer boolean, p_refund_application_fee boolean"
+      }
+    ],
+    "public.server_apply_dispute": [
+      {
+        "migration": "supabase/migrations/20260825010300_create_payment_fulfillment_functions.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_stripe_dispute_id text, p_charge_id text, p_status text, p_amount_minor bigint, p_currency text, p_recovery_status text"
+      },
+      {
+        "migration": "supabase/migrations/20260825010350_persist_monotonic_disputes.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_stripe_dispute_id text, p_charge_id text, p_status text, p_amount_minor bigint, p_currency text, p_recovery_status text"
+      }
+    ],
+    "private.checkout_integration_identifier": [
+      {
+        "migration": "supabase/migrations/20260825010370_harden_hosted_checkout_retry.sql",
+        "arguments": "p_order_id uuid"
+      }
+    ],
+    "private.checkout_request_digest": [
+      {
+        "migration": "supabase/migrations/20260825010370_harden_hosted_checkout_retry.sql",
+        "arguments": "p_order_id uuid, p_event_id uuid, p_tier_id uuid, p_client_request_id uuid, p_confirmation_token_hash text, p_buyer_email text, p_currency text, p_subtotal_minor bigint, p_application_fee_amount_minor bigint, p_destination_account_id text, p_checkout_expires_at timestamptz, p_integration_identifier text"
+      }
+    ],
+    "private.populate_checkout_request_snapshot": [
+      {
+        "migration": "supabase/migrations/20260825010370_harden_hosted_checkout_retry.sql",
+        "arguments": ""
+      },
+      {
+        "migration": "supabase/migrations/20260825010380_freeze_checkout_create_snapshot.sql",
+        "arguments": ""
+      },
+      {
+        "migration": "supabase/migrations/20260825010390_add_checkout_expiry_headroom.sql",
+        "arguments": ""
+      }
+    ],
+    "private.get_checkout_preflight": [
+      {
+        "migration": "supabase/migrations/20260825010370_harden_hosted_checkout_retry.sql",
+        "arguments": "p_event_id uuid, p_tier_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260902010100_add_checkout_cart_reservation.sql",
+        "arguments": "p_event_id uuid, p_tier_ids uuid[]"
+      },
+      {
+        "migration": "supabase/migrations/20260909010100_allow_checkout_preflight_status_refresh.sql",
+        "arguments": "p_event_id uuid, p_tier_ids uuid[]"
+      }
+    ],
+    "public.server_get_checkout_preflight": [
+      {
+        "migration": "supabase/migrations/20260825010370_harden_hosted_checkout_retry.sql",
+        "arguments": "p_event_id uuid, p_tier_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260902010100_add_checkout_cart_reservation.sql",
+        "arguments": "p_event_id uuid, p_tier_ids uuid[]"
+      }
+    ],
+    "private.lookup_checkout_cancellation": [
+      {
+        "migration": "supabase/migrations/20260825010370_harden_hosted_checkout_retry.sql",
+        "arguments": "p_token_hash text"
+      }
+    ],
+    "public.server_lookup_checkout_cancellation": [
+      {
+        "migration": "supabase/migrations/20260825010370_harden_hosted_checkout_retry.sql",
+        "arguments": "p_token_hash text"
+      }
+    ],
+    "private.consume_checkout_rate_limit": [
+      {
+        "migration": "supabase/migrations/20260825010370_harden_hosted_checkout_retry.sql",
+        "arguments": "p_identity_hash text"
+      }
+    ],
+    "public.server_consume_checkout_rate_limit": [
+      {
+        "migration": "supabase/migrations/20260825010370_harden_hosted_checkout_retry.sql",
+        "arguments": "p_identity_hash text"
+      }
+    ],
+    "private.checkout_expiry_from": [
+      {
+        "migration": "supabase/migrations/20260825010390_add_checkout_expiry_headroom.sql",
+        "arguments": "p_now timestamptz"
+      },
+      {
+        "migration": "supabase/migrations/20260825010400_cover_stripe_retry_envelope.sql",
+        "arguments": "p_now timestamptz"
+      },
+      {
+        "migration": "supabase/migrations/20260825010410_cover_ambiguous_user_retry.sql",
+        "arguments": "p_now timestamptz"
+      }
+    ],
+    "private.finalize_webhook_receipt": [
+      {
+        "migration": "supabase/migrations/20260825010420_add_webhook_reconciliation_boundary.sql",
+        "arguments": "p_stripe_event_id text, p_processing_status text, p_error_code text"
+      }
+    ],
+    "private.get_webhook_order_snapshot": [
+      {
+        "migration": "supabase/migrations/20260825010420_add_webhook_reconciliation_boundary.sql",
+        "arguments": "p_order_id uuid, p_checkout_session_id text"
+      }
+    ],
+    "public.server_finalize_webhook_receipt": [
+      {
+        "migration": "supabase/migrations/20260825010420_add_webhook_reconciliation_boundary.sql",
+        "arguments": "p_stripe_event_id text, p_processing_status text, p_error_code text"
+      }
+    ],
+    "public.server_get_webhook_order_snapshot": [
+      {
+        "migration": "supabase/migrations/20260825010420_add_webhook_reconciliation_boundary.sql",
+        "arguments": "p_order_id uuid, p_checkout_session_id text"
+      }
+    ],
+    "private.get_webhook_payment_order_snapshot": [
+      {
+        "migration": "supabase/migrations/20260825010430_harden_webhook_reconciliation.sql",
+        "arguments": "p_order_id uuid"
+      }
+    ],
+    "public.server_get_webhook_payment_order_snapshot": [
+      {
+        "migration": "supabase/migrations/20260825010430_harden_webhook_reconciliation.sql",
+        "arguments": "p_order_id uuid"
+      }
+    ],
+    "private.persist_connect_status_if_current": [
+      {
+        "migration": "supabase/migrations/20260825010430_harden_webhook_reconciliation.sql",
+        "arguments": "p_stripe_account_id text, p_retrieved_at timestamptz, p_revision text, p_transfers_status text, p_payouts_status text, p_requirements_status text, p_currently_due_count integer, p_past_due_count integer, p_last_status_code text"
+      },
+      {
+        "migration": "supabase/migrations/20260825010440_add_connect_refresh_sequence.sql",
+        "arguments": "p_stripe_account_id text, p_refresh_sequence bigint, p_transfers_status text, p_payouts_status text, p_requirements_status text, p_currently_due_count integer, p_past_due_count integer, p_last_status_code text"
+      },
+      {
+        "migration": "supabase/migrations/20260825010450_remove_legacy_connect_refresh_cas.sql",
+        "arguments": "p_stripe_account_id text, p_refresh_sequence bigint, p_transfers_status text, p_payouts_status text, p_requirements_status text, p_currently_due_count integer, p_past_due_count integer, p_last_status_code text"
+      },
+      {
+        "migration": "supabase/migrations/20260825010480_accept_stripe_connect_status_codes.sql",
+        "arguments": "p_stripe_account_id text, p_refresh_sequence bigint, p_transfers_status text, p_payouts_status text, p_requirements_status text, p_currently_due_count integer, p_past_due_count integer, p_last_status_code text"
+      }
+    ],
+    "public.server_persist_connect_status_if_current": [
+      {
+        "migration": "supabase/migrations/20260825010430_harden_webhook_reconciliation.sql",
+        "arguments": "p_stripe_account_id text, p_retrieved_at timestamptz, p_revision text, p_transfers_status text, p_payouts_status text, p_requirements_status text, p_currently_due_count integer, p_past_due_count integer, p_last_status_code text"
+      },
+      {
+        "migration": "supabase/migrations/20260825010440_add_connect_refresh_sequence.sql",
+        "arguments": "p_stripe_account_id text, p_refresh_sequence bigint, p_transfers_status text, p_payouts_status text, p_requirements_status text, p_currently_due_count integer, p_past_due_count integer, p_last_status_code text"
+      }
+    ],
+    "private.mark_payment_requires_review": [
+      {
+        "migration": "supabase/migrations/20260825010430_harden_webhook_reconciliation.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_checkout_session_id text, p_payment_intent_id text, p_charge_id text, p_transfer_id text, p_application_fee_id text, p_balance_transaction_id text, p_customer_id text, p_mode text, p_payment_status text, p_currency text, p_subtotal_minor bigint, p_total_minor bigint, p_application_fee_amount_minor bigint, p_destination_account_id text, p_failure_code text"
+      },
+      {
+        "migration": "supabase/migrations/20260825010510_clean_payment_review_lock.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_checkout_session_id text, p_payment_intent_id text, p_charge_id text, p_transfer_id text, p_application_fee_id text, p_balance_transaction_id text, p_customer_id text, p_mode text, p_payment_status text, p_currency text, p_subtotal_minor bigint, p_total_minor bigint, p_application_fee_amount_minor bigint, p_destination_account_id text, p_failure_code text"
+      }
+    ],
+    "public.server_mark_payment_requires_review": [
+      {
+        "migration": "supabase/migrations/20260825010430_harden_webhook_reconciliation.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_checkout_session_id text, p_payment_intent_id text, p_charge_id text, p_transfer_id text, p_application_fee_id text, p_balance_transaction_id text, p_customer_id text, p_mode text, p_payment_status text, p_currency text, p_subtotal_minor bigint, p_total_minor bigint, p_application_fee_amount_minor bigint, p_destination_account_id text, p_failure_code text"
+      }
+    ],
+    "private.apply_verified_refund": [
+      {
+        "migration": "supabase/migrations/20260825010430_harden_webhook_reconciliation.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_stripe_refund_id text, p_payment_intent_id text, p_charge_id text, p_transfer_reversal_id text, p_application_fee_refund_id text, p_amount_minor bigint, p_currency text, p_status text, p_reason text, p_reverse_transfer boolean, p_refund_application_fee boolean"
+      },
+      {
+        "migration": "supabase/migrations/20260902010400_enforce_whole_order_refund_safety.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_stripe_refund_id text, p_payment_intent_id text, p_charge_id text, p_transfer_reversal_id text, p_application_fee_refund_id text, p_amount_minor bigint, p_currency text, p_status text, p_reason text, p_reverse_transfer boolean, p_refund_application_fee boolean, p_transfer_reversal_amount_minor bigint, p_application_fee_refund_amount_minor bigint, p_policy_verified boolean, p_policy_failure_code text"
+      },
+      {
+        "migration": "supabase/migrations/20260902010450_fix_whole_order_refund_transitions.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_stripe_refund_id text, p_payment_intent_id text, p_charge_id text, p_transfer_reversal_id text, p_application_fee_refund_id text, p_amount_minor bigint, p_currency text, p_status text, p_reason text, p_reverse_transfer boolean, p_refund_application_fee boolean, p_transfer_reversal_amount_minor bigint, p_application_fee_refund_amount_minor bigint, p_policy_verified boolean, p_policy_failure_code text"
+      },
+      {
+        "migration": "supabase/migrations/20260902010475_harden_refund_review_recovery.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_stripe_refund_id text, p_payment_intent_id text, p_charge_id text, p_transfer_reversal_id text, p_application_fee_refund_id text, p_amount_minor bigint, p_currency text, p_status text, p_reason text, p_reverse_transfer boolean, p_refund_application_fee boolean, p_transfer_reversal_amount_minor bigint, p_application_fee_refund_amount_minor bigint, p_policy_verified boolean, p_policy_failure_code text"
+      }
+    ],
+    "public.server_apply_verified_refund": [
+      {
+        "migration": "supabase/migrations/20260825010430_harden_webhook_reconciliation.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_stripe_refund_id text, p_payment_intent_id text, p_charge_id text, p_transfer_reversal_id text, p_application_fee_refund_id text, p_amount_minor bigint, p_currency text, p_status text, p_reason text, p_reverse_transfer boolean, p_refund_application_fee boolean"
+      },
+      {
+        "migration": "supabase/migrations/20260902010400_enforce_whole_order_refund_safety.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_stripe_refund_id text, p_payment_intent_id text, p_charge_id text, p_transfer_reversal_id text, p_application_fee_refund_id text, p_amount_minor bigint, p_currency text, p_status text, p_reason text, p_reverse_transfer boolean, p_refund_application_fee boolean, p_transfer_reversal_amount_minor bigint, p_application_fee_refund_amount_minor bigint, p_policy_verified boolean, p_policy_failure_code text"
+      },
+      {
+        "migration": "supabase/migrations/20260902010450_fix_whole_order_refund_transitions.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_stripe_refund_id text, p_payment_intent_id text, p_charge_id text, p_transfer_reversal_id text, p_application_fee_refund_id text, p_amount_minor bigint, p_currency text, p_status text, p_reason text, p_reverse_transfer boolean, p_refund_application_fee boolean, p_transfer_reversal_amount_minor bigint, p_application_fee_refund_amount_minor bigint, p_policy_verified boolean, p_policy_failure_code text"
+      },
+      {
+        "migration": "supabase/migrations/20260902010475_harden_refund_review_recovery.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_stripe_refund_id text, p_payment_intent_id text, p_charge_id text, p_transfer_reversal_id text, p_application_fee_refund_id text, p_amount_minor bigint, p_currency text, p_status text, p_reason text, p_reverse_transfer boolean, p_refund_application_fee boolean, p_transfer_reversal_amount_minor bigint, p_application_fee_refund_amount_minor bigint, p_policy_verified boolean, p_policy_failure_code text"
+      }
+    ],
+    "private.apply_verified_dispute": [
+      {
+        "migration": "supabase/migrations/20260825010430_harden_webhook_reconciliation.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_stripe_dispute_id text, p_payment_intent_id text, p_charge_id text, p_transfer_reversal_id text, p_status text, p_amount_minor bigint, p_currency text, p_recovery_status text"
+      }
+    ],
+    "public.server_apply_verified_dispute": [
+      {
+        "migration": "supabase/migrations/20260825010430_harden_webhook_reconciliation.sql",
+        "arguments": "p_stripe_event_id text, p_order_id uuid, p_stripe_dispute_id text, p_payment_intent_id text, p_charge_id text, p_transfer_reversal_id text, p_status text, p_amount_minor bigint, p_currency text, p_recovery_status text"
+      }
+    ],
+    "private.begin_connect_refresh": [
+      {
+        "migration": "supabase/migrations/20260825010440_add_connect_refresh_sequence.sql",
+        "arguments": "p_stripe_account_id text"
+      }
+    ],
+    "public.server_begin_connect_refresh": [
+      {
+        "migration": "supabase/migrations/20260825010440_add_connect_refresh_sequence.sql",
+        "arguments": "p_stripe_account_id text"
+      }
+    ],
+    "private.order_confirmation_status": [
+      {
+        "migration": "supabase/migrations/20260825010460_add_order_confirmation_projection.sql",
+        "arguments": "p_order_status text"
+      },
+      {
+        "migration": "supabase/migrations/20260825010470_map_partial_refunds_to_refunded_confirmation.sql",
+        "arguments": "p_order_status text"
+      }
+    ],
+    "private.lookup_order_confirmation": [
+      {
+        "migration": "supabase/migrations/20260825010460_add_order_confirmation_projection.sql",
+        "arguments": "p_token_hash text"
+      }
+    ],
+    "public.server_lookup_order_confirmation": [
+      {
+        "migration": "supabase/migrations/20260825010460_add_order_confirmation_projection.sql",
+        "arguments": "p_token_hash text"
+      }
+    ],
+    "private.reconcile_verified_refund_ticket": [
+      {
+        "migration": "supabase/migrations/20260825010490_recover_verified_refund_tickets.sql",
+        "arguments": ""
+      },
+      {
+        "migration": "supabase/migrations/20260902010400_enforce_whole_order_refund_safety.sql",
+        "arguments": ""
+      }
+    ],
+    "private.reject_immutable_moderation_record_change": [
+      {
+        "migration": "supabase/migrations/20260826010000_create_moderation_foundation.sql",
+        "arguments": ""
+      }
+    ],
+    "private.guard_public_eligibility_interval_change": [
+      {
+        "migration": "supabase/migrations/20260826010000_create_moderation_foundation.sql",
+        "arguments": ""
+      }
+    ],
+    "private.classify_legacy_event_moderation": [
+      {
+        "migration": "supabase/migrations/20260826010100_migrate_legacy_moderation.sql",
+        "arguments": "p_lifecycle_status text, p_legacy_moderation_status text, p_evidence_code text, p_prior_public_observed_at timestamptz"
+      }
+    ],
+    "private.initialize_event_public_eligibility_interval": [
+      {
+        "migration": "supabase/migrations/20260826010100_migrate_legacy_moderation.sql",
+        "arguments": ""
+      }
+    ],
+    "private.reconcile_legacy_moderation_events": [
+      {
+        "migration": "supabase/migrations/20260826010150_harden_legacy_moderation_migration.sql",
+        "arguments": "p_event_ids uuid[]"
+      }
+    ],
+    "private.policy_environment_matches_current_requirements": [
+      {
+        "migration": "supabase/migrations/20260826010200_add_event_policy_acceptance.sql",
+        "arguments": ""
+      },
+      {
+        "migration": "supabase/migrations/20260826011300_harden_production_policy_urls.sql",
+        "arguments": ""
+      }
+    ],
+    "private.production_policy_configuration_is_ready": [
+      {
+        "migration": "supabase/migrations/20260826010200_add_event_policy_acceptance.sql",
+        "arguments": ""
+      }
+    ],
+    "private.configure_policy_environment": [
+      {
+        "migration": "supabase/migrations/20260826010200_add_event_policy_acceptance.sql",
+        "arguments": "p_environment text"
+      },
+      {
+        "migration": "supabase/migrations/20260826010250_clean_policy_environment_configuration.sql",
+        "arguments": "p_environment text"
+      },
+      {
+        "migration": "supabase/migrations/20260826011300_harden_production_policy_urls.sql",
+        "arguments": "p_environment text"
+      }
+    ],
+    "public.get_required_event_policies": [
+      {
+        "migration": "supabase/migrations/20260826010200_add_event_policy_acceptance.sql",
+        "arguments": ""
+      }
+    ],
+    "public.get_owned_event_requirements": [
+      {
+        "migration": "supabase/migrations/20260826010200_add_event_policy_acceptance.sql",
+        "arguments": "p_event_id uuid"
+      }
+    ],
+    "public.accept_current_event_policies": [
+      {
+        "migration": "supabase/migrations/20260826010200_add_event_policy_acceptance.sql",
+        "arguments": "p_event_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260915010000_add_event_change_history.sql",
+        "arguments": "p_event_id uuid"
+      }
+    ],
+    "private.compute_event_moderation_input": [
+      {
+        "migration": "supabase/migrations/20260826010300_add_moderation_eligibility_functions.sql",
+        "arguments": "p_event_id uuid"
+      }
+    ],
+    "private.compute_event_input_sha256": [
+      {
+        "migration": "supabase/migrations/20260826010300_add_moderation_eligibility_functions.sql",
+        "arguments": "p_event_id uuid"
+      }
+    ],
+    "private.event_meets_public_candidate": [
+      {
+        "migration": "supabase/migrations/20260826010300_add_moderation_eligibility_functions.sql",
+        "arguments": "p_event_id uuid, p_as_of timestamptz"
+      }
+    ],
+    "private.transition_event_public_eligibility": [
+      {
+        "migration": "supabase/migrations/20260826010300_add_moderation_eligibility_functions.sql",
+        "arguments": "p_event_id uuid, p_is_eligible boolean, p_transition_action_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260826010750_harden_staff_moderation_operations.sql",
+        "arguments": "p_event_id uuid, p_is_eligible boolean, p_transition_action_id uuid"
+      }
+    ],
+    "private.event_is_publicly_eligible": [
+      {
+        "migration": "supabase/migrations/20260826010400_route_public_reads_through_eligibility.sql",
+        "arguments": "p_event_id uuid, p_as_of timestamptz"
+      },
+      {
+        "migration": "supabase/migrations/20260826010450_harden_public_eligibility_reads.sql",
+        "arguments": "p_event_id uuid, p_as_of timestamptz"
+      }
+    ],
+    "private.public_event_projection": [
+      {
+        "migration": "supabase/migrations/20260826010400_route_public_reads_through_eligibility.sql",
+        "arguments": "p_event_id uuid"
+      }
+    ],
+    "public.get_public_event": [
+      {
+        "migration": "supabase/migrations/20260826010400_route_public_reads_through_eligibility.sql",
+        "arguments": "p_event_id uuid"
+      }
+    ],
+    "public.get_public_map_events": [
+      {
+        "migration": "supabase/migrations/20260826010400_route_public_reads_through_eligibility.sql",
+        "arguments": "p_west double precision, p_south double precision, p_east double precision, p_north double precision, p_starts_at timestamptz, p_ends_at timestamptz, p_categories text[] default null"
+      },
+      {
+        "migration": "supabase/migrations/20260826010450_harden_public_eligibility_reads.sql",
+        "arguments": "p_west double precision, p_south double precision, p_east double precision, p_north double precision, p_starts_at timestamptz, p_ends_at timestamptz, p_categories text[] default null"
+      }
+    ],
+    "private.event_has_current_public_eligibility": [
+      {
+        "migration": "supabase/migrations/20260826010450_harden_public_eligibility_reads.sql",
+        "arguments": "p_event_id uuid"
+      }
+    ],
+    "private.invalidate_event_public_revision": [
+      {
+        "migration": "supabase/migrations/20260826010500_add_published_event_revision_paths.sql",
+        "arguments": "p_event_id uuid, p_change_kind text, p_actor_user_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260826010550_harden_deterministic_revision_evaluation.sql",
+        "arguments": "p_event_id uuid, p_change_kind text, p_actor_user_id uuid"
+      }
+    ],
+    "public.save_owned_event_revision": [
+      {
+        "migration": "supabase/migrations/20260826010500_add_published_event_revision_paths.sql",
+        "arguments": "p_event_id uuid, p_event jsonb"
+      },
+      {
+        "migration": "supabase/migrations/20260826010575_harden_revision_payload_types.sql",
+        "arguments": "p_event_id uuid, p_event jsonb"
+      },
+      {
+        "migration": "supabase/migrations/20260826011400_guard_started_free_event_payment_mutations.sql",
+        "arguments": "p_event_id uuid, p_event jsonb"
+      },
+      {
+        "migration": "supabase/migrations/20260915010000_add_event_change_history.sql",
+        "arguments": "p_event_id uuid,p_event jsonb"
+      }
+    ],
+    "public.save_owned_event_requirements": [
+      {
+        "migration": "supabase/migrations/20260826010500_add_published_event_revision_paths.sql",
+        "arguments": "p_event_id uuid, p_requirements jsonb"
+      },
+      {
+        "migration": "supabase/migrations/20260915010000_add_event_change_history.sql",
+        "arguments": "p_event_id uuid,p_requirements jsonb"
+      }
+    ],
+    "public.save_owned_organizer_profile": [
+      {
+        "migration": "supabase/migrations/20260826010500_add_published_event_revision_paths.sql",
+        "arguments": "p_profile jsonb"
+      },
+      {
+        "migration": "supabase/migrations/20260826010575_harden_revision_payload_types.sql",
+        "arguments": "p_profile jsonb"
+      }
+    ],
+    "private.require_organizer_profile_revision_boundary": [
+      {
+        "migration": "supabase/migrations/20260826010500_add_published_event_revision_paths.sql",
+        "arguments": ""
+      }
+    ],
+    "public.server_claim_moderation_evaluation": [
+      {
+        "migration": "supabase/migrations/20260826010600_add_contextual_moderation_queue.sql",
+        "arguments": "p_worker_reference text"
+      },
+      {
+        "migration": "supabase/migrations/20260826010650_harden_contextual_moderation_queue.sql",
+        "arguments": "p_worker_reference text"
+      }
+    ],
+    "public.server_apply_moderation_evaluation": [
+      {
+        "migration": "supabase/migrations/20260826010600_add_contextual_moderation_queue.sql",
+        "arguments": "p_evaluation_id uuid, p_content_revision bigint, p_input_sha256 text, p_queued_moderation_version bigint, p_outcome text, p_risk_level text, p_reason_codes text[], p_provider_reference text, p_model_version text"
+      },
+      {
+        "migration": "supabase/migrations/20260826010650_harden_contextual_moderation_queue.sql",
+        "arguments": "p_evaluation_id uuid, p_content_revision bigint, p_input_sha256 text, p_queued_moderation_version bigint, p_outcome text, p_risk_level text, p_reason_codes text[], p_provider_reference text, p_model_version text"
+      },
+      {
+        "migration": "supabase/migrations/20260826010675_digest_contextual_moderation_metadata.sql",
+        "arguments": "p_evaluation_id uuid, p_content_revision bigint, p_input_sha256 text, p_queued_moderation_version bigint, p_outcome text, p_risk_level text, p_reason_codes text[], p_provider_reference text, p_model_version text"
+      }
+    ],
+    "public.server_fail_moderation_evaluation": [
+      {
+        "migration": "supabase/migrations/20260826010600_add_contextual_moderation_queue.sql",
+        "arguments": "p_evaluation_id uuid, p_content_revision bigint, p_input_sha256 text, p_queued_moderation_version bigint, p_failure_code text"
+      },
+      {
+        "migration": "supabase/migrations/20260826010650_harden_contextual_moderation_queue.sql",
+        "arguments": "p_evaluation_id uuid, p_content_revision bigint, p_input_sha256 text, p_queued_moderation_version bigint, p_failure_code text"
+      }
+    ],
+    "private.get_active_staff_role": [
+      {
+        "migration": "supabase/migrations/20260826010700_add_staff_moderation_operations.sql",
+        "arguments": "p_user_id uuid"
+      }
+    ],
+    "private.require_active_staff_role": [
+      {
+        "migration": "supabase/migrations/20260826010700_add_staff_moderation_operations.sql",
+        "arguments": "p_require_admin boolean default false"
+      }
+    ],
+    "public.get_my_staff_role": [
+      {
+        "migration": "supabase/migrations/20260826010700_add_staff_moderation_operations.sql",
+        "arguments": ""
+      }
+    ],
+    "public.list_moderation_queue": [
+      {
+        "migration": "supabase/migrations/20260826010700_add_staff_moderation_operations.sql",
+        "arguments": "p_limit integer"
+      },
+      {
+        "migration": "supabase/migrations/20260826010950_complete_staff_console_projection.sql",
+        "arguments": "p_limit integer"
+      }
+    ],
+    "public.get_moderation_case": [
+      {
+        "migration": "supabase/migrations/20260826010700_add_staff_moderation_operations.sql",
+        "arguments": "p_event_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260826010750_harden_staff_moderation_operations.sql",
+        "arguments": "p_event_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260826010950_complete_staff_console_projection.sql",
+        "arguments": "p_event_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260826011000_remove_staff_case_notes.sql",
+        "arguments": "p_event_id uuid"
+      }
+    ],
+    "public.moderate_event": [
+      {
+        "migration": "supabase/migrations/20260826010700_add_staff_moderation_operations.sql",
+        "arguments": "p_event_id uuid, p_expected_content_revision bigint, p_expected_input_sha256 text, p_expected_moderation_version bigint, p_action text, p_reason_code text, p_internal_note text"
+      },
+      {
+        "migration": "supabase/migrations/20260826010750_harden_staff_moderation_operations.sql",
+        "arguments": "p_event_id uuid, p_expected_content_revision bigint, p_expected_input_sha256 text, p_expected_moderation_version bigint, p_action text, p_reason_code text, p_internal_note text"
+      }
+    ],
+    "public.resolve_legacy_public_history": [
+      {
+        "migration": "supabase/migrations/20260826010700_add_staff_moderation_operations.sql",
+        "arguments": "p_event_id uuid, p_expected_content_revision bigint, p_expected_input_sha256 text, p_expected_moderation_version bigint, p_public_history_status text, p_evidence_code text, p_observed_public_at timestamptz, p_internal_note text"
+      },
+      {
+        "migration": "supabase/migrations/20260826010750_harden_staff_moderation_operations.sql",
+        "arguments": "p_event_id uuid, p_expected_content_revision bigint, p_expected_input_sha256 text, p_expected_moderation_version bigint, p_public_history_status text, p_evidence_code text, p_observed_public_at timestamptz, p_internal_note text"
+      }
+    ],
+    "public.request_event_review": [
+      {
+        "migration": "supabase/migrations/20260826010800_add_review_requests_and_reports.sql",
+        "arguments": "p_event_id uuid, p_organizer_note text"
+      }
+    ],
+    "public.withdraw_event_review": [
+      {
+        "migration": "supabase/migrations/20260826010800_add_review_requests_and_reports.sql",
+        "arguments": "p_event_id uuid"
+      }
+    ],
+    "private.resolve_current_review_request_from_staff_action": [
+      {
+        "migration": "supabase/migrations/20260826010800_add_review_requests_and_reports.sql",
+        "arguments": ""
+      }
+    ],
+    "public.server_submit_event_report": [
+      {
+        "migration": "supabase/migrations/20260826010800_add_review_requests_and_reports.sql",
+        "arguments": "p_event_id uuid, p_reporter_fingerprint text, p_network_fingerprint text, p_reason text"
+      },
+      {
+        "migration": "supabase/migrations/20260826010850_harden_review_reports_lint.sql",
+        "arguments": "p_event_id uuid, p_reporter_fingerprint text, p_network_fingerprint text, p_reason text"
+      }
+    ],
+    "public.server_expire_event_report_fingerprints": [
+      {
+        "migration": "supabase/migrations/20260826010800_add_review_requests_and_reports.sql",
+        "arguments": ""
+      },
+      {
+        "migration": "supabase/migrations/20260826010875_harden_report_privacy_and_retention.sql",
+        "arguments": ""
+      }
+    ],
+    "public.get_current_event_review_request": [
+      {
+        "migration": "supabase/migrations/20260826010900_add_current_review_request_projection.sql",
+        "arguments": "p_event_id uuid"
+      }
+    ],
+    "private.is_canonical_production_policy_url": [
+      {
+        "migration": "supabase/migrations/20260826011300_harden_production_policy_urls.sql",
+        "arguments": "p_url text"
+      },
+      {
+        "migration": "supabase/migrations/20260826011450_reject_policy_url_dot_segments.sql",
+        "arguments": "p_url text"
+      }
+    ],
+    "private.calculate_checkout_money": [
+      {
+        "migration": "supabase/migrations/20260902010100_add_checkout_cart_reservation.sql",
+        "arguments": "p_subtotal_minor bigint, p_quantity integer, p_platform_percent_bps integer, p_platform_fixed_minor bigint, p_processing_fee_treatment text, p_processing_estimate_percent_bps integer, p_processing_estimate_fixed_minor bigint"
+      },
+      {
+        "migration": "supabase/migrations/20260902010190_fix_checkout_cart_money.sql",
+        "arguments": "p_subtotal_minor bigint, p_quantity integer, p_platform_percent_bps integer, p_platform_fixed_minor bigint, p_processing_fee_treatment text, p_processing_estimate_percent_bps integer, p_processing_estimate_fixed_minor bigint"
+      }
+    ],
+    "private.checkout_cart_request_digest": [
+      {
+        "migration": "supabase/migrations/20260902010100_add_checkout_cart_reservation.sql",
+        "arguments": "p_order_id uuid, p_event_id uuid, p_client_request_id uuid, p_confirmation_token_hash text, p_buyer_email text, p_currency text, p_subtotal_minor bigint, p_application_fee_amount_minor bigint, p_destination_account_id text, p_checkout_expires_at timestamptz, p_integration_identifier text, p_order_items jsonb"
+      }
+    ],
+    "private.get_checkout_integrity_order_snapshot": [
+      {
+        "migration": "supabase/migrations/20260902010300_add_checkout_item_reconciliation.sql",
+        "arguments": "p_order_id uuid, p_checkout_session_id text"
+      },
+      {
+        "migration": "supabase/migrations/20260907010000_integrate_core_ticket_truth_lite_fulfillment.sql",
+        "arguments": "p_order_id uuid, p_checkout_session_id text"
+      }
+    ],
+    "private.get_checkout_integrity_payment_snapshot": [
+      {
+        "migration": "supabase/migrations/20260902010300_add_checkout_item_reconciliation.sql",
+        "arguments": "p_order_id uuid"
+      }
+    ],
+    "public.server_get_checkout_integrity_order_snapshot": [
+      {
+        "migration": "supabase/migrations/20260902010300_add_checkout_item_reconciliation.sql",
+        "arguments": "p_order_id uuid, p_checkout_session_id text"
+      }
+    ],
+    "public.server_get_checkout_integrity_payment_snapshot": [
+      {
+        "migration": "supabase/migrations/20260902010300_add_checkout_item_reconciliation.sql",
+        "arguments": "p_order_id uuid"
+      }
+    ],
+    "private.mark_checkout_reconciliation_review": [
+      {
+        "migration": "supabase/migrations/20260902010300_add_checkout_item_reconciliation.sql",
+        "arguments": "p_order_id uuid, p_checkout_session_id text, p_stripe_event_id text, p_failure_code text"
+      }
+    ],
+    "public.server_mark_checkout_reconciliation_review": [
+      {
+        "migration": "supabase/migrations/20260902010300_add_checkout_item_reconciliation.sql",
+        "arguments": "p_order_id uuid, p_checkout_session_id text, p_stripe_event_id text, p_failure_code text"
+      }
+    ],
+    "private.prepare_whole_order_refund": [
+      {
+        "migration": "supabase/migrations/20260902010400_enforce_whole_order_refund_safety.sql",
+        "arguments": "p_order_id uuid, p_reason text"
+      },
+      {
+        "migration": "supabase/migrations/20260902010450_fix_whole_order_refund_transitions.sql",
+        "arguments": "p_order_id uuid, p_reason text"
+      },
+      {
+        "migration": "supabase/migrations/20260902010475_harden_refund_review_recovery.sql",
+        "arguments": "p_order_id uuid, p_reason text"
+      }
+    ],
+    "public.server_prepare_whole_order_refund": [
+      {
+        "migration": "supabase/migrations/20260902010400_enforce_whole_order_refund_safety.sql",
+        "arguments": "p_order_id uuid, p_reason text"
+      },
+      {
+        "migration": "supabase/migrations/20260902010450_fix_whole_order_refund_transitions.sql",
+        "arguments": "p_order_id uuid, p_reason text"
+      },
+      {
+        "migration": "supabase/migrations/20260902010475_harden_refund_review_recovery.sql",
+        "arguments": "p_order_id uuid, p_reason text"
+      }
+    ],
+    "private.lookup_checkout_integrity_confirmation": [
+      {
+        "migration": "supabase/migrations/20260902010500_add_checkout_confirmation_v2.sql",
+        "arguments": "p_token_hash text"
+      }
+    ],
+    "public.server_lookup_checkout_integrity_confirmation": [
+      {
+        "migration": "supabase/migrations/20260902010500_add_checkout_confirmation_v2.sql",
+        "arguments": "p_token_hash text"
+      }
+    ],
+    "public.server_claim_checkout_integrity_fixture_evaluation": [
+      {
+        "migration": "supabase/migrations/20260902010550_add_scoped_checkout_fixture_moderation.sql",
+        "arguments": "p_event_id uuid, p_fixture_prefix text"
+      }
+    ],
+    "private.guard_ticket_identity_and_transition": [
+      {
+        "migration": "supabase/migrations/20260907010000_integrate_core_ticket_truth_lite_fulfillment.sql",
+        "arguments": ""
+      }
+    ],
+    "public.server_lookup_paid_ticket_collection": [
+      {
+        "migration": "supabase/migrations/20260907010100_add_lite_ticket_collection.sql",
+        "arguments": "p_confirmation_token_hash text"
+      },
+      {
+        "migration": "supabase/migrations/20260915010300_add_approved_private_event_facts.sql",
+        "arguments": "p_confirmation_token_hash text"
+      }
+    ],
+    "public.server_redeem_paid_ticket": [
+      {
+        "migration": "supabase/migrations/20260907010200_add_atomic_lite_redemption.sql",
+        "arguments": "p_organizer_id uuid, p_event_id uuid, p_credential_hash bytea"
+      }
+    ],
+    "public.cancel_owned_event": [
+      {
+        "migration": "supabase/migrations/20260907010300_preserve_lite_ticket_invalidation.sql",
+        "arguments": "p_event_id uuid"
+      }
+    ],
+    "private.require_owned_paid_event": [
+      {
+        "migration": "supabase/migrations/20260910010000_add_organizer_event_metrics.sql",
+        "arguments": "p_event_id uuid"
+      }
+    ],
+    "private.organizer_order_coherent": [
+      {
+        "migration": "supabase/migrations/20260910010000_add_organizer_event_metrics.sql",
+        "arguments": "p_order_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260915010100_add_cancellation_summary.sql",
+        "arguments": "p_order_id uuid"
+      }
+    ],
+    "public.get_organizer_event_metrics": [
+      {
+        "migration": "supabase/migrations/20260910010000_add_organizer_event_metrics.sql",
+        "arguments": "p_event_id uuid"
+      }
+    ],
+    "private.organizer_order_summary": [
+      {
+        "migration": "supabase/migrations/20260910010100_add_organizer_order_reads.sql",
+        "arguments": "p_order public.orders"
+      }
+    ],
+    "public.list_organizer_event_orders": [
+      {
+        "migration": "supabase/migrations/20260910010100_add_organizer_order_reads.sql",
+        "arguments": "p_event_id uuid,p_search text default '',p_limit integer default 25,p_cursor_created_at timestamptz default null,p_cursor_id uuid default null"
+      }
+    ],
+    "private.organizer_refund_state": [
+      {
+        "migration": "supabase/migrations/20260910010150_add_organizer_order_detail.sql",
+        "arguments": "p_order public.orders"
+      },
+      {
+        "migration": "supabase/migrations/20260910010350_add_owned_refund_evidence_recovery.sql",
+        "arguments": "p_order public.orders"
+      }
+    ],
+    "public.get_organizer_order": [
+      {
+        "migration": "supabase/migrations/20260910010150_add_organizer_order_detail.sql",
+        "arguments": "p_event_id uuid,p_order_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260915010100_add_cancellation_summary.sql",
+        "arguments": "p_event_id uuid,p_order_id uuid"
+      }
+    ],
+    "public.server_redeem_organizer_ticket": [
+      {
+        "migration": "supabase/migrations/20260910010200_add_owned_manual_admission.sql",
+        "arguments": "p_organizer_id uuid,p_event_id uuid,p_credential_hash bytea"
+      },
+      {
+        "migration": "supabase/migrations/20260912010200_extend_shared_admission_for_free_sources.sql",
+        "arguments": "p_organizer_id uuid,p_event_id uuid,p_credential_hash bytea"
+      }
+    ],
+    "public.redeem_owned_ticket": [
+      {
+        "migration": "supabase/migrations/20260910010200_add_owned_manual_admission.sql",
+        "arguments": "p_event_id uuid,p_ticket_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260912010200_extend_shared_admission_for_free_sources.sql",
+        "arguments": "p_event_id uuid,p_ticket_id uuid"
+      }
+    ],
+    "public.server_get_organizer_refund_context": [
+      {
+        "migration": "supabase/migrations/20260910010300_add_owned_refund_context.sql",
+        "arguments": "p_organizer_id uuid,p_event_id uuid,p_order_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260910010350_add_owned_refund_evidence_recovery.sql",
+        "arguments": "p_organizer_id uuid,p_event_id uuid,p_order_id uuid"
+      }
+    ],
+    "public.list_organizer_event_orders_filtered": [
+      {
+        "migration": "supabase/migrations/20260911010000_extend_spec04_organizer_reads.sql",
+        "arguments": "p_event_id uuid, p_search text default '', p_status text default 'all', p_limit integer default 25, p_cursor_created_at timestamptz default null, p_cursor_id uuid default null"
+      }
+    ],
+    "public.get_organizer_order_v2": [
+      {
+        "migration": "supabase/migrations/20260911010000_extend_spec04_organizer_reads.sql",
+        "arguments": "p_event_id uuid, p_order_id uuid"
+      }
+    ],
+    "public.list_organizer_event_admissions": [
+      {
+        "migration": "supabase/migrations/20260911020000_add_owned_admission_search.sql",
+        "arguments": "p_event_id uuid, p_search text default '', p_limit integer default 25, p_cursor jsonb default null"
+      }
+    ],
+    "private.free_reserved_admissions": [
+      {
+        "migration": "supabase/migrations/20260912010000_create_free_registration_source.sql",
+        "arguments": "p_event_id uuid"
+      }
+    ],
+    "private.free_registration_is_coherent": [
+      {
+        "migration": "supabase/migrations/20260912010000_create_free_registration_source.sql",
+        "arguments": "p_registration_id uuid"
+      }
+    ],
+    "private.guard_free_source_identity": [
+      {
+        "migration": "supabase/migrations/20260912010000_create_free_registration_source.sql",
+        "arguments": ""
+      }
+    ],
+    "private.guard_free_ticket_source": [
+      {
+        "migration": "supabase/migrations/20260912010000_create_free_registration_source.sql",
+        "arguments": ""
+      }
+    ],
+    "private.check_free_source_complete": [
+      {
+        "migration": "supabase/migrations/20260912010000_create_free_registration_source.sql",
+        "arguments": ""
+      }
+    ],
+    "private.guard_registered_free_event": [
+      {
+        "migration": "supabase/migrations/20260912010000_create_free_registration_source.sql",
+        "arguments": ""
+      }
+    ],
+    "private.cancel_free_event_sources": [
+      {
+        "migration": "supabase/migrations/20260912010000_create_free_registration_source.sql",
+        "arguments": ""
+      }
+    ],
+    "private.guard_free_registration_insert": [
+      {
+        "migration": "supabase/migrations/20260912010000_create_free_registration_source.sql",
+        "arguments": ""
+      }
+    ],
+    "public.server_confirm_free_registration": [
+      {
+        "migration": "supabase/migrations/20260912010100_add_atomic_free_registration.sql",
+        "arguments": "p_request_id uuid,p_event_id uuid,p_name text,p_email text,p_quantity integer,p_access_hash text,p_ticket_manifest jsonb"
+      },
+      {
+        "migration": "supabase/migrations/20260913010200_add_ticket_email_entry_points.sql",
+        "arguments": "p_request_id uuid,p_event_id uuid,p_name text,p_email text,p_quantity integer,p_access_hash text,p_ticket_manifest jsonb"
+      }
+    ],
+    "public.server_resolve_free_registration": [
+      {
+        "migration": "supabase/migrations/20260912010100_add_atomic_free_registration.sql",
+        "arguments": "p_request_id uuid,p_access_hash text"
+      }
+    ],
+    "public.server_lookup_free_ticket_collection": [
+      {
+        "migration": "supabase/migrations/20260912010100_add_atomic_free_registration.sql",
+        "arguments": "p_access_hash text"
+      },
+      {
+        "migration": "supabase/migrations/20260915010300_add_approved_private_event_facts.sql",
+        "arguments": "p_access_hash text"
+      }
+    ],
+    "public.get_public_free_rsvp": [
+      {
+        "migration": "supabase/migrations/20260912010100_add_atomic_free_registration.sql",
+        "arguments": "p_event_id uuid"
+      }
+    ],
+    "private.require_owned_free_event": [
+      {
+        "migration": "supabase/migrations/20260912010300_add_free_owner_reads_and_rate_limit.sql",
+        "arguments": "p_event_id uuid"
+      }
+    ],
+    "public.get_organizer_free_registration_metrics": [
+      {
+        "migration": "supabase/migrations/20260912010300_add_free_owner_reads_and_rate_limit.sql",
+        "arguments": "p_event_id uuid"
+      }
+    ],
+    "public.get_organizer_free_admissions": [
+      {
+        "migration": "supabase/migrations/20260912010300_add_free_owner_reads_and_rate_limit.sql",
+        "arguments": "p_event_id uuid,p_search text default '',p_limit integer default 25,p_cursor jsonb default null"
+      }
+    ],
+    "public.server_consume_free_rsvp_rate_limit": [
+      {
+        "migration": "supabase/migrations/20260912010300_add_free_owner_reads_and_rate_limit.sql",
+        "arguments": "p_identity_hash text,p_operation text"
+      }
+    ],
+    "private.protect_ticket_email_ledger": [
+      {
+        "migration": "supabase/migrations/20260913010000_create_ticket_email_foundation.sql",
+        "arguments": ""
+      },
+      {
+        "migration": "supabase/migrations/20260913010600_add_email_retention_and_recipient_suppression.sql",
+        "arguments": ""
+      }
+    ],
+    "private.ticket_email_source": [
+      {
+        "migration": "supabase/migrations/20260913010000_create_ticket_email_foundation.sql",
+        "arguments": "p_kind text,p_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260913010600_add_email_retention_and_recipient_suppression.sql",
+        "arguments": "p_kind text,p_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260914010000_add_refund_operations.sql",
+        "arguments": "p_kind text,p_id uuid"
+      }
+    ],
+    "private.consume_ticket_email_limits": [
+      {
+        "migration": "supabase/migrations/20260913010000_create_ticket_email_foundation.sql",
+        "arguments": "p_identities jsonb"
+      }
+    ],
+    "private.ticket_email_fingerprint": [
+      {
+        "migration": "supabase/migrations/20260913010000_create_ticket_email_foundation.sql",
+        "arguments": "p_subject text"
+      }
+    ],
+    "public.server_claim_ticket_email": [
+      {
+        "migration": "supabase/migrations/20260913010100_add_ticket_email_worker_contracts.sql",
+        "arguments": ""
+      }
+    ],
+    "public.server_prepare_ticket_email_context": [
+      {
+        "migration": "supabase/migrations/20260913010100_add_ticket_email_worker_contracts.sql",
+        "arguments": "p_attempt_id uuid,p_lease_id uuid,p_recovery_email text default null"
+      },
+      {
+        "migration": "supabase/migrations/20260913010600_add_email_retention_and_recipient_suppression.sql",
+        "arguments": "p_attempt_id uuid,p_lease_id uuid,p_recovery_email text default null"
+      },
+      {
+        "migration": "supabase/migrations/20260914010200_add_refund_notice.sql",
+        "arguments": "p_attempt_id uuid,p_lease_id uuid,p_recovery_email text default null"
+      },
+      {
+        "migration": "supabase/migrations/20260915010200_add_event_notices.sql",
+        "arguments": "p_attempt_id uuid,p_lease_id uuid,p_recovery_email text default null"
+      }
+    ],
+    "private.ticket_email_envelope_valid": [
+      {
+        "migration": "supabase/migrations/20260913010100_add_ticket_email_worker_contracts.sql",
+        "arguments": "p_value jsonb"
+      }
+    ],
+    "public.server_save_ticket_email_payload": [
+      {
+        "migration": "supabase/migrations/20260913010100_add_ticket_email_worker_contracts.sql",
+        "arguments": "p_attempt_id uuid,p_lease_id uuid,p_token_hash text,p_payload jsonb"
+      }
+    ],
+    "public.server_begin_ticket_email_dispatch": [
+      {
+        "migration": "supabase/migrations/20260913010100_add_ticket_email_worker_contracts.sql",
+        "arguments": "p_attempt_id uuid,p_lease_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260913010600_add_email_retention_and_recipient_suppression.sql",
+        "arguments": "p_attempt_id uuid,p_lease_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260914010200_add_refund_notice.sql",
+        "arguments": "p_attempt_id uuid,p_lease_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260915010200_add_event_notices.sql",
+        "arguments": "p_attempt_id uuid,p_lease_id uuid"
+      }
+    ],
+    "public.server_finish_ticket_email_dispatch": [
+      {
+        "migration": "supabase/migrations/20260913010100_add_ticket_email_worker_contracts.sql",
+        "arguments": "p_attempt_id uuid,p_lease_id uuid,p_outcome text,p_provider_id text default null"
+      },
+      {
+        "migration": "supabase/migrations/20260913010600_add_email_retention_and_recipient_suppression.sql",
+        "arguments": "p_attempt_id uuid,p_lease_id uuid,p_outcome text,p_provider_id text default null"
+      }
+    ],
+    "public.server_stop_ticket_email": [
+      {
+        "migration": "supabase/migrations/20260913010100_add_ticket_email_worker_contracts.sql",
+        "arguments": "p_attempt_id uuid,p_lease_id uuid,p_reason text"
+      }
+    ],
+    "public.server_observe_ticket_email": [
+      {
+        "migration": "supabase/migrations/20260913010100_add_ticket_email_worker_contracts.sql",
+        "arguments": "p_webhook_id text,p_attempt_id uuid,p_provider_id text,p_kind text,p_observed_at timestamptz"
+      },
+      {
+        "migration": "supabase/migrations/20260913010600_add_email_retention_and_recipient_suppression.sql",
+        "arguments": "p_webhook_id text,p_attempt_id uuid,p_provider_id text,p_kind text,p_observed_at timestamptz"
+      }
+    ],
+    "private.enqueue_initial_ticket_email": [
+      {
+        "migration": "supabase/migrations/20260913010200_add_ticket_email_entry_points.sql",
+        "arguments": "p_kind text,p_id uuid"
+      },
+      {
+        "migration": "supabase/migrations/20260913010400_preserve_initial_email_deduplication.sql",
+        "arguments": "p_kind text,p_id uuid"
+      }
+    ],
+    "public.get_ticket_email_delivery": [
+      {
+        "migration": "supabase/migrations/20260913010200_add_ticket_email_entry_points.sql",
+        "arguments": "p_event_id uuid,p_source_kind text,p_source_id uuid"
+      }
+    ],
+    "public.request_ticket_email_resend": [
+      {
+        "migration": "supabase/migrations/20260913010200_add_ticket_email_entry_points.sql",
+        "arguments": "p_event_id uuid,p_source_kind text,p_source_id uuid,p_request_id uuid"
+      }
+    ],
+    "public.server_request_ticket_recovery": [
+      {
+        "migration": "supabase/migrations/20260913010200_add_ticket_email_entry_points.sql",
+        "arguments": "p_request_id uuid,p_recipient_hash text,p_ip_hash text,p_payload jsonb"
+      }
+    ],
+    "public.get_organizer_free_registration_detail": [
+      {
+        "migration": "supabase/migrations/20260913010200_add_ticket_email_entry_points.sql",
+        "arguments": "p_event_id uuid,p_registration_id uuid"
+      }
+    ],
+    "public.server_ticket_email_confirmation_status": [
+      {
+        "migration": "supabase/migrations/20260913010200_add_ticket_email_entry_points.sql",
+        "arguments": "p_kind text,p_access_hash text,p_ip_hash text"
+      }
+    ],
+    "public.server_read_ticket_email_access": [
+      {
+        "migration": "supabase/migrations/20260913010300_add_scoped_ticket_email_access.sql",
+        "arguments": "p_token_hash text,p_ip_hash text,p_page integer default 0,p_member integer default null"
+      },
+      {
+        "migration": "supabase/migrations/20260914010200_add_refund_notice.sql",
+        "arguments": "p_token_hash text,p_ip_hash text,p_page integer default 0,p_member integer default null"
+      },
+      {
+        "migration": "supabase/migrations/20260915010200_add_event_notices.sql",
+        "arguments": "p_token_hash text,p_ip_hash text,p_page integer default 0,p_member integer default null"
+      },
+      {
+        "migration": "supabase/migrations/20260915010300_add_approved_private_event_facts.sql",
+        "arguments": "p_token_hash text,p_ip_hash text,p_page integer default 0,p_member integer default null"
+      }
+    ],
+    "public.server_revoke_ticket_email_grant": [
+      {
+        "migration": "supabase/migrations/20260913010300_add_scoped_ticket_email_access.sql",
+        "arguments": "p_grant_id uuid"
+      }
+    ],
+    "public.server_prune_ticket_email_history": [
+      {
+        "migration": "supabase/migrations/20260913010300_add_scoped_ticket_email_access.sql",
+        "arguments": ""
+      },
+      {
+        "migration": "supabase/migrations/20260913010600_add_email_retention_and_recipient_suppression.sql",
+        "arguments": ""
+      }
+    ],
+    "public.get_ticket_email_resend_status": [
+      {
+        "migration": "supabase/migrations/20260913010500_add_resend_request_status.sql",
+        "arguments": "p_event_id uuid,p_source_kind text,p_source_id uuid,p_request_id uuid"
+      }
+    ],
+    "public.server_clear_ticket_email_recipient_block": [
+      {
+        "migration": "supabase/migrations/20260913010600_add_email_retention_and_recipient_suppression.sql",
+        "arguments": "p_source_kind text,p_source_id uuid"
+      }
+    ],
+    "private.protect_order_refund_operation": [
+      {
+        "migration": "supabase/migrations/20260914010000_add_refund_operations.sql",
+        "arguments": ""
+      }
+    ],
+    "private.require_refund_order": [
+      {
+        "migration": "supabase/migrations/20260914010000_add_refund_operations.sql",
+        "arguments": "p_organizer_id uuid,p_event_id uuid,p_order_id uuid"
+      }
+    ],
+    "private.order_refund_state": [
+      {
+        "migration": "supabase/migrations/20260914010000_add_refund_operations.sql",
+        "arguments": "p_order public.orders"
+      }
+    ],
+    "public.get_organizer_refund_status": [
+      {
+        "migration": "supabase/migrations/20260914010000_add_refund_operations.sql",
+        "arguments": "p_event_id uuid,p_order_id uuid"
+      }
+    ],
+    "public.server_claim_owned_refund": [
+      {
+        "migration": "supabase/migrations/20260914010000_add_refund_operations.sql",
+        "arguments": "p_organizer_id uuid,p_event_id uuid,p_order_id uuid"
+      }
+    ],
+    "public.server_note_refund_observation": [
+      {
+        "migration": "supabase/migrations/20260914010000_add_refund_operations.sql",
+        "arguments": "p_organizer_id uuid,p_event_id uuid,p_order_id uuid,p_state text,p_refund_id text default null"
+      }
+    ],
+    "public.server_read_owned_refund_operation": [
+      {
+        "migration": "supabase/migrations/20260914010000_add_refund_operations.sql",
+        "arguments": "p_organizer_id uuid,p_event_id uuid,p_order_id uuid"
+      }
+    ],
+    "private.complete_refund_operation": [
+      {
+        "migration": "supabase/migrations/20260914010000_add_refund_operations.sql",
+        "arguments": ""
+      }
+    ],
+    "private.refund_detail": [
+      {
+        "migration": "supabase/migrations/20260914010200_add_refund_notice.sql",
+        "arguments": "p_order_id uuid"
+      }
+    ],
+    "private.refund_notice_source": [
+      {
+        "migration": "supabase/migrations/20260914010200_add_refund_notice.sql",
+        "arguments": "p_order_id uuid"
+      }
+    ],
+    "public.server_enqueue_refund_notices": [
+      {
+        "migration": "supabase/migrations/20260914010200_add_refund_notice.sql",
+        "arguments": "p_limit integer default 25"
+      }
+    ],
+    "public.server_read_refund_detail_access": [
+      {
+        "migration": "supabase/migrations/20260914010200_add_refund_notice.sql",
+        "arguments": "p_token_hash text,p_ip_hash text"
+      }
+    ],
+    "public.get_organizer_refund_notice_status": [
+      {
+        "migration": "supabase/migrations/20260914010200_add_refund_notice.sql",
+        "arguments": "p_event_id uuid,p_order_id uuid"
+      }
+    ],
+    "private.guard_event_change_snapshot": [
+      {
+        "migration": "supabase/migrations/20260915010000_add_event_change_history.sql",
+        "arguments": ""
+      }
+    ],
+    "private.event_change_facts": [
+      {
+        "migration": "supabase/migrations/20260915010000_add_event_change_history.sql",
+        "arguments": "p_event_id uuid"
+      }
+    ],
+    "private.event_material_change_fields": [
+      {
+        "migration": "supabase/migrations/20260915010000_add_event_change_history.sql",
+        "arguments": "p_before jsonb,p_after jsonb"
+      }
+    ],
+    "private.lock_event_change_rows": [
+      {
+        "migration": "supabase/migrations/20260915010000_add_event_change_history.sql",
+        "arguments": "p_event_id uuid"
+      }
+    ],
+    "private.capture_event_change_facts": [
+      {
+        "migration": "supabase/migrations/20260915010000_add_event_change_history.sql",
+        "arguments": "p_event_id uuid"
+      }
+    ],
+    "private.capture_deferred_event_change": [
+      {
+        "migration": "supabase/migrations/20260915010000_add_event_change_history.sql",
+        "arguments": ""
+      }
+    ],
+    "private.event_change_context_token": [
+      {
+        "migration": "supabase/migrations/20260915010000_add_event_change_history.sql",
+        "arguments": "p_event_id uuid"
+      }
+    ],
+    "private.lock_owned_event_change_context": [
+      {
+        "migration": "supabase/migrations/20260915010000_add_event_change_history.sql",
+        "arguments": "p_event_id uuid"
+      }
+    ],
+    "private.assert_event_change_context": [
+      {
+        "migration": "supabase/migrations/20260915010000_add_event_change_history.sql",
+        "arguments": "p_event_id uuid,p_expected_context text"
+      }
+    ],
+    "public.get_owned_event_change_context": [
+      {
+        "migration": "supabase/migrations/20260915010000_add_event_change_history.sql",
+        "arguments": "p_event_id uuid"
+      }
+    ],
+    "private.mark_event_change_notice_submitted": [
+      {
+        "migration": "supabase/migrations/20260915010000_add_event_change_history.sql",
+        "arguments": "p_event_id uuid,p_snapshot_id uuid"
+      }
+    ],
+    "public.save_owned_event_revision_if_current": [
+      {
+        "migration": "supabase/migrations/20260915010000_add_event_change_history.sql",
+        "arguments": "p_event_id uuid,p_event jsonb,p_expected_context text"
+      }
+    ],
+    "public.save_owned_event_requirements_if_current": [
+      {
+        "migration": "supabase/migrations/20260915010000_add_event_change_history.sql",
+        "arguments": "p_event_id uuid,p_requirements jsonb,p_expected_context text"
+      }
+    ],
+    "public.accept_current_event_policies_if_current": [
+      {
+        "migration": "supabase/migrations/20260915010000_add_event_change_history.sql",
+        "arguments": "p_event_id uuid,p_expected_context text"
+      }
+    ],
+    "public.publish_event_if_current": [
+      {
+        "migration": "supabase/migrations/20260915010000_add_event_change_history.sql",
+        "arguments": "p_event_id uuid,p_expected_context text"
+      }
+    ],
+    "private.is_payment_after_invalidation_without_tickets": [
+      {
+        "migration": "supabase/migrations/20260915010100_add_cancellation_summary.sql",
+        "arguments": "o public.orders"
+      }
+    ],
+    "public.get_owned_event_cancellation_summary": [
+      {
+        "migration": "supabase/migrations/20260915010150_add_owned_event_cancellation_summary.sql",
+        "arguments": "p_event_id uuid"
+      }
+    ],
+    "private.protect_event_notice_receipt": [
+      {
+        "migration": "supabase/migrations/20260915010200_add_event_notices.sql",
+        "arguments": ""
+      }
+    ],
+    "private.event_notice_detail": [
+      {
+        "migration": "supabase/migrations/20260915010200_add_event_notices.sql",
+        "arguments": "p_kind text,p_id uuid"
+      }
+    ],
+    "private.event_notice_source": [
+      {
+        "migration": "supabase/migrations/20260915010200_add_event_notices.sql",
+        "arguments": "p_kind text,p_id uuid,p_purpose text"
+      }
+    ],
+    "private.event_notice_audience": [
+      {
+        "migration": "supabase/migrations/20260915010200_add_event_notices.sql",
+        "arguments": "p_event_id uuid,p_purpose text,p_revision_key text"
+      }
+    ],
+    "public.preview_owned_event_notice": [
+      {
+        "migration": "supabase/migrations/20260915010200_add_event_notices.sql",
+        "arguments": "p_event_id uuid,p_purpose text"
+      }
+    ],
+    "public.submit_owned_event_notice": [
+      {
+        "migration": "supabase/migrations/20260915010200_add_event_notices.sql",
+        "arguments": "p_event_id uuid,p_purpose text,p_preview_token text,p_request_id uuid"
+      }
+    ],
+    "private.event_notice_attempt_source": [
+      {
+        "migration": "supabase/migrations/20260915010200_add_event_notices.sql",
+        "arguments": "p_attempt_id uuid"
+      }
+    ],
+    "public.get_owned_event_notice_status": [
+      {
+        "migration": "supabase/migrations/20260915010200_add_event_notices.sql",
+        "arguments": "p_event_id uuid,p_purpose text"
+      }
+    ],
+    "public.server_read_event_status_access": [
+      {
+        "migration": "supabase/migrations/20260915010200_add_event_notices.sql",
+        "arguments": "p_token_hash text,p_ip_hash text"
+      }
+    ],
+    "private.supersede_event_change_notices": [
+      {
+        "migration": "supabase/migrations/20260915010200_add_event_notices.sql",
+        "arguments": ""
+      }
+    ],
+    "private.approved_event_ticket_facts": [
+      {
+        "migration": "supabase/migrations/20260915010300_add_approved_private_event_facts.sql",
+        "arguments": "p_event_id uuid"
+      }
+    ],
+    "public.save_owned_organizer_settings": [
+      {
+        "migration": "supabase/migrations/20260916010000_add_owned_organizer_settings.sql",
+        "arguments": "p_display_name text, p_bio text, p_expected_updated_at timestamptz"
+      }
+    ],
+    "private.discovery_window": [
+      {
+        "migration": "supabase/migrations/20260917010000_add_public_discovery_read.sql",
+        "arguments": "p_when text, p_as_of timestamptz"
+      }
+    ],
+    "private.discovery_encode_cursor": [
+      {
+        "migration": "supabase/migrations/20260917010000_add_public_discovery_read.sql",
+        "arguments": "p_payload jsonb"
+      }
+    ],
+    "public.server_get_public_discovery_events": [
+      {
+        "migration": "supabase/migrations/20260917010000_add_public_discovery_read.sql",
+        "arguments": "p_query jsonb"
+      }
+    ],
+    "public.server_consume_discovery_read_rate_limit": [
+      {
+        "migration": "supabase/migrations/20260917010100_add_discovery_read_rate_limit.sql",
+        "arguments": "p_identity_hash text"
+      }
+    ]
+  }
+}

@@ -1,8 +1,14 @@
+import { z } from 'zod'
 export const browserEnvKeys = [
   'VITE_SUPABASE_URL',
   'VITE_SUPABASE_PUBLISHABLE_KEY',
   'VITE_MAPBOX_ACCESS_TOKEN',
   'VITE_STRIPE_PUBLISHABLE_KEY',
+  'VITE_TICKET_SUPPORT_EMAIL',
+  'VITE_ORGANIZER_SUPPORT_EMAIL',
+  'VITE_ACCOUNT_CLOSURE_EMAIL',
+  'VITE_TERMS_URL',
+  'VITE_PRIVACY_URL',
 ] as const
 
 type BrowserEnvKey = (typeof browserEnvKeys)[number]
@@ -22,11 +28,16 @@ export function requireTestStripePublishableKey(value: unknown): string {
 
 export function selectBrowserEnv(source: EnvironmentSource): Partial<Record<BrowserEnvKey, string>> {
   return Object.fromEntries(
-    browserEnvKeys.flatMap((key) => {
+    browserEnvKeys.flatMap<[BrowserEnvKey, string]>((key) => {
       const value = source[key]
 
       if (value === undefined) {
         return []
+      }
+
+      if (['VITE_TICKET_SUPPORT_EMAIL', 'VITE_ORGANIZER_SUPPORT_EMAIL', 'VITE_ACCOUNT_CLOSURE_EMAIL'].includes(key)) {
+        const parsed = z.string().trim().toLowerCase().max(320).email().safeParse(value)
+        return parsed.success ? [[key, parsed.data]] : []
       }
 
       return [[key, key === 'VITE_STRIPE_PUBLISHABLE_KEY' ? requireTestStripePublishableKey(value) : value]]

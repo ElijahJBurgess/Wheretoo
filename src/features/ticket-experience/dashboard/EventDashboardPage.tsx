@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { AsyncState } from '../../../components/ui/AsyncState'
+import { ReadState } from '../../../components/ui/ReadState'
 import { Button } from '../../../components/ui/Button'
 import type {
   EventDashboard,
@@ -92,7 +92,7 @@ export function EventDashboardPage({
   if (readerState.kind === 'loading') {
     return (
       <DashboardState>
-        <AsyncState
+        <ReadState headingAs="h1" skeleton="metrics"
           description="Getting the latest event-level view."
           status="loading"
           title="Loading event dashboard"
@@ -104,10 +104,10 @@ export function EventDashboardPage({
   if (readerState.kind === 'error') {
     return (
       <DashboardState>
-        <AsyncState
+        <ReadState headingAs="h1" skeleton="metrics"
           action={<Button onClick={() => setRequestVersion((version) => version + 1)}>Try again</Button>}
           description="Check your connection, then try again."
-          status="error"
+          status="unavailable"
           title="Event dashboard unavailable"
         />
       </DashboardState>
@@ -118,11 +118,11 @@ export function EventDashboardPage({
     const isNotEnabled = readerState.result.kind === 'not_enabled'
     return (
       <DashboardState>
-        <AsyncState
+        <ReadState headingAs="h1" skeleton="metrics"
           description={isNotEnabled
             ? 'Event-level reporting has not been enabled for this event.'
             : 'Event-level reporting is temporarily unavailable.'}
-          status={isNotEnabled ? 'empty' : 'error'}
+          status="unavailable"
           title={isNotEnabled ? 'Event dashboard not enabled' : 'Event dashboard unavailable'}
         />
       </DashboardState>
@@ -133,9 +133,9 @@ export function EventDashboardPage({
   if (dashboard.eventId !== eventId) {
     return (
       <DashboardState>
-        <AsyncState
+        <ReadState headingAs="h1" skeleton="metrics"
           description="Event-level reporting is temporarily unavailable."
-          status="error"
+          status="unavailable"
           title="Event dashboard unavailable"
         />
       </DashboardState>

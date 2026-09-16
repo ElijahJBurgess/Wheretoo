@@ -34,46 +34,56 @@ function defaultDependencies(): CameraDecoderDependencies {
 export function createCameraDecoder(
   dependencies: CameraDecoderDependencies = defaultDependencies(),
 ): CameraDecoder {
-  let controls: ScannerControls | undefined
-  let stopRequested = false
+  type CameraRun = { controls?: ScannerControls; stopped: boolean; element: HTMLVideoElement }
+  let active: CameraRun | undefined
+  function stopTracks(run: CameraRun) {
+    const stream = run.element.srcObject
+    if (stream && 'getTracks' in stream) {
+      for (const track of stream.getTracks()) track.stop()
+      run.element.srcObject = null
+    }
+  }
+  function stopRun(run: CameraRun) {
+    run.stopped = true
+    run.controls?.stop()
+    run.controls = undefined
+    if (active === run) stopTracks(run)
+  }
 
   return {
     async start(input) {
-      stopRequested = false
+      if (active) stopRun(active)
+      const run: CameraRun = { stopped: false, element: input.element }
+      active = run
+      const abort = () => stopRun(run)
+      input.signal.addEventListener('abort', abort, { once: true })
       try {
         const devices = await dependencies.listVideoInputDevices()
-        if (input.signal.aborted) return { kind: 'initialization_failed' }
+        if (input.signal.aborted || run.stopped) return { kind: 'initialization_failed' }
         if (devices.length === 0) return { kind: 'no_camera' }
-
         const nextControls = await dependencies.decodeFromVideoDevice(
           devices[0]?.deviceId,
           input.element,
           (result) => {
-            if (result && !input.signal.aborted) input.onDecode(result.getText())
+            if (result && !input.signal.aborted && !run.stopped && active === run) input.onDecode(result.getText())
           },
         )
-
-        if (input.signal.aborted || stopRequested) {
-          nextControls.stop()
-          stopRequested = false
-          if (input.signal.aborted) return { kind: 'initialization_failed' }
-          return { kind: 'ready' }
+        run.controls = nextControls
+        if (input.signal.aborted || run.stopped || active !== run) {
+          stopRun(run)
+          return { kind: input.signal.aborted ? 'initialization_failed' : 'ready' }
         }
-
-        controls = nextControls
         return { kind: 'ready' }
       } catch (error) {
+        stopRun(run)
         return { kind: isPermissionDenied(error) ? 'permission_denied' : 'initialization_failed' }
+      } finally {
+        // Controller unmount also calls stop; retain abort cleanup while controls are active.
+        if (!run.controls) input.signal.removeEventListener('abort', abort)
       }
     },
     stop() {
-      if (!controls) {
-        stopRequested = true
-        return
-      }
-      controls.stop()
-      controls = undefined
-      stopRequested = false
+      if (active) stopRun(active)
     },
   }
 }

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { publicTextSchema } from '../../lib/publicText.schema'
 import { eventCategories } from '../events/event.types'
 
 export const lowercaseRfcUuidSchema = z
@@ -93,13 +94,13 @@ const publicTicketTiersSchema = z
 const publicEventProjectionSchema = z
   .object({
     id: lowercaseRfcUuidSchema,
-    title: z.string().trim().min(3).max(120),
-    description: z.string().trim().min(20).max(5_000),
+    title: publicTextSchema(3, 120),
+    description: publicTextSchema(20, 5_000),
     category: z.enum(eventCategories),
     starts_at: z.string().datetime({ offset: true }),
     ends_at: z.string().datetime({ offset: true }),
     timezone: z.string(),
-    venue_name: z.string().trim().max(160).nullable(),
+    venue_name: publicTextSchema(0, 160).nullable(),
     address_line1: z.string().trim().min(1),
     address_line2: z.string().nullable(),
     city: z.string().trim().min(1),
@@ -115,7 +116,7 @@ const publicEventProjectionSchema = z
     organizer: z
       .object({
         id: lowercaseRfcUuidSchema,
-        display_name: z.string().trim().min(2).max(100),
+        display_name: publicTextSchema(2, 100),
       })
       .strict(),
   })

@@ -5,9 +5,30 @@ import { getCorsHeaders, handleCorsPreflight } from "../_shared/cors.ts";
 import { getServiceClient } from "../_shared/database.ts";
 import { getAppBaseUrl } from "../_shared/env.ts";
 import { HttpError } from "../_shared/http.ts";
+import { getStripe } from "../_shared/stripeClient.ts";
 import { recoverOwnedRefund, refundOwnedOrder } from "./refundAdapter.ts";
-const inputSchema = z.strictObject({ eventId: z.uuid(), orderId: z.uuid() });
-const recoverySchema = z.strictObject({
+import {
+  executeOwnedRefund,
+  type RefundObservation,
+  type RefundOperationContext,
+} from "./refundOperation.ts";
+import { observeRefund } from "./refundObservation.ts";
+const states = z.enum([
+  "eligible",
+  "submitting",
+  "processing",
+  "unknown",
+  "failed",
+  "review",
+  "completed",
+  "ineligible",
+]);
+const inputSchema = z.strictObject({
+  eventId: z.uuid(),
+  orderId: z.uuid(),
+  action: z.enum(["submit", "reconcile"]).default("submit"),
+});
+const snapshotSchema = z.strictObject({
   orderId: z.uuid(),
   paymentIntentId: z.string().regex(/^pi_[A-Za-z0-9]+$/),
   chargeId: z.string().regex(/^ch_[A-Za-z0-9]+$/),
@@ -16,26 +37,41 @@ const recoverySchema = z.strictObject({
   connectedAccountId: z.string().regex(/^acct_[A-Za-z0-9]+$/),
   totalMinor: z.number().int().positive().safe(),
   applicationFeeAmountMinor: z.number().int().nonnegative().safe(),
-  refundId: z.string().regex(/^re_[A-Za-z0-9]+$/),
+  currency: z.literal("usd"),
+  reason: z.literal("requested_by_customer"),
+  refundId: z.string().regex(/^re_[A-Za-z0-9]+$/).nullable(),
   reversalId: z.string().nullable(),
   feeRefundId: z.string().nullable(),
 });
 const contextSchema = z.strictObject({
-  recovery: recoverySchema.optional(),
-  refundState: z.enum([
-    "available",
-    "pending",
-    "refunded",
-    "unavailable",
-    "recoverable",
-  ]),
+  state: states,
+  hasOperation: z.boolean(),
+  canRecover: z.boolean(),
+  snapshot: z.unknown(),
 });
+const claimSchema = z.strictObject({ dispatch: z.boolean(), state: states });
 export interface OrganizerRefundDependencies {
   appOrigin: string;
   verifyOrganizer(request: Request): Promise<OrganizerContext>;
-  context(ownerId: string, eventId: string, orderId: string): Promise<unknown>;
-  refund(orderId: string): Promise<void>;
-  recover(snapshot: z.infer<typeof recoverySchema>): Promise<void>;
+  read(
+    owner: string,
+    event: string,
+    order: string,
+  ): Promise<RefundOperationContext>;
+  claim(
+    owner: string,
+    event: string,
+    order: string,
+  ): Promise<{ dispatch: boolean; state: string }>;
+  refund(order: string): Promise<void>;
+  observe(snapshot: unknown): Promise<RefundObservation>;
+  note(
+    owner: string,
+    event: string,
+    order: string,
+    state: string,
+    refundId?: string,
+  ): Promise<void>;
 }
 async function readInput(request: Request) {
   if (
@@ -76,17 +112,17 @@ export function createOrganizerRefundHandler(
     const respond = (outcome: string, status = 200) =>
       new Response(JSON.stringify({ outcome }), { status, headers });
     if (!headers.has("access-control-allow-origin")) {
-      return respond("unconfirmed", 403);
+      return respond("unauthorized", 403);
     }
     const preflight = handleCorsPreflight(request, deps.appOrigin);
     if (preflight) return preflight;
-    if (request.method !== "POST") return respond("unconfirmed", 405);
+    if (request.method !== "POST") return respond("unknown", 405);
     let owner: OrganizerContext;
     try {
       owner = await deps.verifyOrganizer(request);
     } catch (error) {
       return respond(
-        "unconfirmed",
+        "unauthorized",
         error instanceof HttpError ? error.status : 503,
       );
     }
@@ -94,53 +130,78 @@ export function createOrganizerRefundHandler(
     try {
       input = await readInput(request);
     } catch {
-      return respond("unconfirmed", 400);
+      return respond("unknown", 400);
     }
-    const readState = async () =>
-      contextSchema.parse(
-        await deps.context(owner.organizerId, input.eventId, input.orderId),
-      );
+    const args = [owner.organizerId, input.eventId, input.orderId] as const;
     try {
-      const context = await readState();
-      const state = context.refundState;
-      if (state === "recoverable") {
-        if (!context.recovery || context.recovery.orderId !== input.orderId) {
-          throw new Error();
-        }
-        await deps.recover(context.recovery);
-        return respond("pending");
-      }
-      if (state === "pending" || state === "refunded") return respond(state);
-      if (state !== "available") return respond("unconfirmed", 409);
-      try {
-        await deps.refund(input.orderId);
-      } catch {
-        // An earlier request or webhook may have completed during this retry.
-        const current = (await readState()).refundState;
-        return current === "pending" || current === "refunded"
-          ? respond(current)
-          : respond("unconfirmed", 503);
-      }
-      // Provider acknowledgement is not canonical refund completion.
-      return respond("pending");
+      const outcome = await executeOwnedRefund(input, {
+        read: () => deps.read(...args),
+        claim: () => deps.claim(...args),
+        refund: () => deps.refund(input.orderId),
+        observe: deps.observe,
+        note: (state, id) => deps.note(...args, state, id),
+      });
+      return respond(outcome, outcome === "ineligible" ? 409 : 200);
     } catch {
-      return respond("unconfirmed", 503);
+      return respond("unknown", 503);
     }
   };
 }
 export function handler(request: Request) {
+  const ids = (owner: string, event: string, order: string) => ({
+    p_organizer_id: owner,
+    p_event_id: event,
+    p_order_id: order,
+  });
   return createOrganizerRefundHandler({
     appOrigin: getAppBaseUrl(),
     verifyOrganizer: requireOrganizer,
     refund: refundOwnedOrder,
-    recover: recoverOwnedRefund,
-    async context(ownerId, eventId, orderId) {
+    async read(owner, event, order) {
       const { data, error } = await getServiceClient().rpc(
-        "server_get_organizer_refund_context",
-        { p_organizer_id: ownerId, p_event_id: eventId, p_order_id: orderId },
+        "server_read_owned_refund_operation",
+        ids(owner, event, order),
       );
       if (error) throw new Error("Order unavailable");
-      return data;
+      const context = contextSchema.parse(data);
+      if (context.canRecover) {
+        const snapshot = snapshotSchema.parse(context.snapshot);
+        if (snapshot.orderId !== order) throw new Error("Order unavailable");
+      }
+      return context;
+    },
+    async claim(owner, event, order) {
+      const { data, error } = await getServiceClient().rpc(
+        "server_claim_owned_refund",
+        ids(owner, event, order),
+      );
+      if (error) throw new Error("Order unavailable");
+      return claimSchema.parse(data);
+    },
+    async note(owner, event, order, state, refundId) {
+      const { error } = await getServiceClient().rpc(
+        "server_note_refund_observation",
+        {
+          ...ids(owner, event, order),
+          p_state: state,
+          p_refund_id: refundId ?? null,
+        },
+      );
+      if (error) throw new Error("Observation unavailable");
+    },
+    async observe(value) {
+      const snapshot = snapshotSchema.parse(value);
+      const stripe = getStripe();
+      return observeRefund(snapshot, {
+        async read() {
+          const [charge, refunds] = await Promise.all([
+            stripe.charges.retrieve(snapshot.chargeId),
+            stripe.refunds.list({ charge: snapshot.chargeId, limit: 10 }),
+          ]);
+          return { charge, refunds };
+        },
+        recover: recoverOwnedRefund,
+      });
     },
   })(request);
 }

@@ -3,6 +3,9 @@ import {
   checkoutCanonicalSubmissionSchema,
   type CheckoutCanonicalSubmission,
 } from './checkout.schemas'
+import { checkoutItemsSchema } from './checkout.schemas'
+import { lowercaseRfcUuidSchema } from '../tickets/ticket.schemas'
+import { checkoutSelectionPath } from './checkout.cart'
 
 const contractVersion = 'checkout_integrity_v1' as const
 const base64Url32BytePattern = /^[A-Za-z0-9_-]{43}$/
@@ -15,6 +18,10 @@ const checkoutAttemptRecordSchema = z
     submissionFingerprint: z.string().refine(isCanonicalCheckoutBearer),
     clientRequestId: z.string().regex(uuidV4Pattern),
     confirmationBearer: z.string().refine(isCanonicalCheckoutBearer),
+    lifecycle: z.enum(['prepared', 'submitted', 'rejected']).optional(),
+    rejectionKind: z.enum(['stock', 'unavailable']).optional(),
+    verifiedEventId: lowercaseRfcUuidSchema.optional(),
+    selection: checkoutItemsSchema.optional(),
   })
   .strict()
 
@@ -54,22 +61,26 @@ function readAttempt(key: string): CheckoutAttemptRecord | null {
   } catch {
     throw new Error('Checkout retry state is unavailable.')
   }
-  if (value === null) return null
+  if (value === null) {
+    if (sessionStorage.getItem(`${key}:seen`) !== null) throw new Error('Checkout retry state is unavailable.')
+    return null
+  }
   try {
     return checkoutAttemptRecordSchema.parse(JSON.parse(value))
   } catch {
-    return null
+    throw new Error('Checkout retry state is unavailable.')
   }
 }
 
 function writeAttempt(key: string, attempt: CheckoutAttemptRecord): void {
   try {
+    sessionStorage.setItem(`${key}:seen`, '1')
     sessionStorage.setItem(key, JSON.stringify(attempt))
   } catch {
     throw new Error('Checkout retry state is unavailable.')
   }
   const persisted = readAttempt(key)
-  if (persisted === null || !attemptsMatch(persisted, attempt)) {
+  if (persisted === null || JSON.stringify(persisted) !== JSON.stringify(checkoutAttemptRecordSchema.parse(attempt))) {
     throw new Error('Checkout retry state is unavailable.')
   }
 }
@@ -83,16 +94,22 @@ function attemptsMatch(left: CheckoutAttemptRecord, right: CheckoutAttemptRecord
 
 export async function getOrCreateCheckoutAttempt(
   canonicalSubmission: CheckoutCanonicalSubmission,
+  expectedBearer?: string,
+  requireExisting = false,
 ): Promise<CheckoutAttemptRecord> {
   const submission = checkoutCanonicalSubmissionSchema.parse(canonicalSubmission)
   const fingerprint = await submissionFingerprint(submission)
   const key = storageKey(submission.eventId)
   const stored = readAttempt(key)
+  if ((requireExisting && !stored) || (expectedBearer !== undefined && stored?.confirmationBearer !== expectedBearer)) throw new Error('Checkout retry state is unavailable. Keep your original checkout link.')
   if (stored?.submissionFingerprint === fingerprint) return stored
+
+  if (stored !== null) throw new Error('Resolve your existing checkout before changing buyer details or tickets.')
 
   const confirmationBytes = crypto.getRandomValues(new Uint8Array(32))
   const attempt: CheckoutAttemptRecord = {
     contractVersion,
+    lifecycle: 'prepared',
     submissionFingerprint: fingerprint,
     clientRequestId: crypto.randomUUID().toLowerCase(),
     confirmationBearer: bytesToBase64Url(confirmationBytes),
@@ -107,11 +124,56 @@ export function clearCheckoutAttemptForConfirmation(confirmationBearer: string):
   try {
     const keys = Array.from({ length: sessionStorage.length }, (_value, index) => sessionStorage.key(index))
     for (const key of keys) {
-      if (key === null || !key.startsWith(storageKeyPrefix)) continue
+      if (key === null || !key.startsWith(storageKeyPrefix) || key.endsWith(':seen')) continue
       const stored = readAttempt(key)
-      if (stored?.confirmationBearer === confirmationBearer) sessionStorage.removeItem(key)
+      if (stored?.confirmationBearer === confirmationBearer) {
+        sessionStorage.removeItem(key)
+        sessionStorage.removeItem(`${key}:seen`)
+      }
     }
   } catch {
     // Cleanup is best effort when browser storage is unavailable.
   }
+}
+
+export function getStoredCheckoutAttempt(eventId: string): CheckoutAttemptRecord | null {
+  return readAttempt(storageKey(lowercaseRfcUuidSchema.parse(eventId)))
+}
+
+export function markCheckoutSubmitted(eventId: string, attempt: CheckoutAttemptRecord, submission: CheckoutCanonicalSubmission, verifiedEventId: string): CheckoutAttemptRecord {
+  const key = storageKey(eventId)
+  const stored = readAttempt(key)
+  if (!stored || !attemptsMatch(stored, attempt) || stored.lifecycle === 'rejected') throw new Error('Checkout retry state is unavailable.')
+  if (verifiedEventId !== submission.eventId) throw new Error('Checkout event could not be verified.')
+  const updated = checkoutAttemptRecordSchema.parse({ ...stored, lifecycle: 'submitted', verifiedEventId, selection: submission.items })
+  writeAttempt(key, updated)
+  return updated
+}
+
+export function markCheckoutRejected(eventId: string, attempt: CheckoutAttemptRecord, rejectionKind: 'stock' | 'unavailable' = 'stock'): void {
+  const key = storageKey(eventId)
+  const stored = readAttempt(key)
+  if (!stored || !attemptsMatch(stored, attempt)) throw new Error('Checkout retry state is unavailable.')
+  writeAttempt(key, { ...stored, lifecycle: 'rejected', rejectionKind })
+}
+
+export function findCheckoutAttempt(confirmationBearer: string): { eventId: string; attempt: CheckoutAttemptRecord } | null {
+  if (!isCanonicalCheckoutBearer(confirmationBearer)) return null
+  try {
+    for (let index = 0; index < sessionStorage.length; index++) {
+      const key = sessionStorage.key(index)
+      if (key === null || !key.startsWith(storageKeyPrefix) || key.endsWith(':seen')) continue
+      const eventId = key.slice(storageKeyPrefix.length)
+      if (!lowercaseRfcUuidSchema.safeParse(eventId).success) continue
+      const attempt = readAttempt(key)
+      if (attempt?.confirmationBearer === confirmationBearer) return { eventId, attempt }
+    }
+  } catch { return null }
+  return null
+}
+
+export function getVerifiedCheckoutAssociation(confirmationBearer: string): { eventId: string; selectionPath: string } | null {
+  const found = findCheckoutAttempt(confirmationBearer)
+  if (!found || found.attempt.verifiedEventId !== found.eventId || !found.attempt.selection) return null
+  return { eventId: found.eventId, selectionPath: checkoutSelectionPath(found.eventId, found.attempt.selection) }
 }

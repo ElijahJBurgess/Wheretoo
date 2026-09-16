@@ -7,11 +7,6 @@ export type Json =
   | Json[]
 
 export type Database = {
-  // Allows to automatically instantiate createClient with right options
-  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
-  __InternalSupabase: {
-    PostgrestVersion: "14.5"
-  }
   public: {
     Tables: {
       disputes: {
@@ -217,6 +212,103 @@ export type Database = {
             columns: ["organizer_id"]
             isOneToOne: false
             referencedRelation: "organizers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      free_registration_requests: {
+        Row: {
+          access_hash: string
+          created_at: string
+          email: string | null
+          event_id: string | null
+          id: string
+          name: string | null
+          quantity: number | null
+          result: Json | null
+        }
+        Insert: {
+          access_hash: string
+          created_at?: string
+          email?: string | null
+          event_id?: string | null
+          id: string
+          name?: string | null
+          quantity?: number | null
+          result?: Json | null
+        }
+        Update: {
+          access_hash?: string
+          created_at?: string
+          email?: string | null
+          event_id?: string | null
+          id?: string
+          name?: string | null
+          quantity?: number | null
+          result?: Json | null
+        }
+        Relationships: []
+      }
+      free_registrations: {
+        Row: {
+          access_hash: string
+          cancelled_at: string | null
+          created_at: string
+          email: string
+          event_id: string
+          id: string
+          name: string
+          organizer_id: string
+          quantity: number
+          request_id: string
+          status: string
+        }
+        Insert: {
+          access_hash: string
+          cancelled_at?: string | null
+          created_at?: string
+          email: string
+          event_id: string
+          id?: string
+          name: string
+          organizer_id: string
+          quantity: number
+          request_id: string
+          status?: string
+        }
+        Update: {
+          access_hash?: string
+          cancelled_at?: string | null
+          created_at?: string
+          email?: string
+          event_id?: string
+          id?: string
+          name?: string
+          organizer_id?: string
+          quantity?: number
+          request_id?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "free_registrations_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "free_registrations_organizer_id_fkey"
+            columns: ["organizer_id"]
+            isOneToOne: false
+            referencedRelation: "organizers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "free_registrations_request_id_fkey"
+            columns: ["request_id"]
+            isOneToOne: true
+            referencedRelation: "free_registration_requests"
             referencedColumns: ["id"]
           },
         ]
@@ -808,12 +900,13 @@ export type Database = {
           event_id: string
           id: string
           issued_at: string
-          order_id: string
-          order_item_id: string
+          order_id: string | null
+          order_item_id: string | null
           organizer_id: string
           refunded_at: string | null
+          registration_id: string | null
           status: string
-          ticket_tier_id: string
+          ticket_tier_id: string | null
           unit_sequence: number
           used_at: string | null
         }
@@ -824,12 +917,13 @@ export type Database = {
           event_id: string
           id?: string
           issued_at?: string
-          order_id: string
-          order_item_id: string
+          order_id?: string | null
+          order_item_id?: string | null
           organizer_id: string
           refunded_at?: string | null
+          registration_id?: string | null
           status?: string
-          ticket_tier_id: string
+          ticket_tier_id?: string | null
           unit_sequence: number
           used_at?: string | null
         }
@@ -840,12 +934,13 @@ export type Database = {
           event_id?: string
           id?: string
           issued_at?: string
-          order_id?: string
-          order_item_id?: string
+          order_id?: string | null
+          order_item_id?: string | null
           organizer_id?: string
           refunded_at?: string | null
+          registration_id?: string | null
           status?: string
-          ticket_tier_id?: string
+          ticket_tier_id?: string | null
           unit_sequence?: number
           used_at?: string | null
         }
@@ -879,6 +974,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "tickets_registration_id_fkey"
+            columns: ["registration_id"]
+            isOneToOne: false
+            referencedRelation: "free_registrations"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "tickets_ticket_tier_id_fkey"
             columns: ["ticket_tier_id"]
             isOneToOne: false
@@ -893,6 +995,31 @@ export type Database = {
     }
     Functions: {
       accept_current_event_policies: {
+        Args: { p_event_id: string }
+        Returns: {
+          alcohol_present: boolean
+          cannabis_present: boolean
+          event_policy_label: string
+          event_policy_stage: string
+          event_policy_url: string
+          event_policy_version_id: string
+          explicit_adult_content: boolean
+          gambling_present: boolean
+          high_risk_activity: boolean
+          minimum_age: string
+          needs_acceptance: boolean
+          organizer_terms_label: string
+          organizer_terms_stage: string
+          organizer_terms_url: string
+          organizer_terms_version_id: string
+          weapons_present: boolean
+        }[]
+      }
+      accept_current_event_policies_if_current: {
+        Args: { p_event_id: string; p_expected_context: string }
+        Returns: Json
+      }
+      accept_current_event_policies_without_change_history: {
         Args: { p_event_id: string }
         Returns: {
           alcohol_present: boolean
@@ -1106,8 +1233,49 @@ export type Database = {
         Args: { p_event_id: string }
         Returns: Json
       }
+      get_organizer_free_admissions: {
+        Args: {
+          p_cursor?: Json
+          p_event_id: string
+          p_limit?: number
+          p_search?: string
+        }
+        Returns: Json
+      }
+      get_organizer_free_registration_detail: {
+        Args: { p_event_id: string; p_registration_id: string }
+        Returns: Json
+      }
+      get_organizer_free_registration_metrics: {
+        Args: { p_event_id: string }
+        Returns: Json
+      }
       get_organizer_order: {
         Args: { p_event_id: string; p_order_id: string }
+        Returns: Json
+      }
+      get_organizer_order_v2: {
+        Args: { p_event_id: string; p_order_id: string }
+        Returns: Json
+      }
+      get_organizer_refund_notice_status: {
+        Args: { p_event_id: string; p_order_id: string }
+        Returns: Json
+      }
+      get_organizer_refund_status: {
+        Args: { p_event_id: string; p_order_id: string }
+        Returns: Json
+      }
+      get_owned_event_cancellation_summary: {
+        Args: { p_event_id: string }
+        Returns: Json
+      }
+      get_owned_event_change_context: {
+        Args: { p_event_id: string }
+        Returns: Json
+      }
+      get_owned_event_notice_status: {
+        Args: { p_event_id: string; p_purpose: string }
         Returns: Json
       }
       get_owned_event_requirements: {
@@ -1136,6 +1304,7 @@ export type Database = {
         Args: { p_event_id: string }
         Returns: Json[]
       }
+      get_public_free_rsvp: { Args: { p_event_id: string }; Returns: Json }
       get_public_map_events: {
         Args: {
           p_categories?: string[]
@@ -1175,6 +1344,19 @@ export type Database = {
           version_id: string
         }[]
       }
+      get_ticket_email_delivery: {
+        Args: { p_event_id: string; p_source_id: string; p_source_kind: string }
+        Returns: Json
+      }
+      get_ticket_email_resend_status: {
+        Args: {
+          p_event_id: string
+          p_request_id: string
+          p_source_id: string
+          p_source_kind: string
+        }
+        Returns: Json
+      }
       list_moderation_queue: {
         Args: { p_limit: number }
         Returns: {
@@ -1191,6 +1373,15 @@ export type Database = {
           queued_evaluation_count: number
         }[]
       }
+      list_organizer_event_admissions: {
+        Args: {
+          p_cursor?: Json
+          p_event_id: string
+          p_limit?: number
+          p_search?: string
+        }
+        Returns: Json
+      }
       list_organizer_event_orders: {
         Args: {
           p_cursor_created_at?: string
@@ -1198,6 +1389,17 @@ export type Database = {
           p_event_id: string
           p_limit?: number
           p_search?: string
+        }
+        Returns: Json
+      }
+      list_organizer_event_orders_filtered: {
+        Args: {
+          p_cursor_created_at?: string
+          p_cursor_id?: string
+          p_event_id: string
+          p_limit?: number
+          p_search?: string
+          p_status?: string
         }
         Returns: Json
       }
@@ -1240,7 +1442,63 @@ export type Database = {
         }
         Returns: string
       }
+      preview_owned_event_notice: {
+        Args: { p_event_id: string; p_purpose: string }
+        Returns: Json
+      }
       publish_event: {
+        Args: { p_event_id: string }
+        Returns: {
+          address_line1: string | null
+          address_line2: string | null
+          admission_type: string
+          animation_preset: string
+          artwork_path: string | null
+          capacity: number | null
+          category: string | null
+          city: string | null
+          content_revision: number
+          country_code: string
+          created_at: string
+          description: string | null
+          ends_at: string | null
+          first_publicly_eligible_at: string | null
+          id: string
+          latitude: number | null
+          location: unknown
+          longitude: number | null
+          mapbox_feature_id: string | null
+          moderated_revision: number | null
+          moderation_status: string
+          moderation_updated_at: string | null
+          moderation_version: number
+          organizer_id: string
+          postal_code: string | null
+          public_eligibility_version: number
+          public_history_status: string
+          publicly_authorized_action_id: string | null
+          publicly_authorized_revision: number | null
+          published_at: string | null
+          region: string | null
+          starts_at: string | null
+          status: string
+          timezone: string
+          title: string | null
+          updated_at: string
+          venue_name: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "events"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      publish_event_if_current: {
+        Args: { p_event_id: string; p_expected_context: string }
+        Returns: Json
+      }
+      publish_event_without_change_history: {
         Args: { p_event_id: string }
         Returns: {
           address_line1: string | null
@@ -1296,6 +1554,15 @@ export type Database = {
         Args: { p_event_id: string; p_organizer_note: string }
         Returns: string
       }
+      request_ticket_email_resend: {
+        Args: {
+          p_event_id: string
+          p_request_id: string
+          p_source_id: string
+          p_source_kind: string
+        }
+        Returns: Json
+      }
       resolve_legacy_public_history: {
         Args: {
           p_event_id: string
@@ -1321,7 +1588,79 @@ export type Database = {
           weapons_present: boolean
         }[]
       }
+      save_owned_event_requirements_if_current: {
+        Args: {
+          p_event_id: string
+          p_expected_context: string
+          p_requirements: Json
+        }
+        Returns: Json
+      }
+      save_owned_event_requirements_without_change_history: {
+        Args: { p_event_id: string; p_requirements: Json }
+        Returns: {
+          alcohol_present: boolean
+          cannabis_present: boolean
+          explicit_adult_content: boolean
+          gambling_present: boolean
+          high_risk_activity: boolean
+          minimum_age: string
+          weapons_present: boolean
+        }[]
+      }
       save_owned_event_revision: {
+        Args: { p_event: Json; p_event_id: string }
+        Returns: {
+          address_line1: string | null
+          address_line2: string | null
+          admission_type: string
+          animation_preset: string
+          artwork_path: string | null
+          capacity: number | null
+          category: string | null
+          city: string | null
+          content_revision: number
+          country_code: string
+          created_at: string
+          description: string | null
+          ends_at: string | null
+          first_publicly_eligible_at: string | null
+          id: string
+          latitude: number | null
+          location: unknown
+          longitude: number | null
+          mapbox_feature_id: string | null
+          moderated_revision: number | null
+          moderation_status: string
+          moderation_updated_at: string | null
+          moderation_version: number
+          organizer_id: string
+          postal_code: string | null
+          public_eligibility_version: number
+          public_history_status: string
+          publicly_authorized_action_id: string | null
+          publicly_authorized_revision: number | null
+          published_at: string | null
+          region: string | null
+          starts_at: string | null
+          status: string
+          timezone: string
+          title: string | null
+          updated_at: string
+          venue_name: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "events"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      save_owned_event_revision_if_current: {
+        Args: { p_event: Json; p_event_id: string; p_expected_context: string }
+        Returns: Json
+      }
+      save_owned_event_revision_without_change_history: {
         Args: { p_event: Json; p_event_id: string }
         Returns: {
           address_line1: string | null
@@ -1458,6 +1797,18 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      save_owned_organizer_settings: {
+        Args: {
+          p_bio: string
+          p_display_name: string
+          p_expected_updated_at: string
+        }
+        Returns: {
+          bio: string
+          display_name: string
+          updated_at: string
+        }[]
       }
       save_ticket_tiers: {
         Args: { p_event_id: string; p_tiers: Json }
@@ -1624,6 +1975,10 @@ export type Database = {
         Args: { p_stripe_account_id: string }
         Returns: number
       }
+      server_begin_ticket_email_dispatch: {
+        Args: { p_attempt_id: string; p_lease_id: string }
+        Returns: Json
+      }
       server_cancel_checkout_reservation: {
         Args: { p_order_id: string; p_reason: string }
         Returns: string
@@ -1651,12 +2006,45 @@ export type Database = {
           queued_moderation_version: number
         }[]
       }
+      server_claim_owned_refund: {
+        Args: { p_event_id: string; p_order_id: string; p_organizer_id: string }
+        Returns: Json
+      }
+      server_claim_ticket_email: { Args: never; Returns: Json }
+      server_clear_ticket_email_recipient_block: {
+        Args: { p_source_id: string; p_source_kind: string }
+        Returns: boolean
+      }
+      server_confirm_free_registration: {
+        Args: {
+          p_access_hash: string
+          p_email: string
+          p_event_id: string
+          p_name: string
+          p_quantity: number
+          p_request_id: string
+          p_ticket_manifest: Json
+        }
+        Returns: Json
+      }
       server_consume_checkout_rate_limit: {
         Args: { p_identity_hash: string }
         Returns: {
           allowed: boolean
           retry_after_seconds: number
         }[]
+      }
+      server_consume_discovery_read_rate_limit: {
+        Args: { p_identity_hash: string }
+        Returns: Json
+      }
+      server_consume_free_rsvp_rate_limit: {
+        Args: { p_identity_hash: string; p_operation: string }
+        Returns: Json
+      }
+      server_enqueue_refund_notices: {
+        Args: { p_limit?: number }
+        Returns: number
       }
       server_expire_checkout_reservations: {
         Args: { p_now: string }
@@ -1680,6 +2068,15 @@ export type Database = {
           p_stripe_event_id: string
         }
         Returns: string
+      }
+      server_finish_ticket_email_dispatch: {
+        Args: {
+          p_attempt_id: string
+          p_lease_id: string
+          p_outcome: string
+          p_provider_id?: string
+        }
+        Returns: boolean
       }
       server_fulfill_paid_order: {
         Args: {
@@ -1746,6 +2143,32 @@ export type Database = {
         Args: { p_event_id: string; p_order_id: string; p_organizer_id: string }
         Returns: Json
       }
+      server_get_public_discovery_events: {
+        Args: { p_query: Json }
+        Returns: Json
+      }
+      server_get_unattached_checkout_review_snapshot: {
+        Args: {
+          p_order_id: string
+          p_session_id: string
+          p_stripe_event_id: string
+        }
+        Returns: {
+          application_fee_amount_minor: number
+          checkout_expires_at: string
+          checkout_request_id: string
+          checkout_session_id: string
+          create_digest: string
+          currency: string
+          destination_account_id: string
+          event_id: string
+          order_id: string
+          order_items: Json
+          snapshot_digest: string
+          subtotal_minor: number
+          total_minor: number
+        }[]
+      }
       server_lookup_checkout_cancellation: {
         Args: { p_token_hash: string }
         Returns: {
@@ -1772,14 +2195,22 @@ export type Database = {
           total_minor: number
         }[]
       }
+      server_lookup_free_ticket_collection: {
+        Args: { p_access_hash: string }
+        Returns: Json
+      }
       server_lookup_paid_ticket_collection: {
         Args: { p_confirmation_token_hash: string }
         Returns: {
+          event_address: string
           event_ends_at: string
+          event_facts_available: boolean
           event_id: string
           event_starts_at: string
           event_status: string
+          event_timezone: string
           event_title: string
+          event_updated: boolean
           event_venue_name: string
           items: Json
           order_status: string
@@ -1855,6 +2286,26 @@ export type Database = {
           ticket_status: string
         }[]
       }
+      server_note_refund_observation: {
+        Args: {
+          p_event_id: string
+          p_order_id: string
+          p_organizer_id: string
+          p_refund_id?: string
+          p_state: string
+        }
+        Returns: undefined
+      }
+      server_observe_ticket_email: {
+        Args: {
+          p_attempt_id: string
+          p_kind: string
+          p_observed_at: string
+          p_provider_id: string
+          p_webhook_id: string
+        }
+        Returns: boolean
+      }
       server_persist_connect_status_if_current: {
         Args: {
           p_currently_due_count: number
@@ -1871,6 +2322,14 @@ export type Database = {
           persistence_result: string
         }[]
       }
+      server_prepare_ticket_email_context: {
+        Args: {
+          p_attempt_id: string
+          p_lease_id: string
+          p_recovery_email?: string
+        }
+        Returns: Json
+      }
       server_prepare_whole_order_refund: {
         Args: { p_order_id: string; p_reason: string }
         Returns: {
@@ -1883,6 +2342,44 @@ export type Database = {
           reason: string
           total_minor: number
           transfer_id: string
+        }[]
+      }
+      server_prune_ticket_email_history: { Args: never; Returns: number }
+      server_read_event_status_access: {
+        Args: { p_ip_hash: string; p_token_hash: string }
+        Returns: Json
+      }
+      server_read_owned_refund_operation: {
+        Args: { p_event_id: string; p_order_id: string; p_organizer_id: string }
+        Returns: Json
+      }
+      server_read_refund_detail_access: {
+        Args: { p_ip_hash: string; p_token_hash: string }
+        Returns: Json
+      }
+      server_read_ticket_email_access: {
+        Args: {
+          p_ip_hash: string
+          p_member?: number
+          p_page?: number
+          p_token_hash: string
+        }
+        Returns: Json
+      }
+      server_reconcile_unattached_paid_checkout: {
+        Args: {
+          p_expected_snapshot_digest: string
+          p_order_id: string
+          p_payment_snapshot: Json
+          p_session_id: string
+          p_stripe_event_id: string
+          p_ticket_manifest: Json
+        }
+        Returns: {
+          disposition: string
+          order_id: string
+          order_status: string
+          ticket_count: number
         }[]
       }
       server_record_webhook_receipt: {
@@ -1925,6 +2422,26 @@ export type Database = {
           outcome: string
         }[]
       }
+      server_reject_moderation_evaluation_input: {
+        Args: {
+          p_attempt_count: number
+          p_content_revision: number
+          p_evaluation_id: string
+          p_event_id: string
+          p_input_sha256: string
+          p_queued_moderation_version: number
+        }
+        Returns: string
+      }
+      server_request_ticket_recovery: {
+        Args: {
+          p_ip_hash: string
+          p_payload: Json
+          p_recipient_hash: string
+          p_request_id: string
+        }
+        Returns: Json
+      }
       server_reserve_checkout: {
         Args: {
           p_client_request_id: string
@@ -1953,6 +2470,27 @@ export type Database = {
           total_minor: number
         }[]
       }
+      server_resolve_free_registration: {
+        Args: { p_access_hash: string; p_request_id: string }
+        Returns: Json
+      }
+      server_revoke_ticket_email_grant: {
+        Args: { p_grant_id: string }
+        Returns: boolean
+      }
+      server_save_ticket_email_payload: {
+        Args: {
+          p_attempt_id: string
+          p_lease_id: string
+          p_payload: Json
+          p_token_hash: string
+        }
+        Returns: boolean
+      }
+      server_stop_ticket_email: {
+        Args: { p_attempt_id: string; p_lease_id: string; p_reason: string }
+        Returns: boolean
+      }
       server_submit_event_report: {
         Args: {
           p_event_id: string
@@ -1961,6 +2499,19 @@ export type Database = {
           p_reporter_fingerprint: string
         }
         Returns: string
+      }
+      server_ticket_email_confirmation_status: {
+        Args: { p_access_hash: string; p_ip_hash: string; p_kind: string }
+        Returns: Json
+      }
+      submit_owned_event_notice: {
+        Args: {
+          p_event_id: string
+          p_preview_token: string
+          p_purpose: string
+          p_request_id: string
+        }
+        Returns: Json
       }
       withdraw_event_review: { Args: { p_event_id: string }; Returns: string }
     }

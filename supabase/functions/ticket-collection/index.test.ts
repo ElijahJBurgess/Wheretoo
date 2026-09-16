@@ -518,3 +518,85 @@ Deno.test("default transport calls only the service RPC with a hash and rejects 
       .includes(BEARER),
   );
 });
+
+Deno.test("a canonical paid bearer beginning rsvp_ still resolves exclusively as paid", async () => {
+  let paid = 0;
+  let free = 0;
+  const response = await createTicketCollectionHandler(
+    dependencies(projection(), {
+      findCollection: async () => {
+        paid++;
+        return projection();
+      },
+      findFreeCollection: async () => {
+        free++;
+        return null;
+      },
+    }),
+  )(request({ collectionBearer: "rsvp_" + "A".repeat(38) }));
+  assertEquals(response.status, 200);
+  assertEquals(paid, 1);
+  assertEquals(free, 0);
+});
+
+Deno.test("approved private facts retain paid Used timestamp while cancellation stays separate", async () => {
+  const old = projection();
+  const value = {
+    ...old,
+    event_status: "cancelled",
+    event_facts_available: true,
+    event_updated: true,
+    event_timezone: "America/Los_Angeles",
+    event_address: "1 Market St",
+    tickets: old.tickets.map((t, i) => ({
+      ...t,
+      status: i === 0 ? "used" : "cancelled",
+      used_at: i === 0 ? "2026-09-09T18:30:00Z" : null,
+    })),
+  };
+  const response = await createTicketCollectionHandler(dependencies(value))(
+    request(),
+  );
+  assertEquals(response.status, 200);
+  const body = await response.json();
+  assertEquals(body.collection.tickets[0].usedAt, "2026-09-09T18:30:00Z");
+  assertEquals(body.collection.tickets[0].eventStatus, "cancelled");
+  assertEquals(
+    body.collection.tickets.every((t: { admissionCredential: unknown }) =>
+      t.admissionCredential === null
+    ),
+    true,
+  );
+});
+Deno.test("unavailable legacy event facts do not synthesize schedule or leak mutable metadata", async () => {
+  const old = projection();
+  const value = {
+    ...old,
+    event_title: null,
+    event_starts_at: null,
+    event_ends_at: null,
+    event_venue_name: null,
+    event_status: "cancelled",
+    event_facts_available: false,
+    event_updated: false,
+    event_timezone: null,
+    event_address: null,
+    tickets: old.tickets.map((t) => ({
+      ...t,
+      status: "cancelled",
+      used_at: null,
+    })),
+  };
+  const response = await createTicketCollectionHandler(dependencies(value))(
+    request(),
+  );
+  assertEquals(response.status, 200);
+  const body = await response.json();
+  assertEquals(body.collection.tickets[0].startsAt, null);
+  assertEquals(body.collection.tickets[0].eventFactsAvailable, false);
+  assertEquals(
+    body.collection.tickets[0].eventName,
+    "Event details unavailable",
+  );
+  await unavailable({ ...value, event_title: "Unapproved private title" });
+});

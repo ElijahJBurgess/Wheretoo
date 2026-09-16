@@ -83,7 +83,7 @@ function rowLocation(event: EventRow): NormalizedLocation | null {
   }
 }
 
-function draftPayload(values: EventFormValues): EventDraftPayload {
+export function draftPayload(values: EventFormValues): EventDraftPayload {
   const location = values.location
 
   return {
@@ -119,7 +119,8 @@ export async function listOwnedEvents(organizerId: string): Promise<EventRow[]> 
     throw error
   }
 
-  return data ?? []
+  if (!Array.isArray(data)) throw new Error('Event list unavailable')
+  return data
 }
 
 export async function getOwnedEvent(

@@ -1,9 +1,14 @@
-import { useLayoutEffect, useRef } from 'react'
+import { RefundSupportContext } from '../../refunds/RefundedTicketContext'
+import { formatBuyerSchedule } from '../../buyer-journey/format'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { TicketDisplay } from '../contracts/ticketCollection'
 import type { WalletCapability } from '../contracts/wallet'
 import { AdmissionQr } from './AdmissionQr'
+import { InactiveTicketArtwork } from './InactiveTicketArtwork'
+import { BuyerEventSummary, BuyerHeader, BuyerIcon } from '../../buyer-journey/BuyerPrimitives'
 
 export type FocusedTicketViewProps = {
+  backAction?: ReactNode
   ticket: TicketDisplay
   walletCapability: WalletCapability
   now: () => Date
@@ -28,28 +33,14 @@ const statusPresentation: Record<PresentationStatus, { icon: string; label: stri
 function presentationStatus(ticket: TicketDisplay, now: () => Date): PresentationStatus {
   if (ticket.status !== 'valid') return ticket.status
 
-  const endsAt = Date.parse(ticket.endsAt)
+  const endsAt = (ticket.endsAt === null ? NaN : Date.parse(ticket.endsAt))
   if (!Number.isFinite(endsAt)) return 'unavailable'
   return now().getTime() >= endsAt ? 'ended' : 'valid'
 }
 
-function formatEventTime(startsAt: string, endsAt: string): string {
-  const start = new Date(startsAt)
-  const end = new Date(endsAt)
-  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) return 'Schedule unavailable'
-
-  const date = new Intl.DateTimeFormat('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-  })
-  const time = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' })
-  return `${date.format(start)} · ${time.format(start)}–${time.format(end)}`
-}
-
 export function FocusedTicketView({
   ticket,
-  walletCapability,
+  backAction,
   now,
   previousSelector,
   nextSelector,
@@ -58,6 +49,13 @@ export function FocusedTicketView({
   onHeadingFocused,
 }: FocusedTicketViewProps) {
   const headingRef = useRef<HTMLHeadingElement>(null)
+  const [clockRevision, setClockRevision] = useState(0)
+  useEffect(() => {
+    const remaining = (ticket.endsAt === null ? NaN : Date.parse(ticket.endsAt)) - now().getTime()
+    if (ticket.status !== 'valid' || !Number.isFinite(remaining) || remaining <= 0) return
+    const timer = window.setTimeout(() => setClockRevision(value => value + 1), Math.min(remaining + 1, 2_147_483_647))
+    return () => window.clearTimeout(timer)
+  }, [ticket.endsAt, ticket.status, now, clockRevision])
   const status = presentationStatus(ticket, now)
   const presentation = statusPresentation[status]
   const isMultiTicket = ticket.totalInCollection > 1
@@ -69,70 +67,36 @@ export function FocusedTicketView({
   }, [focusHeadingOnMount, onHeadingFocused])
 
   return (
-    <article className={`focused-ticket focused-ticket--${status}`}>
-      <header className="focused-ticket__header">
-        <div>
-          <p className="ticket-kicker">{ticket.eventName}</p>
-          <h1 ref={headingRef} tabIndex={-1}>Ticket {ticket.position}</h1>
+    <article className={`buyer-focused buyer-focused--${status}`}>
+      <BuyerHeader back={backAction ?? (isMultiTicket
+        ? <button className="buyer-icon-button" aria-label="Back to all tickets" onClick={() => onSelect(null)} type="button"><BuyerIcon name="close" /></button>
+        : <a className="buyer-icon-button" aria-label="Return to event" href={`/events/${encodeURIComponent(ticket.eventId)}`}><BuyerIcon name="close" /></a>)} />
+      <div className="buyer-content">
+        <header className="buyer-focused__heading">
+          {status === 'valid' ? <BuyerIcon name="ticket" className="buyer-focused__ticket-icon" /> : <span aria-hidden="true" className="buyer-focused__status-icon">{presentation.icon}</span>}
+          <h1 className={status === 'valid' ? 'buyer-visually-hidden' : ''} ref={headingRef} tabIndex={-1}>{status === 'valid' ? `Ticket ${ticket.position}` : presentation.label}</h1>
+          {status !== 'valid' ? <p>{presentation.detail}</p> : null}
+        </header>
+        <section className="buyer-focused__admission" aria-label="Admission credential">
+          {status === 'valid' && ticket.status === 'valid' ? <AdmissionQr credential={ticket.admissionCredential} /> : <InactiveTicketArtwork />}
+        </section>
+        <div className="buyer-focused__type">
+          <strong>{ticket.admissionLabel}</strong>
+          <p aria-live="polite" role="status">{status !== 'valid' ? <span className="buyer-visually-hidden">{presentation.label}. </span> : null}Ticket {ticket.position} of {ticket.totalInCollection}</p>
+          {ticket.attendeeLabel ? <p>{ticket.attendeeLabel}</p> : null}
+          {ticket.usedAt ? <p>Checked in · {new Date(ticket.usedAt).toLocaleString('en-US', { timeZone: ticket.timezone ?? 'UTC', timeZoneName: 'short' })}</p> : null}
         </div>
-        <span className={`ticket-status ticket-status--${status}`}>
-          <span aria-hidden="true">{presentation.icon}</span>
-          {presentation.label}
-        </span>
-      </header>
-
-      <section className="focused-ticket__admission" aria-label="Admission credential">
-        {status === 'valid' && ticket.status === 'valid'
-          ? <AdmissionQr credential={ticket.admissionCredential} />
-          : (
-            <div className="focused-ticket__inactive" role="status">
-              <span aria-hidden="true">{presentation.icon}</span>
-              <strong>{presentation.label}</strong>
-              <p>{presentation.detail}</p>
-            </div>
-          )}
-        {status === 'valid' ? <p className="focused-ticket__scan-note">{presentation.detail}</p> : null}
-      </section>
-
-      <dl className="focused-ticket__facts">
-        <div><dt>Admission</dt><dd>{ticket.admissionLabel}</dd></div>
-        {ticket.attendeeLabel ? <div><dt>Guest</dt><dd>{ticket.attendeeLabel}</dd></div> : null}
-        <div><dt>When</dt><dd>{formatEventTime(ticket.startsAt, ticket.endsAt)}</dd></div>
-        <div><dt>Where</dt><dd>{ticket.venueName}</dd></div>
-      </dl>
-
-      <div className="focused-ticket__actions">
-        {ticket.directionsUrl
-          ? <a className="ui-button ui-button--secondary" href={ticket.directionsUrl} rel="noreferrer">Get directions</a>
-          : null}
-        <button className="ui-button ui-button--secondary" disabled type="button">
-          {walletCapability.label}
-        </button>
+        {ticket.eventStatus === 'cancelled' ? <p role="status">Event cancelled. Prior check-ins remain recorded.</p> : ticket.eventUpdated ? <p role="status">Event updated. Review the latest published details below.</p> : null}
+        {ticket.eventFactsAvailable === false ? <p>Previous published event details are unavailable.</p> : null}
+        <BuyerEventSummary title={ticket.eventName} schedule={formatBuyerSchedule(ticket.startsAt, ticket.endsAt, ticket.timezone)} venue={ticket.venueName} />
+        {status === 'refunded' ? <RefundSupportContext /> : null}
+        {status === 'valid' ? <div className="buyer-focused__valid"><span><BuyerIcon name="check" />Valid ticket</span><p>{presentation.detail}</p></div> : null}
+        {ticket.directionsUrl ? <a className="ui-button buyer-secondary" href={ticket.directionsUrl} rel="noreferrer">Get directions</a> : null}
+        {isMultiTicket ? <footer className="buyer-focused__navigation">
+          <button className="buyer-nav-button" disabled={previousSelector === null} onClick={() => onSelect(previousSelector)} type="button"><BuyerIcon name="back" /><span>Previous ticket</span></button>
+          <button className="buyer-nav-button" disabled={nextSelector === null} onClick={() => onSelect(nextSelector)} type="button"><BuyerIcon name="arrow" /><span>Next ticket</span></button>
+        </footer> : null}
       </div>
-
-      {isMultiTicket ? (
-        <footer className="focused-ticket__navigation">
-          <p aria-live="polite" role="status">Ticket {ticket.position} of {ticket.totalInCollection}</p>
-          <div>
-            <button
-              className="ui-button ui-button--secondary"
-              disabled={previousSelector === null}
-              onClick={() => onSelect(previousSelector)}
-              type="button"
-            >
-              Previous ticket
-            </button>
-            <button
-              className="ui-button ui-button--primary"
-              disabled={nextSelector === null}
-              onClick={() => onSelect(nextSelector)}
-              type="button"
-            >
-              Next ticket
-            </button>
-          </div>
-        </footer>
-      ) : null}
     </article>
   )
 }

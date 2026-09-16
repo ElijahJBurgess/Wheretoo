@@ -1,5 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { AsyncState } from '../../components/ui/AsyncState'
@@ -7,6 +7,7 @@ import { Button } from '../../components/ui/Button'
 import { Field } from '../../components/ui/Field'
 import { FormErrorSummary } from '../../components/ui/FormErrorSummary'
 import { useSession } from '../auth/SessionProvider'
+import { OnboardingLayout, OnboardingProgress } from '../organizer-onboarding/OnboardingLayout'
 import type { Organizer } from './organizer.api'
 import { useOrganizer, useSaveOrganizer } from './organizer.queries'
 import { organizerInputSchema, type OrganizerInput } from './organizer.schemas'
@@ -25,7 +26,6 @@ const organizerTypes = [
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Your organizer profile could not be saved. Try again.'
 }
-
 function defaultValues(organizer: Organizer | null, metadataName: unknown): OrganizerInput {
   const seededName = typeof metadataName === 'string' ? metadataName : ''
 
@@ -41,10 +41,16 @@ function defaultValues(organizer: Organizer | null, metadataName: unknown): Orga
 type OrganizerSetupFormProps = {
   initialValues: OrganizerInput
   userId: string
+  onSavingChange: (saving: boolean) => void
 }
 
-function OrganizerSetupForm({ initialValues, userId }: OrganizerSetupFormProps) {
+function OrganizerSetupForm({ initialValues, userId, onSavingChange }: OrganizerSetupFormProps) {
   const navigate = useNavigate()
+  const mounted = useRef(false)
+  useLayoutEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
   const saveOrganizerMutation = useSaveOrganizer(userId)
   const [serverError, setServerError] = useState<string | null>(null)
   const {
@@ -66,30 +72,27 @@ function OrganizerSetupForm({ initialValues, userId }: OrganizerSetupFormProps) 
   const summaryErrors = serverError ? [...validationMessages, serverError] : validationMessages
   const summaryTitle = serverError ? 'Profile save failed' : 'Check the highlighted fields'
 
-  const submit = handleSubmit(
-    async (input) => {
+  async function submit(input: OrganizerInput) {
       setServerError(null)
+      onSavingChange(true)
 
       try {
         await saveOrganizerMutation.mutateAsync(input)
-        navigate('/organizer/events', { replace: true })
+        if (mounted.current) navigate('/organizer/settings/payments', { replace: true })
       } catch (error) {
+        if (!mounted.current) return
         setServerError(errorMessage(error))
+        onSavingChange(false)
       }
-    },
-    () => setServerError(null),
-  )
+  }
 
   return (
-    <section aria-labelledby="organizer-setup-title" className="auth-panel">
-      <p className="auth-panel__eyebrow">Organizer profile · 1 of 1</p>
-      <h1 id="organizer-setup-title">Tell us about your organization</h1>
-      <p className="auth-panel__intro">
-        Create the public identity people will see beside every event you publish.
-      </p>
+    <section aria-labelledby="organizer-setup-title" className="onboarding-form onboarding-form--profile">
+      <OnboardingProgress step={2} />
+      <h1 className="onboarding__sr-only" id="organizer-setup-title">Organizer Profile</h1>
       <FormErrorSummary errors={summaryErrors} title={summaryTitle} />
-      <form className="auth-form" noValidate onSubmit={submit}>
-        <Field error={errors.displayName?.message} label="Public organizer name" name="displayName">
+      <form className="auth-form" noValidate onSubmit={(event) => { void handleSubmit(submit, () => setServerError(null))(event) }}>
+        <Field error={errors.displayName?.message} label="Organizer / business name" name="displayName">
           <input autoComplete="organization" {...register('displayName')} />
         </Field>
         <Field error={errors.organizerType?.message} label="Organizer type" name="organizerType">
@@ -102,55 +105,67 @@ function OrganizerSetupForm({ initialValues, userId }: OrganizerSetupFormProps) 
             ))}
           </select>
         </Field>
-        <Field error={errors.bio?.message} label="Short description" name="bio">
-          <textarea maxLength={500} {...register('bio')} />
-        </Field>
-        <Field error={errors.websiteUrl?.message} label="Website" name="websiteUrl">
+        <Field error={errors.websiteUrl?.message} label="Website or social (optional)" name="websiteUrl">
           <input autoComplete="url" inputMode="url" placeholder="https://" type="url" {...register('websiteUrl')} />
         </Field>
-        <Field error={errors.baseCity?.message} label="Base city" name="baseCity">
-          <input autoComplete="address-level2" placeholder="San Francisco" {...register('baseCity')} />
-        </Field>
+        <details className="onboarding__optional" open={errors.bio || errors.baseCity ? true : undefined}>
+          <summary>More about your organization (optional)</summary>
+          <Field error={errors.bio?.message} label="Short description" name="bio">
+            <textarea maxLength={500} {...register('bio')} />
+          </Field>
+          <Field error={errors.baseCity?.message} label="Base city" name="baseCity">
+            <input autoComplete="address-level2" placeholder="San Francisco" {...register('baseCity')} />
+          </Field>
+        </details>
         <Button disabled={isSaving} type="submit">
-          {isSaving ? 'Saving profile…' : 'Save organizer profile'}
+          {isSaving ? 'Saving profile…' : 'Continue'}
         </Button>
       </form>
     </section>
   )
 }
 
-export function OrganizerSetupPage() {
-  const sessionState = useSession()
-  const userId = sessionState.status === 'authenticated' ? sessionState.user.id : ''
-  const metadataName =
-    sessionState.status === 'authenticated' ? sessionState.user.user_metadata.full_name : undefined
+function OrganizerSetupJourney({ userId, metadataName }: { userId: string; metadataName: unknown }) {
   const organizerQuery = useOrganizer(userId)
+  const [isCompleting, setIsCompleting] = useState(false)
 
-  if (sessionState.status !== 'authenticated' || organizerQuery.isPending) {
-    return <AsyncState status="loading" title="Loading your organizer profile" />
+  if (organizerQuery.isPending) {
+    return <OnboardingLayout title="Organizer Profile"><AsyncState status="loading" title="Loading your organizer profile" /></OnboardingLayout>
   }
 
   if (organizerQuery.isError) {
     return (
-      <AsyncState
+      <OnboardingLayout title="Organizer Profile"><AsyncState
         action={<Button onClick={() => void organizerQuery.refetch()}>Try again</Button>}
         description="Check your connection, then try again."
         status="error"
         title="Your organizer profile could not load"
-      />
+      /></OnboardingLayout>
     )
   }
 
-  if (organizerQuery.data?.onboarding_completed_at) {
+  // A save updates the shared organizer cache before navigation finishes. Keep that
+  // update from sending a new organizer past the payouts decision.
+  if (organizerQuery.data?.onboarding_completed_at && !isCompleting) {
     return <Navigate replace to="/organizer/events" />
   }
 
   return (
-    <div className="auth-layout__main">
+    <OnboardingLayout title="Organizer Profile">
       <OrganizerSetupForm
+        key={userId}
         initialValues={defaultValues(organizerQuery.data ?? null, metadataName)}
         userId={userId}
+        onSavingChange={setIsCompleting}
       />
-    </div>
+    </OnboardingLayout>
   )
+}
+
+export function OrganizerSetupPage() {
+  const sessionState = useSession()
+  if (sessionState.status !== 'authenticated') {
+    return <OnboardingLayout title="Organizer Profile"><AsyncState status="loading" title="Loading your organizer profile" /></OnboardingLayout>
+  }
+  return <OrganizerSetupJourney key={`${sessionState.user.id}:${sessionState.identityVersion ?? 0}`} userId={sessionState.user.id} metadataName={sessionState.user.user_metadata.full_name} />
 }

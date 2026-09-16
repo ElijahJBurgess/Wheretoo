@@ -1,0 +1,148 @@
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { beforeEach, expect, it, vi } from 'vitest'
+const api = vi.hoisted(() => ({ getDelivery: vi.fn(), requestResend: vi.fn(), getResendStatus: vi.fn() }))
+vi.mock('./delivery.api', () => api)
+import { ResendTicketsDialog } from './ResendTicketsDialog'
+const source = { ownerId: 'owner', eventId: 'event', sourceId: 'order', sourceKind: 'paid_order' as const }
+const summary = { ...source, recipientEmail: 'recorded@example.com', eligible: true, reason: null, configured: true, latest: null }
+const attempt = { id: 'attempt', state: 'queued', observation: null, createdAt: '2026-09-11T12:00:00Z', stoppedReason: null }
+function show(props = source) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const view = render(<QueryClientProvider client={client}><ResendTicketsDialog {...props} onClose={() => {}} /></QueryClientProvider>)
+  return { ...view, client }
+}
+beforeEach(() => { vi.resetAllMocks(); sessionStorage.clear(); api.getDelivery.mockResolvedValue(summary); api.getResendStatus.mockResolvedValue(null) })
+it('shows the exact recorded recipient as noneditable and explains existing admissions', async () => {
+  show()
+  expect(await screen.findByText('recorded@example.com')).toBeVisible()
+  expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+  expect(screen.getByText(/does not create new tickets or QR codes/)).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Confirm and resend' })).toBeEnabled()
+})
+it('latches double clicks, reconciles lost response on remount with the same request, and does not resend unknown', async () => {
+  let reject!: (error: Error) => void
+  api.requestResend.mockReturnValue(new Promise((_, r) => { reject = r }))
+  const first = show()
+  const button = await screen.findByRole('button', { name: 'Confirm and resend' })
+  fireEvent.click(button); fireEvent.click(button)
+  expect(api.requestResend).toHaveBeenCalledTimes(1)
+  const requestId = api.requestResend.mock.calls[0]![1]
+  await act(async () => reject(new Error('lost')))
+  await screen.findByText('Send status unknown')
+  first.unmount(); first.client.clear()
+  api.getResendStatus.mockResolvedValue({ ...attempt, state: 'unknown' })
+  show()
+  expect(await screen.findByText('Send status unknown')).toBeVisible()
+  await waitFor(() => expect(api.getResendStatus).toHaveBeenCalledWith(expect.objectContaining(source), requestId, expect.anything()))
+  fireEvent.click(screen.getByRole('button', { name: 'Check status' }))
+  expect(api.requestResend).toHaveBeenCalledTimes(1)
+  expect(screen.queryByRole('button', { name: 'Confirm and resend' })).not.toBeInTheDocument()
+})
+it('distinguishes queued from provider accepted and displays a later bounce truthfully', async () => {
+  api.requestResend.mockResolvedValue({ kind: 'queued', attemptId: 'attempt' })
+  api.getResendStatus.mockResolvedValue(attempt)
+  show()
+  fireEvent.click(await screen.findByRole('button', { name: 'Confirm and resend' }))
+  expect(await screen.findByText('Ticket email queued')).toBeVisible()
+  expect(screen.queryByText('Email accepted')).not.toBeInTheDocument()
+  api.getResendStatus.mockResolvedValue({ ...attempt, state: 'accepted', observation: 'bounced' })
+  fireEvent.click(screen.getByRole('button', { name: 'Check status' }))
+  expect(await screen.findByText('Email bounced')).toBeVisible()
+  expect(screen.queryByText(/Check their inbox/)).not.toBeInTheDocument()
+})
+it.each(['ended', 'recipient_blocked', 'inactive'])('blocks ineligible %s without creating an operation', async reason => {
+  api.getDelivery.mockResolvedValue({ ...summary, eligible: false, reason })
+  show()
+  expect(await screen.findByText('Cannot resend tickets')).toBeVisible()
+  expect(screen.queryByRole('button', { name: 'Confirm and resend' })).not.toBeInTheDocument()
+  expect(api.requestResend).not.toHaveBeenCalled()
+})
+it('shows disabled delivery without a success claim', async () => {
+  api.getDelivery.mockResolvedValue({ ...summary, configured: false })
+  show()
+  expect(await screen.findByText('Ticket email is not enabled')).toBeVisible()
+  expect(screen.queryByRole('button', { name: 'Confirm and resend' })).not.toBeInTheDocument()
+})
+it('removes old recipient while a new source is loading', async () => {
+  const view = show()
+  await screen.findByText('recorded@example.com')
+  api.getDelivery.mockReturnValue(new Promise(() => {}))
+  view.rerender(<QueryClientProvider client={view.client}><ResendTicketsDialog {...source} sourceId='other' onClose={() => {}} /></QueryClientProvider>)
+  expect(screen.queryByText('recorded@example.com')).not.toBeInTheDocument()
+})
+it('requires a deliberate fresh request after definite failure and preserves accepted truth', async () => {
+  api.requestResend.mockResolvedValue({ kind: 'queued', attemptId: 'attempt' })
+  api.getResendStatus.mockResolvedValue({ ...attempt, state: 'failed' })
+  show()
+  fireEvent.click(await screen.findByRole('button', { name: 'Confirm and resend' }))
+  expect(await screen.findByText('Couldn’t resend tickets')).toBeVisible()
+  const firstId = api.requestResend.mock.calls[0]![1]
+  api.getResendStatus.mockResolvedValue({ ...attempt, state: 'accepted' })
+  fireEvent.click(screen.getByRole('button', { name: 'Request another email' }))
+  expect(await screen.findByText('Email accepted')).toBeVisible()
+  expect(api.requestResend.mock.calls[1]![1]).not.toBe(firstId)
+  expect(screen.getByText(/acceptance does not confirm inbox arrival/)).toBeVisible()
+})
+it('does not send without durable request storage', async () => {
+  const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('blocked') })
+  show()
+  fireEvent.click(await screen.findByRole('button', { name: 'Confirm and resend' }))
+  expect(await screen.findByText(/cannot safely remember/)).toBeVisible()
+  expect(api.requestResend).not.toHaveBeenCalled()
+  spy.mockRestore()
+})
+it('retains accepted result across close/remount and changes UUID only for a deliberate fresh resend', async () => {
+  api.requestResend.mockResolvedValue({ kind: 'queued', attemptId: 'attempt' })
+  api.getResendStatus.mockResolvedValue({ ...attempt, state: 'accepted' })
+  const first = show()
+  fireEvent.click(await screen.findByRole('button', { name: 'Confirm and resend' }))
+  await screen.findByText('Email accepted')
+  const requestId = api.requestResend.mock.calls[0]![1]
+  first.unmount(); first.client.clear()
+  show()
+  await screen.findByText('Email accepted')
+  expect(api.requestResend).toHaveBeenCalledTimes(1)
+  expect(api.getResendStatus).toHaveBeenLastCalledWith(expect.objectContaining(source), requestId, expect.anything())
+  fireEvent.click(screen.getByRole('button', { name: 'Request another email' }))
+  await waitFor(() => expect(api.requestResend).toHaveBeenCalledTimes(2))
+  expect(api.requestResend.mock.calls[1]![1]).not.toBe(requestId)
+})
+it('does not offer a fresh resend after a verified bounce even before summary refresh catches up', async () => {
+  api.requestResend.mockResolvedValue({ kind: 'queued', attemptId: 'attempt' })
+  api.getResendStatus.mockResolvedValue({ ...attempt, state: 'accepted', observation: 'bounced' })
+  show()
+  fireEvent.click(await screen.findByRole('button', { name: 'Confirm and resend' }))
+  await screen.findByText('Email bounced')
+  expect(screen.queryByRole('button', { name: 'Request another email' })).not.toBeInTheDocument()
+})
+it('allows a deliberate fresh resend after pre-dispatch suppression and restored eligibility, preserving the old attempt', async () => {
+  const suppression = { ...attempt, state: 'suppressed', stoppedReason: 'configuration_unavailable' }
+  const immutableSuppression = JSON.stringify(suppression)
+  api.requestResend.mockResolvedValue({ kind: 'queued', attemptId: 'attempt' })
+  api.getResendStatus.mockResolvedValue(suppression)
+  const first = show()
+  fireEvent.click(await screen.findByRole('button', { name: 'Confirm and resend' }))
+  await screen.findByText('Ticket email not sent')
+  const original = api.requestResend.mock.calls[0]![1]
+  first.unmount(); first.client.clear()
+  api.getDelivery.mockResolvedValue({ ...summary, configured: true, eligible: true, reason: null })
+  show()
+  await screen.findByText('Ticket email not sent')
+  expect(api.getResendStatus).toHaveBeenLastCalledWith(expect.objectContaining(source), original, expect.anything())
+  expect(screen.getByText('recorded@example.com')).toBeVisible()
+  expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Request another email' }))
+  await waitFor(() => expect(api.requestResend).toHaveBeenCalledTimes(2))
+  expect(api.requestResend.mock.calls[1]![1]).not.toBe(original)
+  expect(JSON.stringify(suppression)).toBe(immutableSuppression)
+})
+it.each(['queued', 'sending', 'unknown'])('does not replace a verified %s request with a fresh UUID', async state => {
+  api.requestResend.mockResolvedValue({ kind: 'queued', attemptId: 'attempt' })
+  api.getResendStatus.mockResolvedValue({ ...attempt, state })
+  show()
+  fireEvent.click(await screen.findByRole('button', { name: 'Confirm and resend' }))
+  await screen.findByRole('button', { name: 'Check status' })
+  expect(screen.queryByRole('button', { name: 'Request another email' })).not.toBeInTheDocument()
+  expect(api.requestResend).toHaveBeenCalledTimes(1)
+})

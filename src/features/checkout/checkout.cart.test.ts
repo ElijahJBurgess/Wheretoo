@@ -25,6 +25,10 @@ describe('checkout cart URL codec', () => {
     ])
   })
 
+  it('retains syntactically valid tiers that disappeared from current availability', () => {
+    expect(parseCheckoutCart(`?item=${vipTierId}%3A1`, [gaTierId])).toEqual([{ tierId: vipTierId, quantity: 1 }])
+  })
+
   it('accepts exactly ten admissions across multiple tiers', () => {
     expect(parseCheckoutCart(
       `?item=${gaTierId}%3A6&item=${vipTierId}%3A4`,
@@ -39,7 +43,6 @@ describe('checkout cart URL codec', () => {
   it.each([
     ['', [gaTierId]],
     [`?item=${gaTierId}%3A1&item=${gaTierId}%3A2`, [gaTierId]],
-    [`?item=${vipTierId}%3A1`, [gaTierId]],
     ['?item=not-a-uuid%3A1', [gaTierId]],
     [`?item=${gaTierId}%3A0`, [gaTierId]],
     [`?item=${gaTierId}%3A1.5`, [gaTierId]],

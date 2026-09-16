@@ -1,8 +1,11 @@
-import type { OrderSummary } from './operations.schemas'
+import { ReadState } from '../../components/ui/ReadState'
+import { isOperationsAccessDenied } from './operations.errors'
+import type { OrderFilter, OrderSummary } from './operations.schemas'
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useSession } from '../auth/SessionProvider'
-import { useEventMetrics, useEventOrders } from './operations.queries'
+import { useOwnedEvent } from '../events/event.queries'
+import { useEventOrders } from './operations.queries'
 import { OperationsError } from './OperationsUi'
 import { money } from './operations.format'
 import { statusLabel } from './operations.format'
@@ -15,17 +18,25 @@ export function OrganizerOrdersPage() {
 function EventOrders({ ownerId, eventId }: { ownerId: string; eventId: string }) {
   const [draft, setDraft] = useState('')
   const [search, setSearch] = useState('')
+  const [status, setStatus] = useState<OrderFilter>('all')
   const [previousRows, setPreviousRows] = useState<OrderSummary[]>([])
-  const query = useEventOrders(ownerId, eventId, search)
-  const metrics = useEventMetrics(ownerId, eventId)
-  const rows = query.data?.pages.flatMap((page) => page.orders) ?? previousRows
+  const query = useEventOrders(ownerId, eventId, search, status)
+  const event = useOwnedEvent(eventId, ownerId, { revalidateOnMount: true })
+  const verifiedEvent = event.isFetchedAfterMount && !event.isError ? event.data : undefined
+  const accessDenied = isOperationsAccessDenied(query.error)
+  const rows = accessDenied ? [] : query.isFetchedAfterMount ? query.data?.pages.flatMap((page) => page.orders) ?? previousRows : previousRows
   return (
     <section className='operations-page'>
       <Link className='ops-back' to={`/organizer/events/${eventId}/dashboard`}>
         ← Event dashboard
       </Link>
       <header className='ops-page-heading'>
-        <p>{metrics.data?.event.title ?? 'Event operations'}</p>
+        <p>
+          {verifiedEvent?.title ??
+            (event.isPending || !event.isFetchedAfterMount
+              ? 'Loading event…'
+              : 'Event context unavailable')}
+        </p>
         <h1>Orders</h1>
         <p>Manage and view ticket orders for this event.</p>
       </header>
@@ -50,11 +61,17 @@ function EventOrders({ ownerId, eventId }: { ownerId: string; eventId: string })
         />
         <button className='ops-button ops-button--primary' type='submit'>Search</button>
       </form>
+      <div className='ops-event-filters' aria-label='Order status'>
+        {(['all', 'paid', 'refunded'] as const).map(value => <button type='button' className='ops-button' key={value}
+          aria-pressed={status === value} onClick={() => { setPreviousRows([]); setStatus(value) }}>
+          {value === 'all' ? 'All' : value === 'paid' ? 'Paid' : 'Refunded'}
+        </button>)}
+      </div>
       {query.isFetching && !query.isFetchingNextPage && rows.length > 0 && <p className='ops-note' role='status'>Updating results…</p>}
-      {query.isPending && rows.length === 0
-        ? <p role='status' className='operations-state'>Loading orders…</p>
-        : query.isError && !query.data && rows.length === 0
-        ? <OperationsError title='Orders unavailable' retry={() => void query.refetch()} />
+      {(query.isPending || !query.isFetchedAfterMount) && rows.length === 0
+        ? <ReadState status='loading' paused={query.fetchStatus === 'paused'} skeleton='order-rows' title='Loading orders…' />
+        : (query.isError || !query.data) && rows.length === 0
+        ? <OperationsError headingAs='h2' title='Orders unavailable' retry={() => void query.refetch()} />
         : (
           <>
             <div className='ops-orders-header' aria-hidden='true'>
@@ -87,9 +104,10 @@ function EventOrders({ ownerId, eventId }: { ownerId: string; eventId: string })
               ))}
             </ul>
             {rows.length === 0 && (
-              <p className='operations-state'>
-                {search ? 'No matching orders.' : 'No orders yet.'}
-              </p>
+              <ReadState status='empty' title={search || status !== 'all' ? 'No matching orders' : 'No orders yet'}
+                description={search || status !== 'all' ? 'Try another search or order status.' : 'Orders will appear here after a purchase is confirmed.'}
+                action={search ? <button className='ops-button' onClick={() => { setDraft(''); setSearch(''); setPreviousRows([]); document.getElementById('order-search')?.focus() }}>Clear search</button> : undefined}
+                secondaryAction={status !== 'all' ? <button className='ops-button' onClick={() => { setStatus('all'); setPreviousRows([]) }}>Clear filter</button> : undefined} />
             )}
             {query.isFetchNextPageError && (
               <p role='alert'>More orders could not load. Try again.</p>

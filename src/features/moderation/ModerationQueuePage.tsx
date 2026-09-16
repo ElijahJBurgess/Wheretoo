@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { AsyncState } from '../../components/ui/AsyncState'
+import { ReadState } from '../../components/ui/ReadState'
 import { Button } from '../../components/ui/Button'
 import { useStaffContext } from './staffContext'
 import { useModerationQueue } from './moderation.queries'
@@ -32,12 +32,12 @@ export function ModerationQueuePage() {
   const queueQuery = useModerationQueue(staffUserId)
 
   if (queueQuery.isPending) {
-    return <AsyncState status="loading" title="Loading moderation queue" />
+    return <ReadState headingAs="h1" paused={queueQuery.fetchStatus === 'paused'} status="loading" skeleton="order-rows" title="Loading moderation queue" />
   }
 
-  if (queueQuery.isError) {
+  if (queueQuery.isError || !Array.isArray(queueQuery.data)) {
     return (
-      <AsyncState
+      <ReadState headingAs="h1"
         action={<Button onClick={() => void queueQuery.refetch()}>Try again</Button>}
         description="Check your connection, then try again."
         status="error"
@@ -48,7 +48,7 @@ export function ModerationQueuePage() {
 
   if (!queueQuery.data?.length) {
     return (
-      <AsyncState
+      <ReadState headingAs="h1"
         description="Held, blocked, and removed events will appear here when staff attention is needed."
         status="empty"
         title="No cases need attention"

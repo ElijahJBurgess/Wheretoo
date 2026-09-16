@@ -1,0 +1,21 @@
+{
+  "format": 1,
+  "baselineManifestSha256": "99008c21467da572af1d06f1208a13989b9927cdb54c74243387d39c677f83f2",
+  "migrations": [
+    {
+      "path": "supabase/migrations/20260918010100_guard_incomplete_moderation_jobs.sql",
+      "sha256": "992a0de9840f90cf79d887215ab2d966b7857099698842fb4a17cea35c345f6e",
+      "approvalId": "spec14-moderation-input-2026-09-15"
+    },
+    {
+      "path": "supabase/migrations/20260918010200_restore_active_event_moderation_schedule.sql",
+      "sha256": "827b264600d5e07adf0d2e8227ea0a284b56ed1f4c7bad09caf8af4aae89a087",
+      "approvalId": "spec14-active-moderation-schedule-2026-09-15"
+    },
+    {
+      "path": "supabase/migrations/20260918010300_reconcile_unattached_paid_checkout.sql",
+      "sha256": "1c149b1910c87ac07d7e5bf08dad26b8554f351577b6241beb444e1d27d332d9",
+      "approvalId": "spec14-unattached-paid-checkout-2026-09-15"
+    }
+  ]
+}

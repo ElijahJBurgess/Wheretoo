@@ -25,9 +25,9 @@ reset role;
 select is((select proconfig::text from pg_proc where oid='public.server_lookup_paid_ticket_collection(text)'::regprocedure),'{"search_path=\"\""}','projection fixes empty search path');
 select ok(not exists(select 1 from pg_proc p, lateral aclexplode(p.proacl) a where p.oid='public.server_lookup_paid_ticket_collection(text)'::regprocedure and a.grantee=0 and a.privilege_type='EXECUTE'),'PUBLIC has no execute grant');
 select results_eq($$ select jsonb_object_keys(to_jsonb(p)) from public.server_lookup_paid_ticket_collection(repeat('1',64)) p order by 1 $$,
-$$ values ('event_ends_at'),('event_id'),('event_starts_at'),('event_status'),('event_title'),('event_venue_name'),('items'),('order_status'),('quantity'),('tickets') $$,'projection exposes only event, status and minimal coherence data');
+$$ values ('event_address'),('event_ends_at'),('event_facts_available'),('event_id'),('event_starts_at'),('event_status'),('event_timezone'),('event_title'),('event_updated'),('event_venue_name'),('items'),('order_status'),('quantity'),('tickets') $$,'projection exposes only approved event facts, status and minimal coherence data');
 select results_eq($$ select jsonb_object_keys(tickets->0) from public.server_lookup_paid_ticket_collection(repeat('1',64)) order by 1 $$,
-$$ values ('admission_label'),('credential_hash'),('id'),('order_item_id'),('status'),('unit_sequence') $$,'ticket projection excludes PII, Stripe, reconciliation and raw credential');
+$$ values ('admission_label'),('credential_hash'),('id'),('order_item_id'),('status'),('unit_sequence'),('used_at') $$,'ticket projection excludes PII, Stripe, reconciliation and raw credential');
 select results_eq($$ select jsonb_object_keys(items->0) from public.server_lookup_paid_ticket_collection(repeat('1',64)) order by 1 $$,
 $$ values ('admission_label'),('order_item_id'),('quantity') $$,'source projection contains only snapshot label and unit cardinality');
 select results_eq($$ select ticket->>'id' from public.server_lookup_paid_ticket_collection(repeat('1',64)), jsonb_array_elements(tickets) with ordinality a(ticket,n) order by n $$,

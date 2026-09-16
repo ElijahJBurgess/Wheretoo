@@ -1,5 +1,5 @@
 import { Outlet } from 'react-router-dom'
-import { AsyncState } from '../../components/ui/AsyncState'
+import { ReadState } from '../../components/ui/ReadState'
 import { Button } from '../../components/ui/Button'
 import { useSession } from '../auth/SessionProvider'
 import { useStaffRole } from './moderation.queries'
@@ -10,25 +10,25 @@ export function RequireStaff() {
   const roleQuery = useStaffRole(staffUserId)
 
   if (sessionState.status !== 'authenticated' || roleQuery.isPending) {
-    return <AsyncState status="loading" title="Checking moderation access" />
+    return <ReadState headingAs="h1" paused={roleQuery.fetchStatus === 'paused'} status="loading" title="Checking moderation access" />
   }
 
-  if (roleQuery.isError) {
+  if (roleQuery.isError || roleQuery.data === undefined) {
     return (
-      <AsyncState
+      <ReadState headingAs="h1"
         action={<Button onClick={() => void roleQuery.refetch()}>Try again</Button>}
         description="Check your connection, then try again."
-        status="error"
+        status="unavailable"
         title="Moderation access could not be confirmed"
       />
     )
   }
 
-  if (roleQuery.data === null || roleQuery.data === undefined) {
+  if (roleQuery.data === null) {
     return (
-      <AsyncState
+      <ReadState headingAs="h1"
         description="An active moderator or admin role is required."
-        status="empty"
+        status="denied"
         title="Moderation access required"
       />
     )

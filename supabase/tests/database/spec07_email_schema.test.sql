@@ -1,0 +1,15 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+select extensions.no_plan();
+select extensions.has_table('private','ticket_email_settings','delivery activation is private');
+select extensions.has_table('private','ticket_email_grants','scoped grants exist');
+select extensions.has_table('private','ticket_email_members','membership exists separately from tickets');
+select extensions.has_table('private','ticket_email_outbox','durable outbox exists');
+select extensions.has_table('private','ticket_email_observations','verified observations are durable');
+select extensions.ok(not has_table_privilege('anon','private.ticket_email_grants','SELECT'),'anonymous cannot select grants');
+select extensions.ok(not has_table_privilege('authenticated','private.ticket_email_outbox','SELECT'),'organizers cannot select outbox payloads');
+select extensions.is((select enabled_at::text from private.ticket_email_settings),null,'automatic delivery starts disabled');
+select extensions.is((select limits::text from private.ticket_email_settings),null,'unapproved production limits are inactive');
+select extensions.ok(not (select worker_enabled from private.ticket_email_settings),'worker starts disabled');
+select * from extensions.finish();
+rollback;

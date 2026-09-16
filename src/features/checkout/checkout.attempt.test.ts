@@ -41,6 +41,7 @@ describe('checkout attempt identity', () => {
       'clientRequestId',
       'confirmationBearer',
       'contractVersion',
+      'lifecycle',
       'submissionFingerprint',
     ])
     expect(sessionStorage.getItem(storageKey)).not.toMatch(/Avery|example\.com|buyerName|buyerEmail|tierId|quantity/)
@@ -50,16 +51,19 @@ describe('checkout attempt identity', () => {
     { buyerName: 'Avery Stone Jr.' },
     { buyerEmail: 'other@example.com' },
     { items: [{ tierId: gaTierId, quantity: 3 }] },
-  ])('rotates both values after a material buyer or cart edit', async (edit) => {
+  ])('blocks a material buyer or cart edit while the original identity is unresolved', async (edit) => {
     vi.spyOn(crypto, 'randomUUID')
       .mockReturnValueOnce(firstUuid)
       .mockReturnValueOnce(secondUuid)
     const first = await getOrCreateCheckoutAttempt(submission)
-    const second = await getOrCreateCheckoutAttempt({ ...submission, ...edit })
+    await expect(getOrCreateCheckoutAttempt({ ...submission, ...edit })).rejects.toThrow()
+    expect(JSON.parse(sessionStorage.getItem(storageKey) ?? '{}')).toEqual(first)
+  })
 
-    expect(second.clientRequestId).toBe(secondUuid)
-    expect(second.clientRequestId).not.toBe(first.clientRequestId)
-    expect(second.confirmationBearer).not.toBe(first.confirmationBearer)
+  it('blocks replacement when a previously written record is deleted', async () => {
+    await getOrCreateCheckoutAttempt(submission)
+    sessionStorage.removeItem(storageKey)
+    await expect(getOrCreateCheckoutAttempt(submission)).rejects.toThrow()
   })
 
   it('generates the bearer from an independent 32-byte random draw in canonical base64url', async () => {
@@ -82,7 +86,7 @@ describe('checkout attempt identity', () => {
     expect(attempt.confirmationBearer).not.toContain(firstUuid.replaceAll('-', ''))
   })
 
-  it('rotates a stored bearer whose unused base64url pad bits are non-canonical', async () => {
+  it('blocks a stored bearer whose unused base64url pad bits are non-canonical', async () => {
     vi.spyOn(crypto, 'randomUUID')
       .mockReturnValueOnce(firstUuid)
       .mockReturnValueOnce(secondUuid)
@@ -98,13 +102,11 @@ describe('checkout attempt identity', () => {
       confirmationBearer: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh9',
     }))
 
-    const rotated = await getOrCreateCheckoutAttempt(submission)
-
-    expect(rotated.clientRequestId).toBe(secondUuid)
-    expect(rotated.confirmationBearer).toBe('AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8')
+    await expect(getOrCreateCheckoutAttempt(submission)).rejects.toThrow()
+    expect(JSON.parse(sessionStorage.getItem(storageKey) ?? '{}').clientRequestId).toBe(firstUuid)
   })
 
-  it('fails closed and rotates a corrupt stored record', async () => {
+  it('fails closed without replacing a corrupt stored record', async () => {
     sessionStorage.setItem(storageKey, JSON.stringify({
       contractVersion: 'checkout_integrity_v1',
       submissionFingerprint: 'not-a-fingerprint',
@@ -114,10 +116,8 @@ describe('checkout attempt identity', () => {
     }))
     vi.spyOn(crypto, 'randomUUID').mockReturnValue(secondUuid)
 
-    const attempt = await getOrCreateCheckoutAttempt(submission)
-
-    expect(attempt.clientRequestId).toBe(secondUuid)
-    expect(sessionStorage.getItem(storageKey)).not.toContain('leaked@example.com')
+    await expect(getOrCreateCheckoutAttempt(submission)).rejects.toThrow()
+    expect(JSON.parse(sessionStorage.getItem(storageKey) ?? '{}').clientRequestId).toBe(firstUuid)
   })
 
   it('terminal confirmation cleanup deletes only the bearer-matching attempt', async () => {
@@ -138,6 +138,7 @@ describe('checkout attempt identity', () => {
       .mockReturnValueOnce(firstUuid)
       .mockReturnValueOnce(secondUuid)
     const first = await getOrCreateCheckoutAttempt(submission)
+    clearCheckoutAttemptForConfirmation(first.confirmationBearer)
     const second = await getOrCreateCheckoutAttempt({ ...submission, buyerName: 'Another Buyer' })
 
     clearCheckoutAttemptForConfirmation(first.confirmationBearer)

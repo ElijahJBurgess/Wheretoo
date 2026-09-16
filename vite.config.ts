@@ -37,7 +37,7 @@ export default defineConfig(({ command, mode }) => {
         browserEnvKeys.map((key) => [`import.meta.env.${key}`, JSON.stringify(browserEnv[key] ?? '')]),
       ),
       'import.meta.env.VITE_SCREEN_PREVIEW_ENABLED': JSON.stringify(
-        mode === 'development' || process.env.VERCEL_ENV === 'preview' || process.env.WHERETOO_ENABLE_PREVIEW === '1',
+        process.env.WHERETOO_ENABLE_PREVIEW === '1',
       ),
     },
     plugins: [developmentCspBypass(), ticketExperienceEntry(command), react()],
@@ -46,6 +46,8 @@ export default defineConfig(({ command, mode }) => {
       setupFiles: ['./src/test/setup.ts'],
       exclude: [
         ...configDefaults.exclude,
+        '.worktrees/**',
+        '.superpowers/**',
         'supabase/functions/**',
         'tests/integration/**',
         'tests/e2e/**',

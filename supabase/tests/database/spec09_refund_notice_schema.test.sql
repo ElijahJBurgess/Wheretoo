@@ -1,0 +1,11 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+select extensions.no_plan();
+select extensions.has_function('public','server_enqueue_refund_notices',array['integer'],'bounded canonical catch-up exists');
+select extensions.has_function('public','server_read_refund_detail_access',array['text','text'],'purpose-specific financial resolver exists');
+select extensions.has_function('public','get_organizer_refund_notice_status',array['uuid','uuid'],'notice delivery status is independent');
+select extensions.ok(not has_function_privilege('anon','public.server_enqueue_refund_notices(integer)','execute'),'anonymous cannot enqueue');
+select extensions.ok(not has_function_privilege('authenticated','public.server_read_refund_detail_access(text,text)','execute'),'members cannot bypass bearer edge');
+select extensions.ok(has_function_privilege('service_role','public.server_read_refund_detail_access(text,text)','execute'),'service resolver allowed');
+select * from extensions.finish();
+rollback;

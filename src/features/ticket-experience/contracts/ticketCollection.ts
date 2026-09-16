@@ -4,13 +4,18 @@ export type TicketDisplay = {
   selector: string
   eventId: string
   eventName: string
-  startsAt: string
-  endsAt: string
+  startsAt: string | null
+  endsAt: string | null
+  eventFactsAvailable?: boolean
+  eventUpdated?: boolean
+  eventStatus?: 'published' | 'cancelled'
+  timezone?: string
   venueName: string
   admissionLabel: string
   position: number
   totalInCollection: number
   attendeeLabel?: string
+  usedAt?: string
   directionsUrl?: string
 } & (
   | { status: 'valid'; admissionCredential: string }
@@ -18,6 +23,8 @@ export type TicketDisplay = {
 )
 
 export type TicketCollection = {
+  registrationId?: string
+  registrationStatus?: 'confirmed' | 'cancelled'
   collectionLabel: string
   eventId: string
   tickets: readonly TicketDisplay[]

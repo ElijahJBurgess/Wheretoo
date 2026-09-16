@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
@@ -16,6 +17,11 @@ vi.mock('../moderation/moderation.queries', () => ({
   useCurrentEventReviewRequest, usePublicEvent, useRequestEventReview, useWithdrawEventReview,
 }))
 
+const { ownerRead } = vi.hoisted(() => ({ ownerRead: vi.fn() }))
+vi.mock('./event.api', () => ({ getOwnedEvent: ownerRead }))
+vi.mock('../event-changes/eventChanges.queries', () => ({ useCancellationSummary: () => ({ data: undefined, isError: true, isPending: false, refetch: vi.fn() }), useEventNoticeStatus: () => ({ data: undefined, isError: true, isPending: false, refetch: vi.fn() }) }))
+vi.mock('../../lib/supabase/client', () => ({ supabase: {} }))
+
 import { PublishedEventPage } from './PublishedEventPage'
 
 const organizer = { id: 'organizer-1', display_name: 'Bay City Arts' } as Organizer
@@ -33,6 +39,7 @@ const event = {
 function renderPage(
   row: EventRow | null = event,
   queryState?: { data: EventRow | null | undefined; isPending: boolean; isError: boolean; refetch: typeof eventRefetch },
+  path = '/organizer/events/event-1',
 ) {
   useOwnedEvent.mockReturnValue(queryState ?? { data: row, isPending: false, isError: false, refetch: eventRefetch })
   const router = createMemoryRouter([
@@ -41,13 +48,14 @@ function renderPage(
     { path: '/organizer/events/:eventId/tickets', element: <p>ticket setup destination</p> },
     { path: '/organizer/events/:eventId/check-in', element: <p>scanner destination</p> },
     { path: '/organizer/events', element: <p>events destination</p> },
-  ], { initialEntries: ['/organizer/events/event-1'] })
-  return { router, ...render(<RouterProvider router={router} />) }
+  ], { initialEntries: [path] })
+  return { router, ...render(<QueryClientProvider client={new QueryClient()}><RouterProvider router={router} /></QueryClientProvider>) }
 }
 
 describe('PublishedEventPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    ownerRead.mockResolvedValue(event)
     useSession.mockReturnValue({ status: 'authenticated', session: {}, user: { id: 'organizer-1' } })
     useOrganizer.mockReturnValue({ data: organizer, isPending: false, isError: false, refetch: organizerRefetch })
     usePublicEvent.mockReturnValue({ data: { id: 'event-1' }, isPending: false, isError: false, refetch: publicEventRefetch })
@@ -55,6 +63,27 @@ describe('PublishedEventPage', () => {
     useRequestEventReview.mockReturnValue({ isPending: false, mutateAsync: requestMutateAsync })
     useWithdrawEventReview.mockReturnValue({ isPending: false, mutateAsync: withdrawMutateAsync })
     useCancelOwnedEvent.mockReturnValue({ isPending: false, mutateAsync: cancelMutateAsync })
+  })
+
+  it('shows the creation outcome only after verified canonical public availability', () => {
+    renderPage(event, undefined, '/organizer/events/event-1?created=1')
+    expect(screen.getByRole('heading', { name: 'Your event is live!' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'View event' })).toHaveAttribute('href', '/events/event-1')
+  })
+
+  it('shows a held creation outcome without a public event action', () => {
+    usePublicEvent.mockReturnValue({ data: null, isPending: false, isError: false, refetch: publicEventRefetch })
+    renderPage({ ...event, moderation_status: 'under_review' }, undefined, '/organizer/events/event-1?created=1')
+    expect(screen.getByRole('heading', { name: 'Your event is under review' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'View event' })).not.toBeInTheDocument()
+  })
+
+  it('keeps an unavailable canonical availability check retryable from the creation outcome', async () => {
+    usePublicEvent.mockReturnValue({ data: undefined, isPending: false, isError: true, refetch: publicEventRefetch })
+    renderPage(event, undefined, '/organizer/events/event-1?created=1')
+    await userEvent.click(screen.getByRole('button', { name: 'Check public availability again' }))
+    expect(publicEventRefetch).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('link', { name: 'View event' })).not.toBeInTheDocument()
   })
 
   it('requires explicit cancellation confirmation and lets the organizer keep the event', async () => {
@@ -86,10 +115,10 @@ describe('PublishedEventPage', () => {
     await user.click(screen.getByRole('button', { name: 'Cancel event' }))
     await user.dblClick(screen.getByRole('button', { name: 'Confirm cancellation' }))
     expect(cancelMutateAsync).toHaveBeenCalledExactlyOnceWith('event-1')
-    expect(screen.getByRole('button', { name: 'Cancelling…' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Checking cancellation…' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Keep event' })).toBeDisabled()
     await act(async () => resolve({ ...event, status: 'cancelled' }))
-    expect(screen.getByText('Event cancelled. Payments have not been automatically refunded.')).toHaveFocus()
+    expect(screen.getByText(/Cancellation confirmed. Unused admissions are stopped/)).toHaveFocus()
     expect(screen.queryByRole('button', { name: 'Cancel event' })).not.toBeInTheDocument()
   })
 
@@ -99,11 +128,40 @@ describe('PublishedEventPage', () => {
     renderPage()
     await user.click(screen.getByRole('button', { name: 'Cancel event' }))
     await user.click(screen.getByRole('button', { name: 'Confirm cancellation' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent(/could not confirm cancellation.*safe to try again/i)
+    expect(await screen.findByText(/server confirmed this event is still published/i)).toBeInTheDocument()
+    expect(ownerRead).toHaveBeenCalledWith('event-1', 'organizer-1')
     expect(cancelMutateAsync).toHaveBeenCalledTimes(1)
     await user.click(screen.getByRole('button', { name: 'Try cancellation again' }))
     expect(cancelMutateAsync).toHaveBeenCalledTimes(2)
-    expect(screen.getByText('Event cancelled. Payments have not been automatically refunded.')).toBeInTheDocument()
+    expect(screen.getByText(/Cancellation confirmed. Unused admissions are stopped/)).toBeInTheDocument()
+  })
+
+  it('disables cancellation retry after an ambiguous mutation and failed owner read, then reconciles before retry', async () => {
+    cancelMutateAsync.mockRejectedValueOnce(new Error('lost reply'))
+    ownerRead.mockRejectedValueOnce(new Error('read failed')).mockResolvedValueOnce(event)
+    const user = userEvent.setup(); renderPage()
+    await user.click(screen.getByRole('button', { name: 'Cancel event' })); await user.click(screen.getByRole('button', { name: 'Confirm cancellation' }))
+    expect(await screen.findByText(/Cancellation status unknown/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Confirm cancellation' })).toBeDisabled()
+    expect(cancelMutateAsync).toHaveBeenCalledOnce()
+    await user.click(screen.getByRole('button', { name: 'Check cancellation status' }))
+    expect(screen.getByRole('button', { name: 'Try cancellation again' })).toBeEnabled()
+    expect(cancelMutateAsync).toHaveBeenCalledOnce()
+  })
+
+  it('recovers lost cancellation success independently of organizer, summary and notice failures', async () => {
+    cancelMutateAsync.mockRejectedValueOnce(new Error('lost reply'))
+    ownerRead.mockImplementation(async () => {
+      useOrganizer.mockReturnValue({ isError: true, refetch: organizerRefetch })
+      return { ...event, status: 'cancelled' }
+    })
+    const user = userEvent.setup(); renderPage()
+    await user.click(screen.getByRole('button', { name: 'Cancel event' })); await user.click(screen.getByRole('button', { name: 'Confirm cancellation' }))
+    expect(await screen.findByRole('heading', { name: 'Event cancelled' })).toBeInTheDocument()
+    expect(screen.getByText(/Summary unavailable/)).toBeInTheDocument()
+    expect(screen.getByText('Notice status unavailable')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Edit event' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Check in guests' })).not.toBeInTheDocument()
   })
 
   it('does not offer cancellation for an already cancelled event', () => {
@@ -257,9 +315,9 @@ describe('PublishedEventPage', () => {
   it('handles cancelled lifecycle conservatively without public or cancellation actions', () => {
     renderPage({ ...event, status: 'cancelled' })
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
-    expect(screen.getByRole('heading', { level: 1, name: 'Cancelled' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { level: 2, name: 'Friday Night Makers' })).toBeInTheDocument()
-    expect(screen.getByText('This event is not publicly available.')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1, name: 'Event cancelled' })).toBeInTheDocument()
+    expect(screen.getByText(/Cancellation confirmed/)).toBeInTheDocument()
+    expect(screen.getByText(/Summary unavailable/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /cancel|refund/i })).not.toBeInTheDocument()
   })
 
@@ -276,7 +334,7 @@ describe('PublishedEventPage', () => {
     failed.unmount()
 
     renderPage(null)
-    expect(screen.getByText('Event not found')).toBeInTheDocument()
+    expect(screen.getByText('Event unavailable')).toBeInTheDocument()
     expect(screen.queryByText(/owner|permission|another organizer/i)).not.toBeInTheDocument()
   })
 })

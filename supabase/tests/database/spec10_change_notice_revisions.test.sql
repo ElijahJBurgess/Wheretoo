@@ -1,0 +1,56 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions;
+select no_plan();
+\ir free_registration_fixture.inc
+select pg_temp.register(10,2);
+create function pg_temp.eid() returns uuid language sql as $$select 'b6200000-0000-4000-8000-000000000001'::uuid$$;
+create function pg_temp.preview() returns jsonb language sql as $$select public.preview_owned_event_notice(pg_temp.eid(),'event_change')$$;
+select public.save_owned_event_revision(pg_temp.eid(),(private.event_change_facts(pg_temp.eid())-'disclosures')||jsonb_build_object('starts_at',now()+interval '2 days','ends_at',now()+interval '2 days 2 hours'));
+select is(public.get_owned_event_change_context(pg_temp.eid())->>'notice_required','true','schedule change persists required notice');
+select is(pg_temp.preview()->>'canSend','false','saved but not published revision cannot send');
+select throws_ok($$select public.submit_owned_event_notice(pg_temp.eid(),'event_change',pg_temp.preview()->>'previewToken','b6500000-0000-4000-8000-000000000011')$$,'P0001','NOTICE_CONTEXT_CONFLICT','cannot notify attendees of unapproved saved facts');
+select is((select count(*) from private.ticket_email_outbox),0::bigint,'saving never sends email');
+select public.accept_current_event_policies(pg_temp.eid());
+select public.publish_event(pg_temp.eid());
+select is(pg_temp.preview()->>'canSend','true','exact publicly eligible revision can be deliberately sent');
+select is((select count(*) from private.ticket_email_outbox),0::bigint,'publishing never sends email');
+create temp table reviewed as select pg_temp.preview() p;
+select public.submit_owned_event_notice(pg_temp.eid(),'event_change',(select p->>'previewToken' from reviewed),'b6500000-0000-4000-8000-000000000012');
+select is(public.get_owned_event_change_context(pg_temp.eid())->>'notice_required','false','durable deliberate submit completes follow-up for that snapshot');
+select is((select count(*) from private.ticket_email_outbox),1::bigint,'one message per free registration');
+select public.save_owned_event_revision(pg_temp.eid(),(private.event_change_facts(pg_temp.eid())-'disclosures')||'{"capacity":4}');
+select is(public.get_owned_event_change_context(pg_temp.eid())->>'notice_required','true','new facts superseding unsent material notice require fresh review even for capacity change');
+select is((select state from private.ticket_email_outbox),'suppressed','stale unsent work is durably suppressed');
+select is(public.get_owned_event_notice_status(pg_temp.eid(),'event_change')->>'suppressed','1','owner sees stale suppression truthfully');
+select throws_ok($$select public.submit_owned_event_notice(pg_temp.eid(),'event_change',(select p->>'previewToken' from reviewed),'b6500000-0000-4000-8000-000000000013')$$,'P0001','NOTICE_CONTEXT_CONFLICT','stale reviewed audience cannot submit with new intent');
+select public.submit_owned_event_notice(pg_temp.eid(),'event_change',pg_temp.preview()->>'previewToken','b6500000-0000-4000-8000-000000000014');
+select is((select count(*) from private.ticket_email_outbox where state='queued'),1::bigint,'fresh review queues current snapshot only');
+select public.cancel_owned_event(pg_temp.eid());
+select is(public.get_owned_event_notice_status(pg_temp.eid(),'event_change')->>'suppressed','2','cancellation prevents dispatch of remaining unsent change');
+select is((select count(*) from private.ticket_email_outbox where purpose='event_cancellation'),0::bigint,'cancellation notification remains deliberate');
+-- A legacy public event has no pre-migration facts, but its required reasons
+-- must survive submitting and then superseding a never-dispatched notice.
+select * from finish();rollback;
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions;
+select no_plan();
+\ir free_registration_fixture.inc
+select pg_temp.register(10,2);
+create function pg_temp.eid() returns uuid language sql as $$select 'b6200000-0000-4000-8000-000000000001'::uuid$$;
+delete from private.event_change_state where event_id=pg_temp.eid();
+update public.events set moderation_status='under_review',moderation_version=moderation_version+1 where id=pg_temp.eid();
+select public.get_owned_event_change_context(pg_temp.eid());
+select public.save_owned_event_revision(pg_temp.eid(),(private.event_change_facts(pg_temp.eid())-'disclosures')||'{"venue_name":"New Legacy Venue"}');
+select public.accept_current_event_policies(pg_temp.eid());
+update public.events set moderation_status='clear' where id=pg_temp.eid();
+select public.publish_event(pg_temp.eid());
+select private.capture_event_change_facts(pg_temp.eid());
+select is(public.get_owned_event_change_context(pg_temp.eid())->'previous_publicly_eligible','null'::jsonb,'legacy previous public facts remain unavailable');
+select public.submit_owned_event_notice(pg_temp.eid(),'event_change',public.preview_owned_event_notice(pg_temp.eid(),'event_change')->>'previewToken','b6500000-0000-4000-8000-000000000099');
+select is(public.get_owned_event_change_context(pg_temp.eid())->>'notice_required','false','legacy material notice submitted');
+select public.save_owned_event_revision(pg_temp.eid(),(private.event_change_facts(pg_temp.eid())-'disclosures')||'{"capacity":4}');
+select is(public.get_owned_event_change_context(pg_temp.eid())->>'notice_required','true','legacy unsent notice reasons survive capacity supersession');
+select is(public.get_owned_event_change_context(pg_temp.eid())->'required_fields','["venue_name"]'::jsonb,'legacy reason is retained without fabricated history');
+select * from finish();rollback;

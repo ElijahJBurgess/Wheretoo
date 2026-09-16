@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { loadConnectAndInitialize } = vi.hoisted(() => ({ loadConnectAndInitialize: vi.fn() }))
 
-vi.mock('@stripe/connect-js', () => ({ loadConnectAndInitialize }))
+vi.mock('@stripe/connect-js/pure', () => ({ loadConnectAndInitialize }))
 vi.mock('@stripe/react-connect-js', () => ({
   ConnectComponentsProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   ConnectNotificationBanner: () => <p>Stripe notifications</p>,

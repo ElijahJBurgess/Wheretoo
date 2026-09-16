@@ -26,7 +26,11 @@
     "test:ticket-shells": "vitest run src/features/ticket-experience scripts/send-ticket-ready-test.test.ts",
     "test:ticket-shells:production": "vitest run src/app/router/router.test.tsx && pnpm build && tsx --tsconfig tsconfig.scripts.json scripts/verify-ticket-shell-production.ts",
     "test:functions:moderation": "deno test --allow-env supabase/functions/report-event/index.test.ts supabase/functions/moderate-event-queue/index.test.ts",
-    "typecheck:functions": "deno task check"
+    "typecheck:functions": "deno task check",
+    "test:spec07:database": "python3 tests/integration/spec07-database.py test",
+    "test:spec07:concurrency": "python3 tests/integration/spec07-email-concurrency.py",
+    "test:spec07:browser": "playwright test --config playwright.spec07.config.ts",
+    "test:spec07:production": "tsx --tsconfig tsconfig.scripts.json scripts/verify-spec07-production.ts"
   },
   "keywords": [],
   "author": "",

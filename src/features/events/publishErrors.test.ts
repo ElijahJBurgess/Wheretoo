@@ -3,6 +3,11 @@ import { getPublishErrorMessage, publishErrorCopy } from './publishErrors'
 
 describe('publish error copy', () => {
   it.each(Object.entries({
+    CONNECT_NOT_READY: 'Complete Stripe setup before publishing paid tickets.',
+    CONNECT_ACTION_REQUIRED: 'Update your Stripe account requirements before publishing paid tickets.',
+    TIER_NOT_ACTIVE: 'Add at least one active ticket tier before publishing.',
+    TIER_INVALID: 'Review your saved ticket prices and capacities before publishing.',
+    TIER_LIMIT_EXCEEDED: 'Use no more than three ticket tiers.',
     EVENT_NOT_FOUND: 'This event could not be found.',
     EVENT_NOT_OWNED: 'This event is not available to this organizer.',
     EVENT_INCOMPLETE: 'Complete every required event detail before publishing.',

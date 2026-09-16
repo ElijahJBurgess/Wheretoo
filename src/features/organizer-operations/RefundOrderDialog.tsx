@@ -4,13 +4,14 @@ import { operationsKeys } from './operations.queries'
 import { OperationsDialog } from './OperationsDialog'
 import { money } from './operations.format'
 export function RefundOrderDialog(
-  { ownerId, eventId, orderId, orderNumber, totalMinor, quantity, onClose }: {
+  { ownerId, eventId, orderId, orderNumber, totalMinor, quantity, canRequest = true, onClose }: {
     ownerId: string
     eventId: string
     orderId: string
     orderNumber: string
     totalMinor: number
     quantity: number
+    canRequest?: boolean
     onClose(): void
   },
 ) {
@@ -42,6 +43,7 @@ export function RefundOrderDialog(
       <p className='ops-note'>
         Unused tickets will no longer admit guests. Previous check-ins stay in the event history.
       </p>
+      {!canRequest && !mutation.isSuccess && !confirmed && <p role='status'>A refund cannot be requested in the current order state.</p>}
       {mutation.isError && !confirmed && (
         <p role='alert'>Refund not confirmed. Refresh the order status or retry safely.</p>
       )}
@@ -60,7 +62,7 @@ export function RefundOrderDialog(
         {!mutation.isSuccess && !confirmed && (
           <button
             className='ops-button ops-button--danger'
-            disabled={mutation.isPending}
+            disabled={mutation.isPending || !canRequest}
             onClick={() => mutation.mutate()}
           >
             {mutation.isPending ? 'Requesting refund…' : 'Refund entire order'}

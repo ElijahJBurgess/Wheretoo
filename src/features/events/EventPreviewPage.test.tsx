@@ -2,291 +2,260 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Organizer } from '../organizers/organizer.api'
-import type { EventRow } from './event.types'
-
-const { mutateAsync, organizerRefetch, eventRefetch, requirementsRefetch, tiersRefetch, useOrganizer, useOwnedEvent, useOwnedEventRequirements, useOwnedTicketTiers, usePublishEvent, useSession } = vi.hoisted(() => ({
-  mutateAsync: vi.fn(), organizerRefetch: vi.fn(), eventRefetch: vi.fn(), useOrganizer: vi.fn(),
-  requirementsRefetch: vi.fn(), tiersRefetch: vi.fn(), useOwnedEvent: vi.fn(), useOwnedEventRequirements: vi.fn(), useOwnedTicketTiers: vi.fn(), usePublishEvent: vi.fn(), useSession: vi.fn(),
-}))
-
-vi.mock('../auth/SessionProvider', () => ({ useSession }))
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { testContext, testEvent } from '../event-changes/eventChanges.fixtures'
+import type { EventChangeContext } from '../event-changes/eventChanges.schemas'
+const { useContext, publish, reload, refetch, useOrganizer, organizerRefetch, useTiers, tiersRefetch, useConnect, connectRefetch } = vi.hoisted(() => ({ useContext: vi.fn(), publish: vi.fn(), reload: vi.fn(), refetch: vi.fn(), useOrganizer: vi.fn(), organizerRefetch: vi.fn(), useTiers: vi.fn(), tiersRefetch: vi.fn(), useConnect: vi.fn(), connectRefetch: vi.fn() }))
+vi.mock('../auth/SessionProvider', () => ({ useSession: () => ({ status: 'authenticated', user: { id: 'organizer-1' } }) }))
 vi.mock('../organizers/organizer.queries', () => ({ useOrganizer }))
-vi.mock('../moderation/moderation.queries', () => ({
-  moderationKeys: { publicEvent: (eventId: string) => ['public-event', eventId] },
-  useOwnedEventRequirements,
-}))
-vi.mock('./event.queries', () => ({ useOwnedEvent, usePublishEvent }))
-vi.mock('../tickets/ticket.queries', () => ({ useOwnedTicketTiers }))
+vi.mock('../event-changes/eventChanges.queries', () => ({ useEventChangeContext: useContext }))
+vi.mock('../event-changes/eventChanges.api', async importOriginal => ({ ...await importOriginal<typeof import('../event-changes/eventChanges.api')>(), publishIfCurrent: publish, getEventChangeContext: reload }))
+vi.mock('../tickets/ticket.queries', () => ({ useOwnedTicketTiers: useTiers, ticketKeys: {} }))
+vi.mock('../payments/payment.queries', () => ({ useConnectStatus: useConnect }))
 vi.mock('../../lib/supabase/client', () => ({ supabase: {} }))
-
 import { EventPreviewPage } from './EventPreviewPage'
-
-const organizer: Organizer = {
-  id: 'organizer-1', display_name: 'Bay City Arts', organizer_type: 'Community studio',
-  bio: null, website_url: null, base_city: 'Oakland', country_code: 'US',
-  onboarding_completed_at: '2026-08-24T12:00:00.000Z', created_at: '2026-08-24T12:00:00.000Z',
-  updated_at: '2026-08-24T12:00:00.000Z',
+import { EventChangeError } from '../event-changes/eventChanges.api'
+let current: EventChangeContext
+function renderPreview(path = '/organizer/events/event-1/preview') {
+ const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+ const router = createMemoryRouter([
+  { path: '/organizer/events/:eventId/preview', element: <EventPreviewPage /> }, { path: '/organizer/events/:eventId/edit', element: <p>edit destination</p> },
+  { path: '/organizer/events/:eventId/tickets', element: <p>ticket setup destination</p> }, { path: '/organizer/events/:eventId', element: <p>published destination</p> },
+ ], { initialEntries: [path] })
+ return { router, client, ...render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>) }
 }
+beforeEach(() => {
+ vi.clearAllMocks(); current = testContext(); current.requirements.needsAcceptance = false
+ useContext.mockImplementation(() => ({ data: current, isPending: false, isError: false, isFetching: false, refetch }))
+ useOrganizer.mockReturnValue({ data: { id: 'organizer-1', display_name: 'Bay City Arts' }, isPending: false, isError: false, refetch: organizerRefetch })
+ useTiers.mockReturnValue({ data: [], isPending: false, isError: false, refetch: tiersRefetch })
+ useConnect.mockReturnValue({ data: { status: 'ready' }, isPending: false, isError: false, refetch: connectRefetch })
+ tiersRefetch.mockResolvedValue({ data: [], isError: false })
+ connectRefetch.mockResolvedValue({ data: { status: 'ready' }, isError: false })
+ publish.mockImplementation(async () => ({ ...current, context_token: 'published-token', event: { ...current.event, status: 'published' } }))
+ reload.mockImplementation(async () => current)
+})
+describe('atomic saved preview', () => {
+ it('requires deliberate confirmation before invoking the current-context publisher', async () => {
+  const user = userEvent.setup(); const { router } = renderPreview()
+  await user.click(screen.getByRole('button', { name: 'Publish event' }))
+  expect(publish).not.toHaveBeenCalled()
+  expect(router.state.location.search).toBe('?mode=confirm')
+  expect(screen.getByRole('heading', { name: 'Ready to publish?' })).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Confirm and publish' }))
+  expect(publish).toHaveBeenCalledOnce()
+  expect(publish).toHaveBeenCalledWith('event-1', 'organizer-1', 'baseline-token')
+ })
+ it('renders persisted event, organizer, requirements and policies from one displayed context', () => {
+  renderPreview(); expect(screen.getByRole('heading', { name: 'Preview your event' })).toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: 'Saved title' })).toBeInTheDocument(); expect(screen.getByText(/Bay City Arts/)).toBeInTheDocument(); expect(screen.getByText('21+')).toBeInTheDocument()
+  expect(screen.getByRole('link', { name: 'Organizer Terms' })).toHaveAttribute('href', '/organizer-terms')
+  expect(screen.getByRole('button', { name: 'Publish event' })).toBeEnabled()
+ })
+ it('does not hydrate stale cached context while the initial atomic read is in flight', () => {
+  useContext.mockReturnValue({ data: current, isPending: false, isError: false, isFetching: true, refetch })
+  renderPreview(); expect(screen.getByText('Loading your preview')).toBeInTheDocument(); expect(screen.queryByText('Saved title')).not.toBeInTheDocument()
+ })
+ it('holds publication when the saved context changed after the displayed preview', async () => {
+  const user = userEvent.setup(); const view = renderPreview()
+  current = { ...current, context_token: 'another-token', event: { ...testEvent, title: 'Another writer' } }
+  await act(async () => view.router.navigate('/organizer/events/event-1/preview?refresh'))
+  expect(screen.getByRole('heading', { name: 'Saved title' })).toBeInTheDocument(); expect(screen.queryByText('Another writer')).not.toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Publish event' }))
+  await user.click(screen.getByRole('button', { name: 'Confirm and publish' }))
+  expect(publish).not.toHaveBeenCalled()
+  expect(await screen.findByText('Saved event details changed. Review the updated preview before publishing.')).toBeInTheDocument()
+ })
+ it('keeps publish disabled until the current saved agreement is accepted', () => {
+  current.requirements.needsAcceptance = true; renderPreview()
+  expect(screen.getByRole('button', { name: 'Publish event' })).toBeDisabled(); expect(screen.getByText('Agreement required before publishing.')).toBeInTheDocument()
+ })
+ it('renders retryable atomic context and organizer failures', async () => {
+  useContext.mockReturnValue({ data: undefined, isPending: false, isError: true, refetch })
+  const first = renderPreview(); await userEvent.click(screen.getByRole('button', { name: 'Try again' })); expect(refetch).toHaveBeenCalledOnce(); first.unmount()
+  useContext.mockReturnValue({ data: current, isPending: false, isError: false, refetch })
+  useOrganizer.mockReturnValue({ data: undefined, isPending: false, isError: true, refetch: organizerRefetch })
+  renderPreview(); await userEvent.click(screen.getByRole('button', { name: 'Try again' })); expect(organizerRefetch).toHaveBeenCalledOnce()
+ })
+ it('waits for saved organizer identity before loading its profile', () => {
+  useContext.mockReturnValue({ data: undefined, isPending: true, isError: false, refetch }); renderPreview()
+  expect(useOrganizer).toHaveBeenCalledWith(''); expect(screen.getByText('Loading your preview')).toBeInTheDocument()
+ })
+ it('routes an untiered paid draft to setup and waits for failed tier reads', async () => {
+  current.event.admission_type = 'paid'; const first = renderPreview()
+  expect(screen.getByRole('link', { name: 'Set up paid tickets' })).toBeInTheDocument(); expect(screen.queryByRole('button', { name: 'Publish event' })).not.toBeInTheDocument(); first.unmount()
+  useTiers.mockReturnValue({ data: undefined, isPending: false, isError: true, refetch: tiersRefetch }); renderPreview()
+  expect(screen.getByText('Ticket setup could not load')).toBeInTheDocument(); await userEvent.click(screen.getByRole('button', { name: 'Try again' })); expect(tiersRefetch).toHaveBeenCalledOnce()
+ })
+ it('publishes a paid draft only after its tiers are configured', async () => {
+  current.event.admission_type = 'paid'; useTiers.mockReturnValue({ data: [{ id: 'tier-1', event_id: 'event-1', status: 'draft', name: 'General', description: null, currency: 'usd', unit_amount_minor: 1000, quantity_total: 20 }], isPending: false, isError: false, refetch: tiersRefetch }); tiersRefetch.mockResolvedValue({ data: useTiers().data, isError: false }); const { router } = renderPreview()
+  await userEvent.click(screen.getByRole('button', { name: 'Publish event' })); await userEvent.click(screen.getByRole('button', { name: 'Confirm and publish' })); await waitFor(() => expect(router.state.location.pathname).toBe('/organizer/events/event-1'))
+  expect(publish).toHaveBeenCalledWith('event-1', 'organizer-1', 'baseline-token')
+ })
+ it('attaches the same saved event to the Stripe handoff without publishing', async () => {
+  current.event.admission_type = 'paid'
+  const tiers = [{ id: 'tier-1', event_id: 'event-1', status: 'draft', name: 'General', description: null, currency: 'usd', unit_amount_minor: 1000, quantity_total: 20 }]
+  useTiers.mockReturnValue({ data: tiers, isPending: false, isError: false, refetch: tiersRefetch })
+  tiersRefetch.mockResolvedValue({ data: tiers, isError: false })
+  useConnect.mockReturnValue({ data: { status: 'action_required' }, isPending: false, isError: false, refetch: connectRefetch })
+  connectRefetch.mockResolvedValue({ data: { status: 'action_required' }, isError: false })
+  renderPreview()
+  await userEvent.click(screen.getByRole('button', { name: 'Publish event' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Confirm and publish' }))
+  expect(await screen.findByRole('link', { name: 'Set up Stripe' })).toHaveAttribute('href', '/organizer/settings/payments?eventId=event-1')
+  expect(publish).not.toHaveBeenCalled()
+ })
+ it('dismisses the Stripe-required prompt back to the same saved preview and rechecks readiness on another deliberate confirmation', async () => {
+  current.event.admission_type = 'paid'
+  const tiers = [{ id: 'tier-1', event_id: 'event-1', status: 'draft', name: 'General', description: null, currency: 'usd', unit_amount_minor: 1000, quantity_total: 20 }]
+  useTiers.mockReturnValue({ data: tiers, isPending: false, isError: false, refetch: tiersRefetch })
+  tiersRefetch.mockResolvedValue({ data: tiers, isError: false })
+  connectRefetch.mockResolvedValue({ data: { status: 'action_required' }, isError: false })
+  const user = userEvent.setup(); const { router } = renderPreview()
 
-const event: EventRow = {
-  id: 'event-1', organizer_id: 'organizer-1', status: 'draft', moderation_status: 'clear', content_revision: 1, moderated_revision: null, moderation_version: 0, moderation_updated_at: null, public_history_status: 'never_public', first_publicly_eligible_at: null, public_eligibility_version: 0, publicly_authorized_revision: null, publicly_authorized_action_id: null,
-  title: 'Friday Night Makers', description: 'Meet neighborhood artists and makers for an open studio evening.',
-  category: 'art_culture', starts_at: '2027-01-15T20:30:00.000Z', ends_at: '2027-01-15T22:00:00.000Z',
-  timezone: 'America/Los_Angeles', venue_name: 'The Workshop', address_line1: '123 Valencia St',
-  address_line2: 'Suite 4', city: 'San Francisco', region: 'CA', postal_code: '94103', country_code: 'US',
-  mapbox_feature_id: 'address.verified', latitude: 37.76, longitude: -122.42, location: 'computed geography',
-  admission_type: 'free', capacity: 100, artwork_path: null, animation_preset: 'generic', published_at: null,
-  created_at: '2026-08-24T12:00:00.000Z', updated_at: '2026-08-24T13:00:00.000Z',
-}
+  await user.click(screen.getByRole('button', { name: 'Publish event' }))
+  await user.click(screen.getByRole('button', { name: 'Confirm and publish' }))
+  expect(await screen.findByRole('heading', { name: 'Set up payments to publish' })).toBeInTheDocument()
 
-type QueryState<T> = { data: T | null | undefined; isPending: boolean; isError: boolean; refetch: () => unknown }
+  await user.click(screen.getByRole('button', { name: 'Back' }))
+  expect(await screen.findByRole('heading', { name: 'Preview your event' })).toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: 'Saved title' })).toBeInTheDocument()
+  expect(router.state.location).toMatchObject({ pathname: '/organizer/events/event-1/preview', search: '' })
+  expect(publish).not.toHaveBeenCalled()
 
-const eventLoaded: QueryState<EventRow> = { data: event, isPending: false, isError: false, refetch: eventRefetch }
-const organizerLoaded: QueryState<Organizer> = { data: organizer, isPending: false, isError: false, refetch: organizerRefetch }
-const requirements = {
-  minimumAge: 'all_ages', alcoholPresent: false, cannabisPresent: false, explicitAdultContent: false,
-  gamblingPresent: false, weaponsPresent: false, highRiskActivity: false, needsAcceptance: false,
-  organizerTerms: { policyKind: 'organizer_terms', label: 'Organizer Terms', versionId: 'dev-organizer-terms-v1', stage: 'development_placeholder', publicUrl: '/organizer-terms' },
-  eventPolicy: { policyKind: 'event_policy', label: 'Event Policy', versionId: 'dev-event-policy-v1', stage: 'development_placeholder', publicUrl: '/event-policy' },
-}
+  await user.click(screen.getByRole('button', { name: 'Publish event' }))
+  expect(screen.getByRole('heading', { name: 'Ready to publish?' })).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Confirm and publish' }))
+  expect(await screen.findByRole('heading', { name: 'Set up payments to publish' })).toBeInTheDocument()
+  expect(connectRefetch).toHaveBeenCalledTimes(2)
 
-function renderPreview() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  const router = createMemoryRouter([
-    { path: '/organizer/events/:eventId/preview', element: <EventPreviewPage /> },
-    { path: '/organizer/events/:eventId/edit', element: <p>edit destination</p> },
-    { path: '/organizer/events/:eventId/tickets', element: <p>ticket setup destination</p> },
-    { path: '/organizer/events/:eventId', element: <p>published destination</p> },
-    { path: '/organizer/events', element: <p>events destination</p> },
-  ], { initialEntries: ['/organizer/events/event-1/preview'] })
-  return {
-    client,
-    router,
-    ...render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>),
+  await act(async () => router.navigate(-1))
+  expect(await screen.findByRole('heading', { name: 'Preview your event' })).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Publish event' }))
+  expect(screen.getByRole('heading', { name: 'Ready to publish?' })).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Confirm and publish' }))
+  expect(await screen.findByRole('heading', { name: 'Set up payments to publish' })).toBeInTheDocument()
+  expect(connectRefetch).toHaveBeenCalledTimes(3)
+  expect(publish).not.toHaveBeenCalled()
+ })
+ it('does not restore an old Stripe prompt across an A to B to A route lifetime', async () => {
+  const paidTiers = [{ id: 'tier-1', event_id: 'event-1', status: 'draft', name: 'General', description: null, currency: 'usd', unit_amount_minor: 1000, quantity_total: 20 }]
+  useContext.mockImplementation((requestedEventId: string) => {
+   const requested = requestedEventId === 'event-1'
+    ? { ...current, event_id: 'event-1', event: { ...current.event, id: 'event-1', admission_type: 'paid', title: 'Event A' } }
+    : { ...current, event_id: 'event-2', event: { ...current.event, id: 'event-2', admission_type: 'free', title: 'Event B' } }
+   return { data: requested, isPending: false, isError: false, isFetching: false, refetch }
+  })
+  useTiers.mockImplementation((_organizerId: string, requestedEventId: string) => ({ data: requestedEventId === 'event-1' ? paidTiers : [], isPending: false, isError: false, refetch: tiersRefetch }))
+  tiersRefetch.mockResolvedValue({ data: paidTiers, isError: false })
+  connectRefetch.mockResolvedValue({ data: { status: 'action_required' }, isError: false })
+  const user = userEvent.setup(); const { router } = renderPreview()
+
+  await user.click(screen.getByRole('button', { name: 'Publish event' }))
+  await user.click(screen.getByRole('button', { name: 'Confirm and publish' }))
+  expect(await screen.findByRole('heading', { name: 'Set up payments to publish' })).toBeInTheDocument()
+  await act(async () => router.navigate('/organizer/events/event-2/preview?mode=confirm'))
+  expect(await screen.findByRole('heading', { name: 'Event B' })).toBeInTheDocument()
+  expect(screen.queryByRole('heading', { name: 'Set up payments to publish' })).not.toBeInTheDocument()
+  await act(async () => router.navigate('/organizer/events/event-1/preview?mode=confirm'))
+  expect(await screen.findByRole('heading', { name: 'Event A' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Confirm and publish' })).toBeInTheDocument()
+  expect(screen.queryByRole('heading', { name: 'Set up payments to publish' })).not.toBeInTheDocument()
+  expect(publish).not.toHaveBeenCalled()
+ })
+ it('loads active owner tiers for a published paid ticket-selection preview', async () => {
+  current.event = { ...current.event, status: 'published', admission_type: 'paid' }
+  useTiers.mockReturnValue({
+   data: [
+    { id: 'active-tier', event_id: 'event-1', status: 'active', name: 'Balcony', description: 'Upper level', currency: 'usd', unit_amount_minor: 2500, quantity_total: 40 },
+    { id: 'archived-tier', event_id: 'event-1', status: 'archived', name: 'Retired', description: null, currency: 'usd', unit_amount_minor: 500, quantity_total: 10 },
+   ],
+   isPending: false, isError: false, refetch: tiersRefetch,
+  })
+  renderPreview()
+
+  expect(useTiers).toHaveBeenCalledWith('organizer-1', 'event-1')
+  await userEvent.click(screen.getByRole('button', { name: 'Ticket Selection' }))
+  expect(screen.getByRole('heading', { name: 'Balcony' })).toBeInTheDocument()
+  expect(screen.getByText('$25.00')).toBeInTheDocument()
+  expect(screen.getByText('40 tickets configured')).toBeInTheDocument()
+  expect(screen.queryByRole('heading', { name: 'Retired' })).not.toBeInTheDocument()
+ })
+ it('shows truthful loading and retryable error states for published paid tiers', async () => {
+  current.event = { ...current.event, status: 'published', admission_type: 'paid' }
+  useTiers.mockReturnValue({ data: undefined, isPending: true, isError: false, fetchStatus: 'fetching', refetch: tiersRefetch })
+  const loading = renderPreview(); expect(screen.getByText('Loading ticket setup')).toBeInTheDocument(); loading.unmount()
+  useTiers.mockReturnValue({ data: undefined, isPending: false, isError: true, fetchStatus: 'idle', refetch: tiersRefetch })
+  renderPreview(); expect(screen.getByText('Ticket setup could not load')).toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+  expect(tiersRefetch).toHaveBeenCalledOnce()
+ })
+ it('keeps paid-tier and Connect readers disabled for a free preview', () => {
+  current.event.admission_type = 'free'
+  renderPreview()
+  expect(useTiers).toHaveBeenCalledWith('organizer-1', '')
+  expect(useConnect).toHaveBeenCalledWith('', { fresh: true })
+  expect(tiersRefetch).not.toHaveBeenCalled()
+  expect(connectRefetch).not.toHaveBeenCalled()
+ })
+ it.each(['blocked', 'removed', 'under_review'] as const)('preserves returned %s enforcement and removes stale public cache', async moderation_status => {
+  current.event.status = 'published'; current.event.moderation_status = moderation_status
+  const { client, router } = renderPreview(); client.setQueryData(['public-event', 'event-1'], { id: 'stale' })
+  await userEvent.click(screen.getByRole('button', { name: 'Publish changes' })); await waitFor(() => expect(router.state.location.pathname).toBe('/organizer/events/event-1'))
+  expect(client.getQueryData(['events', 'detail', 'organizer-1', 'event-1'])).toMatchObject({ moderation_status })
+ })
+ it('allows a happening-now paid published revision to republish', async () => {
+  current.event = { ...current.event, status: 'published', admission_type: 'paid', starts_at: new Date(Date.now() - 3600000).toISOString(), ends_at: new Date(Date.now() + 3600000).toISOString() }
+  renderPreview(); await userEvent.click(screen.getByRole('button', { name: 'Publish changes' })); expect(publish).toHaveBeenCalledOnce()
+ })
+ it('guards rapid duplicate publication and navigates only after verified success', async () => {
+  let resolve!: (value: EventChangeContext) => void; publish.mockReturnValue(new Promise<EventChangeContext>(done => { resolve = done }))
+  const user = userEvent.setup(); const { router } = renderPreview(); await user.click(screen.getByRole('button', { name: 'Publish event' })); await user.dblClick(screen.getByRole('button', { name: 'Confirm and publish' }))
+  expect(publish).toHaveBeenCalledOnce(); expect(screen.getByRole('button', { name: 'Publishing…' })).toBeDisabled(); expect(router.state.location.pathname).toContain('/preview')
+  await act(async () => resolve({ ...current, event: { ...current.event, status: 'published' } })); expect(router.state.location.pathname).toBe('/organizer/events/event-1')
+ })
+ it('drops a late publication result after an A to B to A event switch', async () => {
+  let resolvePublish!: (value: EventChangeContext) => void
+  publish.mockReturnValue(new Promise<EventChangeContext>((resolve) => { resolvePublish = resolve }))
+  useContext.mockImplementation((requestedEventId: string) => {
+   const requested = requestedEventId === 'event-1'
+    ? current
+    : { ...current, event_id: requestedEventId, event: { ...current.event, id: requestedEventId } }
+   return { data: requested, isPending: false, isError: false, isFetching: false, refetch }
+  })
+  const user = userEvent.setup(); const { router } = renderPreview()
+  await user.click(screen.getByRole('button', { name: 'Publish event' }))
+  await user.click(screen.getByRole('button', { name: 'Confirm and publish' }))
+  await act(async () => router.navigate('/organizer/events/event-2/preview'))
+  await act(async () => router.navigate('/organizer/events/event-1/preview'))
+  await act(async () => resolvePublish({ ...current, context_token: 'published-token', event: { ...current.event, status: 'published' } }))
+  expect(router.state.location.pathname).toBe('/organizer/events/event-1/preview')
+ })
+ it.each(['conflict', 'unknown'] as const)('retains preview and requires fresh review after %s', async kind => {
+  publish.mockRejectedValue(new EventChangeError(kind)); const user = userEvent.setup(); renderPreview()
+  await user.click(screen.getByRole('button', { name: 'Publish event' })); await user.click(screen.getByRole('button', { name: 'Confirm and publish' })); expect(screen.getByRole('heading', { name: 'Saved title' })).toBeInTheDocument()
+  if (kind === 'conflict') {
+   expect(screen.getByRole('button', { name: 'Try publishing again' })).toBeDisabled()
+   current = { ...current, context_token: 'fresh-token', event: { ...current.event, title: 'Refreshed version' } }
+   await user.click(screen.getByRole('button', { name: 'Reload and review saved event' })); expect(screen.getByRole('heading', { name: 'Refreshed version' })).toBeInTheDocument(); expect(screen.getByRole('button', { name: 'Confirm and publish' })).toBeEnabled()
+  } else {
+   expect(screen.getByText('Publication was not completed. Review the saved event before trying again.')).toBeInTheDocument()
+   expect(screen.getByRole('button', { name: 'Try publishing again' })).toBeEnabled()
+   expect(publish).toHaveBeenCalledOnce()
   }
-}
-
-describe('EventPreviewPage', () => {
-  afterEach(() => vi.useRealTimers())
-
-  beforeEach(() => {
-    vi.clearAllMocks()
-    useSession.mockReturnValue({ status: 'authenticated', session: {}, user: { id: 'organizer-1' } })
-    useOwnedEvent.mockReturnValue(eventLoaded)
-    useOrganizer.mockReturnValue(organizerLoaded)
-    useOwnedEventRequirements.mockReturnValue({ data: requirements, isPending: false, isError: false, refetch: requirementsRefetch })
-    useOwnedTicketTiers.mockReturnValue({ data: [], isPending: false, isError: false, refetch: tiersRefetch })
-    usePublishEvent.mockReturnValue({ isPending: false, mutateAsync })
-  })
-
-  it('loads the persisted event before its persisted organizer and renders the complete summary', () => {
-    renderPreview()
-
-    expect(useOwnedEvent).toHaveBeenCalledWith('event-1', 'organizer-1')
-    expect(useOrganizer).toHaveBeenCalledWith('organizer-1')
-    expect(usePublishEvent).toHaveBeenCalledWith('organizer-1')
-    expect(useOwnedEventRequirements).toHaveBeenCalledWith('organizer-1', 'event-1')
-    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
-    expect(screen.getByRole('heading', { level: 1, name: 'Preview your event' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { level: 2, name: 'Friday Night Makers' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { level: 3, name: 'About this event' })).toBeInTheDocument()
-    expect(screen.getByText('Hosted by Bay City Arts')).toBeInTheDocument()
-    expect(screen.getByText('Friday, January 15, 2027')).toBeInTheDocument()
-    expect(screen.getByText('12:30 PM–2:00 PM')).toBeInTheDocument()
-    expect(screen.getByText('Pacific time (America/Los_Angeles)')).toBeInTheDocument()
-    expect(screen.getByText('Art & culture')).toBeInTheDocument()
-    expect(screen.getByText('Free')).toBeInTheDocument()
-    expect(screen.getByText('The Workshop')).toBeInTheDocument()
-    expect(screen.getByText('123 Valencia St, Suite 4, San Francisco, CA 94103')).toBeInTheDocument()
-    expect(screen.getByText(event.description!)).toBeInTheDocument()
-    expect(screen.getByLabelText('Whereto event artwork placeholder')).toBeInTheDocument()
-    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
-    expect(screen.queryByText(/ticket selector|rsvp|ai artwork|animation picker|map preview/i)).not.toBeInTheDocument()
-  })
-
-  it('renders persisted requirements and policy labels, and gates publish on current acceptance', () => {
-    useOwnedEventRequirements.mockReturnValue({
-      data: { ...requirements, minimumAge: '21_plus', alcoholPresent: true, needsAcceptance: true },
-      isPending: false, isError: false, refetch: requirementsRefetch,
-    })
-    renderPreview()
-
-    expect(screen.getByRole('heading', { name: 'Event requirements' })).toBeInTheDocument()
-    expect(screen.getByText('21+')).toBeInTheDocument()
-    expect(screen.getByText('Alcohol present')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Organizer Terms' })).toHaveAttribute('href', '/organizer-terms')
-    expect(screen.getByRole('link', { name: 'Event Policy' })).toHaveAttribute('href', '/event-policy')
-    expect(screen.getByText('Agreement required before publishing.')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Publish event' })).toBeDisabled()
-    expect(mutateAsync).not.toHaveBeenCalled()
-  })
-
-  it('keeps publish unavailable while persisted agreement status is loading or failed and offers retry', async () => {
-    const user = userEvent.setup()
-    useOwnedEventRequirements.mockReturnValue({ data: undefined, isPending: true, isError: false, refetch: requirementsRefetch })
-    const loading = renderPreview()
-    expect(screen.getByText('Loading event requirements')).toBeInTheDocument()
-    loading.unmount()
-
-    useOwnedEventRequirements.mockReturnValue({ data: undefined, isPending: false, isError: true, refetch: requirementsRefetch })
-    renderPreview()
-    await user.click(screen.getByRole('button', { name: 'Try again' }))
-    expect(requirementsRefetch).toHaveBeenCalledOnce()
-    expect(mutateAsync).not.toHaveBeenCalled()
-  })
-
-  it('waits to enable the organizer query until the event supplies its organizer ID', async () => {
-    useOwnedEvent.mockReturnValue({ data: undefined, isPending: true, isError: false, refetch: eventRefetch })
-    renderPreview()
-    expect(screen.getByText('Loading your preview')).toBeInTheDocument()
-    expect(useOrganizer).toHaveBeenCalledWith('')
-    expect(usePublishEvent).toHaveBeenCalledWith('')
-  })
-
-  it('renders retryable event and organizer failures and authorization-safe missing states', async () => {
-    const user = userEvent.setup()
-    useOwnedEvent.mockReturnValue({ data: undefined, isPending: false, isError: true, refetch: eventRefetch })
-    const first = renderPreview()
-    await user.click(screen.getByRole('button', { name: 'Try again' }))
-    expect(eventRefetch).toHaveBeenCalledOnce()
-    first.unmount()
-
-    useOwnedEvent.mockReturnValue(eventLoaded)
-    useOrganizer.mockReturnValue({ data: undefined, isPending: false, isError: true, refetch: organizerRefetch })
-    const second = renderPreview()
-    await user.click(screen.getByRole('button', { name: 'Try again' }))
-    expect(organizerRefetch).toHaveBeenCalledOnce()
-    second.unmount()
-
-    useOwnedEvent.mockReturnValue({ data: null, isPending: false, isError: false, refetch: eventRefetch })
-    renderPreview()
-    expect(screen.getByText('Event not found')).toBeInTheDocument()
-    expect(screen.queryByText(/owner|permission|another organizer/i)).not.toBeInTheDocument()
-  })
-
-  it('sends a paid draft without tiers to ticket setup and keeps publication unavailable', () => {
-    useOwnedEvent.mockReturnValue({ ...eventLoaded, data: { ...event, admission_type: 'paid' } })
-    renderPreview()
-    expect(screen.getByText('Finish ticket setup, then confirm the current agreement and publish this version.')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Set up paid tickets' })).toHaveAttribute('href', '/organizer/events/event-1/tickets')
-    expect(screen.queryByRole('button', { name: /Publish event|Try publishing again/ })).not.toBeInTheDocument()
-    expect(mutateAsync).not.toHaveBeenCalled()
-  })
-
-  it('publishes a paid draft after owned tiers are configured and the current agreement is accepted', async () => {
-    const user = userEvent.setup()
-    const paidDraft = { ...event, admission_type: 'paid' } as EventRow
-    useOwnedEvent.mockReturnValue({ ...eventLoaded, data: paidDraft })
-    useOwnedTicketTiers.mockReturnValue({
-      data: [{ id: 'tier-1' }], isPending: false, isError: false, refetch: tiersRefetch,
-    })
-    mutateAsync.mockResolvedValue({ ...paidDraft, status: 'published', published_at: '2026-08-25T14:00:00.000Z' })
-    const { router } = renderPreview()
-
-    expect(useOwnedTicketTiers).toHaveBeenCalledWith('organizer-1', 'event-1')
-    await user.click(screen.getByRole('button', { name: 'Publish event' }))
-
-    expect(mutateAsync).toHaveBeenCalledWith('event-1')
-    await waitFor(() => expect(router.state.location.pathname).toBe('/organizer/events/event-1'))
-  })
-
-  it('allows an accepted happening-now paid revision to re-publish through the existing preview action', async () => {
-    const user = userEvent.setup()
-    const now = Date.now()
-    const activePaidEvent = {
-      ...event,
-      status: 'published',
-      moderation_status: 'under_review',
-      admission_type: 'paid',
-      starts_at: new Date(now - 60 * 60 * 1000).toISOString(),
-      ends_at: new Date(now + 60 * 60 * 1000).toISOString(),
-      published_at: new Date(now - 24 * 60 * 60 * 1000).toISOString(),
-    } as EventRow
-    useOwnedEvent.mockReturnValue({ ...eventLoaded, data: activePaidEvent })
-    mutateAsync.mockResolvedValue({ ...activePaidEvent, moderation_status: 'clear', moderated_revision: 1 })
-
-    const { router } = renderPreview()
-    const publish = screen.getByRole('button', { name: 'Publish changes' })
-    expect(publish).toBeEnabled()
-    await user.click(publish)
-
-    expect(mutateAsync).toHaveBeenCalledWith('event-1')
-    await waitFor(() => expect(router.state.location.pathname).toBe('/organizer/events/event-1'))
-  })
-
-  it('publishes exactly once under rapid clicks and navigates only after a published row returns', async () => {
-    const user = userEvent.setup()
-    let resolve!: (row: EventRow) => void
-    mutateAsync.mockReturnValue(new Promise<EventRow>((done) => { resolve = done }))
-    const { router } = renderPreview()
-    const publish = screen.getByRole('button', { name: 'Publish event' })
-    await user.dblClick(publish)
-    expect(mutateAsync).toHaveBeenCalledOnce()
-    expect(mutateAsync).toHaveBeenCalledWith('event-1')
-    expect(router.state.location.pathname).toBe('/organizer/events/event-1/preview')
-    await act(async () => resolve({ ...event, status: 'published', published_at: '2026-08-24T16:00:00.000Z' }))
-    await waitFor(() => expect(router.state.location.pathname).toBe('/organizer/events/event-1'))
-  })
-
-  it('rejects a mismatched publish response', async () => {
-    const user = userEvent.setup()
-    useOwnedEvent.mockReturnValue({ ...eventLoaded, data: { ...event, status: 'published', moderation_status: 'blocked' } })
-    mutateAsync.mockResolvedValueOnce({ ...event, id: 'event-2', status: 'published', moderation_status: 'clear' })
-    const { router } = renderPreview()
-
-    await user.click(screen.getByRole('button', { name: 'Publish changes' }))
-    expect(await screen.findByText('Publishing failed. Try again.')).toBeInTheDocument()
-    expect(router.state.location.pathname).toBe('/organizer/events/event-1/preview')
-  })
-
-  it.each(['blocked', 'removed'] as const)('preserves %s enforcement on re-publish', async (moderationStatus) => {
-    const user = userEvent.setup()
-    useOwnedEvent.mockReturnValue({
-      ...eventLoaded,
-      data: { ...event, status: 'published', moderation_status: moderationStatus },
-    })
-    mutateAsync.mockResolvedValueOnce({ ...event, status: 'published', moderation_status: moderationStatus })
-    const { client, router } = renderPreview()
-    client.setQueryData(['public-event', 'event-1'], { id: 'stale-public-event' })
-
-    await user.click(screen.getByRole('button', { name: 'Publish changes' }))
-    expect(mutateAsync).toHaveBeenCalledWith('event-1')
-    await waitFor(() => expect(router.state.location.pathname).toBe('/organizer/events/event-1'))
-    expect(client.getQueryData(['public-event', 'event-1'])).toBeUndefined()
-  })
-
-  it.each([
-    ['EVENT_NOT_FOUND', 'This event could not be found.'],
-    ['EVENT_NOT_OWNED', 'This event is not available to this organizer.'],
-    ['EVENT_INCOMPLETE', 'Complete every required event detail before publishing.'],
-    ['EVENT_TIME_INVALID', 'Choose a future start time and an end time after it.'],
-    ['EVENT_LOCATION_INVALID', 'Choose a verified California address.'],
-    ['EVENT_OUTSIDE_SERVICE_AREA', 'Choose a location inside the current Bay Area service area.'],
-    ['PAID_PUBLISHING_NOT_AVAILABLE', 'Paid event publishing is not available in this milestone. Choose Free to publish.'],
-    ['EVENT_MODERATION_BLOCKED', 'This event cannot be published in its current moderation state.'],
-  ])('shows recovery copy for %s and preserves preview', async (message, copy) => {
-    const user = userEvent.setup()
-    mutateAsync.mockRejectedValue({ message })
-    const { router } = renderPreview()
-    await user.click(screen.getByRole('button', { name: 'Publish event' }))
-    expect(await screen.findByText(copy)).toBeInTheDocument()
-    expect(router.state.location.pathname).toBe('/organizer/events/event-1/preview')
-  })
-
-  it('suppresses unknown backend details and rejects an unexpected non-published response', async () => {
-    const user = userEvent.setup()
-    mutateAsync
-      .mockRejectedValueOnce(new Error('relation public.secret_table failed'))
-      .mockResolvedValueOnce({ ...event, status: 'draft' })
-    const { router } = renderPreview()
-    await user.click(screen.getByRole('button', { name: 'Publish event' }))
-    expect(await screen.findByText('Publishing failed. Try again.')).toBeInTheDocument()
-    expect(screen.queryByText(/secret_table/)).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Try publishing again' }))
-    expect(await screen.findByText('Publishing failed. Try again.')).toBeInTheDocument()
-    expect(mutateAsync).toHaveBeenCalledTimes(2)
-    expect(router.state.location.pathname).toBe('/organizer/events/event-1/preview')
-  })
+ })
+ it.each([{ id: 'wrong-event', status: 'published' }, { organizer_id: 'wrong-owner', status: 'published' }, { status: 'draft' }])('rejects unverified publication response %o', async invalid => {
+  publish.mockResolvedValue({ ...current, event: { ...current.event, ...invalid } }); const { router } = renderPreview()
+  await userEvent.click(screen.getByRole('button', { name: 'Publish event' })); await userEvent.click(screen.getByRole('button', { name: 'Confirm and publish' })); expect(await screen.findByText('Publication was not completed. Review the saved event before trying again.')).toBeInTheDocument(); expect(router.state.location.pathname).toContain('/preview')
+  expect(screen.getByRole('button', { name: 'Try publishing again' })).toBeEnabled()
+ })
+ it('shows a reconciled Stripe readiness error without exposing backend detail', async () => {
+  publish.mockRejectedValue({ message: 'CONNECT_NOT_READY', details: 'private account row' })
+  const user = userEvent.setup(); renderPreview()
+  await user.click(screen.getByRole('button', { name: 'Publish event' }))
+  await user.click(screen.getByRole('button', { name: 'Confirm and publish' }))
+  expect(await screen.findByText('Complete Stripe setup before publishing paid tickets.')).toBeInTheDocument()
+  expect(screen.queryByText(/private account row/)).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Try publishing again' })).toBeEnabled()
+ })
 })

@@ -5,7 +5,7 @@ import { PublicTicketingError } from './publicTicketing.errors'
 import {
   lowercaseRfcUuidSchema,
   publicFreeEventSchema,
-  publicPaidTicketingEventSchema,
+  publicTicketingEventSchema,
 } from './ticket.schemas'
 import type { CanonicalPublicTicketingEvent } from './ticket.types'
 
@@ -37,10 +37,11 @@ export async function getPublicEventTicketing(eventId: string): Promise<Canonica
   })
 
   if (error) throwPublicProjectionError(status)
+  if (!Array.isArray(data)) throw new PublicTicketingError('INVALID_RESPONSE')
 
   if (data !== null && data.length > 0) {
     if (data.length !== 1) throw new PublicTicketingError('INVALID_RESPONSE')
-    const parsedProjection = publicPaidTicketingEventSchema.safeParse(data[0])
+    const parsedProjection = publicTicketingEventSchema.safeParse(data[0])
     if (!parsedProjection.success) throw new PublicTicketingError('INVALID_RESPONSE')
     return parsedProjection.data
   }
@@ -49,7 +50,8 @@ export async function getPublicEventTicketing(eventId: string): Promise<Canonica
     p_event_id: parsedEventId.data,
   })
   if (fallback.error) throwPublicProjectionError(fallback.status)
-  if (fallback.data === null || fallback.data.length === 0) return null
+  if (!Array.isArray(fallback.data)) throw new PublicTicketingError('INVALID_RESPONSE')
+  if (fallback.data.length === 0) return null
   if (fallback.data.length !== 1) throw new PublicTicketingError('INVALID_RESPONSE')
 
   const parsedEvent = publicFreeEventSchema.safeParse(fallback.data[0])

@@ -1,0 +1,37 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+select extensions.no_plan();
+\ir spec07_email_fixture.inc
+create temp table proof(k text primary key,v jsonb);
+grant select on proof to authenticated;
+insert into proof values('registration',pg_temp.register(1,2));
+insert into proof values('claim',public.server_claim_ticket_email());
+select public.server_prepare_ticket_email_context((v->>'id')::uuid,(v->>'lease_id')::uuid) from proof where k='claim';
+select public.server_save_ticket_email_payload((v->>'id')::uuid,(v->>'lease_id')::uuid,repeat('a',64),pg_temp.envelope()) from proof where k='claim';
+select * from public.server_redeem_organizer_ticket('b6100000-0000-4000-8000-000000000001','b6200000-0000-4000-8000-000000000001',extensions.digest('1:1','sha256'));
+insert into proof select 'usedAt',to_jsonb(used_at) from public.tickets where registration_id=(select (v->>'registrationId')::uuid from proof where k='registration') and unit_sequence=1;
+select extensions.is((private.ticket_email_source('free_registration',(select (v->>'registrationId')::uuid from proof where k='registration'))->>'eligible')::boolean,true,'mixed Used and Valid remains eligible for existing collection email');
+select extensions.is(jsonb_array_length(public.server_read_ticket_email_access(repeat('a',64),repeat('1',64),0,1)->'projection'->'tickets'),2,'mixed collection retains every admission');
+select extensions.is(public.server_read_ticket_email_access(repeat('a',64),repeat('1',64),0,1)->'projection'->'tickets'->0->'used_at',(select v from proof where k='usedAt'),'existing grant returns original Used timestamp');
+select * from public.server_redeem_organizer_ticket('b6100000-0000-4000-8000-000000000001','b6200000-0000-4000-8000-000000000001',extensions.digest('1:2','sha256'));
+select extensions.is(private.ticket_email_source('free_registration',(select (v->>'registrationId')::uuid from proof where k='registration'))->>'reason','no_valid_tickets','fully Used sources refuse new sends');
+select extensions.is((select public.server_begin_ticket_email_dispatch((v->>'id')::uuid,(v->>'lease_id')::uuid) from proof where k='claim'),null::jsonb,'eligibility is rechecked immediately before dispatch');
+select extensions.is((select state from private.ticket_email_outbox where id=(select (v->>'id')::uuid from proof where k='claim')),'suppressed','a never-dispatched ineligible attempt is suppressed');
+select extensions.is(public.server_read_ticket_email_access(repeat('a',64),repeat('1',64),0,1)->>'kind','member','fully Used history remains accessible by existing grant');
+set local role authenticated;
+select extensions.throws_ok($$select public.get_ticket_email_delivery(null,'free_registration',(select (v->>'registrationId')::uuid from proof where k='registration'))$$,'42501','Collection unavailable','null event cannot bypass exact source/event binding');
+select extensions.throws_ok($$select public.get_ticket_email_delivery('b6200000-0000-4000-8000-000000000002','free_registration',(select (v->>'registrationId')::uuid from proof where k='registration'))$$,'42501','Collection unavailable','wrong event cannot retrieve delivery context');
+select extensions.throws_ok($$select public.get_ticket_email_delivery('b6200000-0000-4000-8000-000000000001','paid_order',(select (v->>'registrationId')::uuid from proof where k='registration'))$$,'42501','Collection unavailable','free ID cannot masquerade as paid order');
+select set_config('request.jwt.claim.sub','b6100000-0000-4000-8000-000000000002',true);
+select extensions.throws_ok($$select public.get_ticket_email_delivery('b6200000-0000-4000-8000-000000000001','free_registration',(select (v->>'registrationId')::uuid from proof where k='registration'))$$,'42501','Collection unavailable','another organizer cannot retrieve recipient or status');
+select extensions.throws_ok($$select public.get_organizer_free_registration_detail('b6200000-0000-4000-8000-000000000001',(select (v->>'registrationId')::uuid from proof where k='registration'))$$,'42501','Event unavailable','free detail checks actual owner');
+reset role;
+select extensions.ok(not has_function_privilege('authenticated','public.server_clear_ticket_email_recipient_block(text,uuid)','EXECUTE'),'organizers cannot clear provider recipient suppression');
+-- A replay of a pre-activation authoritative registration cannot create an initial email.
+update private.ticket_email_settings set enabled_at=null;
+insert into proof values('historical',pg_temp.register(2,1,2));
+update private.ticket_email_settings set enabled_at=clock_timestamp();
+select pg_temp.register(2,1,2);
+select extensions.is((select count(*) from private.ticket_email_outbox where registration_id=(select (v->>'registrationId')::uuid from proof where k='historical')),0::bigint,'post-activation replay does not enqueue a historical issuance');
+select * from extensions.finish();
+rollback;

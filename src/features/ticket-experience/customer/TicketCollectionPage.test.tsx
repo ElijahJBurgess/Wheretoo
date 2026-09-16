@@ -14,6 +14,8 @@ vi.mock('qrcode.react', () => ({
   QRCodeCanvas: () => <canvas aria-label="Admission QR code" />,
 }))
 
+const ticketTestNow = () => new Date('2026-09-03T12:00:00Z')
+
 type RenderTicketRouteInput = {
   collectionBearer?: string
   selector?: string
@@ -37,7 +39,7 @@ function renderTicketRoute(input: RenderTicketRouteInput): ReturnType<typeof ren
           path="/tickets/:collectionBearer/:ticketSelector?"
           element={(
             <TicketCollectionPage
-              now={input.now}
+              now={input.now ?? ticketTestNow}
               reader={input.reader}
               walletProvider={fixtureWalletProvider}
             />
@@ -90,6 +92,27 @@ function deferredResult() {
 }
 
 describe('TicketCollectionPage recovery', () => {
+  it('removes the previous QR and rejects late reads across A to B to A', async () => {
+    const pendingB = deferredResult()
+    const pendingA = deferredResult()
+    const readCollection = vi.fn<TicketCollectionReader['readCollection']>()
+      .mockResolvedValueOnce({ kind: 'ready', collection: { collectionLabel: 'Collection A', eventId: 'event-a', tickets: [ticket()] } })
+      .mockImplementationOnce(() => pendingB.promise)
+      .mockImplementationOnce(() => pendingA.promise)
+    const router = createMemoryRouter([{ path: '/tickets/:collectionBearer', element: <TicketCollectionPage now={ticketTestNow} reader={{ readCollection }} walletProvider={fixtureWalletProvider} /> }], { initialEntries: ['/tickets/synthetic-a'] })
+    render(<RouterProvider router={router} />)
+    await screen.findByLabelText('Admission QR code')
+    await act(() => router.navigate('/tickets/synthetic-b'))
+    expect(screen.queryByLabelText('Admission QR code')).not.toBeInTheDocument()
+    await act(() => router.navigate('/tickets/synthetic-a'))
+    expect(screen.queryByLabelText('Admission QR code')).not.toBeInTheDocument()
+    await act(async () => pendingB.resolve({ kind: 'ready', collection: { collectionLabel: 'Late collection B', eventId: 'event-b', tickets: [ticket({ eventName: 'Late private event B' })] } }))
+    expect(screen.queryByText('Late private event B')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Admission QR code')).not.toBeInTheDocument()
+    await act(async () => pendingA.resolve({ kind: 'ready', collection: { collectionLabel: 'Fresh A', eventId: 'event-a', tickets: [ticket()] } }))
+    expect(await screen.findAllByLabelText('Admission QR code')).toHaveLength(1)
+    expect(readCollection).toHaveBeenCalledTimes(3)
+  })
   it('shows loading while the collection reader is pending', () => {
     const pending = deferredResult()
     renderTicketRoute({ reader: { readCollection: () => pending.promise } })
@@ -170,7 +193,7 @@ describe('TicketCollectionPage collection navigation', () => {
     })
     const view = renderTicketRoute({ reader: readerFor(first, second) })
 
-    expect(await screen.findByRole('heading', { name: 'Your tickets' })).toBeVisible()
+    expect(await screen.findByRole('heading', { name: 'Ticket wallet' })).toBeVisible()
     expect(screen.getAllByText('General Admission')).toHaveLength(2)
     expect(screen.getByRole('link', { name: /Ticket 1.*General Admission/i })).toBeVisible()
     expect(screen.getByRole('link', { name: /Ticket 2.*General Admission/i })).toBeVisible()
@@ -197,7 +220,7 @@ describe('TicketCollectionPage collection navigation', () => {
     const second = ticket({ selector: 'ticket-2', position: 2, totalInCollection: 2 })
     renderTicketRoute({ selector: 'unknown', reader: readerFor(first, second) })
 
-    expect(await screen.findByRole('heading', { name: 'Your tickets' })).toBeVisible()
+    expect(await screen.findByRole('heading', { name: 'Ticket wallet' })).toBeVisible()
     expect(screen.queryByTestId('admission-qr')).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: /Ticket 1.*General Admission/i })).toBeVisible()
     expect(screen.getByRole('link', { name: /Ticket 2.*General Admission/i })).toBeVisible()
@@ -243,6 +266,7 @@ describe('TicketCollectionPage collection navigation', () => {
         path: '/tickets/:collectionBearer/:ticketSelector?',
         element: (
           <TicketCollectionPage
+            now={ticketTestNow}
             reader={readerFor(first, second)}
             walletProvider={fixtureWalletProvider}
           />
@@ -262,7 +286,7 @@ describe('TicketCollectionPage collection navigation', () => {
     await act(() => router.navigate(1))
     expect(await screen.findByRole('heading', { name: 'Ticket 2' })).toBeVisible()
     await act(() => router.navigate('/tickets/history-test'))
-    expect(await screen.findByRole('heading', { name: 'Your tickets' })).toBeVisible()
+    expect(await screen.findByRole('heading', { name: 'Ticket wallet' })).toBeVisible()
     expect(screen.queryByTestId('admission-qr')).not.toBeInTheDocument()
   })
 
@@ -296,4 +320,16 @@ describe('TicketCollectionPage collection navigation', () => {
     expect(mutations.indexOf('new-mounted')).toBeGreaterThan(mutations.indexOf('old-unmounted'))
     expect(screen.getAllByTestId('admission-qr')).toHaveLength(1)
   })
+})
+
+it('labels ended free admissions as event ended while preserving Used history', async () => {
+  const reader: TicketCollectionReader = { readCollection: async () => ({ kind: 'ready', collection: {
+    registrationId: 'registration-a', registrationStatus: 'confirmed', eventId: 'event-a', collectionLabel: 'Free tickets',
+    tickets: [ticket({totalInCollection: 2}), ticket({selector:'ticket-2',position:2,totalInCollection:2,status:'used',admissionCredential:null,usedAt:'2026-09-12T19:00:00-07:00'})],
+  } }) }
+  renderTicketRoute({reader,now:()=>new Date('2026-09-13T08:00:00Z')})
+  await screen.findByRole('heading',{name:'Ticket wallet'})
+  expect(screen.getByRole('link',{name:'Ticket 1, General Admission, Event ended'})).toBeInTheDocument()
+  expect(screen.getByRole('link',{name:'Ticket 2, General Admission, Already used'})).toBeInTheDocument()
+  expect(screen.queryByRole('heading',{name:'Available tickets'})).toBeNull()
 })

@@ -1,3 +1,4 @@
+import { createClient } from "@supabase/supabase-js";
 import {
   assertEquals,
   assertMatch,
@@ -10,6 +11,7 @@ import {
   moderationJobSchema,
 } from "./contracts.ts";
 import {
+  createDatabaseDependencies,
   createModerationWorkerHandler,
   type ModerationWorkerDependencies,
 } from "./index.ts";
@@ -89,7 +91,8 @@ function dependencies(
 ): ModerationWorkerDependencies {
   return {
     workerToken,
-    claimJob: () => Promise.resolve(job),
+    claimJob: () => Promise.resolve({ kind: "ready", job }),
+    rejectInput: () => Promise.resolve("superseded"),
     moderate: () => Promise.resolve(result),
     applyResult: () => Promise.resolve("applied"),
     failJob: () => Promise.resolve("retry_scheduled"),
@@ -161,7 +164,7 @@ Deno.test("worker requires the exact bearer token before claiming work", async (
   const handler = createModerationWorkerHandler(dependencies({
     claimJob: () => {
       claims += 1;
-      return Promise.resolve(job);
+      return Promise.resolve({ kind: "ready", job });
     },
   }));
 
@@ -323,4 +326,241 @@ Deno.test("provider adapter maps timeout and malformed output to bounded safe co
     ModerationAdapterError,
     "MODERATOR_MALFORMED",
   );
+});
+
+// These fixtures cross the real Supabase RPC adapter and handler. Only HTTP and
+// the external moderator are substituted; parsing and RPC selection remain real.
+const databaseJob = {
+  evaluation_id: "37000000-0000-4000-8000-000000000001",
+  event_id: "27000000-0000-4000-8000-000000000001",
+  content_revision: 1,
+  input_sha256: "a".repeat(64),
+  queued_moderation_version: 4,
+  attempt_count: 1,
+  prior_reason_codes: [],
+  moderation_input: job.input,
+};
+const incompleteDatabaseJob = {
+  ...databaseJob,
+  moderation_input: {
+    ...job.input,
+    event: { ...job.input.event, description: "PRIVATE_CANONICAL_TEXT" },
+    disclosures: {
+      minimum_age: null,
+      alcohol_present: null,
+      cannabis_present: null,
+      explicit_adult_content: null,
+      gambling_present: null,
+      weapons_present: null,
+      high_risk_activity: null,
+    },
+  },
+};
+
+function databaseHandler(
+  row: unknown,
+  rejectResponse: () => Response = () => Response.json("superseded"),
+  providerFailure = false,
+) {
+  const calls: Array<{ rpc: string; args: unknown }> = [];
+  const logs: unknown[][] = [];
+  let providerCalls = 0;
+  const client = createClient(
+    "https://database.example.invalid",
+    "test-service-key",
+    {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      },
+      global: {
+        fetch: (url, init) => {
+          const rpc = String(url).split("/").at(-1)!;
+          calls.push({ rpc, args: JSON.parse(String(init?.body)) });
+          if (rpc === "server_claim_moderation_evaluation") {
+            return Promise.resolve(Response.json([row]));
+          }
+          if (rpc === "server_reject_moderation_evaluation_input") {
+            return Promise.resolve(rejectResponse());
+          }
+          if (rpc === "server_apply_moderation_evaluation") {
+            return Promise.resolve(Response.json("applied"));
+          }
+          if (rpc === "server_fail_moderation_evaluation") {
+            return Promise.resolve(Response.json("retry_scheduled"));
+          }
+          throw new Error("unexpected RPC");
+        },
+      },
+    },
+  );
+  const handler = createModerationWorkerHandler(createDatabaseDependencies(
+    client,
+    workerToken,
+    () => {
+      providerCalls += 1;
+      return providerFailure
+        ? Promise.reject(new ModerationAdapterError("MODERATOR_TIMEOUT"))
+        : Promise.resolve(result);
+    },
+    (...values) => logs.push(values),
+  ));
+  return { handler, calls, logs, providerCalls: () => providerCalls };
+}
+
+Deno.test("database claim with null disclosures rejects the exact lease without provider/apply/fail", async () => {
+  const boundary = databaseHandler(incompleteDatabaseJob);
+  const response = await boundary.handler(request());
+  assertEquals(response.status, 500);
+  assertEquals(await response.json(), {
+    error: { code: "MODERATION_JOB_INVALID" },
+    disposition: "superseded",
+  });
+  assertEquals(boundary.calls, [
+    {
+      rpc: "server_claim_moderation_evaluation",
+      args: { p_worker_reference: "edge-worker" },
+    },
+    {
+      rpc: "server_reject_moderation_evaluation_input",
+      args: {
+        p_evaluation_id: "37000000-0000-4000-8000-000000000001",
+        p_event_id: "27000000-0000-4000-8000-000000000001",
+        p_content_revision: 1,
+        p_input_sha256: "a".repeat(64),
+        p_queued_moderation_version: 4,
+        p_attempt_count: 1,
+      },
+    },
+  ]);
+  assertEquals(boundary.providerCalls(), 0);
+  assertEquals(
+    JSON.stringify(boundary.logs).includes("PRIVATE_CANONICAL_TEXT"),
+    false,
+  );
+  assertEquals(JSON.stringify(boundary.logs).includes("Zod"), false);
+});
+
+Deno.test("invalid database claim envelopes retain generic safe500 and cannot authorize rejection", async () => {
+  for (
+    const change of [
+      { evaluation_id: "invalid" },
+      { event_id: null },
+      { content_revision: 0 },
+      { input_sha256: "invalid" },
+      { queued_moderation_version: -1 },
+      { attempt_count: 0 },
+      { attempt_count: 4 },
+      { prior_reason_codes: ["private prose"] },
+    ]
+  ) {
+    const boundary = databaseHandler({ ...incompleteDatabaseJob, ...change });
+    const response = await boundary.handler(request());
+    assertEquals(response.status, 500);
+    assertEquals(await response.json(), { error: { code: "INTERNAL_ERROR" } });
+    assertEquals(boundary.calls.length, 1);
+    assertEquals(boundary.providerCalls(), 0);
+    assertEquals(boundary.logs, [["moderation_worker_internal_error"]]);
+  }
+});
+
+Deno.test("invalid-input rejection conflicts and persistence failures stay visible without provider failures", async () => {
+  for (
+    const [payload, status, disposition] of [
+      ["conflict", 200, "conflict"],
+      ["not_found", 200, "not_found"],
+      ["schema_disagreement", 200, "schema_disagreement"],
+      [
+        {
+          code: "P0001",
+          message: "PRIVATE_DATABASE_FAILURE",
+          details: "private",
+          hint: null,
+        },
+        409,
+        "rejection_failed",
+      ],
+      ["PRIVATE_UNRECOGNIZED_DISPOSITION", 200, "rejection_failed"],
+      [["superseded"], 200, "rejection_failed"],
+    ] as const
+  ) {
+    const boundary = databaseHandler(
+      incompleteDatabaseJob,
+      () => Response.json(payload, { status }),
+    );
+    const response = await boundary.handler(request());
+    assertEquals(response.status, 500);
+    assertEquals(await response.json(), {
+      error: { code: "MODERATION_JOB_INVALID" },
+      disposition,
+    });
+    assertEquals(boundary.calls.map((call) => call.rpc), [
+      "server_claim_moderation_evaluation",
+      "server_reject_moderation_evaluation_input",
+    ]);
+    assertEquals(boundary.providerCalls(), 0);
+    assertEquals(JSON.stringify(boundary.logs).includes("PRIVATE"), false);
+  }
+});
+
+Deno.test("valid database claim preserves existing apply and provider-retry RPC boundaries", async () => {
+  for (const providerFailure of [false, true]) {
+    const boundary = databaseHandler(databaseJob, undefined, providerFailure);
+    const response = await boundary.handler(request());
+    assertEquals(response.status, providerFailure ? 503 : 200);
+    assertEquals(boundary.providerCalls(), 1);
+    assertEquals(boundary.calls.map((call) => call.rpc), [
+      "server_claim_moderation_evaluation",
+      providerFailure
+        ? "server_fail_moderation_evaluation"
+        : "server_apply_moderation_evaluation",
+    ]);
+    assertEquals(
+      boundary.calls[1].args,
+      providerFailure
+        ? {
+          p_evaluation_id: job.evaluationId,
+          p_content_revision: 1,
+          p_input_sha256: "a".repeat(64),
+          p_queued_moderation_version: 4,
+          p_failure_code: "MODERATOR_TIMEOUT",
+        }
+        : {
+          p_evaluation_id: job.evaluationId,
+          p_content_revision: 1,
+          p_input_sha256: "a".repeat(64),
+          p_queued_moderation_version: 4,
+          p_outcome: "clear_candidate",
+          p_risk_level: "low",
+          p_reason_codes: ["no_violation"],
+          p_provider_reference: `sha256:${"a".repeat(64)}`,
+          p_model_version: `sha256:${"b".repeat(64)}`,
+        },
+    );
+  }
+});
+
+Deno.test("database adapter preserves nullable draft facts and three retained tiers", async () => {
+  const boundary = databaseHandler({
+    ...databaseJob,
+    moderation_input: {
+      ...job.input,
+      event: {
+        ...job.input.event,
+        title: null,
+        description: null,
+        starts_at: null,
+        ends_at: null,
+        latitude: null,
+        longitude: null,
+      },
+      ticket_tiers: [{ name: "Active", description: null }, {
+        name: "Archived one",
+        description: null,
+      }, { name: "Archived two", description: null }],
+    },
+  });
+  assertEquals((await boundary.handler(request())).status, 200);
+  assertEquals(boundary.providerCalls(), 1);
 });

@@ -112,3 +112,27 @@ describe('createCameraDecoder', () => {
     expect(controls.stop).toHaveBeenCalledOnce()
   })
 })
+
+it('stops every attached media track immediately and after late initialization', async () => {
+  const stopVideo = vi.fn()
+  const stopAudio = vi.fn()
+  const input = startInput()
+  let finish!: (controls: { stop(): void }) => void
+  const decoder = createCameraDecoder(dependencies({ decodeFromVideoDevice: vi.fn((_id, element) => {
+    element.srcObject = { getTracks: () => [{ stop: stopVideo }, { stop: stopAudio }] } as unknown as MediaStream
+    return new Promise<{ stop(): void }>(resolve => { finish = resolve })
+  }) }))
+  const pending = decoder.start(input)
+  await Promise.resolve()
+  decoder.stop()
+  expect(stopVideo).toHaveBeenCalled()
+  expect(stopAudio).toHaveBeenCalled()
+  expect(input.element.srcObject).toBeNull()
+  const stopLate = vi.fn()
+  input.element.srcObject = { getTracks: () => [{ stop: stopLate }] } as unknown as MediaStream
+  const controls = { stop: vi.fn() }
+  finish(controls)
+  await pending
+  expect(stopLate).toHaveBeenCalled()
+  expect(controls.stop).toHaveBeenCalledOnce()
+})

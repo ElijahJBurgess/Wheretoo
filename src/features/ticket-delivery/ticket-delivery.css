@@ -1,0 +1,35 @@
+.delivery-dialog { text-align: center; }
+.delivery-dialog .delivery-seal { display: grid; place-items: center; width: 68px; height: 68px; margin: 18px auto; border: 2px solid #9560f1; border-radius: 50%; color: #b689ff; font-size: 31px; }
+.delivery-dialog .delivery-seal--accepted { color: #40c798; border-color: #40c798; }
+.delivery-dialog .delivery-recipient { padding: 14px; border: 1px solid #283440; border-radius: 8px; background: #0d151e; overflow-wrap: anywhere; color: #f2f4fa; font-weight: 700; }
+.delivery-dialog .delivery-explanation { text-align: left; padding: 16px; border: 1px solid #283440; border-radius: 8px; color: #b8c3d3; font-size: 13px; line-height: 1.55; }
+.delivery-dialog-actions { display: grid; gap: 10px; margin-top: 24px; }
+.delivery-dialog-actions .ops-button { width: 100%; justify-content: center; }
+.delivery-support { display: inline-block; padding: 10px 0; color: #c096ff; text-align: center; }
+.delivery-recovery .buyer-content { padding-top: 62px; gap: 24px; }
+.delivery-recovery h1 { font-size: clamp(46px, 13vw, 62px); }
+.delivery-recovery p { color: #bfc0c8; line-height: 1.6; }
+.delivery-recovery .delivery-eyebrow { color: #c7a5fc; font-size: 11px; text-transform: uppercase; letter-spacing: .16em; }
+.delivery-form { display: grid; gap: 10px; }
+.delivery-form label { color: #e8e3ed; font-size: 12px; }
+.delivery-form input { min-width: 0; width: 100%; border: 1px solid #3e3a49; border-radius: 9px; background: #11141a; color: #fff; padding: 14px; min-height: 50px; }
+.delivery-form .buyer-primary { margin-top: 8px; }
+.delivery-recovery p[role='alert'] { color: #ffb2af; }
+.delivery-recovery .delivery-privacy { margin-top: 48px; padding-top: 22px; border-top: 1px solid #28222e; font-size: 12px; }
+.delivery-notice { display: grid; gap: 8px; padding: 14px; border: 1px solid #393044; border-radius: 10px; background: #141017; font-size: 12px; }
+.delivery-notice p { color: #c4bdce; }
+.delivery-notice button { justify-self: start; background: none; color: #d2adff; border: 0; padding: 5px 0; cursor: pointer; text-decoration: underline; }
+.delivery-index .buyer-content { padding-top: 25px; }
+.delivery-index h1 { font-size: 44px; }
+.delivery-index-list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.delivery-index-list a { display: grid; gap: 8px; padding: 18px; background: #11141a; border: 1px solid #36313f; border-radius: 10px; text-decoration: none; }
+.delivery-index-list strong { color: #fff; font-size: 17px; overflow-wrap: anywhere; }
+.delivery-index-list span { color: #bfb7c9; font-size: 12px; }
+.delivery-pagination { display: flex; gap: 12px; justify-content: space-between; }
+.delivery-access-back { max-width: 440px; margin: 0 auto; padding: 14px 18px; background: #080a0b; font-size: 13px; }
+.delivery-access-back a { color: #c89aff; }
+.registration-search { display: grid; gap: 12px; margin: 24px 0; }
+.registration-search input { width: 100%; min-width: 0; padding: 14px; border: 1px solid #354455; border-radius: 8px; background: #0e1721; color: #fff; }
+.registration-results { list-style: none; padding: 0; display: grid; gap: 12px; }
+.registration-results a { display: grid; gap: 8px; text-decoration: none; overflow-wrap: anywhere; }
+.buyer-header .buyer-recovery-link { justify-self: end; font-size: 11px; line-height: 1.2; padding: 10px 0 10px 6px; text-align: right; }

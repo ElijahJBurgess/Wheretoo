@@ -1029,6 +1029,34 @@ Deno.test("checkout reuses an attached Session after set-based line validation",
   assertEquals(calls, ["retrieve"]);
 });
 
+// Spec 08: never redirect to an unrelated or terminal attached session.
+Deno.test("attached retry requires the exact stored Session ID and open status", async () => {
+  for (const override of [
+    { id: "cs_test_DifferentSession" },
+    { status: "complete" },
+    { status: "expired" },
+  ]) {
+    let creates = 0;
+    let attaches = 0;
+    let releases = 0;
+    let expirations = 0;
+    const response = await createStripeCreateCheckoutHandler(dependencies({
+      reserveCheckout: async () => reservation({ existingCheckoutSessionId: SESSION_ID }),
+      retrieveSession: async () => sessionFixture(override),
+      createSession: async () => { creates++; return sessionFixture(); },
+      attachSession: async () => { attaches++; },
+      expireSession: async () => { expirations++; throw new Error("must not expire unrelated or complete truth"); },
+      releaseReservation: async () => { releases++; },
+    }))(request());
+    assertEquals(response.status, 502);
+    assertEquals(await responseHasCheckoutUrl(response), false);
+    assertEquals(creates, 0);
+    assertEquals(attaches, 0);
+    assertEquals(expirations, 0);
+    assertEquals(releases, override.status === "expired" ? 1 : 0);
+  }
+});
+
 // Mutation caught: releasing or mutating the request after an unknown create outcome.
 Deno.test("unknown create outcomes preserve inventory and replay identically", async () => {
   const captured: string[] = [];

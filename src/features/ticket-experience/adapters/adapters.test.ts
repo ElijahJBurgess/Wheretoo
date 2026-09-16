@@ -61,7 +61,7 @@ admissionCheckerContract('strict Edge', () => createAdmissionChecker(async (_nam
   expected: outcomes.map((outcome, index) => ({ eventId, credential: credential('abcdef'.charAt(index)), outcome })),
   paidValidCredential: credential('a'), collectionBearerAsCredential: bearer('a'),
   checkoutBearerAsCredential: bearer('b'), eventId, wrongEventId, optionalResultFields: [],
-  malformedCredentialOutcome: 'network_error',
+  malformedCredentialOutcome: 'invalid',
 })
 
 describe('strict ticket collection boundary', () => {
@@ -164,7 +164,26 @@ describe('strict admission boundary', () => {
   })
   it('rejects malformed event identity without invoking Edge', async () => {
     const invoke = vi.fn()
-    await expect(createAdmissionChecker(invoke).checkAdmission({ eventId: 'bad', credential: credential('a') })).resolves.toEqual({ outcome: 'network_error' })
+    await expect(createAdmissionChecker(invoke).checkAdmission({ eventId: 'bad', credential: credential('a') })).resolves.toEqual({ outcome: 'context_unavailable' })
     expect(invoke).not.toHaveBeenCalled()
   })
+})
+
+it('only namespaced free links accept the approved registration and registrant fields',async()=>{
+ const value={kind:'ready',collection:{registrationId:eventId,registrationStatus:'confirmed',collectionLabel:'Picnic tickets',eventId,tickets:[{...ticket,attendeeLabel:'Synthetic Guest',timezone:'America/New_York'}]}}
+ await expect(readerFor(value).readCollection({collectionBearer:'rsvp_'+bearer('a')})).resolves.toEqual(value)
+ await expect(readerFor(value).readCollection({collectionBearer:bearer('a')})).resolves.toEqual({kind:'unavailable'})
+ await expect(readerFor(ready()).readCollection({collectionBearer:'rsvp_'+bearer('a')})).resolves.toEqual({kind:'unavailable'})
+})
+
+it('accepts approved paid history metadata without weakening the paid/free source boundary', async () => {
+ const updated={...ticket,status:'used',admissionCredential:null,usedAt:'2026-09-10T12:00:00Z',timezone:'America/Los_Angeles',eventStatus:'cancelled',eventUpdated:true,eventFactsAvailable:true}
+ expect((await readerFor(ready([updated])).readCollection({collectionBearer:bearer('a')})).kind).toBe('ready')
+ expect(await readerFor(ready([{...updated,attendeeLabel:'Forged free source'}])).readCollection({collectionBearer:bearer('a')})).toEqual({kind:'unavailable'})
+ expect(await readerFor(ready([{...updated,usedAt:undefined}])).readCollection({collectionBearer:bearer('a')})).toEqual({kind:'unavailable'})
+})
+it('keeps missing legacy facts explicitly unavailable instead of inventing dates',async()=>{
+ const unavailable={...ticket,status:'cancelled',admissionCredential:null,eventName:'Event details unavailable',venueName:'Venue unavailable',startsAt:null,endsAt:null,eventStatus:'cancelled',eventUpdated:false,eventFactsAvailable:false}
+ expect((await readerFor(ready([unavailable])).readCollection({collectionBearer:bearer('a')})).kind).toBe('ready')
+ expect(await readerFor(ready([{...unavailable,startsAt:ticket.startsAt}])).readCollection({collectionBearer:bearer('a')})).toEqual({kind:'unavailable'})
 })

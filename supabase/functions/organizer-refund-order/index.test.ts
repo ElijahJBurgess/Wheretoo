@@ -20,47 +20,63 @@ function request(body: unknown = { eventId, orderId }) {
 }
 function setup(overrides: Partial<OrganizerRefundDependencies> = {}) {
   const calls: unknown[] = [];
+  let state = "eligible";
   const handler = createOrganizerRefundHandler({
     appOrigin: "https://app.invalid",
     verifyOrganizer: async () => ({ userId: owner, organizerId: owner }),
-    context: async (...args) => {
+    read: async (...args) => {
       calls.push(args);
-      return { refundState: "available" };
+      return { state, hasOperation: false, canRecover: false, snapshot: null };
     },
+    claim: async () => ({ dispatch: true, state: "submitting" }),
     refund: async (id) => {
       calls.push(id);
     },
-    recover: async () => {},
+    observe: async () => ({ state: "processing" }),
+    note: async (_owner, _event, _order, next) => {
+      state = next;
+    },
     ...overrides,
   });
   return { handler, calls };
 }
 Deno.test("ownership failure cannot reach refund engine and errors are sanitized", async () => {
   const { handler, calls } = setup({
-    context: async () => {
+    read: async () => {
       throw new Error("private");
     },
   });
   const response = await handler(request());
   assertEquals(response.status, 503);
   assertEquals(calls, []);
-  assertEquals(await response.json(), { outcome: "unconfirmed" });
+  assertEquals(await response.json(), { outcome: "unknown" });
 });
 Deno.test("verified owner plus event and order bound before the existing engine", async () => {
   const { handler, calls } = setup();
   const response = await handler(request());
-  assertEquals(calls, [[owner, eventId, orderId], orderId]);
-  assertEquals(await response.json(), { outcome: "pending" });
+  assertEquals(calls, [[owner, eventId, orderId], orderId, [
+    owner,
+    eventId,
+    orderId,
+  ]]);
+  assertEquals(await response.json(), { outcome: "processing" });
   assertEquals(response.headers.get("cache-control"), "private, no-store");
 });
 Deno.test("canonical pending/refunded retries never request another provider refund", async () => {
-  for (const refundState of ["pending", "refunded"]) {
+  for (const refundState of ["processing", "completed"]) {
     const { handler, calls } = setup({
-      context: async () => ({ refundState }),
+      read: async () => ({
+        state: refundState,
+        hasOperation: true,
+        canRecover: false,
+        snapshot: null,
+      }),
     });
     const response = await handler(request());
     assertEquals(calls, []);
-    assertEquals(await response.json(), { outcome: refundState });
+    assertEquals(await response.json(), {
+      outcome: refundState === "completed" ? "already_refunded" : refundState,
+    });
   }
 });
 Deno.test("client financial inputs, huge bodies, and missing auth cannot invoke refund", async () => {
@@ -91,10 +107,15 @@ Deno.test("timeout and canonical ineligible remain unconfirmed without claiming 
     },
   });
   assertEquals(await (await handler(request())).json(), {
-    outcome: "unconfirmed",
+    outcome: "unknown",
   });
   const refused = setup({
-    context: async () => ({ refundState: "unavailable" }),
+    read: async () => ({
+      state: "ineligible",
+      hasOperation: false,
+      canRecover: false,
+      snapshot: null,
+    }),
   });
   assertEquals((await refused.handler(request())).status, 409);
   assertEquals(refused.calls, []);
@@ -115,13 +136,21 @@ Deno.test("owned evidence recovery never calls create and remains pending", asyn
   };
   let recovered: unknown;
   const { handler, calls } = setup({
-    context: async () => ({ refundState: "recoverable", recovery }),
-    recover: async (snapshot) => {
+    read: async () => ({
+      state: "review",
+      hasOperation: false,
+      canRecover: true,
+      snapshot: recovery,
+    }),
+    observe: async (snapshot) => {
       recovered = snapshot;
+      return { state: "processing" };
     },
   });
-  const response = await handler(request());
-  assertEquals(await response.json(), { outcome: "pending" });
+  const response = await handler(
+    request({ eventId, orderId, action: "reconcile" }),
+  );
+  assertEquals(await response.json(), { outcome: "review" });
   assertEquals(recovered, recovery);
   assertEquals(calls, []);
 });
