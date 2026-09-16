@@ -259,3 +259,12 @@ describe('atomic saved preview', () => {
   expect(screen.getByRole('button', { name: 'Try publishing again' })).toBeEnabled()
  })
 })
+
+it('shows draft preview but keeps publication disabled while policies are unavailable', () => {
+ current = { ...current, requirements: { ...current.requirements, needsAcceptance: true, organizerTerms: null, eventPolicy: null } }
+ renderPreview()
+ expect(screen.getByRole('heading', { name: 'Saved title' })).toBeInTheDocument()
+ expect(screen.getByText('Publication policies are not available. You can keep editing and saving your draft.')).toBeInTheDocument()
+ expect(screen.getByRole('button', { name: 'Publish event' })).toBeDisabled()
+ expect(screen.queryByRole('link', { name: 'Organizer Terms' })).not.toBeInTheDocument()
+})

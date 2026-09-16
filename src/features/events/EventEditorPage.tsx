@@ -156,10 +156,8 @@ export function EventEditorPage() {
   const hasUnsavedChanges = isDirty || requirementsAreDirty
   const isBusy = isSubmitting || saveDraftMutation.isPending || writing || writeState !== 'ready'
   const currentNeedsAcceptance = requirementsQuery.data?.needsAcceptance !== false || agreementInvalidatedByEdit
-  const organizerTerms = requirementsQuery.data?.organizerTerms
-    ?? policiesQuery.data?.find((policy) => policy.policyKind === 'organizer_terms')
-  const eventPolicy = requirementsQuery.data?.eventPolicy
-    ?? policiesQuery.data?.find((policy) => policy.policyKind === 'event_policy')
+  const organizerTerms = requirementsQuery.data ? requirementsQuery.data.organizerTerms : policiesQuery.data?.find((policy) => policy.policyKind === 'organizer_terms')
+  const eventPolicy = requirementsQuery.data ? requirementsQuery.data.eventPolicy : policiesQuery.data?.find((policy) => policy.policyKind === 'event_policy')
   const shouldBlockNavigation = useCallback(
     () => hasUnsavedChanges && !approvedNavigationRef.current,
     [hasUnsavedChanges],
@@ -602,7 +600,7 @@ export function EventEditorPage() {
                   <header className="event-step__header"><h1>Event Details</h1><p>Review your event and complete the final details.</p></header>
                   {ownedEvent ? <><EventCompositionSummary event={ownedEvent} /><EventImageManager key={eventId} eventId={eventId} disabled={isBusy} /></> : null}
                   <EventRequirementsStep control={requirementsControl} errors={requirementErrors} onRequirementChange={resetDisplayedAgreement} register={registerRequirement} />
-                  {organizerTerms && eventPolicy ? <OrganizerAgreementStep error={requirementErrors.organizerAgreement?.message} eventPolicy={eventPolicy} needsAcceptance={currentNeedsAcceptance} onAgreementChange={() => { setAgreementError(null); requirementsForm.clearErrors('organizerAgreement') }} organizerTerms={organizerTerms} register={registerRequirement} /> : <ReadState status="unavailable" title="Current policies could not load" description="Try loading your event details again." />}
+                  {organizerTerms && eventPolicy ? <OrganizerAgreementStep error={requirementErrors.organizerAgreement?.message} eventPolicy={eventPolicy} needsAcceptance={currentNeedsAcceptance} onAgreementChange={() => { setAgreementError(null); requirementsForm.clearErrors('organizerAgreement') }} organizerTerms={organizerTerms} register={registerRequirement} /> : <ReadState status="unavailable" title="Publication policies are not available" description="You can save your draft and images. Agreement and publication will be available once Wheretoo has configured its policies." />}
                 </> : null}
                 <div className="event-editor__actions"><div className="event-editor__primary-actions">
                   {!requirementsNeedInitialState ? <Button disabled={isBusy} onClick={() => submitAction('save')} variant="secondary">{serverError ? 'Try saving again' : saveLabel}</Button> : null}
@@ -661,7 +659,7 @@ export function EventEditorPage() {
             />
           ) : null}
           {activeStep === 5 && requirementsAreHydrated && (!organizerTerms || !eventPolicy) ? (
-            <ReadState status="unavailable" title="Current policies could not load" description="Check your connection, then try again." />
+            <ReadState status="unavailable" title="Publication policies are not available" description="You can save your draft and images. Agreement and publication will be available once Wheretoo has configured its policies." />
           ) : null}
           <div className="event-editor__actions">
             {activeStep > 1 ? <Button disabled={isBusy} onClick={() => setActiveStep((step) => (step - 1) as ActiveStep)} variant="secondary">Back</Button> : <span />}

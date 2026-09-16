@@ -37,7 +37,7 @@ beforeEach(() => {
  create.mockResolvedValue(testEvent)
  save.mockImplementation(async (_id, _owner, _token, values) => { current = { ...current, context_token: 'saved-token', event: { ...current.event, title: values.title, admission_type: values.admissionType } }; return current })
  requirements.mockImplementation(async (_id, _owner, _token, values) => { current = { ...current, context_token: 'requirements-token', requirements: { ...current.requirements, ...values } }; return current })
- accept.mockImplementation(async () => { current = { ...current, context_token: 'accepted-token', requirements: { ...current.requirements, needsAcceptance: false } }; return current })
+ accept.mockImplementation(async () => { if (!current.requirements.organizerTerms || !current.requirements.eventPolicy) throw new Error('Policies unavailable'); current = { ...current, context_token: 'accepted-token', requirements: { ...current.requirements, needsAcceptance: false } }; return current })
  reload.mockImplementation(async () => current)
  useTiers.mockReturnValue({ data: [], isPending: false, isError: false })
  Object.defineProperties(HTMLDialogElement.prototype, {
@@ -223,4 +223,24 @@ describe('atomic-context event editor', () => {
   await act(async () => router.navigate('/away')); await user.click(screen.getByRole('button', { name: 'Leave' }))
   expect(await screen.findByText('away destination')).toBeInTheDocument()
  })
+})
+
+it('keeps draft location, ticket type, details and images available when publication policy is unconfigured', async () => {
+ current = { ...testContext(), requirements: { ...testContext().requirements, needsAcceptance: true, organizerTerms: null, eventPolicy: null } }
+ const user = userEvent.setup()
+ const view = renderEditor('/organizer/events/event-1/edit?step=date-location')
+ expect(await screen.findByText('Mock address search')).toBeInTheDocument()
+ expect(screen.queryByText('Your event could not load')).not.toBeInTheDocument()
+ await user.click(screen.getByRole('button', { name: 'Continue' }))
+ expect(await screen.findByRole('heading', { name: 'Ticket Type' })).toBeInTheDocument()
+ await user.click(screen.getByRole('button', { name: 'Continue' }))
+ expect(await screen.findByRole('heading', { name: 'Event Details' })).toBeInTheDocument()
+ expect(screen.getByText('Publication policies are not available')).toBeInTheDocument()
+ expect(screen.getByLabelText('Upload images')).toBeInTheDocument()
+ expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled()
+ expect(screen.getByRole('button', { name: 'Save draft' })).toBeEnabled()
+ expect(accept).not.toHaveBeenCalled()
+ view.unmount()
+ renderEditor('/organizer/events/event-1/edit?step=date-location')
+ expect(await screen.findByText('Mock address search')).toBeInTheDocument()
 })

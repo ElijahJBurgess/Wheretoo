@@ -296,10 +296,10 @@ export function EventPreviewPage() {
           <div><dt>Weapons</dt><dd>{requirements.weaponsPresent ? 'Disclosed' : 'Not disclosed'}</dd></div>
           <div><dt>High-risk activity</dt><dd>{requirements.highRiskActivity ? 'Disclosed' : 'Not disclosed'}</dd></div>
         </dl>
-        <p className="event-preview__policies">
+        {requirements.organizerTerms && requirements.eventPolicy ? <p className="event-preview__policies">
           Policies: <a href={requirements.organizerTerms.publicUrl}>{requirements.organizerTerms.label}</a>{' and '}
           <a href={requirements.eventPolicy.publicUrl}>{requirements.eventPolicy.label}</a>
-        </p>
+        </p> : <p role="status">Publication policies are not available. You can keep editing and saving your draft.</p>}
         <p className="event-preview__agreement" role="status">
           {requirements.needsAcceptance ? 'Agreement required before publishing.' : 'Agreement current for this saved event.'}
         </p>

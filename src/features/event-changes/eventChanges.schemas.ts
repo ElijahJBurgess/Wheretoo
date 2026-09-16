@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { requirementsFromRpc, requirementsRpcRowSchema } from '../moderation/moderation.api'
+import { eventRequirementsInputSchema } from '../moderation/moderation.schemas'
 import { eventNoticeFactsSchema } from './eventStatus.schemas'
 import type { EventRow } from '../events/event.types'
 const count = z.number().int().nonnegative().safe()
@@ -19,9 +20,28 @@ const eventSchema = z.object({
  published_at: nullableText, created_at: z.string(), updated_at: z.string(),
 }).passthrough().transform(row => row as EventRow)
 export const snapshotSchema = z.strictObject({ snapshot_id: z.string().uuid(), snapshot_version: count, content_revision: count, captured_at: z.string(), facts: eventNoticeFactsSchema })
+// An unconfigured publication policy must not hide an owned draft.
+// Keep this alternative local to editor context; consent APIs stay strict.
+const unavailablePolicyRequirementsSchema = z.strictObject({
+ minimum_age: requirementsRpcRowSchema.shape.minimum_age,
+ alcohol_present: z.boolean().nullable(), cannabis_present: z.boolean().nullable(), explicit_adult_content: z.boolean().nullable(),
+ gambling_present: z.boolean().nullable(), weapons_present: z.boolean().nullable(), high_risk_activity: z.boolean().nullable(),
+ policies_unavailable: z.literal(true), needs_acceptance: z.literal(true),
+}).refine(row => {
+ const disclosures = [row.minimum_age, row.alcohol_present, row.cannabis_present, row.explicit_adult_content, row.gambling_present, row.weapons_present, row.high_risk_activity]
+ return disclosures.every(value => value === null) || disclosures.every(value => value !== null)
+}, 'Disclosure projection must be wholly absent or complete.').transform(row => ({
+ ...eventRequirementsInputSchema.parse({
+  minimumAge: row.minimum_age ?? 'all_ages', alcoholPresent: row.alcohol_present ?? false,
+  cannabisPresent: row.cannabis_present ?? false, explicitAdultContent: row.explicit_adult_content ?? false,
+  gamblingPresent: row.gambling_present ?? false, weaponsPresent: row.weapons_present ?? false,
+  highRiskActivity: row.high_risk_activity ?? false,
+ }),
+ needsAcceptance: true as const, organizerTerms: null, eventPolicy: null,
+}))
 export const eventChangeContextSchema = z.strictObject({
  event_id: z.string().min(1), context_token: z.string().min(1), event: eventSchema,
- requirements: requirementsRpcRowSchema.transform(requirementsFromRpc), currently_publicly_eligible: z.boolean(),
+ requirements: z.union([requirementsRpcRowSchema.transform(requirementsFromRpc), unavailablePolicyRequirementsSchema]), currently_publicly_eligible: z.boolean(),
  previous_saved: snapshotSchema.nullable(), current_saved: snapshotSchema,
  previous_publicly_eligible: snapshotSchema.nullable(), current_publicly_eligible: snapshotSchema.nullable(),
  notice_required: z.boolean(), required_snapshot_id: z.string().uuid().nullable(), required_fields: z.array(z.string()),
