@@ -43,10 +43,7 @@ export function EventDetailsStep({ errors, register, creation = false }: EventDe
         </fieldset>
         <Field error={errors.capacity?.message} label="Capacity (optional)" name="capacity">
           <input min="1" inputMode="numeric" type="number" {...register('capacity', { setValueAs: (value) => value === '' || value === null || value === undefined ? null : Number(value) })} />
-        </Field></> : <div>
-          <p className="ui-field__label">Event artwork</p>
-          <p className="event-creation__artwork-note">Add up to three images in the Event Details step after saving your draft.</p>
-        </div>}
+        </Field></> : null}
       </div>
     </div>
   )

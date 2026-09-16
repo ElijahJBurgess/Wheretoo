@@ -127,7 +127,7 @@ describe('OrganizerPaymentsPage', () => {
     useConnectStatus.mockReturnValue({ data: { ...baseStatus, status: 'ready' }, isPending: false, isError: false, refetch })
     render(<OrganizerPaymentsPage />)
 
-    await user.click(screen.getByRole('button', { name: 'Open Stripe Express' }))
+    await user.click(screen.getByRole('button', { name: 'Manage in Stripe' }))
 
     expect(getExpressLoginUrl).toHaveBeenCalledOnce()
     expect(await screen.findByRole('alert')).toHaveTextContent('Something went wrong')
@@ -171,7 +171,7 @@ describe('OrganizerPaymentsPage', () => {
     useConnectStatus.mockReturnValue({ data: { ...baseStatus, status: 'ready' }, isPending: false, isError: false, refetch })
     const view = render(<OrganizerPaymentsPage />)
 
-    await user.click(screen.getByRole('button', { name: 'Open Stripe Express' }))
+    await user.click(screen.getByRole('button', { name: 'Manage in Stripe' }))
     useSession.mockReturnValue({ status: 'anonymous', session: null, user: null })
     view.rerender(<OrganizerPaymentsPage />)
     resolveUrl('https://connect.stripe.com/express/login')
@@ -192,7 +192,7 @@ describe('OrganizerPaymentsPage', () => {
     const view = render(<OrganizerPaymentsPage />)
 
     try {
-      await user.click(screen.getByRole('button', { name: 'Open Stripe Express' }))
+      await user.click(screen.getByRole('button', { name: 'Manage in Stripe' }))
       view.unmount()
       resolveUrl('https://connect.stripe.com/express/login')
 
@@ -213,7 +213,7 @@ describe('OrganizerPaymentsPage', () => {
     render(<OrganizerPaymentsPage />)
 
     try {
-      await user.click(screen.getByRole('button', { name: 'Open Stripe Express' }))
+      await user.click(screen.getByRole('button', { name: 'Manage in Stripe' }))
       await Promise.resolve()
       expect(assign).toHaveBeenCalledWith('https://connect.stripe.com/express/login')
     } finally {

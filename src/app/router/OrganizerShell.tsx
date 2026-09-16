@@ -30,7 +30,7 @@ export function OrganizerShell() {
   const creationEdit = pathname.endsWith('/edit') && (query.get('resume') === '1' || query.get('saved') === '1' || ['basics', 'date-location', 'ticket-type', 'details', 'requirements'].includes(query.get('step') ?? ''))
   const creationDetail = ownedEvent.data?.status === 'draft' && (pathname.endsWith('/tickets') || pathname.endsWith('/preview'))
   const creationOutcome = query.get('created') === '1' && pathname === `/organizer/events/${eventId}`
-  if (pathname === '/organizer/setup' || pathname === '/organizer/settings/payments' || pathname === '/organizer/events/new' || creationEdit || creationDetail || creationOutcome) return <Outlet />
+  if (pathname === '/organizer/setup' || pathname === '/organizer/events/new' || creationEdit || creationDetail || creationOutcome) return <Outlet />
   if (pathname === '/organizer/events' || pathname.startsWith('/organizer/settings') || match) return <OperationsLayout eventId={match?.[1]} admissionType={admissionType === 'paid' || admissionType === 'free' ? admissionType : null} signOutPending={controller.pending} onSignOut={() => void handleSignOut()} staffRole={staffRoleQuery.data ?? null}><FormErrorSummary errors={signOutError ? [signOutError] : []} title="Sign out failed" /><Outlet /></OperationsLayout>
   return (
     <OrganizerLayout signOutPending={controller.pending} onSignOut={() => void handleSignOut()} staffRole={staffRoleQuery.data ?? null}>

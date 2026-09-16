@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -55,6 +55,37 @@ describe('OrganizerPaymentsPage journey', () => {
     createConnectAccountSession.mockResolvedValue({ clientSecret: 'never-render-this-secret', status: statusValue('action_required') })
   })
 
+  it.each([
+    ['not_started', 'Not connected', 'Not enabled'],
+    ['pending', 'Setup incomplete', 'Awaiting confirmation'],
+    ['action_required', 'Setup incomplete', 'Setup incomplete'],
+    ['restricted', 'Setup incomplete', 'Setup incomplete'],
+    ['ready', 'Ready', 'Enabled'],
+  ] as const)('shows server-derived capability state for %s in Settings', async (status, accountLabel, capabilityLabel) => {
+    getConnectStatus.mockResolvedValue(statusValue(status))
+    renderPage()
+    expect(await screen.findByRole('heading', { name: 'Payments & Payouts' })).toBeInTheDocument()
+    const account = await screen.findByRole('region', { name: 'Stripe account' })
+    expect(within(account).getByText(accountLabel, { selector: '.payments-settings__badge' })).toBeInTheDocument()
+    const capabilities = within(account).getByRole('list', { name: 'Payment capabilities' })
+    expect(within(capabilities).getByText('Accept payments')).toBeInTheDocument()
+    expect(within(capabilities).getByText('Receive payouts')).toBeInTheDocument()
+    expect(within(capabilities).getAllByText(capabilityLabel)).toHaveLength(2)
+    expect(screen.queryByRole('main')).not.toBeInTheDocument()
+  })
+
+  it('does not retain capability readiness when a refresh fails', async () => {
+    const user = userEvent.setup()
+    getConnectStatus.mockResolvedValue(statusValue('pending'))
+    renderPage()
+    await screen.findByRole('button', { name: 'Refresh status' })
+    getConnectStatus.mockRejectedValue(new Error('offline'))
+    await user.click(screen.getByRole('button', { name: 'Refresh status' }))
+    const capabilities = await screen.findByRole('list', { name: 'Payment capabilities' })
+    expect(within(capabilities).getAllByText('Unavailable')).toHaveLength(2)
+    expect(within(capabilities).queryByText('Enabled')).not.toBeInTheDocument()
+  })
+
   it('offers the payouts decision and safely skips into the organizer console', async () => {
     const user = userEvent.setup()
     renderPage()
@@ -96,8 +127,7 @@ describe('OrganizerPaymentsPage journey', () => {
     renderPage()
     await user.click(await screen.findByRole('button', { name: 'Refresh status' }))
     expect(await screen.findByRole('heading', { name: 'You’re all set!' })).toBeInTheDocument()
-    expect(screen.getByText('Payments enabled')).toBeInTheDocument()
-    expect(screen.getByText('Payouts configured')).toBeInTheDocument()
+    expect(within(screen.getByRole('list', { name: 'Payment capabilities' })).getAllByText('Enabled')).toHaveLength(2)
     await user.click(screen.getByRole('link', { name: 'Create your first event' }))
     expect(screen.getByText('new event destination')).toBeInTheDocument()
   })
@@ -246,7 +276,7 @@ describe('OrganizerPaymentsPage journey', () => {
     expect(await screen.findByText('Stripe component: management')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Exit embedded setup' }))
     getExpressLoginUrl.mockRejectedValue(new Error('raw account details'))
-    await user.click(await screen.findByRole('button', { name: 'Open Stripe Express' }))
+    await user.click(await screen.findByRole('button', { name: 'Manage in Stripe' }))
     expect(await screen.findByRole('heading', { name: 'Something went wrong' })).toBeInTheDocument()
     expect(screen.queryByText('raw account details')).not.toBeInTheDocument()
   })
@@ -257,7 +287,7 @@ describe('OrganizerPaymentsPage journey', () => {
     let resolveUrl!: (value: string) => void
     getExpressLoginUrl.mockReturnValue(new Promise(resolve => { resolveUrl = resolve }))
     const view = renderPage()
-    await user.click(await screen.findByRole('button', { name: 'Open Stripe Express' }))
+    await user.click(await screen.findByRole('button', { name: 'Manage in Stripe' }))
     if (reason === 'unmount') view.unmount()
     else {
       useSession.mockReturnValue({ status: 'anonymous', session: null, user: null })

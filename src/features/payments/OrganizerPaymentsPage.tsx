@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState, type PropsWithChildren } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { z } from 'zod'
@@ -9,23 +9,34 @@ import { Button } from '../../components/ui/Button'
 import { useSession } from '../auth/SessionProvider'
 import { captureIdentityLifetime } from '../auth/identityLifetime'
 import { useOptionalSignOut } from '../auth/SignOutProvider'
-import { OnboardingIcon, OnboardingLayout, OnboardingProgress, StripeArtwork, type OnboardingIconKind } from '../organizer-onboarding/OnboardingLayout'
+import { OnboardingIcon } from '../organizer-onboarding/OnboardingLayout'
 import { getExpressLoginUrl, type ConnectAccountSession } from './payment.api'
 import { ConnectEmbeddedPanel } from './ConnectEmbeddedPanel'
 import { useConnectAccountSession, useConnectStatus } from './payment.queries'
 import type { ConnectStatus } from './payment.types'
+import './organizer-payments.css'
 
 type JourneyStep = 'overview' | 'transition' | 'interrupted'
 type ActionError = 'session' | 'embedded' | 'express' | 'status'
 
 const statusCopy = {
-  pending: { label: 'Verification Pending', title: 'Stripe is reviewing your details', description: 'Your payment setup is pending with Stripe. Paid ticket sales will be available once verification is complete and your account is ready.', icon: 'clock', tone: 'pending' },
-  action_required: { label: 'Action Required', title: 'Action required in Stripe', description: 'Stripe needs more information to complete your account setup. Review your details securely with Stripe to continue.', icon: 'alert', tone: 'danger' },
-  restricted: { label: 'Action Required', title: 'Payment setup needs an update', description: 'Your Stripe account needs attention before you can sell paid tickets. Open Stripe to review and update your details.', icon: 'alert', tone: 'danger' },
-  ready: { label: 'Payouts Connected', title: 'You’re all set!', description: 'Stripe is connected and your payouts are ready.', icon: 'check', tone: 'success' },
-  interrupted: { label: 'Onboarding Interrupted', title: 'Setup not completed', description: 'You started setting up your payouts with Stripe but didn’t finish. Pick up where you left off to start accepting payments.', icon: 'pause', tone: 'neutral' },
-  error: { label: 'Stripe Connection Error', title: 'Something went wrong', description: 'We couldn’t connect to Stripe. Check your connection and try again.', icon: 'error', tone: 'danger' },
-} satisfies Record<string, { label: string; title: string; description: string; icon: OnboardingIconKind; tone: string }>
+  pending: { title: 'Stripe is reviewing your details', description: 'Your payment setup is pending with Stripe. Paid ticket sales will be available once verification is complete and your account is ready.', tone: 'pending' },
+  action_required: { title: 'Action required in Stripe', description: 'Stripe needs more information to complete your account setup. Review your details securely with Stripe to continue.', tone: 'danger' },
+  restricted: { title: 'Payment setup needs an update', description: 'Your Stripe account needs attention before you can sell paid tickets. Open Stripe to review and update your details.', tone: 'danger' },
+  ready: { title: 'You’re all set!', description: 'Stripe is connected and your payouts are ready.', tone: 'success' },
+  interrupted: { title: 'Setup not completed', description: 'You started setting up your payouts with Stripe but didn’t finish. Pick up where you left off to start accepting payments.', tone: 'neutral' },
+  error: { title: 'Something went wrong', description: 'We couldn’t connect to Stripe. Check your connection and try again.', tone: 'danger' },
+} satisfies Record<string, { title: string; description: string; tone: string }>
+
+function PaymentsSettingsPanel({ children }: PropsWithChildren) {
+  return <section className="payments-settings" aria-labelledby="payments-settings-title">
+    <header className="payments-settings__header">
+      <h2 id="payments-settings-title">Payments &amp; Payouts</h2>
+      <p>Connect Stripe to accept payments for your events and receive payouts.</p>
+    </header>
+    {children}
+  </section>
+}
 
 function OrganizerPaymentsJourney({ userId, eventId, verifyEvent }: { userId: string; eventId?: string; verifyEvent?: () => Promise<void> }) {
   const navigate = useNavigate()
@@ -135,7 +146,7 @@ function OrganizerPaymentsJourney({ userId, eventId, verifyEvent }: { userId: st
 
   const laterAction = eventId
     ? <Button disabled={busy !== null} onClick={() => void returnToEvent()} variant="secondary">Do this later</Button>
-    : <Link className="onboarding__text-link" to="/organizer/events">Do this later</Link>
+    : <Link className="payments-settings__link" to="/organizer/events">Do this later</Link>
 
   async function openExpressLogin() {
     if (inFlight.current) return
@@ -162,8 +173,13 @@ function OrganizerPaymentsJourney({ userId, eventId, verifyEvent }: { userId: st
   const copy = hasError ? statusCopy.error
     : isInterrupted ? statusCopy.interrupted
       : status && status.status !== 'not_started' ? statusCopy[status.status] : null
-  const pageTitle = embeddedSession ? 'Secure Stripe Setup'
-    : isTransition ? 'Continue to Stripe' : copy?.label ?? 'Set Up Payouts'
+  const accountLabel = hasError ? 'Status unavailable' : status?.status === 'ready' ? 'Ready'
+    : status?.status === 'not_started' && !isInterrupted ? 'Not connected' : 'Setup incomplete'
+  // The safe public projection exposes aggregate readiness, not independent
+  // capability flags. Never infer either capability from incomplete setup.
+  const capabilityLabel = hasError ? 'Unavailable' : status?.status === 'ready' ? 'Enabled'
+    : status?.status === 'pending' ? 'Awaiting confirmation'
+      : status?.status === 'not_started' ? 'Not enabled' : 'Setup incomplete'
   const retry = () => {
     if (actionError === 'express') void openExpressLogin()
     else if (actionError === 'embedded' || actionError === 'session') void openEmbeddedPanel()
@@ -171,17 +187,12 @@ function OrganizerPaymentsJourney({ userId, eventId, verifyEvent }: { userId: st
   }
 
   return (
-    <OnboardingLayout
-      backTo={isTransition ? undefined : returnPath}
-      onBack={isTransition ? () => { setStep('overview'); restoreFocus.current = true } : undefined}
-      title={pageTitle}
-      wide={embeddedSession !== null}
-    >
+    <PaymentsSettingsPanel>
       {connectQuery.isPending || (eventId !== undefined && connectQuery.isFetching) || busy === 'refresh' ? (
         <AsyncState status="loading" title={busy === 'refresh' ? 'Checking your Stripe status' : 'Loading payment setup'} />
       ) : embeddedSession ? (
-        <div className="onboarding-stripe">
-          <p className="onboarding__intro">Complete your details securely with Stripe.</p>
+        <div className="payments-settings__embedded">
+          <p className="payments-settings__intro">Complete your details securely with Stripe.</p>
           <ConnectEmbeddedPanel
             initialSession={embeddedSession}
             mode={embeddedSession.status.status === 'ready' ? 'management' : 'onboarding'}
@@ -195,65 +206,63 @@ function OrganizerPaymentsJourney({ userId, eventId, verifyEvent }: { userId: st
             }}
           />
         </div>
-      ) : copy ? (
-        <section aria-labelledby="payout-status-title" className={`onboarding-status onboarding-status--${copy.tone}`}>
-          <div aria-hidden="true" className="onboarding-status__symbol"><OnboardingIcon kind={copy.icon} /></div>
-          <div aria-live="polite" role={hasError ? 'alert' : undefined}>
-            <h1 id="payout-status-title">{copy.title}</h1>
-            <p className="onboarding__intro">{copy.description}</p>
-          </div>
-          {!hasError && status?.status === 'ready' ? (
-            <ul className="onboarding-status__checks">
-              {['Payments enabled', 'Payouts configured', 'Ready to sell tickets'].map(label => <li key={label}><OnboardingIcon kind="check" />{label}</li>)}
-            </ul>
-          ) : !hasError && status?.status === 'pending' ? (
-            <p className="onboarding__trust"><OnboardingIcon kind="lock" />Payments and payouts become available once Stripe confirms your account is ready.</p>
-          ) : null}
-          <div className="onboarding__actions">
-            {hasError ? <Button disabled={busy !== null} onClick={retry} ref={actionRef}>{busy === 'session' ? 'Opening secure setup…' : busy === 'express' ? 'Opening Stripe Express…' : 'Try again'}</Button>
-              : status?.status === 'ready' ? <>
-                {eventId ? <Button disabled={busy !== null} onClick={() => void returnToEvent()}>Return to event</Button> : <Link className="ui-button ui-button--primary" to="/organizer/events/new">Create your first event</Link>}
-                <Link className="onboarding__text-link" to="/organizer/events">Go to dashboard</Link>
-                <div className="onboarding__management">
-                  <Button disabled={busy !== null} onClick={() => void openEmbeddedPanel()} ref={actionRef} variant="secondary">{busy === 'session' ? 'Opening secure setup…' : 'Manage payment details'}</Button>
-                  <Button disabled={busy !== null} onClick={() => void openExpressLogin()} variant="secondary">{busy === 'express' ? 'Opening Stripe Express…' : 'Open Stripe Express'}</Button>
-                </div>
-              </> : status?.status === 'pending' ? <>
-                <Button disabled={busy !== null} onClick={() => void refreshOverview()} ref={actionRef}>Refresh status</Button>
-                <Button disabled={busy !== null} onClick={() => void openEmbeddedPanel()} variant="secondary">{busy === 'session' ? 'Opening secure setup…' : 'Continue with Stripe'}</Button>
-                {eventId ? laterAction : <Link className="onboarding__text-link" to="/organizer/events">Go to dashboard</Link>}
-              </> : <>
-                <Button disabled={busy !== null} onClick={() => void openEmbeddedPanel(isInterrupted)} ref={actionRef}>{busy === 'session' ? 'Opening secure setup…' : isInterrupted ? 'Continue setup' : 'Review with Stripe'}</Button>
-                {laterAction}
-              </>}
-            {hasError ? <Link className="onboarding__text-link" to="/organizer/events">Go to dashboard</Link> : null}
-          </div>
-        </section>
-      ) : isTransition ? (
-        <section aria-labelledby="stripe-transition-title" className="onboarding-payouts onboarding-payouts--transition">
-          <StripeArtwork transition />
-          <h1 id="stripe-transition-title">You’re almost there</h1>
-          <p className="onboarding__intro">Continue to secure Stripe onboarding to complete your payout setup. Stripe collects your business details, verifies your identity, and sets up how you get paid.</p>
-          <p className="onboarding__trust"><OnboardingIcon kind="lock" />Your sensitive information is handled securely by Stripe.</p>
-          <Button disabled={busy !== null} onClick={() => void openEmbeddedPanel()} ref={actionRef}>{busy === 'session' ? 'Opening secure setup…' : 'Continue with Stripe'}</Button>
-        </section>
       ) : (
-        <section aria-labelledby="payouts-intro-title" className="onboarding-payouts">
-          <OnboardingProgress step={3} />
-          <StripeArtwork />
-          <h1 id="payouts-intro-title">Secure payouts<br /> with Stripe</h1>
-          <ul className="onboarding-payouts__benefits">
-            {['Accept payments for your events', 'Get paid securely', 'Stripe handles sensitive payment information'].map(label => <li key={label}><OnboardingIcon kind="check" />{label}</li>)}
-          </ul>
-          <p className="onboarding__intro">wheretoo partners with Stripe to handle payments and payouts securely.</p>
-          <div className="onboarding__actions">
-            <Button onClick={() => { setStep('transition'); restoreFocus.current = true }} ref={actionRef}>Set up payouts</Button>
-            {laterAction}
+        <section className="payments-settings__account" aria-label="Stripe account">
+          <div className="payments-settings__account-header">
+            <span className="payments-settings__stripe">stripe</span>
+            <span className={`payments-settings__badge${!hasError && status?.status === 'ready' ? ' payments-settings__badge--ready' : ''}`}>{accountLabel}</span>
           </div>
-          <p className="onboarding__note">You can create drafts and free events while you finish setting up payouts.</p>
+          <ul className="payments-settings__capabilities" aria-label="Payment capabilities">
+            {['Accept payments', 'Receive payouts'].map(label => <li key={label}>
+              <span>{label}</span><strong>{capabilityLabel}</strong>
+            </li>)}
+          </ul>
+          {copy ? (
+            <section aria-labelledby="payout-status-title" className={`payments-settings__status payments-settings__status--${copy.tone}`}>
+              <div aria-live="polite" role={hasError ? 'alert' : undefined}>
+                <h3 id="payout-status-title">{copy.title}</h3>
+                <p className="payments-settings__intro">{copy.description}</p>
+              </div>
+              <div className="payments-settings__actions">
+                {hasError ? <Button disabled={busy !== null} onClick={retry} ref={actionRef}>{busy === 'session' ? 'Opening secure setup…' : busy === 'express' ? 'Opening Stripe Express…' : 'Try again'}</Button>
+                  : status?.status === 'ready' ? <>
+                    <Button disabled={busy !== null} onClick={() => void openExpressLogin()}>{busy === 'express' ? 'Opening Stripe Express…' : 'Manage in Stripe'}</Button>
+                    <Button disabled={busy !== null} onClick={() => void openEmbeddedPanel()} ref={actionRef} variant="secondary">{busy === 'session' ? 'Opening secure setup…' : 'Manage payment details'}</Button>
+                    {eventId ? <Button disabled={busy !== null} onClick={() => void returnToEvent()} variant="secondary">Return to event</Button> : <Link className="payments-settings__link" to="/organizer/events/new">Create your first event</Link>}
+                    <Link className="payments-settings__link" to="/organizer/events">Go to dashboard</Link>
+                  </> : status?.status === 'pending' ? <>
+                    <Button disabled={busy !== null} onClick={() => void refreshOverview()} ref={actionRef}>Refresh status</Button>
+                    <Button disabled={busy !== null} onClick={() => void openEmbeddedPanel()} variant="secondary">{busy === 'session' ? 'Opening secure setup…' : 'Continue with Stripe'}</Button>
+                    {eventId ? laterAction : <Link className="payments-settings__link" to="/organizer/events">Go to dashboard</Link>}
+                  </> : <>
+                    <Button disabled={busy !== null} onClick={() => void openEmbeddedPanel(isInterrupted)} ref={actionRef}>{busy === 'session' ? 'Opening secure setup…' : isInterrupted ? 'Continue setup' : 'Review with Stripe'}</Button>
+                    {laterAction}
+                  </>}
+                {hasError ? <Link className="payments-settings__link" to="/organizer/events">Go to dashboard</Link> : null}
+              </div>
+            </section>
+          ) : isTransition ? (
+            <section aria-labelledby="stripe-transition-title" className="payments-settings__overview payments-settings__overview--transition">
+              <button className="payments-settings__link payments-settings__back" onClick={() => { setStep('overview'); restoreFocus.current = true }} type="button">← Back to payout overview</button>
+              <h3 id="stripe-transition-title">You’re almost there</h3>
+              <p className="payments-settings__intro">Continue to secure Stripe onboarding to complete your payout setup. Stripe collects your business details, verifies your identity, and sets up how you get paid.</p>
+              <Button disabled={busy !== null} onClick={() => void openEmbeddedPanel()} ref={actionRef}>{busy === 'session' ? 'Opening secure setup…' : 'Continue with Stripe'}</Button>
+            </section>
+          ) : (
+            <section aria-labelledby="payouts-intro-title" className="payments-settings__overview">
+              <h3 id="payouts-intro-title">Secure payouts with Stripe</h3>
+              <p className="payments-settings__intro">Stripe handles your payment setup, identity verification, and bank details.</p>
+              <div className="payments-settings__actions">
+                <Button onClick={() => { setStep('transition'); restoreFocus.current = true }} ref={actionRef}>Set up payouts</Button>
+                {laterAction}
+              </div>
+              <p className="payments-settings__note">You can create drafts and free events while you finish setting up payouts.</p>
+            </section>
+          )}
+          <p className="payments-settings__trust"><OnboardingIcon kind="lock" />Your sensitive payment and bank information is handled securely by Stripe.</p>
         </section>
       )}
-    </OnboardingLayout>
+    </PaymentsSettingsPanel>
   )
 }
 
@@ -281,7 +290,7 @@ export function OrganizerPaymentsPage() {
   const sessionState = useSession()
   const signOut = useOptionalSignOut()
   if (sessionState.status !== 'authenticated' || signOut?.pending) {
-    return <OnboardingLayout title="Set Up Payouts"><AsyncState status="loading" title="Loading payment setup" /></OnboardingLayout>
+    return <PaymentsSettingsPanel><AsyncState status="loading" title="Loading payment setup" /></PaymentsSettingsPanel>
   }
   if (eventId !== null) {
     if (!z.uuid().safeParse(eventId).success) return <AsyncState status="empty" title="Event unavailable" action={<Link to="/organizer/events">My events</Link>} />

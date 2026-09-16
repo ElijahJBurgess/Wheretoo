@@ -35,7 +35,18 @@ describe('OrganizerShell onboarding presentation boundary', () => {
     useSignOut.mockReturnValue({ error: null, pending: false, signOut: vi.fn() })
   })
 
-  it.each(['/organizer/setup', '/organizer/settings/payments', '/organizer/events/new', '/organizer/events/00000000-0000-4000-8000-000000000001/edit?resume=1', '/organizer/events/00000000-0000-4000-8000-000000000001/edit?step=details', '/organizer/events/00000000-0000-4000-8000-000000000001/tickets', '/organizer/events/00000000-0000-4000-8000-000000000001/preview', '/organizer/events/00000000-0000-4000-8000-000000000001?created=1'])(
+  it.each([
+    '/organizer/settings/payments',
+    '/organizer/settings/payments?eventId=00000000-0000-4000-8000-000000000001',
+  ])('keeps payment Settings inside the organizer operations shell at %s', path => {
+    renderPath(path)
+
+    expect(screen.getByRole('heading', { name: 'Onboarding content' })).toBeInTheDocument()
+    expect(screen.getByRole('navigation', { name: 'Organizer operations' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument()
+  })
+
+  it.each(['/organizer/setup', '/organizer/events/new', '/organizer/events/00000000-0000-4000-8000-000000000001/edit?resume=1', '/organizer/events/00000000-0000-4000-8000-000000000001/edit?step=details', '/organizer/events/00000000-0000-4000-8000-000000000001/tickets', '/organizer/events/00000000-0000-4000-8000-000000000001/preview', '/organizer/events/00000000-0000-4000-8000-000000000001?created=1'])(
     'leaves the full-frame onboarding layout unwrapped at %s',
     (path) => {
       renderPath(path)

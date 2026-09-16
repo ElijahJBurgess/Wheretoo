@@ -79,7 +79,7 @@ export function EventEditorPage() {
   const eventId = routeEventId ?? ''
   const isNew = eventId === ''
   const queryClient = useQueryClient()
-  const routeIdentityKey = organizerId + ':' + eventId
+  const routeIdentityKey = organizerId + ':' + sessionState.identityVersion + ':' + eventId
   const routeIdentity = useMemo(() => ({ key: routeIdentityKey }), [routeIdentityKey])
   const latestRouteIdentityRef = useRef(routeIdentity)
   const mountedRef = useRef(false)
@@ -94,6 +94,10 @@ export function EventEditorPage() {
   const requirementsQuery = { ...contextQuery, isError: !hasBaseline && contextQuery.isError, data: context?.requirements }
   const [writeState, setWriteState] = useState<'ready' | 'conflict' | 'unknown'>('ready')
   const [writing, setWriting] = useState(false)
+  const [artworkBusyIdentity, setArtworkBusyIdentity] = useState<typeof routeIdentity | null>(null)
+  const artworkBusy = artworkBusyIdentity === routeIdentity
+  const setArtworkBusy = (busy: boolean) => setArtworkBusyIdentity(busy ? routeIdentity : null)
+  const artworkDraftRef = useRef<{ id: string; identity: typeof routeIdentity } | null>(null)
   const [confirmReload, setConfirmReload] = useState(false)
   const policiesQuery = useRequiredEventPolicies()
   const saveDraftMutation = useSaveEventDraft()
@@ -104,7 +108,7 @@ export function EventEditorPage() {
   const initialStep = explicitCreationStep ?? 1
   const [activeStep, setActiveStep] = useState<ActiveStep>(initialStep)
   const [draftSaved, setDraftSaved] = useState(new URLSearchParams(routeLocation.search).get('saved') === '1')
-  const [serverError, setServerError] = useState<string | null>(null)
+  const [serverError, setServerError] = useState<string | null>(() => typeof routeLocation.state?.artworkError === 'string' ? routeLocation.state.artworkError : null)
   const [agreementError, setAgreementError] = useState<string | null>(null)
   const hydratedEventIdRef = useRef<string | null>(null)
   const approvedNavigationRef = useRef(false)
@@ -154,22 +158,22 @@ export function EventEditorPage() {
     && (requirementsQuery.isPending || (ownedEvent.admission_type === 'paid' && resumeTiersQuery.isPending))
   const requirementsAreHydrated = eventId !== '' && requirementsHydratedEventId === eventId
   const hasUnsavedChanges = isDirty || requirementsAreDirty
-  const isBusy = isSubmitting || saveDraftMutation.isPending || writing || writeState !== 'ready'
+  const isBusy = isSubmitting || saveDraftMutation.isPending || writing || artworkBusy || writeState !== 'ready'
   const currentNeedsAcceptance = requirementsQuery.data?.needsAcceptance !== false || agreementInvalidatedByEdit
   const organizerTerms = requirementsQuery.data ? requirementsQuery.data.organizerTerms : policiesQuery.data?.find((policy) => policy.policyKind === 'organizer_terms')
   const eventPolicy = requirementsQuery.data ? requirementsQuery.data.eventPolicy : policiesQuery.data?.find((policy) => policy.policyKind === 'event_policy')
   const shouldBlockNavigation = useCallback(
-    () => hasUnsavedChanges && !approvedNavigationRef.current,
-    [hasUnsavedChanges],
+    () => (hasUnsavedChanges || artworkBusy) && !approvedNavigationRef.current,
+    [hasUnsavedChanges, artworkBusy],
   )
   const blocker = useBlocker(shouldBlockNavigation)
 
   useBeforeUnload(useCallback((event) => {
-    if (hasUnsavedChanges && !approvedNavigationRef.current) {
+    if ((hasUnsavedChanges || artworkBusy) && !approvedNavigationRef.current) {
       event.preventDefault()
       event.returnValue = ''
     }
-  }, [hasUnsavedChanges]))
+  }, [hasUnsavedChanges, artworkBusy]))
 
   useEffect(() => {
     if (!waitingForResume && eventQuery.data && eventQueryHasSafeIdentity && hydratedEventIdRef.current !== eventQuery.data.id) {
@@ -286,6 +290,25 @@ export function EventEditorPage() {
     if (saved.organizer_id !== organizerId || !saved.id) throw new Error('SAVED_EVENT_IDENTITY_MISMATCH')
     reset(eventRowToFormValues(saved))
     return saved
+  }
+
+  async function ensureArtworkDraft(): Promise<string> {
+    if (eventId) return eventId
+    if (artworkDraftRef.current?.identity === routeIdentity) return artworkDraftRef.current.id
+    const values = eventDraftSchema.parse(getValues())
+    const saved = await persistForCurrentLifecycle(values)
+    artworkDraftRef.current = { id: saved.id, identity: routeIdentity }
+    return saved.id
+  }
+
+  function finishArtworkUpload(savedId: string, error: string | null) {
+    if (!isNew || artworkDraftRef.current?.id !== savedId || artworkDraftRef.current.identity !== routeIdentity) return
+    const message = error ? `Your draft is saved. ${error}` : null
+    setServerError(message)
+    approvedNavigationRef.current = true
+    void navigate(`/organizer/events/${savedId}/edit?step=basics`, {
+      replace: true, state: { artworkError: message },
+    })
   }
 
   async function persistRequirements() {
@@ -585,7 +608,7 @@ export function EventEditorPage() {
             <form noValidate onSubmit={(event) => event.preventDefault()}>
               <fieldset className="event-creation__form" disabled={isBusy}>
                 <FormErrorSummary errors={summaryErrors} title={serverError || agreementError ? 'Changes were not saved' : 'Missing information'} />
-                {activeStep === 1 ? <EventDetailsStep creation errors={errors} register={register} /> : null}
+                {activeStep === 1 ? <><EventDetailsStep creation errors={errors} register={register} /><EventImageManager eventId={eventId} disabled={isBusy} ensureEventId={ensureArtworkDraft} onBusyChange={setArtworkBusy} onUploadSettled={finishArtworkUpload} /></> : null}
                 {activeStep === 2 ? <EventScheduleLocationStep creation errors={errors} location={location} onLocationChange={setLocation} register={register} /> : null}
                 {activeStep === 3 ? <div className="event-step">
                   <header className="event-step__header"><h1>Ticket Type</h1><p>How will people attend your event?</p></header>
@@ -598,7 +621,7 @@ export function EventEditorPage() {
                 {requirementsInitialState()}
                 {activeStep >= 4 && requirementsAreHydrated ? <>
                   <header className="event-step__header"><h1>Event Details</h1><p>Review your event and complete the final details.</p></header>
-                  {ownedEvent ? <><EventCompositionSummary event={ownedEvent} /><EventImageManager key={eventId} eventId={eventId} disabled={isBusy} /></> : null}
+                  {ownedEvent ? <><EventCompositionSummary event={ownedEvent} /><EventImageManager key={eventId} eventId={eventId} disabled={isBusy} onBusyChange={setArtworkBusy} /></> : null}
                   <EventRequirementsStep control={requirementsControl} errors={requirementErrors} onRequirementChange={resetDisplayedAgreement} register={registerRequirement} />
                   {organizerTerms && eventPolicy ? <OrganizerAgreementStep error={requirementErrors.organizerAgreement?.message} eventPolicy={eventPolicy} needsAcceptance={currentNeedsAcceptance} onAgreementChange={() => { setAgreementError(null); requirementsForm.clearErrors('organizerAgreement') }} organizerTerms={organizerTerms} register={registerRequirement} /> : <ReadState status="unavailable" title="Publication policies are not available" description="You can save your draft and images. Agreement and publication will be available once Wheretoo has configured its policies." />}
                 </> : null}
@@ -638,7 +661,7 @@ export function EventEditorPage() {
         <aside className="event-editor__rail"><StepRail current={activeStep} labels={steps} /></aside>
         <form className="event-editor__form" noValidate onSubmit={(event) => event.preventDefault()}>
           <FormErrorSummary errors={summaryErrors} title={serverError || agreementError ? 'Save needs review' : 'Check the highlighted fields'} />
-          {activeStep === 1 ? <><EventDetailsStep errors={errors} register={register} />{eventId ? <EventImageManager key={eventId} eventId={eventId} disabled={isBusy} /> : null}</> : null}
+          {activeStep === 1 ? <><EventDetailsStep errors={errors} register={register} />{eventId ? <EventImageManager key={eventId} eventId={eventId} disabled={isBusy} onBusyChange={setArtworkBusy} /> : null}</> : null}
           {activeStep === 2 ? <EventScheduleLocationStep errors={errors} location={location} onLocationChange={setLocation} register={register} /> : null}
           {activeStep === 3 ? <EventReviewStep eventId={isNew ? undefined : eventId} values={getValues()} /> : null}
           {requirementsInitialState()}

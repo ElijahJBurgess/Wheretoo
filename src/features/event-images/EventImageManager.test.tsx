@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, expect, it, vi } from 'vitest'
@@ -46,4 +46,38 @@ it('blocks mutation while loading and exposes read failure retry', async () => {
  const view=show(0,{isPending:true}); expect(screen.getByLabelText('Upload images')).toBeDisabled();view.unmount()
  show(0,{isError:true});expect(screen.getByLabelText('Upload images')).toBeDisabled()
  await userEvent.setup().click(screen.getByRole('button',{name:'Refresh images'}));expect(mock.refetch).toHaveBeenCalledOnce()
+})
+
+it('creates the draft before uploading and shows the selected preview while saving', async () => {
+ let resolveDraft!: (id: string) => void
+ const ensureEventId = vi.fn(() => new Promise<string>(resolve => { resolveDraft = resolve }))
+ const settled = vi.fn()
+ mock.images.mockReturnValue({ data: undefined, isPending: true, isError: false })
+ render(<QueryClientProvider client={new QueryClient()}><EventImageManager eventId="" ensureEventId={ensureEventId} onUploadSettled={settled} /></QueryClientProvider>)
+ await userEvent.setup().upload(screen.getByLabelText('Upload images'),new File(['image'],'first.png',{type:'image/png'}))
+ await waitFor(()=>expect(ensureEventId).toHaveBeenCalledOnce())
+ expect(await screen.findByAltText('Uploading image 1')).toBeInTheDocument()
+ expect(mock.upload).not.toHaveBeenCalled()
+ resolveDraft('saved-draft')
+ await waitFor(()=>expect(mock.upload).toHaveBeenCalledWith('saved-draft',expect.any(File),expect.any(Function)))
+ await waitFor(()=>expect(settled).toHaveBeenCalledWith('saved-draft',null))
+})
+it('does not create a draft for unsupported files or upload after draft creation fails', async () => {
+ const ensureEventId=vi.fn().mockRejectedValue(new Error('Draft could not be saved.'))
+ mock.images.mockReturnValue({ data:undefined,isPending:true,isError:false })
+ render(<QueryClientProvider client={new QueryClient()}><EventImageManager eventId="" ensureEventId={ensureEventId} /></QueryClientProvider>)
+ const user=userEvent.setup({applyAccept:false})
+ await user.upload(screen.getByLabelText('Upload images'),new File(['svg'],'bad.svg',{type:'image/svg+xml'}))
+ expect(await screen.findByRole('alert')).toHaveTextContent('Choose JPEG')
+ expect(ensureEventId).not.toHaveBeenCalled()
+ await waitFor(()=>expect(screen.getByLabelText('Upload images')).toBeEnabled())
+ await user.upload(screen.getByLabelText('Upload images'),new File(['image'],'first.png',{type:'image/png'}))
+ expect(await screen.findByRole('alert')).toHaveTextContent('Draft could not be saved')
+ expect(mock.upload).not.toHaveBeenCalled()
+})
+
+it('accepts a dropped image through the same validated upload path', async () => {
+ const view=show()
+ fireEvent.drop(view.container.querySelector('.event-image-dropzone')!, { dataTransfer: { files: [new File(['png'],'drop.png',{type:'image/png'})] } })
+ await waitFor(()=>expect(mock.upload).toHaveBeenCalledWith('event',expect.any(File),expect.any(Function)))
 })

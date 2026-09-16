@@ -5,13 +5,15 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { testContext, testEvent } from '../event-changes/eventChanges.fixtures'
 import type { EventChangeContext } from '../event-changes/eventChanges.schemas'
-const { useContext, create, save, requirements, accept, reload, refetch, locationLoaded, useTiers } = vi.hoisted(() => ({ useContext: vi.fn(), create: vi.fn(), save: vi.fn(), requirements: vi.fn(), accept: vi.fn(), reload: vi.fn(), refetch: vi.fn(), locationLoaded: vi.fn(), useTiers: vi.fn() }))
-vi.mock('../auth/SessionProvider', () => ({ useSession: () => ({ status: 'authenticated', user: { id: 'organizer-1' } }) }))
+const { useContext, create, save, requirements, accept, reload, refetch, locationLoaded, useTiers, upload, identity } = vi.hoisted(() => ({ useContext: vi.fn(), create: vi.fn(), save: vi.fn(), requirements: vi.fn(), accept: vi.fn(), reload: vi.fn(), refetch: vi.fn(), locationLoaded: vi.fn(), useTiers: vi.fn(), upload: vi.fn(), identity: { version: 1 } }))
+vi.mock('../auth/SessionProvider', () => ({ useSession: () => ({ status: 'authenticated', user: { id: 'organizer-1' }, identityVersion: identity.version }) }))
 vi.mock('./event.queries', async importOriginal => ({ ...await importOriginal<typeof import('./event.queries')>(), useSaveEventDraft: () => ({ isPending: false, mutateAsync: create }) }))
 vi.mock('../event-changes/eventChanges.queries', () => ({ useEventChangeContext: useContext }))
 vi.mock('../event-changes/eventChanges.api', async importOriginal => ({ ...await importOriginal<typeof import('../event-changes/eventChanges.api')>(), saveEventIfCurrent: save, saveRequirementsIfCurrent: requirements, acceptPoliciesIfCurrent: accept, getEventChangeContext: reload }))
 vi.mock('../moderation/moderation.queries', async importOriginal => ({ ...await importOriginal<typeof import('../moderation/moderation.queries')>(), useRequiredEventPolicies: () => ({ data: [] }) }))
 vi.mock('../tickets/ticket.queries', async importOriginal => ({ ...await importOriginal<typeof import('../tickets/ticket.queries')>(), useOwnedTicketTiers: useTiers }))
+vi.mock('../event-images/eventImages.queries', () => ({ useEventImages: () => ({ data: [], isPending: false, isError: false }) }))
+vi.mock('../event-images/eventImages.api', () => ({ uploadEventImage: upload, removeEventImage: vi.fn(), reorderEventImages: vi.fn() }))
 vi.mock('../../lib/supabase/client', () => ({ supabase: {} }))
 vi.mock('./LocationSearchField', () => { locationLoaded(); return { default: () => <button>Mock address search</button> } })
 import { EventEditorPage } from './EventEditorPage'
@@ -32,7 +34,7 @@ async function toRequirements(user: ReturnType<typeof userEvent.setup>) {
  await user.click(screen.getByRole('button', { name: 'Continue' }))
 }
 beforeEach(() => {
- vi.clearAllMocks(); current = testContext()
+ vi.clearAllMocks(); identity.version = 1; current = testContext()
  useContext.mockImplementation((eventId: string) => ({ data: eventId ? current : undefined, isPending: false, isFetching: false, isError: false, refetch }))
  create.mockResolvedValue(testEvent)
  save.mockImplementation(async (_id, _owner, _token, values) => { current = { ...current, context_token: 'saved-token', event: { ...current.event, title: values.title, admission_type: values.admissionType } }; return current })
@@ -45,6 +47,61 @@ beforeEach(() => {
  })
 })
 describe('atomic-context event editor', () => {
+ it('silently saves the entered Basics before artwork and stays on Basics with the real draft', async () => {
+  let finishUpload!: () => void
+  upload.mockImplementation(() => new Promise<void>(resolve => { finishUpload = resolve }))
+  const user = userEvent.setup(); const { router } = renderEditor('/organizer/events/new')
+  await user.type(screen.getByLabelText('Event name'), 'Artwork draft')
+  await user.upload(screen.getByLabelText('Upload images'), new File(['png'], 'flyer.png', { type: 'image/png' }))
+  await waitFor(() => expect(upload).toHaveBeenCalledWith('event-1', expect.any(File), expect.any(Function)))
+  expect(create).toHaveBeenCalledOnce()
+  expect(create).toHaveBeenCalledWith(expect.objectContaining({ values: expect.objectContaining({ title: 'Artwork draft' }) }))
+  expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled()
+  expect(router.state.location.pathname).toBe('/organizer/events/new')
+  const leave = new Event('beforeunload', { cancelable: true })
+  window.dispatchEvent(leave)
+  expect(leave.defaultPrevented).toBe(true)
+  await act(async () => finishUpload())
+  await waitFor(() => expect(router.state.location.pathname).toBe('/organizer/events/event-1/edit'))
+  expect(router.state.location.search).toBe('?step=basics')
+  expect(screen.getByLabelText('Upload images')).toBeEnabled()
+ })
+ it('releases artwork busy state for a replacement same-owner session and ignores the old completion', async () => {
+  let finishUpload!: () => void
+  upload.mockImplementation(() => new Promise<void>(resolve => { finishUpload = resolve }))
+  const { router } = renderEditor('/organizer/events/new')
+  await userEvent.setup().upload(screen.getByLabelText('Upload images'), new File(['png'], 'flyer.png', { type: 'image/png' }))
+  await waitFor(() => expect(upload).toHaveBeenCalledOnce())
+  expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled()
+  identity.version = 2
+  await act(async () => router.navigate('/organizer/events/new?session=2'))
+  // The unsaved-navigation guard still applies to a route navigation.
+  if (screen.queryByRole('button', { name: 'Leave without saving' })) await userEvent.click(screen.getByRole('button', { name: 'Leave without saving' }))
+  await waitFor(() => expect(screen.getByLabelText('Upload images')).toBeEnabled())
+  await act(async () => finishUpload())
+  expect(router.state.location.pathname).toBe('/organizer/events/new')
+ })
+ it('keeps the persisted draft when its image upload fails so retry cannot create another draft', async () => {
+  upload.mockRejectedValue(new Error('Upload response lost.'))
+  const user = userEvent.setup(); const { router } = renderEditor('/organizer/events/new')
+  const unsavedInput = screen.getByLabelText('Upload images')
+  await user.upload(screen.getByLabelText('Upload images'), new File(['png'], 'flyer.png', { type: 'image/png' }))
+  await waitFor(() => expect(router.state.location.pathname).toBe('/organizer/events/event-1/edit'))
+  expect(screen.getByText(/Your draft is saved. Upload response lost/)).toBeInTheDocument()
+  await waitFor(() => expect(screen.getByLabelText('Upload images')).not.toBe(unsavedInput))
+  await waitFor(() => expect(screen.getByLabelText('Upload images')).toBeEnabled())
+  await user.upload(screen.getByLabelText('Upload images'), new File(['png'], 'flyer.png', { type: 'image/png' }))
+  await waitFor(() => expect(upload).toHaveBeenCalledTimes(2))
+  expect(create).toHaveBeenCalledOnce()
+ })
+ it('does not attach artwork to a returned draft owned by somebody else', async () => {
+  create.mockResolvedValue({ ...testEvent, organizer_id: 'other-owner' })
+  const { router } = renderEditor('/organizer/events/new')
+  await userEvent.setup().upload(screen.getByLabelText('Upload images'), new File(['png'], 'flyer.png', { type: 'image/png' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('SAVED_EVENT_IDENTITY_MISMATCH')
+  expect(upload).not.toHaveBeenCalled()
+  expect(router.state.location.pathname).toBe('/organizer/events/new')
+ })
  it('validates Basics before persisting and resumes a paid draft from its saved tiers', async () => {
   const user = userEvent.setup(); const first = renderEditor('/organizer/events/new')
   await user.click(screen.getByRole('button', { name: 'Continue' }))
