@@ -1,3 +1,4 @@
+import { EventImageManager } from '../event-images/EventImageManager'
 import { captureIdentityLifetime } from '../auth/identityLifetime'
 import { useQueryClient } from '@tanstack/react-query'
 import { adoptEventChangeCache } from '../event-changes/eventChanges.cache'
@@ -586,7 +587,7 @@ export function EventEditorPage() {
             <form noValidate onSubmit={(event) => event.preventDefault()}>
               <fieldset className="event-creation__form" disabled={isBusy}>
                 <FormErrorSummary errors={summaryErrors} title={serverError || agreementError ? 'Changes were not saved' : 'Missing information'} />
-                {activeStep === 1 ? <EventDetailsStep artworkPath={ownedEvent?.artwork_path} creation errors={errors} register={register} /> : null}
+                {activeStep === 1 ? <EventDetailsStep creation errors={errors} register={register} /> : null}
                 {activeStep === 2 ? <EventScheduleLocationStep creation errors={errors} location={location} onLocationChange={setLocation} register={register} /> : null}
                 {activeStep === 3 ? <div className="event-step">
                   <header className="event-step__header"><h1>Ticket Type</h1><p>How will people attend your event?</p></header>
@@ -599,7 +600,7 @@ export function EventEditorPage() {
                 {requirementsInitialState()}
                 {activeStep >= 4 && requirementsAreHydrated ? <>
                   <header className="event-step__header"><h1>Event Details</h1><p>Review your event and complete the final details.</p></header>
-                  {ownedEvent ? <EventCompositionSummary event={ownedEvent} /> : null}
+                  {ownedEvent ? <><EventCompositionSummary event={ownedEvent} /><EventImageManager key={eventId} eventId={eventId} disabled={isBusy} /></> : null}
                   <EventRequirementsStep control={requirementsControl} errors={requirementErrors} onRequirementChange={resetDisplayedAgreement} register={registerRequirement} />
                   {organizerTerms && eventPolicy ? <OrganizerAgreementStep error={requirementErrors.organizerAgreement?.message} eventPolicy={eventPolicy} needsAcceptance={currentNeedsAcceptance} onAgreementChange={() => { setAgreementError(null); requirementsForm.clearErrors('organizerAgreement') }} organizerTerms={organizerTerms} register={registerRequirement} /> : <ReadState status="unavailable" title="Current policies could not load" description="Try loading your event details again." />}
                 </> : null}
@@ -639,7 +640,7 @@ export function EventEditorPage() {
         <aside className="event-editor__rail"><StepRail current={activeStep} labels={steps} /></aside>
         <form className="event-editor__form" noValidate onSubmit={(event) => event.preventDefault()}>
           <FormErrorSummary errors={summaryErrors} title={serverError || agreementError ? 'Save needs review' : 'Check the highlighted fields'} />
-          {activeStep === 1 ? <EventDetailsStep errors={errors} register={register} /> : null}
+          {activeStep === 1 ? <><EventDetailsStep errors={errors} register={register} />{eventId ? <EventImageManager key={eventId} eventId={eventId} disabled={isBusy} /> : null}</> : null}
           {activeStep === 2 ? <EventScheduleLocationStep errors={errors} location={location} onLocationChange={setLocation} register={register} /> : null}
           {activeStep === 3 ? <EventReviewStep eventId={isNew ? undefined : eventId} values={getValues()} /> : null}
           {requirementsInitialState()}

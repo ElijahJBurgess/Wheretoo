@@ -1,3 +1,4 @@
+import { usePublicEventImages } from '../event-images/publicEventImages'
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useLocation, useNavigate, useNavigationType } from 'react-router-dom'
@@ -15,6 +16,8 @@ export function DiscoveryPage() {
   const filters = parseDiscoverySearch(location.search)
   const search = serializeDiscoveryFilters(filters)
   const discovery = useDiscovery(filters)
+  const images = usePublicEventImages(discovery.items.map(item => item.id))
+  const withImage = (item: (typeof discovery.items)[number]) => ({ ...item, artworkReference: images.data?.find(image => image.eventId === item.id)?.url ?? null })
   const restored = useRef<string | null>(null)
 
   useEffect(() => {
@@ -56,7 +59,7 @@ export function DiscoveryPage() {
     // link carries the normalized public search, never a private return URL.
     window.history.replaceState({ ...window.history.state, usr: { discoveryScroll: Math.min(1_000_000, Math.max(0, window.scrollY)) } }, '')
   }}>
-    <DiscoveryView {...discovery} filters={filters} publicSearch={search}
+    <DiscoveryView {...discovery} items={discovery.items.map(withImage)} highlightItems={discovery.highlightItems.map(withImage)} filters={filters} publicSearch={search}
       onFiltersChange={changeFilters} onRefresh={() => void discovery.refresh()}
       onRetry={() => void discovery.refresh()} onLoadMore={() => void discovery.loadMore()} />
   </div>

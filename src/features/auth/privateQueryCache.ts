@@ -4,6 +4,7 @@ import { invalidateIdentityLifetime } from './identityLifetime'
 function isPrivateIdentityQuery(query: Query): boolean {
   const [scope, family] = query.queryKey
   return (scope === 'events' && (family === 'owned' || family === 'detail')) ||
+    scope === 'event-images' ||
     scope === 'event-change-context' ||
     scope === 'event-notice-status' ||
     scope === 'event-cancellation-summary' ||

@@ -11,11 +11,10 @@ const categoryLabels: Record<(typeof eventCategories)[number], string> = {
 type EventDetailsStepProps = {
   errors: FieldErrors<EventFormValues>
   creation?: boolean
-  artworkPath?: string | null
   register: UseFormRegister<EventFormValues>
 }
 
-export function EventDetailsStep({ errors, register, creation = false, artworkPath }: EventDetailsStepProps) {
+export function EventDetailsStep({ errors, register, creation = false }: EventDetailsStepProps) {
   const Heading = creation ? 'h1' : 'h2'
   return (
     <div className="event-step">
@@ -46,7 +45,7 @@ export function EventDetailsStep({ errors, register, creation = false, artworkPa
           <input min="1" inputMode="numeric" type="number" {...register('capacity', { setValueAs: (value) => value === '' || value === null || value === undefined ? null : Number(value) })} />
         </Field></> : <div>
           <p className="ui-field__label">Event artwork</p>
-          {artworkPath && /^https?:\/\//i.test(artworkPath) ? <img className="event-creation__artwork" src={artworkPath} alt="Event artwork" /> : <p className="event-creation__artwork-note">Artwork upload is not available yet. You can save your event and continue.</p>}
+          <p className="event-creation__artwork-note">Add up to three images in the Event Details step after saving your draft.</p>
         </div>}
       </div>
     </div>

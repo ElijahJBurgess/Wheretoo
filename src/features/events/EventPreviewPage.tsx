@@ -1,3 +1,4 @@
+import { EventImageGallery } from '../event-images/EventImageGallery'
 import { captureIdentityLifetime } from '../auth/identityLifetime'
 import { adoptEventChangeCache } from '../event-changes/eventChanges.cache'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -279,6 +280,7 @@ export function EventPreviewPage() {
         setIsPublishing(true)
         void getEventChangeContext(eventId, authenticatedOrganizerId).then(next => { setBaseline(next); setPublishState('ready'); setPublishError(null) }, () => setPublishError('The saved event could not be loaded. Publication remains unknown.')).finally(() => { activePublishEventIdRef.current = null; setIsPublishing(false) })
       }} variant="secondary">Reload and review saved event</Button> : null}
+      <EventImageGallery eventId={event.id} title={event.title ?? 'Event'} />
       {confirming ? <EventPublishConfirmation event={event} organizer={organizer} tiers={paidTiersQuery.data ?? []} /> : <EventAttendeePreview event={event} organizer={organizer} tiers={paidTiersQuery.data ?? []} />}
       {!confirming ? <section aria-labelledby="preview-requirements-title" className="event-preview__requirements">
         <header>

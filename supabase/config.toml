@@ -478,3 +478,8 @@ verify_jwt = false
 # Anonymous discovery uses a service-only read behind its independent rate limiter.
 [functions.public-discovery]
 verify_jwt = false
+
+# Public GET rechecks canonical eligibility; POST verifies organizer JWT and ownership.
+[functions.event-images]
+verify_jwt = false
+import_map = "../deno.json"

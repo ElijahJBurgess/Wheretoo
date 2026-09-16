@@ -1,3 +1,4 @@
+vi.mock('../event-images/publicEventImages', () => ({ usePublicEventImages: () => ({ data: [], isError: false, isPending: false }) }))
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'

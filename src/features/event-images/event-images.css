@@ -1,0 +1,13 @@
+.event-image-manager { margin-block: 1.5rem; padding-block: 1rem; border-block: 1px solid #d5d5ce; }
+.event-image-manager h2 { font-size: 1.2rem; }
+.event-image-manager h2 span { font-size: .9rem; font-weight: 400; }
+.event-image-upload { display: grid; gap: .5rem; font-weight: 600; }
+.event-image-upload input { max-width: 100%; }
+.event-image-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 0; gap: 1rem; list-style: none; }
+.event-image-grid img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: .5rem; }
+.event-image-actions { display: flex; gap: .35rem; flex-wrap: wrap; margin-top: .5rem; }
+.event-image-actions button { min-height: 44px; min-width: 44px; cursor: pointer; }
+.event-image-actions button:disabled { cursor: default; opacity: .5; }
+.event-image-gallery { display: flex; gap: .75rem; overflow-x: auto; margin-block: 1rem; }
+.event-image-gallery img { width: min(100%, 36rem); max-height: 28rem; object-fit: contain; border-radius: .75rem; }
+@media (max-width: 540px) { .event-image-grid { grid-template-columns: 1fr; } }

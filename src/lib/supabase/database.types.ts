@@ -994,6 +994,9 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      list_event_images: { Args: { p_event_ids: string[] }; Returns: Json }
+      reorder_event_images: { Args: { p_event_id: string; p_image_ids: string[] }; Returns: undefined }
+
       accept_current_event_policies: {
         Args: { p_event_id: string }
         Returns: {
