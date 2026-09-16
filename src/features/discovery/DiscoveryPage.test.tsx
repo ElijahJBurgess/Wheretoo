@@ -1,4 +1,4 @@
-vi.mock('../event-images/publicEventImages', () => ({ usePublicEventImages: () => ({ data: [], isError: false, isPending: false }) }))
+vi.mock('../event-images/publicEventImages', () => ({ usePublicEventImages: () => ({ data: [{eventId: 'first', position: 2, url: 'https://example.invalid/secondary.png'}, {eventId: 'first', position: 1, url: 'https://example.invalid/flyer.png'}], isError: false, isPending: false }) }))
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -20,6 +20,8 @@ it.each(['Clear filters', 'Wheretoo discovery home'])('starts a new first page o
   const router = createMemoryRouter([{ path: '/discover', element: <DiscoveryPage /> }], { initialEntries: ['/discover'] })
   render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>)
   await screen.findByText('Event first')
+  expect(document.querySelector('img[src="https://example.invalid/flyer.png"]')).toBeInTheDocument()
+  expect(document.querySelector('img[src="https://example.invalid/secondary.png"]')).not.toBeInTheDocument()
   await userEvent.click(screen.getByRole('button', { name: 'Load more' }))
   await screen.findByText('Event second')
   await userEvent.click(screen.getByRole('button', { name: 'Music' }))

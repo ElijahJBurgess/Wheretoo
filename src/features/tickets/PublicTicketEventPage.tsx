@@ -1,5 +1,4 @@
 import { usePublicEventImages } from '../event-images/publicEventImages'
-import { EventImageGallery } from '../event-images/EventImageGallery'
 import '../buyer-journey/buyer-availability.css'
 import { discoveryReturnPath } from '../discovery/discovery.navigation'
 import { FreeRsvpEntry } from '../rsvp/FreeRsvpEntry'
@@ -56,12 +55,6 @@ function formatAddress(event: {
 }): string {
   const street = [event.address_line1, event.address_line2].filter(Boolean).join(', ')
   return `${street}, ${event.city}, ${event.region} ${event.postal_code}`
-}
-
-function getRenderableArtwork(path: string | null): string | null {
-  if (!path) return null
-  if (/^(https?:|data:|blob:)/i.test(path)) return path
-  return null
 }
 
 type PublicEventStateProps = {
@@ -189,7 +182,7 @@ export function PublicTicketEventPage({ selection = false }: { selection?: boole
     : null
   const dateAndTime = formatDateAndTime(event.starts_at, event.ends_at)
 
-  const artwork = images.data?.[0]?.url ?? getRenderableArtwork(event.artwork_path)
+  const artwork = images.data?.find(image => image.position === 1)?.url ?? null
   const paidAvailable = !hasRetryableStaleEvent && paidPublicEvent?.tiers.some(tier => tier.availability_status === 'available')
   const compactAvailability = paidPublicEvent !== null && !paidAvailable
 
@@ -208,7 +201,6 @@ export function PublicTicketEventPage({ selection = false }: { selection?: boole
         badge={event.admission_type==='free'?'Free RSVP':undefined}
         action={!selection && paidAvailable ? <Link className="ui-button buyer-primary" to={`/events/${event.id}/tickets`} state={publicReturnState}>Get tickets<BuyerIcon name="arrow" /></Link> : undefined}
       >
-        <EventImageGallery eventId={event.id} title={event.title} includePrimary={false} publicOnly />
         {paidPublicEvent !== null ? <PublicTicketPurchase key={event.id} eventId={event.id} tiers={paidPublicEvent.tiers} availabilityKnown={!hasRetryableStaleEvent} /> : (
           <section className="public-event__tickets"><h2>Free RSVP</h2><p>No payment required.</p><FreeRsvpEntry eventId={event.id}/></section>
         )}

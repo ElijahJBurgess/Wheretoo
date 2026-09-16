@@ -26,7 +26,7 @@ export async function listEventImages(eventIds: string[]): Promise<EventImage[]>
     return { ...image, url }
   })
 }
-export async function uploadEventImage(eventId: string, file: File, current: () => boolean = () => true): Promise<void> {
+export async function uploadEventImage(eventId: string, file: File, current: () => boolean = () => true): Promise<string> {
   validateImageSelection([file], 0)
   await validateImageContent(file)
   if (!current()) throw new Error('Your session changed. Sign in again before uploading.')
@@ -35,13 +35,14 @@ export async function uploadEventImage(eventId: string, file: File, current: () 
   const response = await fetch(`${publicEnv.supabaseUrl}/functions/v1/event-images`, {
     method: 'POST', headers: { authorization: `Bearer ${session.access_token}`, apikey: publicEnv.supabasePublishableKey, 'content-type': file.type, 'x-event-id': eventId }, body: file,
   })
-  if (!response.ok) throw new Error(response.status === 415 ? 'Choose a readable JPEG, PNG or WebP image.' : 'Upload could not be confirmed. Refresh images before trying again; the event allows at most three images.')
+  if (!response.ok) throw new Error(response.status === 415 ? 'Choose a readable JPEG, PNG or WebP image.' : 'Upload could not be confirmed. Refresh flyer before trying again.')
+  return z.object({ path: z.string().startsWith(`${eventId}/`) }).parse(await response.json()).path
 }
 export async function removeEventImage(path: string): Promise<void> {
   const { error } = await bucket().remove([path])
-  if (error) throw new Error('Removal could not be confirmed. Refresh images before trying again.')
+  if (error) throw new Error('Removal could not be confirmed. Refresh flyer before trying again.')
 }
 export async function reorderEventImages(eventId: string, ids: string[]): Promise<void> {
   const { error } = await supabase.rpc('reorder_event_images', { p_event_id: eventId, p_image_ids: ids })
-  if (error) throw new Error('Image order changed or could not be saved. Refresh images and try again.')
+  if (error) throw new Error('The flyer changed or could not be saved. Refresh flyer and try again.')
 }

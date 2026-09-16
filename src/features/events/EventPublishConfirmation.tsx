@@ -11,7 +11,6 @@ export function EventPublishConfirmation({ event, organizer, tiers }: { event: E
   const activeTiers = tiers.filter((tier) => event.status === 'draft' ? tier.status !== 'archived' : tier.status === 'active')
   const capacity = event.admission_type === 'paid' ? activeTiers.reduce((sum, tier) => sum + tier.quantity_total, 0) : event.capacity
   return <div className="creation-confirmation">
-    {event.artwork_path && /^https?:\/\//i.test(event.artwork_path) ? <img alt={`${event.title ?? 'Event'} artwork`} className="creation-preview__artwork" src={event.artwork_path} /> : null}
     <h2>{event.title}</h2>
     <p>Hosted by {organizer.display_name}</p>
     <p>{formatInstant(event.starts_at)} – {formatInstant(event.ends_at)} · Pacific time</p>

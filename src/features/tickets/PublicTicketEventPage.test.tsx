@@ -1,4 +1,4 @@
-vi.mock('../event-images/publicEventImages', () => ({ usePublicEventImages: () => ({ data: [], isError: false, isPending: false }) }))
+vi.mock('../event-images/publicEventImages', () => ({ usePublicEventImages: () => ({ data: [{position: 2, url: 'https://example.invalid/secondary.png'}, {position: 1, url: 'https://example.invalid/flyer.png'}], isError: false, isPending: false }) }))
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
@@ -81,6 +81,11 @@ function renderPage(search = '') {
 }
 
 describe('PublicTicketEventPage', () => {
+  it('shows the canonical flyer without a secondary gallery', () => {
+    const view = renderPage()
+    expect(view.container.querySelectorAll('img')).toHaveLength(1)
+    expect(view.container.querySelector('img')).toHaveAttribute('src', 'https://example.invalid/flyer.png')
+  })
   beforeEach(() => {
     vi.clearAllMocks()
     startTransition.mockImplementation((callback: () => void) => callback())

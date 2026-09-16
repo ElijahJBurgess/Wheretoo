@@ -1,3 +1,4 @@
+vi.mock('../event-images/publicEventImages', () => ({ usePublicEventImages: () => ({ data: [{position: 1, url: 'https://example.invalid/flyer.png'}] }) }))
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
@@ -51,6 +52,7 @@ it('selects three admissions and submits one registrant without payment', async 
   })
   renderPage()
   await screen.findByRole('heading', { name: 'Choose your RSVP' })
+  expect(screen.getByRole('presentation')).toHaveAttribute('src', 'https://example.invalid/flyer.png')
   fireEvent.click(screen.getByRole('button', { name: 'Increase quantity' }))
   fireEvent.click(screen.getByRole('button', { name: 'Increase quantity' }))
   fireEvent.click(screen.getByRole('button', { name: 'Continue' }))

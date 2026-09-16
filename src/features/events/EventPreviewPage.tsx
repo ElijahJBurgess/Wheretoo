@@ -1,3 +1,4 @@
+import './eventPreview.css'
 import { EventImageGallery } from '../event-images/EventImageGallery'
 import { captureIdentityLifetime } from '../auth/identityLifetime'
 import { adoptEventChangeCache } from '../event-changes/eventChanges.cache'
@@ -23,6 +24,10 @@ import { EventPublishConfirmation } from './EventPublishConfirmation'
 import { getPublishErrorMessage } from './publishErrors'
 
 export function EventPreviewPage() {
+  return <div className="organizer-preview-route"><EventPreviewContent /></div>
+}
+
+function EventPreviewContent() {
   const { eventId = '' } = useParams()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()

@@ -17,7 +17,7 @@ export function DiscoveryPage() {
   const search = serializeDiscoveryFilters(filters)
   const discovery = useDiscovery(filters)
   const images = usePublicEventImages(discovery.items.map(item => item.id))
-  const withImage = (item: (typeof discovery.items)[number]) => ({ ...item, artworkReference: images.data?.find(image => image.eventId === item.id)?.url ?? null })
+  const withImage = (item: (typeof discovery.items)[number]) => ({ ...item, artworkReference: images.data?.find(image => image.eventId === item.id && image.position === 1)?.url ?? null })
   const restored = useRef<string | null>(null)
 
   useEffect(() => {

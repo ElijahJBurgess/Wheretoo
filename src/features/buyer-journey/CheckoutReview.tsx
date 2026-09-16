@@ -3,21 +3,22 @@ import type { ReactNode } from 'react'
 import { BuyerEventSummary, BuyerHeader, BuyerIcon, BuyerProgress } from './BuyerPrimitives'
 import type { PublicTicketingEvent } from '../tickets/ticket.types'
 
-export function CheckoutReview({ event, lines, totalMinor, back, editSelection, children }: {
+export function CheckoutReview({ event, lines, totalMinor, back, editSelection, children, artwork = event.artwork_path }: {
   event: PublicTicketingEvent['event']
+  artwork?: string | null
   lines: readonly { name: string; quantity: number; unitAmountMinor: number }[]
   totalMinor: number
   back: ReactNode
   editSelection: ReactNode
   children: ReactNode
 }) {
-  const artwork = event.artwork_path && /^(https?:|data:|blob:)/i.test(event.artwork_path) ? event.artwork_path : null
+  const renderableArtwork = artwork && /^(https?:|data:|blob:)/i.test(artwork) ? artwork : null
   return <main className="buyer-page buyer-checkout">
     <BuyerHeader back={back} />
     <BuyerProgress step={2} />
     <h1 className="buyer-visually-hidden">Review your tickets</h1>
     <div className="buyer-content">
-      <BuyerEventSummary title={event.title} organizer={event.organizer.display_name} artwork={artwork}
+      <BuyerEventSummary title={event.title} organizer={event.organizer.display_name} artwork={renderableArtwork}
         schedule={formatBuyerSchedule(event.starts_at, event.ends_at, event.timezone)} venue={event.venue_name ?? 'Venue to be announced'} location={`${event.city}, ${event.region}`} />
       <section aria-label="Ticket summary" className="buyer-section">
         <div className="buyer-section-heading"><h2>Your tickets</h2>{editSelection}</div>

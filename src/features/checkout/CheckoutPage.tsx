@@ -1,3 +1,4 @@
+import { usePublicEventImages } from '../event-images/publicEventImages'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { TicketDeliveryNotice } from '../ticket-delivery/TicketDeliveryNotice'
@@ -51,6 +52,7 @@ function CheckoutRoute({ assignCheckout = assignHostedCheckout }: CheckoutPagePr
   const eventId = eventIdResult.success ? eventIdResult.data : ''
   const cancelToken = new URLSearchParams(location.search).get('cancel')
   const eventQuery = useCheckoutPublicEvent(eventId)
+  const images = usePublicEventImages(eventId ? [eventId] : [])
   const verifiedEventId = eventQuery.data?.event.id === eventId ? eventId : null
   const routeItems = parseCheckoutCart(location.search)
   const [buyerName, setBuyerName] = useState('')
@@ -173,7 +175,7 @@ function CheckoutRoute({ assignCheckout = assignHostedCheckout }: CheckoutPagePr
   const lines = snapshot ? snapshot.items.map((item) => ({ name: item.tierName, quantity: item.quantity, unitAmountMinor: item.unitAmountMinor })) : selected.map((line) => ({ name: line.tier!.name, quantity: line.quantity, unitAmountMinor: line.tier!.unit_amount_minor }))
   const total = snapshot?.totalMinor ?? lines.reduce((sum, line) => sum + line.quantity * line.unitAmountMinor, 0)
   const errors = [fieldErrors.buyerName, fieldErrors.buyerEmail, serverError].filter((value): value is string => Boolean(value))
-  return <CheckoutReview event={eventQuery.data.event} lines={lines} totalMinor={total}
+  return <CheckoutReview artwork={images.data?.find(image => image.position === 1)?.url ?? null} event={eventQuery.data.event} lines={lines} totalMinor={total}
     back={returnAction ? <Link className="buyer-icon-button" aria-label="Return to event" to={eventPath!}><BuyerIcon name="back" /></Link> : null}
     editSelection={!recovery && selectionPath ? <Link to={selectionPath}>Edit selection</Link> : null}>
     <form className="buyer-checkout-form" noValidate onSubmit={(event) => void submit(event)}>

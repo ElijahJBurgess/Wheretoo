@@ -1,3 +1,4 @@
+import { usePublicEventImages } from '../event-images/publicEventImages'
 import { ReadState } from '../../components/ui/ReadState'
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
@@ -32,6 +33,7 @@ export function RsvpProgress({ step }: { step: 1 | 2 | 3 }) {
 }
 export function RsvpPage() {
   const { eventId = '' } = useParams()
+  const images = usePublicEventImages([eventId])
   const navigate = useNavigate()
   const [event, setEvent] = useState<FreeRsvpEvent | null>()
   const [eventError, setEventError] = useState(false)
@@ -228,7 +230,7 @@ export function RsvpPage() {
             schedule={formatBuyerSchedule(summary.starts_at, summary.ends_at, summary.timezone)}
             venue={summary.venue_name ?? 'Venue to be announced'}
             location={`${summary.address_line1}, ${summary.city}`}
-            artwork={summary.artwork_path}
+            artwork={images.data?.find(image => image.position === 1)?.url ?? null}
           />
         )}
         {error && <p className='rsvp-notice' role='alert'>{error}</p>}

@@ -1,3 +1,4 @@
+vi.mock('../event-images/publicEventImages', () => ({ usePublicEventImages: () => ({ data: [{position: 2, url: 'https://example.invalid/secondary.png'}, {position: 1, url: 'https://example.invalid/flyer.png'}] }) }))
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -146,6 +147,7 @@ describe('CheckoutPage', () => {
 
   it('reviews multiple canonical cart lines and derives one public-data total', () => {
     renderCheckout()
+    expect(screen.getByRole('presentation')).toHaveAttribute('src', 'https://example.invalid/flyer.png')
 
     expect(screen.getByRole('heading', { name: 'Review your tickets' })).toBeInTheDocument()
     expect(screen.getByText('Night Market')).toBeInTheDocument()

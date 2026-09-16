@@ -12,7 +12,6 @@ export function EventAttendeePreview({ event, organizer, tiers }: { event: Event
       <button aria-pressed={tab === 'tickets'} onClick={() => setTab('tickets')} type="button">Ticket Selection</button>
     </div> : null}
     {tab === 'event' || event.admission_type !== 'paid' ? <>
-      {event.artwork_path && /^https?:\/\//i.test(event.artwork_path) ? <img alt={`${event.title ?? 'Event'} artwork`} className="creation-preview__artwork" src={event.artwork_path} /> : null}
       <EventSummary event={event} organizer={organizer} />
     </> : <section className="creation-preview__tickets" aria-label="Ticket selection preview">
       <h2>Choose your tickets</h2><p>Preview only. Tickets cannot be purchased or reserved here.</p>

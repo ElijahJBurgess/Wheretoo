@@ -6,8 +6,8 @@ const extensions: Record<string, readonly string[]> = {
 export function validateImageSelection(files: readonly File[], existing: number): void {
   if (files.length + existing > MAX_EVENT_IMAGES) throw new Error('An event can have at most three images.')
   for (const file of files) {
-    if (!extensions[file.type]?.includes(file.name.split('.').pop()?.toLowerCase() ?? '')) throw new Error('Choose JPEG, PNG or WebP images.')
-    if (!file.size || file.size > MAX_IMAGE_BYTES) throw new Error('Each image must be between 1 byte and 5 MB.')
+    if (!extensions[file.type]?.includes(file.name.split('.').pop()?.toLowerCase() ?? '')) throw new Error('Choose a JPEG, PNG or WebP flyer.')
+    if (!file.size || file.size > MAX_IMAGE_BYTES) throw new Error('Your flyer must be between 1 byte and 5 MB.')
   }
 }
 // Decode before sending. MIME/extension alone cannot detect corrupt or renamed files.

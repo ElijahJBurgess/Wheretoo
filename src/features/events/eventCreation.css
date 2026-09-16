@@ -81,7 +81,6 @@
 .creation-preview__tabs { display:flex; gap:6px; margin-bottom:18px; }
 .creation-preview__tabs button { flex:1; min-height:44px; border:1px solid #364158; border-radius:8px; color:var(--color-muted); background:#101720; cursor:pointer; }
 .creation-preview__tabs button[aria-pressed=true] { background:#7136ff; color:#fff; border-color:#9865ff; }
-.creation-preview__artwork { width:100%; aspect-ratio:16/9; object-fit:cover; border-radius:10px; }
 .creation-preview__tickets { margin-top:22px; }
 .creation-preview__tier { display:flex; justify-content:space-between; gap:12px; padding:14px; background:#101720; border:1px solid #293749; border-radius:8px; margin:8px 0; }
 .creation-preview__tier h3,.creation-preview__tier p { margin:0; }
