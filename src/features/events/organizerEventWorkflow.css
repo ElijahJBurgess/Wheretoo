@@ -1,0 +1,127 @@
+/* Event authoring only: keep the canvas dark through loading, editing and outcome states. */
+body:has(.organizer-event-workflow) {
+  --color-canvas: #070c12;
+  --color-surface: #101720;
+  --color-ink: #f9f7ff;
+  --color-muted: #b3b4c5;
+  --color-border: #2b3443;
+  --color-violet: #7544ff;
+  --color-violet-deep: #b998ff;
+  --color-success: #77dcb0;
+  --color-success-surface: #10271f;
+  --color-danger: #ff777b;
+  --color-danger-surface: #291419;
+  --color-warning: #efc676;
+  --color-warning-surface: #292215;
+  --color-neutral-surface: #171d28;
+  color: var(--color-ink);
+  background: var(--color-canvas);
+  color-scheme: dark;
+}
+body:has(.organizer-event-workflow) .organizer-layout { background: var(--color-canvas); }
+body:has(.organizer-event-workflow) .organizer-layout__header {
+  max-width: 64rem;
+  gap: 1rem;
+  border-bottom: 1px solid var(--color-border);
+  padding-block: 1rem;
+}
+body:has(.organizer-event-workflow) .organizer-layout__main { max-width: 64rem; }
+body:has(.organizer-event-workflow) a { color: #bc9bff; }
+.organizer-event-workflow { min-height: 100dvh; min-width: 0; padding-block: 1.5rem 3rem; }
+.organizer-event-workflow > :not(.event-creation):not(.organizer-preview-route) { max-width: 60rem; margin-inline: auto; }
+.organizer-event-workflow .organizer-preview-route { padding-block: 0; min-height: auto; }
+.organizer-event-workflow .event-creation {
+  --color-violet-deep: #b998ff;
+  width: calc(100% - 3rem);
+  max-width: 60rem;
+  min-height: auto;
+  border-radius: 1rem;
+  box-shadow: none;
+}
+.organizer-event-workflow .event-creation__header { padding: 1rem 1.5rem; border-bottom: 1px solid var(--color-border); }
+.organizer-event-workflow .event-creation__body { padding: 1rem 2rem 2rem; }
+.organizer-event-workflow .event-creation__progress { padding: 1.5rem 2rem 1rem; }
+.organizer-event-workflow .ui-button--primary { background: #7136ff; border-color: #844dff; color: #fff; }
+.organizer-event-workflow .ui-button--primary:hover:not(:disabled) { background: #6030ed; }
+.organizer-event-workflow .ui-button--secondary { background: transparent; border-color: #786197; color: #f3eeff; }
+.organizer-event-workflow :focus-visible { outline: 3px solid #bb92ff; outline-offset: 3px; }
+.organizer-event-workflow .event-editor__frame { grid-template-columns: minmax(0, 1fr); }
+.organizer-event-workflow .event-editor__rail { position: static; }
+.organizer-event-workflow .event-editor__basics,
+.organizer-event-workflow .event-editor__overview,
+.organizer-event-workflow .event-preview__overview { display: grid; align-items: start; gap: 1.5rem; min-width: 0; }
+.organizer-event-workflow .event-editor__overview { margin-bottom: 2rem; }
+.organizer-event-workflow .event-image-manager { margin-top: 0; min-width: 0; }
+.organizer-event-workflow .event-flyer-preview { margin-inline: auto; }
+.organizer-event-workflow .event-editor__overview > .event-review { margin: 0; }
+.organizer-event-workflow :is(.ui-field, .event-step, .ticket-tiers-form, .ticket-tier-card) { min-width: 0; }
+.organizer-event-workflow :is(input, select, textarea) { min-width: 0; max-width: 100%; }
+.organizer-event-workflow :is(.event-save-state, .moderation-state, .event-status, .event-operational-state) { background: var(--color-neutral-surface); }
+.organizer-event-workflow .published-event__notice { background: var(--color-danger-surface); }
+.organizer-event-workflow .published-event__notice--public { background: var(--color-success-surface); }
+.organizer-event-workflow .event-summary { background: var(--color-surface); }
+.organizer-event-workflow .event-summary__artwork { background: #19132c; color: #eee5ff; }
+.organizer-event-workflow .event-summary__artwork strong { font-size: clamp(1.75rem, 3vw, 3rem); }
+.organizer-event-workflow .event-summary__header h2 { font-size: clamp(1.75rem, 3vw, 2.5rem); line-height: 1.1; }
+.organizer-event-workflow .event-creation__state,
+.organizer-event-workflow .creation-outcome { max-width: 32rem; margin-inline: auto; }
+.organizer-event-workflow .event-creation__save { margin-top: 0; }
+@media (min-width: 48rem) {
+  .organizer-event-workflow .event-preview__overview .event-summary__facts { grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); }
+  .organizer-event-workflow .event-editor__overview .event-flyer-preview { max-width: 15rem; }
+  .organizer-event-workflow .event-step > .ui-field { max-width: 28rem; }
+  .organizer-event-workflow .event-creation__progress ol { max-width: none; gap: .5rem; }
+  .organizer-event-workflow .event-creation__progress li,
+  .organizer-event-workflow .event-creation__progress li:last-child { flex: 1; min-width: 0; flex-direction: column; gap: .65rem; text-align: center; color: var(--color-muted); }
+  .organizer-event-workflow .event-creation__progress li::after { display: none; }
+  .organizer-event-workflow .event-creation__progress li > span:first-child { width: 10px; height: 10px; flex-shrink: 0; }
+  .organizer-event-workflow .event-creation__progress .event-creation__sr { position: static; width: auto; height: auto; margin: 0; overflow: visible; clip: auto; white-space: normal; font-size: .7rem; line-height: 1.4; }
+  .organizer-event-workflow .event-creation__progress li[aria-current] { color: #d3bdff; font-weight: 800; }
+  .organizer-event-workflow .event-creation__progress p { display: none; }
+  .organizer-event-workflow .event-editor__basics,
+  .organizer-event-workflow .event-editor__overview { grid-template-columns: minmax(0, 1fr) minmax(15rem, .62fr); gap: 2rem; }
+  .organizer-event-workflow .event-preview__overview:has(> .event-flyer-preview) { grid-template-columns: minmax(13rem, .65fr) minmax(0, 1fr); }
+  .organizer-event-workflow .event-preview__overview > .event-flyer-preview { margin-block: 0; }
+  .organizer-event-workflow .event-step__fields--schedule { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .organizer-event-workflow .event-step__fields--schedule > :nth-child(n+3) { grid-column: 1 / -1; }
+  .organizer-event-workflow .event-choice-group,
+  .organizer-event-workflow .event-requirements__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .organizer-event-workflow .event-choice-group label { align-items: start; }
+  .organizer-event-workflow .event-editor__basics .event-choice-group { grid-template-columns: minmax(0, 1fr); }
+  .organizer-event-workflow .event-creation .event-editor__primary-actions { flex: initial; margin-left: auto; }
+  .organizer-event-workflow .event-creation .event-editor__primary-actions > .ui-button { flex: initial; min-width: 10rem; }
+  .organizer-event-workflow .step-rail { display: flex; gap: .5rem; }
+  .organizer-event-workflow .step-rail__item { flex: 1; min-width: 0; grid-template-columns: 1fr; gap: .5rem; min-height: 0; overflow-wrap: anywhere; }
+  .organizer-event-workflow .step-rail__item::after { display: none; }
+  .organizer-event-workflow .step-rail__item:has([aria-current]) { color: #c9acff; }
+  .organizer-event-workflow .event-preview__publish,
+  .organizer-event-workflow .event-creation .event-preview__publish { display: flex; align-items: center; }
+  .organizer-event-workflow .event-preview__publish > .ui-button,
+  .organizer-event-workflow .event-creation .event-preview__publish > .ui-button { width: auto; margin: 0; flex-shrink: 0; }
+  .organizer-event-workflow .event-creation__state .ui-button { width: auto; }
+}
+@media (min-width: 64rem) {
+  .organizer-event-workflow .ticket-tiers-page__grid,
+  .organizer-event-workflow .event-creation .ticket-tiers-page__grid { display: grid; grid-template-columns: minmax(0, 1fr) 17rem; }
+  .organizer-event-workflow .ticket-activation-panel,
+  .organizer-event-workflow .event-creation .ticket-activation-panel { background: var(--color-surface); border: 1px solid var(--color-border); padding: 1.25rem; }
+  .organizer-event-workflow .published-event .event-summary { grid-template-columns: minmax(14rem, .6fr) minmax(0, 1fr); }
+  .organizer-event-workflow .published-event .event-summary__artwork { min-height: 0; }
+}
+@media (max-width: 47.999rem) {
+  .organizer-event-workflow { padding-block: 0 2rem; }
+  .organizer-event-workflow .event-creation { width: 100%; border: 0; border-radius: 0; min-height: 100dvh; }
+  .organizer-event-workflow .event-creation__header { padding: .75rem 1rem; }
+  .organizer-event-workflow .event-creation__body { padding: .5rem 1.25rem 1.5rem; }
+  .organizer-event-workflow .event-creation__progress { padding: 1rem 1.5rem; }
+  .organizer-event-workflow .event-editor__basics { gap: 2rem; }
+  .organizer-event-workflow .step-rail { position: relative; display: flex; justify-content: space-between; gap: .35rem; padding-bottom: 2rem; }
+  .organizer-event-workflow .step-rail__item { position: static; display: block; min-height: 0; }
+  .organizer-event-workflow .step-rail__item::after { display: none; }
+  .organizer-event-workflow .step-rail__item > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .organizer-event-workflow .step-rail__item > span[aria-current] { inset: auto 0 0; width: auto; height: auto; clip-path: none; text-align: center; color: #c9acff; }
+
+  .organizer-event-workflow .ticket-tiers-page__grid { grid-template-columns: minmax(0, 1fr); }
+  body:has(.organizer-event-workflow) .organizer-layout__header { justify-content: center; }
+  body:has(.organizer-event-workflow) .organizer-layout__nav { justify-content: center; flex-wrap: wrap; }
+}

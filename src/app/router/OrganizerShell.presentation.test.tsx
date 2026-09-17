@@ -36,6 +36,24 @@ describe('OrganizerShell onboarding presentation boundary', () => {
   })
 
   it.each([
+    '/organizer/events/new',
+    '/organizer/events/00000000-0000-4000-8000-000000000001/edit',
+    '/organizer/events/00000000-0000-4000-8000-000000000001/preview',
+    '/organizer/events/00000000-0000-4000-8000-000000000001/tickets',
+    '/organizer/events/00000000-0000-4000-8000-000000000001',
+  ])('keeps event route content inside the shared presentation boundary at %s', path => {
+    renderPath(path)
+    expect(screen.getByRole('heading', { name: 'Onboarding content' }).closest('.organizer-event-workflow')).not.toBeNull()
+  })
+
+  it.each(['/organizer/setup', '/organizer/events', '/organizer/settings/payments', '/organizer/events/00000000-0000-4000-8000-000000000001/orders'])(
+    'does not apply the event editor presentation to unrelated shells at %s', path => {
+      renderPath(path)
+      expect(screen.getByRole('heading', { name: 'Onboarding content' }).closest('.organizer-event-workflow')).toBeNull()
+    },
+  )
+
+  it.each([
     '/organizer/settings/payments',
     '/organizer/settings/payments?eventId=00000000-0000-4000-8000-000000000001',
   ])('keeps payment Settings inside the organizer operations shell at %s', path => {

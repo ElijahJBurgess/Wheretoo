@@ -285,8 +285,10 @@ function EventPreviewContent() {
         setIsPublishing(true)
         void getEventChangeContext(eventId, authenticatedOrganizerId).then(next => { setBaseline(next); setPublishState('ready'); setPublishError(null) }, () => setPublishError('The saved event could not be loaded. Publication remains unknown.')).finally(() => { activePublishEventIdRef.current = null; setIsPublishing(false) })
       }} variant="secondary">Reload and review saved event</Button> : null}
-      <EventImageGallery eventId={event.id} title={event.title ?? 'Event'} />
-      {confirming ? <EventPublishConfirmation event={event} organizer={organizer} tiers={paidTiersQuery.data ?? []} /> : <EventAttendeePreview event={event} organizer={organizer} tiers={paidTiersQuery.data ?? []} />}
+      <div className="event-preview__overview">
+        <EventImageGallery eventId={event.id} title={event.title ?? 'Event'} />
+        {confirming ? <EventPublishConfirmation event={event} organizer={organizer} tiers={paidTiersQuery.data ?? []} /> : <EventAttendeePreview event={event} organizer={organizer} tiers={paidTiersQuery.data ?? []} />}
+      </div>
       {!confirming ? <section aria-labelledby="preview-requirements-title" className="event-preview__requirements">
         <header>
           <p className="organizer-eyebrow">Saved with this event</p>

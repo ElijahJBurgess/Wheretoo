@@ -1,11 +1,13 @@
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { AsyncState } from '../../components/ui/AsyncState'
+import '../../features/events/organizerEventWorkflow.css'
 
 const signInAction = <Link className="ui-button ui-button--primary" to="/auth/sign-in">Go to sign in</Link>
 
 export function RouteLoadingFallback() {
+  const { pathname } = useLocation()
   return (
-    <div className="ui-page-shell">
+    <div className={`ui-page-shell${pathname.startsWith('/organizer/events/') ? ' organizer-event-workflow' : ''}`}>
       <AsyncState
         description="Whereto is opening this page."
         headingAs="h1"
@@ -31,8 +33,9 @@ export function UnmatchedRouteFallback() {
 }
 
 export function RouteErrorFallback() {
+  const { pathname } = useLocation()
   return (
-    <div className="ui-page-shell">
+    <div className={`ui-page-shell${pathname.startsWith('/organizer/events/') ? ' organizer-event-workflow' : ''}`}>
       <AsyncState
         action={signInAction}
         description="This page could not be opened. You can return to sign in safely."
