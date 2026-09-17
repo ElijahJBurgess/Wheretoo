@@ -79,7 +79,8 @@ function ImageManager({ eventId, disabled = false, ensureEventId, onBusyChange, 
   const uploadLabel = flyer ? 'Replace flyer' : 'Upload flyer'
   return <section className="event-image-manager" aria-label="Event flyer">
     <header className="event-image-heading"><h2>Event flyer <span>Optional</span></h2></header>
-    <p className="event-image-status">Your flyer will appear on discovery and the event page.</p>
+    <p className="event-image-status">Your event’s cover, from discovery to tickets.</p>
+    <p className="event-image-status">4:5 portrait recommended. Other sizes fit inside the frame without cropping.</p>
     {previews.length || flyer ? <div className="event-flyer-preview">
       <img src={previews[0] ?? flyer?.url} alt={previews.length ? 'Uploading flyer' : 'Event flyer'} />
       {previews.length ? <span role="status">Saving…</span> : null}

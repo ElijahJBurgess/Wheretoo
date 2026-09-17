@@ -1,4 +1,6 @@
 :root {
+  --event-flyer-ratio: 4 / 5;
+  --event-flyer-mat: #101216;
   --color-canvas: #f7f7fb;
   --color-surface: #ffffff;
   --color-ink: #19162c;

@@ -1,5 +1,6 @@
 import { fireEvent, render } from '@testing-library/react'
 import { expect, it } from 'vitest'
+import { publicEnv } from '../../lib/env'
 import { EventArtwork } from './EventArtwork'
 it('falls back after an image failure and can render a changed stored URL', () => {
   const view = render(<EventArtwork source='https://example.invalid/event.jpg' className='art' />)
@@ -17,4 +18,10 @@ it('does not render unsupported paths or unsafe URL schemes', () => {
     expect(view.container.querySelector('img')).toBeNull()
     view.unmount()
   }
+})
+
+it('renders the configured Storage origin for local as well as hosted flyers', () => {
+  const source = `${publicEnv.supabaseUrl}/storage/v1/object/sign/event-images/flyer.png`
+  const view = render(<EventArtwork source={source} className='art' />)
+  expect(view.container.querySelector('img')).toHaveAttribute('src', source)
 })

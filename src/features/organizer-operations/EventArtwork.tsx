@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { publicEnv } from '../../lib/env'
 
 // Event artwork is decorative here; operational identity stays in real text.
 // Failed or unsupported stored URLs never turn into invented event photography.
@@ -10,7 +11,11 @@ export function EventArtwork({ source, className, eager = false }: {
   const [failed, setFailed] = useState<string | null>(null)
   let url: string | null = null
   try {
-    if (source && new URL(source).protocol === 'https:') url = source
+    if (source) {
+      const parsed = new URL(source)
+      // The configured Storage origin also supports the isolated local Supabase stack.
+      if (parsed.protocol === 'https:' || (parsed.protocol === 'http:' && parsed.origin === new URL(publicEnv.supabaseUrl).origin)) url = source
+    }
   } catch { /* An unsupported storage path uses the same neutral fallback. */ }
   const available = url !== null && failed !== url
   return <span className={className} aria-hidden='true' data-artwork-state={available ? 'available' : 'missing'}>

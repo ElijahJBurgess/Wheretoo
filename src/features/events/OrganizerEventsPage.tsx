@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom'
 import { ReadState } from '../../components/ui/ReadState'
 import { Button } from '../../components/ui/Button'
 import { useSession } from '../auth/SessionProvider'
+import { useEventImages } from '../event-images/eventImages.queries'
 import { useOwnedEvents } from './event.queries'
 import type { EventRow } from './event.types'
 
@@ -49,6 +50,11 @@ export function OrganizerEventsPage() {
   const sessionState = useSession()
   const organizerId = sessionState.status === 'authenticated' ? sessionState.user.id : ''
   const eventsQuery = useOwnedEvents(organizerId)
+
+  const displayedEvents = (Array.isArray(eventsQuery.data) ? eventsQuery.data : []).filter(event =>
+    filter === 'All' || organizerEventStatus(event).label === filter
+  ).slice(0, visible)
+  const images = useEventImages(sessionState.status === 'authenticated' ? displayedEvents.filter(event => event.status === 'draft' || event.status === 'published').map(event => event.id) : [])
 
   if (eventsQuery.isPending || sessionState.status !== 'authenticated') {
     return <ReadState headingAs="h1" paused={eventsQuery.fetchStatus === 'paused'} status='loading' skeleton='event-cards' title='Loading your events' />
@@ -108,22 +114,19 @@ export function OrganizerEventsPage() {
           </button>
         ))}
       </div>
+      {images.isError ? <p role='status'>Flyers could not load. <button className='ops-button' type='button' onClick={() => void images.refetch()}>Retry flyers</button></p> : null}
       <ul className='event-list'>
-        {eventsQuery.data.filter((event) =>
-          filter === 'All' || organizerEventStatus(event).label === filter
-        ).slice(0, visible).map((event) => {
+        {displayedEvents.map((event) => {
           const title = event.title?.trim() || 'Untitled event'
           const status = organizerEventStatus(event)
           return (
             <li className='event-list__item' key={event.id}>
               <Link
-                className={event.admission_type === 'paid' ? 'ops-event-row' : undefined}
+                className='ops-event-row'
                 aria-label={`${title}, ${status.label}`}
                 to={eventDestination(event)}
               >
-                {event.admission_type === 'paid' && (
-                  <EventArtwork source={event.artwork_path} className='ops-event-art' />
-                )}
+                <EventArtwork source={images.data?.find(image => image.eventId === event.id && image.position === 1)?.url ?? null} className='ops-event-art' />
                 <span className={`event-status event-status--${status.style}`}>{status.label}</span>
                 <strong>{title}</strong>
                 <span className='event-list__dates'>

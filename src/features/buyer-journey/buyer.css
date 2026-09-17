@@ -43,7 +43,7 @@ body:has(.buyer-page) { background: #080a0b; }
 .buyer-progress__dot .buyer-icon { width: 15px; height: 15px; }
 .buyer-event-summary { border: 1px solid #25272b; background: #111415; border-radius: 10px; padding: 14px; min-width: 0; }
 .buyer-event-summary--artwork { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 13px; }
-.buyer-event-summary img { width: 100%; height: 118px; object-fit: cover; border-radius: 7px; }
+.buyer-event-summary img { width: 100%; height: auto; aspect-ratio: var(--event-flyer-ratio); object-fit: contain; background: var(--event-flyer-mat); border-radius: 7px; }
 .buyer-event-summary > div { min-width: 0; }
 .buyer-event-summary h2 { font-family: Georgia, 'Times New Roman', serif; font-size: 29px; font-weight: 400; line-height: 1; letter-spacing: -1px; overflow-wrap: anywhere; margin-bottom: 10px; }
 .buyer-event-summary p { display: flex; gap: 8px; align-items: flex-start; color: #e7e5eb; font-size: 12px; line-height: 1.4; margin-top: 8px; }
@@ -144,11 +144,9 @@ body:has(.buyer-page) { background: #080a0b; }
 .buyer-focused:not(.buyer-focused--valid) .buyer-event-summary { border: 1px solid #292930; border-radius: 9px; padding: 14px; background: #131617; }
 .buyer-focused:not(.buyer-focused--valid) .buyer-event-summary h2 { font-family: Georgia, serif; font-size: 26px; font-weight: 400; }
 .buyer-focused:not(.buyer-focused--valid) .buyer-event-summary p { font-size: 12px; margin-top: 9px; }
-.buyer-event-hero { position: relative; min-height: 780px; display: flex; flex-direction: column; background: #17131b; isolation: isolate; }
-.buyer-event-hero__image { position: absolute; z-index: -2; inset: 0; height: 100%; width: 100%; object-fit: cover; object-position: 50% 40%; }
-.buyer-event-hero::after { content: ''; position: absolute; inset: 0; z-index: -1; background: linear-gradient(180deg, #0000000a 25%, #080a0b38 40%, #080a0be6 68%, #080a0b 100%); }
-.buyer-event-hero--no-artwork { background: #19121e; min-height: 640px; }
-.buyer-event-hero__copy { margin-top: auto; padding: 180px 18px 18px; display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 16px; overflow-wrap: anywhere; }
+.buyer-event-hero { position: relative; display: flex; flex-direction: column; background: #080a0b; }
+.buyer-event-hero__image { display: block; width: calc(100% - 36px); height: auto; aspect-ratio: var(--event-flyer-ratio); object-fit: contain; margin: 0 18px; border: 1px solid #302637; border-radius: 12px; background: var(--event-flyer-mat); }
+.buyer-event-hero__copy { padding: 24px 18px; display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 16px; overflow-wrap: anywhere; }
 .buyer-event h1 { font-size: clamp(54px, 15vw, 68px); max-width: 10ch; min-width: 0; overflow-wrap: anywhere; line-height: .92; }
 .buyer-event__organizer { color: #e4dfeb; font-size: 14px; }
 .buyer-event-facts { display: grid; gap: 12px; margin: 0; }
@@ -156,8 +154,8 @@ body:has(.buyer-page) { background: #080a0b; }
 .buyer-event-facts dd { display: grid; min-width: 0; flex: 1; gap: 2px; margin: 0; font-size: 13px; }
 .buyer-event-facts dd > span + span { color: #c9c3d0; font-size: 12px; }
 .buyer-event__description { font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
-.buyer-event--selection .buyer-event-hero { min-height: 455px; }
-.buyer-event--selection .buyer-event-hero__copy { padding-top: 130px; gap: 12px; }
+.buyer-event--selection .buyer-event-hero__image { width: 160px; align-self: center; }
+.buyer-event--selection .buyer-event-hero__copy { padding-top: 24px; gap: 12px; }
 .buyer-event--selection h1 { font-size: 47px; max-width: none; }
 .buyer-event--selection .buyer-event-facts { grid-template-columns: 1fr 1fr; gap: 8px; }
 .buyer-event--selection .buyer-event-facts dd { font-size: 11px; }
@@ -199,7 +197,5 @@ body:has(.buyer-page) { background: #080a0b; }
 .buyer-page .buyer-primary { position: relative; justify-content: center; }
 .buyer-page .buyer-primary:has(.buyer-icon) { padding-inline: 45px; }
 .buyer-page .buyer-primary > .buyer-icon { position: absolute; right: 18px; margin: 0; }
-.buyer-event-hero__image { height: 570px; }
-.buyer-event--selection .buyer-event-hero__image { height: 410px; }
 
 .rsvp-badge{display:inline-block;padding:.35rem .7rem;border:1px solid #aa77ed;border-radius:1rem;background:#38204c;color:#f0dcff;font-size:.85rem;margin-bottom:.8rem}

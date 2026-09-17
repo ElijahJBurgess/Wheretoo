@@ -37,3 +37,5 @@ body:has(.organizer-preview-route) a { color: #bc9bff; }
   .organizer-preview-route { padding-block: 0; }
   .organizer-preview-route .event-creation { border-radius: 0; border-inline: 0; }
 }
+
+.organizer-preview-route .event-preview > .event-flyer-preview { justify-self: center; }

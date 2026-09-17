@@ -4,13 +4,15 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EventRow } from './event.types'
 
-const { refetch, useOwnedEvents, useSession } = vi.hoisted(() => ({
+const { refetch, useOwnedEvents, useSession, useEventImages } = vi.hoisted(() => ({
   refetch: vi.fn(),
+  useEventImages: vi.fn(),
   useOwnedEvents: vi.fn(),
   useSession: vi.fn(),
 }))
 
 vi.mock('../auth/SessionProvider', () => ({ useSession }))
+vi.mock('../event-images/eventImages.queries', () => ({ useEventImages }))
 vi.mock('./event.queries', () => ({ useOwnedEvents }))
 vi.mock('../organizer-operations/operations.queries', () => ({ useEventMetrics: () => ({ isPending: false, isError: true }) }))
 
@@ -42,6 +44,7 @@ function renderPage() {
 describe('OrganizerEventsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    useEventImages.mockReturnValue({ data: [] })
     useSession.mockReturnValue({ status: 'authenticated', session: {}, user: { id: 'organizer-1' } })
     useOwnedEvents.mockReturnValue({ data: undefined, isPending: true, isError: false, refetch })
   })
@@ -156,4 +159,27 @@ describe('OrganizerEventsPage', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Your events could not load')
     expect(screen.queryByText('No events yet')).not.toBeInTheDocument()
   })
+})
+
+
+it('uses only the canonical flyer for both free and paid organizer cards', () => {
+  useSession.mockReturnValue({ status: 'authenticated', user: { id: 'organizer-1' } })
+  useOwnedEvents.mockReturnValue({ data: [baseEvent, { ...baseEvent, id: 'event-2', admission_type: 'paid' }], isPending: false })
+  useEventImages.mockReturnValue({ data: [
+    { eventId: 'event-1', position: 2, url: 'https://example.com/secondary.png' },
+    { eventId: 'event-1', position: 1, url: 'https://example.com/free.png' },
+    { eventId: 'event-2', position: 1, url: 'https://example.com/paid.png' },
+  ] })
+  const view = renderPage()
+  expect(useEventImages).toHaveBeenCalledWith(['event-1', 'event-2'])
+  expect([...view.container.querySelectorAll('.ops-event-art img')].map(image => image.getAttribute('src')))
+    .toEqual(['https://example.com/free.png', 'https://example.com/paid.png'])
+})
+
+it('does not batch cancelled artwork into authorized active flyer reads', () => {
+  useSession.mockReturnValue({ status: 'authenticated', user: { id: 'organizer-1' } })
+  useOwnedEvents.mockReturnValue({ data: [baseEvent, { ...baseEvent, id: 'cancelled', status: 'cancelled' }], isPending: false })
+  useEventImages.mockReturnValue({ data: [] })
+  renderPage()
+  expect(useEventImages).toHaveBeenCalledWith(['event-1'])
 })

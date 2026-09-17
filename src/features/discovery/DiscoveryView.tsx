@@ -10,6 +10,7 @@ import {
 } from './discovery.presentation'
 import type { DiscoveryDisplayItem, DiscoveryFilters } from './discovery.types'
 import './discovery.css'
+import discoveryHero from './assets/discovery-hero.svg'
 
 export type DiscoveryViewProps = {
   filters: DiscoveryFilters
@@ -97,8 +98,7 @@ function EventLink({ item, publicSearch, variant, eventHref }: {
   if (variant === 'hero') {
     return (
       <article className="discovery-hero">
-        <DiscoveryArtwork hero item={item} />
-        <div className="discovery-hero__scrim" />
+        <div className="discovery-hero__flyer"><DiscoveryArtwork hero item={item} /></div>
         <div className="discovery-hero__copy">
           <p className="discovery-kicker">Coming up</p>
           <h2>{item.title}</h2>
@@ -229,14 +229,15 @@ export function DiscoveryView({
           <Link aria-label="Wheretoo discovery home" className="discovery-wordmark" to="/discover">wheretoo</Link>
           <p className="discovery-location"><PinMark /><span>SF Bay Area</span></p>
           <nav aria-label="Public navigation" className="discovery-nav">
-            <Link aria-current="page" to={discoverDestination}><span aria-hidden="true">⌕</span>Discover</Link>
-            <Link to="/organizer/events"><span aria-hidden="true">◇</span>Organize</Link>
+            <Link aria-current="page" to={discoverDestination}><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="m15 9-2 4-4 2 2-4Z" /></svg>Discover</Link>
+            <Link to="/organizer/events"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="15" rx="3" /><path d="M8 3v6m8-6v6M4 12h16" /></svg>Organize</Link>
           </nav>
         </header>
 
         <section className="discovery-intro">
-          <h1>Somewhere to <em>go?</em></h1>
-          <p>People<br />Places<br />Good times</p>
+          <div className="discovery-intro__copy"><h1>Somewhere to <em>go?</em></h1>
+            <p>People. Places. Good times.</p></div>
+          <img className="discovery-intro__media" src={discoveryHero} width="640" height="480" alt="Wheretoo after-hours poster composition: music, food, and local culture" fetchPriority="high" />
         </section>
 
         <DiscoveryFiltersView filters={filters} onChange={onFiltersChange} />
