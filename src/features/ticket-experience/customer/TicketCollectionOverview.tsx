@@ -35,17 +35,21 @@ export function TicketCollectionOverview({ collectionLabel, ticketHref, tickets,
       <header className="buyer-wallet__heading"><h1 id="ticket-collection-title">Ticket wallet</h1><p>{collectionLabel}</p></header>
       {first?.eventStatus === 'cancelled' ? <p role="status">Event cancelled. Each ticket keeps its admission history.</p> : first?.eventUpdated ? <p role="status">Event updated. Review the latest published details.</p> : null}
       {first?.eventFactsAvailable === false ? <p>Previous published event details are unavailable.</p> : null}
-      {first ? <BuyerEventSummary title={first.eventName} schedule={formatBuyerSchedule(first.startsAt, first.endsAt, first.timezone)} venue={first.venueName} /> : null}
-      <section className="buyer-wallet__tickets"><h2>{!ended && first?.eventFactsAvailable !== false && tickets.every(ticket => ticket.status === 'valid') ? 'Available tickets' : 'Your tickets'}</h2>
-        <ol>{tickets.map(ticket => <li key={ticket.selector}>
-          <Link aria-label={`Ticket ${ticket.position}, ${ticket.admissionLabel}, ${statusLabel(ticket)}`} className="buyer-wallet-row" to={ticketHref(ticket.selector)}>
-            <BuyerIcon name="ticket" className="buyer-ticket-icon" /><div><strong>{ticket.admissionLabel}</strong>{ticket.attendeeLabel ? <span>{ticket.attendeeLabel}</span> : <span>Ticket {ticket.position} of {ticket.totalInCollection}</span>}</div>
-            <span className={`buyer-status buyer-status--${ended && ticket.status === 'valid' ? 'ended' : ticket.status}`}><i aria-hidden="true" />{statusLabel(ticket)}</span><span aria-hidden="true">›</span>
-          </Link>
-        </li>)}</ol>
-      </section>
-      {first ? <Link className="ui-button buyer-primary" to={ticketHref(first.selector)}>View first ticket<BuyerIcon name="arrow" /></Link> : null}
-      <Link className="ui-button buyer-secondary" to="/discover">Browse events</Link>
+      <div className="buyer-wallet__layout">
+        {first ? <BuyerEventSummary title={first.eventName} schedule={formatBuyerSchedule(first.startsAt, first.endsAt, first.timezone)} venue={first.venueName} /> : null}
+        <section className="buyer-wallet__tickets"><h2>{!ended && first?.eventFactsAvailable !== false && tickets.every(ticket => ticket.status === 'valid') ? 'Available tickets' : 'Your tickets'}</h2>
+          <ol>{tickets.map(ticket => <li key={ticket.selector}>
+            <Link aria-label={`Ticket ${ticket.position}, ${ticket.admissionLabel}, ${statusLabel(ticket)}`} className="buyer-wallet-row" to={ticketHref(ticket.selector)}>
+              <BuyerIcon name="ticket" className="buyer-ticket-icon" /><div><strong>{ticket.admissionLabel}</strong>{ticket.attendeeLabel ? <span>{ticket.attendeeLabel}</span> : <span>Ticket {ticket.position} of {ticket.totalInCollection}</span>}</div>
+              <span className={`buyer-status buyer-status--${ended && ticket.status === 'valid' ? 'ended' : ticket.status}`}><i aria-hidden="true" />{statusLabel(ticket)}</span><span aria-hidden="true">›</span>
+            </Link>
+          </li>)}</ol>
+        </section>
+      </div>
+      <div className="buyer-wallet__actions">
+        {first ? <Link className="ui-button buyer-primary" to={ticketHref(first.selector)}>View first ticket<BuyerIcon name="arrow" /></Link> : null}
+        <Link className="ui-button buyer-secondary" to="/discover">Browse events</Link>
+      </div>
     </div>
   </section>
 }

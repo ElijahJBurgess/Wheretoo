@@ -222,7 +222,7 @@ export function RsvpPage() {
         }
       />
       <RsvpProgress step={step} />
-      <div className='buyer-content'>
+      <div className='buyer-content buyer-rsvp__layout'>
         {summary && (
           <BuyerEventSummary
             title={summary.title}
@@ -233,159 +233,161 @@ export function RsvpPage() {
             artwork={images.data?.find(image => image.position === 1)?.url ?? null}
           />
         )}
-        {error && <p className='rsvp-notice' role='alert'>{error}</p>}
-        {busy && <p role='status' aria-live='polite'>Confirming your RSVP…</p>}
-        {blocked
-          ? (
-            <section>
-              <h1>Private RSVP recovery needed</h1>
-              <p>
-                Use your existing private ticket link. Do not create another registration to replace
-                an uncertain request.
-              </p>
-            </section>
-          )
-          : unresolved
-          ? (
-            <section>
-              <h1>{busy ? 'Confirming your RSVP' : 'Check your RSVP'}</h1>
-              <p>
-                Your request for {attempt.submission.quantity}{' '}
-                admission{attempt.submission.quantity === 1 ? '' : 's'}{' '}
-                is saved. Checking again uses that same request.
-              </p>
-              <button
-                className='ui-button buyer-primary'
-                disabled={busy}
-                onClick={() => void resolve(attempt, true)}
-              >
-                Check RSVP status
-              </button>
-            </section>
-          )
-          : confirmed
-          ? (
-            <section>
-              <h1>Your RSVP is confirmed</h1>
-              <Link className='ui-button buyer-primary' to={'/rsvp/' + attempt.collectionBearer}>
-                View your tickets
-              </Link>
-              <button
-                className='ui-button buyer-secondary'
-                onClick={() => {
-                  setNewIntent(true)
-                  setAttempt(null)
-                  setStep(1)
-                  setQuantity(1)
-                  setError('')
-                  window.history.replaceState(window.history.state, '', window.location.pathname)
-                }}
-              >
-                Start another RSVP
-              </button>
-            </section>
-          )
-          : eventError
-          ? (
-            <ReadState headingAs='h1' status='unavailable' title='Availability could not be checked' action={<button className='ui-button buyer-primary' onClick={() => void loadEvent()}>Check availability</button>} />
-          )
-          : event === undefined
-          ? <ReadState headingAs='h1' status='loading' skeleton='detail-fields' title='Loading event…' />
-          : event === null
-          ? (
-            <ReadState headingAs='h1' status='unavailable' title='RSVP unavailable' description='This event may have ended or may no longer be available.' />
-          )
-          : event.availability.status === 'full'
-          ? (
-            <section className='rsvp-notice'>
-              <h1>RSVP capacity reached</h1>
-              <p>This event has reached capacity.</p>
-              <button className='ui-button buyer-secondary' disabled>RSVP full</button>
-              <button className='ui-button buyer-secondary' onClick={() => void loadEvent()}>
-                Check availability
-              </button>
-            </section>
-          )
-          : step === 1
-          ? (
-            <section>
-              <h1>Choose your RSVP</h1>
-              <div className='rsvp-quantity'>
-                <BuyerIcon name='ticket' />
-                <div>
-                  <strong>Free RSVP</strong>
-                  <small>General Admission</small>
-                </div>
-                <span>$0</span>
-                <button
-                  aria-label='Decrease quantity'
-                  disabled={quantity <= 1}
-                  onClick={() => setQuantity((q) => q - 1)}
-                >
-                  −
-                </button>
-                <output aria-label='Quantity'>{quantity}</output>
-                <button
-                  aria-label='Increase quantity'
-                  disabled={quantity >= Math.min(10, event.availability.remaining ?? 10)}
-                  onClick={() => setQuantity((q) => q + 1)}
-                >
-                  +
-                </button>
-              </div>
-              <p className='rsvp-notice'>No payment required.</p>
-              <p>
-                Availability is checked when you confirm. Selecting a quantity does not reserve
-                places.
-              </p>
-              <button
-                className='ui-button buyer-primary'
-                disabled={quantity > Math.min(10, event.availability.remaining ?? 10)}
-                onClick={() => setStep(2)}
-              >
-                Continue
-              </button>
-            </section>
-          )
-          : (
-            <form noValidate onSubmit={(e) => void submit(e)}>
-              <h1>Your details</h1>
-              <div className='buyer-details__fields'>
-                <label htmlFor='rsvp-name'>
-                  Full name<input
-                    id='rsvp-name'
-                    autoComplete='name'
-                    maxLength={200}
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                  />
-                </label>
-                <label htmlFor='rsvp-email'>
-                  Email address<input
-                    id='rsvp-email'
-                    type='email'
-                    autoComplete='email'
-                    maxLength={320}
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                  />
-                </label>
-              </div>
-              <section className='rsvp-summary'>
-                <h2>RSVP summary</h2>
-                <p>Free RSVP × {quantity}</p>
+        <div className='buyer-rsvp__steps'>
+          {error && <p className='rsvp-notice' role='alert'>{error}</p>}
+          {busy && <p role='status' aria-live='polite'>Confirming your RSVP…</p>}
+          {blocked
+            ? (
+              <section>
+                <h1>Private RSVP recovery needed</h1>
                 <p>
-                  <strong>Total — Free</strong>
+                  Use your existing private ticket link. Do not create another registration to replace
+                  an uncertain request.
                 </p>
-                <button className='rsvp-text-button' type='button' onClick={() => setStep(1)}>
-                  Edit quantity
+              </section>
+            )
+            : unresolved
+            ? (
+              <section>
+                <h1>{busy ? 'Confirming your RSVP' : 'Check your RSVP'}</h1>
+                <p>
+                  Your request for {attempt.submission.quantity}{' '}
+                  admission{attempt.submission.quantity === 1 ? '' : 's'}{' '}
+                  is saved. Checking again uses that same request.
+                </p>
+                <button
+                  className='ui-button buyer-primary'
+                  disabled={busy}
+                  onClick={() => void resolve(attempt, true)}
+                >
+                  Check RSVP status
                 </button>
               </section>
-              <button className='ui-button buyer-primary' disabled={busy} type='submit'>
-                Confirm RSVP
-              </button>
-            </form>
-          )}
+            )
+            : confirmed
+            ? (
+              <section>
+                <h1>Your RSVP is confirmed</h1>
+                <Link className='ui-button buyer-primary' to={'/rsvp/' + attempt.collectionBearer}>
+                  View your tickets
+                </Link>
+                <button
+                  className='ui-button buyer-secondary'
+                  onClick={() => {
+                    setNewIntent(true)
+                    setAttempt(null)
+                    setStep(1)
+                    setQuantity(1)
+                    setError('')
+                    window.history.replaceState(window.history.state, '', window.location.pathname)
+                  }}
+                >
+                  Start another RSVP
+                </button>
+              </section>
+            )
+            : eventError
+            ? (
+              <ReadState headingAs='h1' status='unavailable' title='Availability could not be checked' action={<button className='ui-button buyer-primary' onClick={() => void loadEvent()}>Check availability</button>} />
+            )
+            : event === undefined
+            ? <ReadState headingAs='h1' status='loading' skeleton='detail-fields' title='Loading event…' />
+            : event === null
+            ? (
+              <ReadState headingAs='h1' status='unavailable' title='RSVP unavailable' description='This event may have ended or may no longer be available.' />
+            )
+            : event.availability.status === 'full'
+            ? (
+              <section className='rsvp-notice'>
+                <h1>RSVP capacity reached</h1>
+                <p>This event has reached capacity.</p>
+                <button className='ui-button buyer-secondary' disabled>RSVP full</button>
+                <button className='ui-button buyer-secondary' onClick={() => void loadEvent()}>
+                  Check availability
+                </button>
+              </section>
+            )
+            : step === 1
+            ? (
+              <section>
+                <h1>Choose your RSVP</h1>
+                <div className='rsvp-quantity'>
+                  <BuyerIcon name='ticket' />
+                  <div>
+                    <strong>Free RSVP</strong>
+                    <small>General Admission</small>
+                  </div>
+                  <span>$0</span>
+                  <button
+                    aria-label='Decrease quantity'
+                    disabled={quantity <= 1}
+                    onClick={() => setQuantity((q) => q - 1)}
+                  >
+                    −
+                  </button>
+                  <output aria-label='Quantity'>{quantity}</output>
+                  <button
+                    aria-label='Increase quantity'
+                    disabled={quantity >= Math.min(10, event.availability.remaining ?? 10)}
+                    onClick={() => setQuantity((q) => q + 1)}
+                  >
+                    +
+                  </button>
+                </div>
+                <p className='rsvp-notice'>No payment required.</p>
+                <p>
+                  Availability is checked when you confirm. Selecting a quantity does not reserve
+                  places.
+                </p>
+                <button
+                  className='ui-button buyer-primary'
+                  disabled={quantity > Math.min(10, event.availability.remaining ?? 10)}
+                  onClick={() => setStep(2)}
+                >
+                  Continue
+                </button>
+              </section>
+            )
+            : (
+              <form noValidate onSubmit={(e) => void submit(e)}>
+                <h1>Your details</h1>
+                <div className='buyer-details__fields'>
+                  <label htmlFor='rsvp-name'>
+                    Full name<input
+                      id='rsvp-name'
+                      autoComplete='name'
+                      maxLength={200}
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                    />
+                  </label>
+                  <label htmlFor='rsvp-email'>
+                    Email address<input
+                      id='rsvp-email'
+                      type='email'
+                      autoComplete='email'
+                      maxLength={320}
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                    />
+                  </label>
+                </div>
+                <section className='rsvp-summary'>
+                  <h2>RSVP summary</h2>
+                  <p>Free RSVP × {quantity}</p>
+                  <p>
+                    <strong>Total — Free</strong>
+                  </p>
+                  <button className='rsvp-text-button' type='button' onClick={() => setStep(1)}>
+                    Edit quantity
+                  </button>
+                </section>
+                <button className='ui-button buyer-primary' disabled={busy} type='submit'>
+                  Confirm RSVP
+                </button>
+              </form>
+            )}
+        </div>
       </div>
     </main>
   )

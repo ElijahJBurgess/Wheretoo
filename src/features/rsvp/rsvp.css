@@ -127,3 +127,27 @@
   grid-template-columns: 1fr;
   gap: 0;
 }
+
+/* Free RSVP uses the same canvas, form scale and summary panels as paid checkout. */
+.buyer-rsvp .buyer-content { max-width: none; }
+.buyer-rsvp h1 { margin: 0 0 20px; font-size: clamp(28px, 4vw, 38px); }
+.buyer-rsvp .buyer-event-summary { margin: 0; }
+.buyer-rsvp__steps { min-width: 0; padding: 20px; border: 1px solid var(--color-border); border-radius: 16px; background: var(--color-surface); }
+.buyer-rsvp__steps:only-child { grid-column: 1 / -1; }
+.buyer-rsvp__steps > section { display: flex; flex-direction: column; gap: 16px; margin-bottom: 0; }
+.buyer-rsvp__steps > section > h1 { margin-bottom: 4px; }
+.buyer-rsvp__steps > section > .ui-button { margin-top: 0; }
+.buyer-rsvp label { font-size: 14px; }
+.buyer-rsvp input { font-size: 16px; border-color: var(--color-border); background: var(--color-canvas); border-radius: 12px; }
+.buyer-rsvp .ui-button { margin-top: 16px; }
+.rsvp-quantity { padding: 16px 12px; gap: 10px; background: #20182f; border-color: #8961c9; }
+.rsvp-quantity button { min-width: 44px; width: 44px; height: 44px; background: var(--buyer-purple); }
+.rsvp-notice { background: #1d2230; border-color: #414859; }
+.buyer-rsvp.buyer-confirmation .buyer-content { max-width: 720px; margin-inline: auto; }
+.buyer-rsvp.buyer-confirmation .buyer-confirmation__success h1 { font-size: clamp(32px, 4vw, 44px); }
+@media (min-width: 768px) {
+  .buyer-rsvp .buyer-rsvp__layout { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); align-items: start; gap: 28px; }
+  .buyer-rsvp__layout > .buyer-event-summary { display: flex; flex-direction: column; gap: 20px; }
+  .buyer-rsvp__layout > .buyer-event-summary img { width: min(100%, 240px); margin-inline: auto; }
+  .buyer-rsvp__layout > .buyer-event-summary h2 { font-size: 28px; }
+}

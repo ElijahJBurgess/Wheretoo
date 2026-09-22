@@ -10,6 +10,7 @@ import type { TicketCollectionResult } from '../ticket-experience/contracts/tick
 import { useTicketDocumentPrivacy } from '../ticket-experience/customer/useTicketDocumentPrivacy'
 import { parseFreeLocator } from './rsvp.contract'
 import { RsvpProgress } from './RsvpPage'
+import '../buyer-journey/buyer-recovery.css'
 import './rsvp.css'
 const reader = createTicketCollectionReader()
 export function RsvpConfirmationPage() {
@@ -45,7 +46,7 @@ function PrivateRsvpConfirmation({ collectionBearer }: { collectionBearer: strin
   const cancelled = collection?.registrationStatus === 'cancelled'
   const ended = first?.endsAt ? Date.parse(first.endsAt) <= now : false
   return (
-    <main className='buyer-page buyer-rsvp buyer-confirmation'>
+    <main className={`buyer-page buyer-rsvp buyer-confirmation${collection ? cancelled ? ' buyer-confirmation--cancelled' : ended ? ' buyer-confirmation--expired' : ' buyer-confirmation--paid' : ''}`}>
       <BuyerHeader />
       <RsvpProgress step={3} />
       <div className='buyer-content'>

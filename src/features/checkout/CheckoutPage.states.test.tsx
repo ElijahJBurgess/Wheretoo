@@ -11,6 +11,7 @@ vi.mock('react-router-dom', async (importOriginal) => ({
   ...(await importOriginal<typeof import('react-router-dom')>()),
   useNavigate: () => navigate,
 }))
+vi.mock('../event-images/publicEventImages', () => ({ usePublicEventImages: () => ({ data: [] }) }))
 vi.mock('./checkout.queries', () => ({ useCheckoutPublicEvent }))
 vi.mock('./checkout.api', () => ({
   cancelCheckout: vi.fn(),

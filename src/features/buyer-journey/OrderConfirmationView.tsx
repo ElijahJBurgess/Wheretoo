@@ -85,20 +85,24 @@ export function OrderConfirmationView({ order, isTimedOut = false, ticketAction,
         <span aria-hidden="true" className="buyer-confirmation__seal">{copy.mark}</span>
         <h1>{copy.heading}</h1><p role="status" aria-live="polite">{copy.message}</p>
       </header>
-      <BuyerEventSummary title={order.event.title} schedule={formatSchedule(order.event)} venue={order.event.venueName ?? 'Venue to be announced'} />
-      {order.status === 'refunded' ? <RefundSupportContext orderNumber={order.orderNumber} /> : null}
-      <section className="buyer-order-details" aria-labelledby="confirmation-items-title">
-        <h2 id="confirmation-items-title">Order details</h2>
-        <p className="buyer-order-number"><span>{order.orderNumber}</span> · <span>{order.quantity} admissions</span></p>
-        <ul>{order.items.map((item, index) => <li key={`${item.tierName}-${index}`}><span>{item.tierName} × {item.quantity}</span><span>{formatBuyerMoney(item.subtotalMinor)}</span></li>)}</ul>
-        <dl><div><dt>Subtotal</dt><dd>{formatBuyerMoney(order.subtotalMinor)}</dd></div><div><dt>Tax</dt><dd>{formatBuyerMoney(order.taxAmountMinor)}</dd></div>
-          <div className="buyer-order-details__total"><dt>{paid ? 'Total paid' : 'Total'}</dt><dd className="confirmation-card__total">{formatBuyerMoney(order.totalMinor)}</dd></div></dl>
-      </section>
-      {paid ? <>{deliveryNotice}<p className="buyer-ticket-note"><BuyerIcon name="ticket" /><span>Keep your tickets close.<br /><small>Open your ticket to see its current admission status.</small></span></p>{ticketAction}
-        <button className="ui-button buyer-secondary" onClick={() => downloadEventCalendar(order)} type="button"><BuyerIcon name="calendar" />Add to calendar</button></> : null}
-      {recoveryAction}
-      {isTimedOut && order.status === 'processing' ? retryAction : null}
-      {browseAction}
+      <div className="buyer-confirmation__overview">
+        <BuyerEventSummary title={order.event.title} schedule={formatSchedule(order.event)} venue={order.event.venueName ?? 'Venue to be announced'} />
+        {order.status === 'refunded' ? <RefundSupportContext orderNumber={order.orderNumber} /> : null}
+        <section className="buyer-order-details" aria-labelledby="confirmation-items-title">
+          <h2 id="confirmation-items-title">Order details</h2>
+          <p className="buyer-order-number"><span>{order.orderNumber}</span> · <span>{order.quantity} admissions</span></p>
+          <ul>{order.items.map((item, index) => <li key={`${item.tierName}-${index}`}><span>{item.tierName} × {item.quantity}</span><span>{formatBuyerMoney(item.subtotalMinor)}</span></li>)}</ul>
+          <dl><div><dt>Subtotal</dt><dd>{formatBuyerMoney(order.subtotalMinor)}</dd></div><div><dt>Tax</dt><dd>{formatBuyerMoney(order.taxAmountMinor)}</dd></div>
+            <div className="buyer-order-details__total"><dt>{paid ? 'Total paid' : 'Total'}</dt><dd className="confirmation-card__total">{formatBuyerMoney(order.totalMinor)}</dd></div></dl>
+        </section>
+      </div>
+      <div className="buyer-confirmation__actions">
+        {paid ? <>{deliveryNotice}<p className="buyer-ticket-note"><BuyerIcon name="ticket" /><span>Keep your tickets close.<br /><small>Open your ticket to see its current admission status.</small></span></p>{ticketAction}
+          <button className="ui-button buyer-secondary" onClick={() => downloadEventCalendar(order)} type="button"><BuyerIcon name="calendar" />Add to calendar</button></> : null}
+        {recoveryAction}
+        {isTimedOut && order.status === 'processing' ? retryAction : null}
+        {browseAction}
+      </div>
     </div>
   </main>
 }

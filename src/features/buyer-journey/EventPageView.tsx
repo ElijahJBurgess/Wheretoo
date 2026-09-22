@@ -6,9 +6,9 @@ export function EventPageView({ title, organizer, date, time, venue, location, d
   badge?: string; artwork?: string | null; selection?: boolean; back?: ReactNode; action?: ReactNode; children?: ReactNode
 }) {
   return <main className={`buyer-page buyer-event${selection ? ' buyer-event--selection' : ''}`}>
+    <BuyerHeader back={back} />
     <article aria-labelledby="public-event-title">
       <div className={`buyer-event-hero${artwork ? '' : ' buyer-event-hero--no-artwork'}`}>
-        <BuyerHeader back={back} />
         {artwork ? <img className="buyer-event-hero__image" src={artwork} alt={`${title} event artwork`} /> : null}
         <div className="buyer-event-hero__copy">
           {badge ? <span className="rsvp-badge">{badge}</span> : null}<h1 id="public-event-title">{title}</h1><p className="buyer-event__organizer">Hosted by {organizer}</p>
