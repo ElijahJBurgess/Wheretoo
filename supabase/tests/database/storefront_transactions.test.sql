@@ -1,0 +1,30 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions;
+select no_plan();
+\ir helpers/core_ticket_truth_lite_setup.inc
+reset role;
+insert into storage.objects(id,bucket_id,name,metadata,user_metadata) values('24000000-0000-4000-8000-000000000031','organizer-media','a6100000-0000-4000-8000-000000000001/24000000-0000-4000-8000-000000000031.png','{"size":100,"mimetype":"image/png"}','{"organizer_id":"a6100000-0000-4000-8000-000000000001"}');
+select set_config('request.jwt.claim.sub','a6100000-0000-4000-8000-000000000001',true);
+select public.confirm_owned_storefront_handle('paid-storefront','24000000-0000-4000-8000-000000000031');
+update public.organizers set storefront_status='published' where handle='paid-storefront';
+select is(public.get_public_organizer_storefront('paid-storefront')#>>'{featured,id}','a6200000-0000-4000-8000-000000000001','Storefront exposes the canonical purchased event');
+set local role service_role;
+select is(pg_temp.record_and_fulfill('storefrontpaid','storefrontpaid',(select id from fulfillment_orders where kind='clean'),'cs_test_integrityclean')->>'order_status','paid','Existing fulfillment completes storefront-selected event');
+select is((select count(*) from public.tickets where order_id=(select id from fulfillment_orders where kind='clean')),3::bigint,'Existing order issues its canonical three tickets');
+reset role;
+update public.organizers set storefront_status='draft' where handle='paid-storefront';
+select is(public.get_public_organizer_storefront('paid-storefront'),null::jsonb,'Unpublish removes storefront');
+select is((select status from public.orders where id=(select id from fulfillment_orders where kind='clean')),'paid','Unpublish preserves paid order');
+select is((select count(*) from public.tickets where order_id=(select id from fulfillment_orders where kind='clean') and status='valid'),3::bigint,'Unpublish preserves admissions');
+\ir free_registration_fixture.inc
+insert into storage.objects(id,bucket_id,name,metadata,user_metadata) values('24000000-0000-4000-8000-000000000032','organizer-media','b6100000-0000-4000-8000-000000000001/24000000-0000-4000-8000-000000000032.png','{"size":100,"mimetype":"image/png"}','{"organizer_id":"b6100000-0000-4000-8000-000000000001"}');
+select public.confirm_owned_storefront_handle('free-storefront','24000000-0000-4000-8000-000000000032');
+update public.organizers set storefront_status='published' where handle='free-storefront';
+select is(public.get_public_organizer_storefront('free-storefront')#>>'{featured,id}','b6200000-0000-4000-8000-000000000001','Storefront exposes canonical RSVP event');
+select is(pg_temp.register(1)->>'kind','confirmed','Canonical free registration succeeds');
+select is((select count(*) from public.tickets where event_id='b6200000-0000-4000-8000-000000000001'),2::bigint,'RSVP uses shared tickets');
+select is(pg_temp.register(2,1)->>'kind','confirmed','Remaining capacity is canonical');
+select is(public.get_public_organizer_storefront('free-storefront')#>>'{featured,admission,state}','sold_out','Storefront reflects exhausted canonical capacity');
+select is(pg_temp.register(3,1)->>'kind','rejected','No oversell from stale storefront');
+select * from finish();rollback;

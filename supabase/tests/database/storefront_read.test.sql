@@ -1,0 +1,25 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions;
+select no_plan();
+select private.configure_policy_environment('development');
+\ir spec13_fixture.inc
+insert into storage.objects(id,bucket_id,name,metadata,user_metadata) values('24000000-0000-4000-8000-000000000021','organizer-media','d1300000-0000-4000-8000-000000000001/24000000-0000-4000-8000-000000000021.png','{"size":100,"mimetype":"image/png"}','{"organizer_id":"d1300000-0000-4000-8000-000000000001"}');
+select public.confirm_owned_storefront_handle('read-proof','24000000-0000-4000-8000-000000000021');
+update public.organizers set storefront_status='published' where handle='read-proof';
+select is(jsonb_array_length(public.get_public_organizer_storefront('read-proof',null,5)->'events'),5,'Five upcoming events');
+select is(public.get_public_organizer_storefront('read-proof',null,5)#>>'{featured,id}','d1310000-0000-4000-8000-000000000001','Earliest fallback');
+select ok(not exists(select 1 from jsonb_array_elements(public.get_public_organizer_storefront('read-proof',null,5)->'events') x where x->>'id'='d1310000-0000-4000-8000-000000000001'),'Featured excluded');
+select is(public.get_public_organizer_storefront('read-proof',null,5)#>>'{featured,admission,state}','available','Free capacity from canonical read');
+select is(public.get_public_organizer_storefront('read-proof',null,5)#>>'{events,0,admission,minimumAmountMinor}','1200','Paid price from canonical read');
+select is(jsonb_array_length(public.get_public_organizer_storefront('read-proof',public.get_public_organizer_storefront('read-proof',null,5)->'nextCursor',5)->'events'),5,'Next page bounded');
+select ok(public.get_public_organizer_storefront('read-proof',null,5)::text !~ 'organizer_id|owner_id|email|stripe|access_hash|credential','Public DTO excludes private data');
+update public.organizers set storefront_featured_event_id='d1310000-0000-4000-8000-000000000003' where handle='read-proof';
+select is(public.get_public_organizer_storefront('read-proof',null,5)#>>'{featured,id}','d1310000-0000-4000-8000-000000000003','Selected featured event');
+update public.events set status='cancelled' where id='d1310000-0000-4000-8000-000000000003';
+select is(public.get_public_organizer_storefront('read-proof',null,5)#>>'{featured,id}','d1310000-0000-4000-8000-000000000001','Cancelled preference falls back');
+update public.events set status='cancelled' where organizer_id='d1300000-0000-4000-8000-000000000001';
+select is(public.get_public_organizer_storefront('read-proof',null,5)->'featured','null'::jsonb,'No eligible featured event');
+select is(jsonb_array_length(public.get_public_organizer_storefront('read-proof',null,5)->'events'),0,'No stale merchandising');
+select is((select storefront_status from public.organizers where handle='read-proof'),'published','Empty storefront stays published');
+select * from finish();rollback;

@@ -22,8 +22,8 @@ function validatedReturnDestination(state: unknown): string {
   if (!from || typeof from !== 'object' || !('pathname' in from) || typeof from.pathname !== 'string') return fallback
   const path = from.pathname
   // Only registered organizer paths; never restore general query/fragment data.
-  if (path === '/organizer/setup') return path
-  if (/^\/organizer\/settings(?:\/(?:account|profile|payments|help|actions))?$/.test(path)) {
+  if ((path === '/organizer/setup' || path === '/organizer/setup/identity')) return path
+  if (/^\/organizer\/settings(?:\/(?:account|profile|payments|help|actions|storefront(?:\/preview)?))?$/.test(path)) {
     const eventId = 'paymentEventId' in state ? state.paymentEventId : undefined
     return path === '/organizer/settings/payments' && typeof eventId === 'string' && z.uuid().safeParse(eventId).success
       ? `${path}?eventId=${eventId}`

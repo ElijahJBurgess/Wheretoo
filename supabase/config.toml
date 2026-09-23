@@ -483,3 +483,11 @@ verify_jwt = false
 [functions.event-images]
 verify_jwt = false
 import_map = "../deno.json"
+
+[functions.organizer-media]
+verify_jwt = false
+import_map = "../deno.json"
+
+[functions.storefront-telemetry]
+verify_jwt = false
+import_map = "../deno.json"

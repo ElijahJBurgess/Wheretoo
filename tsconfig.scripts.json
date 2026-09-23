@@ -1,11 +1,16 @@
 {
   "compilerOptions": {
     "target": "ES2023",
-    "lib": ["ES2023", "DOM"],
+    "lib": [
+      "ES2023",
+      "DOM"
+    ],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
-    "types": ["node"],
+    "types": [
+      "node"
+    ],
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
@@ -20,7 +25,8 @@
   "include": [
     "scripts/**/*.ts",
     "scripts/**/*.tsx",
-    "src/features/ticket-experience/email/**/*.ts*"
+    "src/features/ticket-experience/email/**/*.ts*",
+    "api/**/*.ts"
   ],
   "exclude": [
     "src/**/*.test.ts",

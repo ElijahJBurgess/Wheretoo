@@ -97,7 +97,8 @@ Deno.test("shared worker sends one private cancellation status message for a lat
   assertStringIncludes(sent[0].text, "under review");
   assertStringIncludes(sent[0].text, "/event-status#em1_");
   assertEquals(
-    /QR|refund is confirmed|tickets are valid/i.test(sent[0].text),
+    // Random private URL bearers can contain the letters QR; inspect message copy.
+    /QR|refund is confirmed|tickets are valid/i.test(sent[0].text.replace(/https?:\/\/\S+/g, '')),
     false,
   );
 });

@@ -2,7 +2,7 @@ import { supabase } from '../../lib/supabase/client'
 import type { Database } from '../../lib/supabase/database.types'
 import type { OrganizerInput } from './organizer.schemas'
 
-export type Organizer = Database['public']['Tables']['organizers']['Row']
+export type Organizer = Pick<Database['public']['Tables']['organizers']['Row'], 'id'|'display_name'|'organizer_type'|'bio'|'website_url'|'base_city'|'country_code'|'onboarding_completed_at'|'created_at'|'updated_at'>
 export const organizerColumns = 'id,display_name,organizer_type,bio,website_url,base_city,country_code,onboarding_completed_at,created_at,updated_at'
 
 type OrganizerMutablePayload = Pick<
@@ -43,7 +43,7 @@ export async function saveOrganizer(userId: string, input: OrganizerInput): Prom
     website_url: optionalText(input.websiteUrl),
     base_city: optionalText(input.baseCity),
     country_code: 'US',
-    onboarding_completed_at: new Date().toISOString(),
+    onboarding_completed_at: existingOrganizer?.onboarding_completed_at ?? null,
   }
   const { data, error } =
     existingOrganizer === null

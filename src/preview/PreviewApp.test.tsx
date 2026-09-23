@@ -51,6 +51,7 @@ describe('development screen hub', () => {
 
   it('ships the SPA fallback needed for direct Vercel routes', () => {
     const config = JSON.parse(readFileSync(`${process.cwd()}/vercel.json`, 'utf8'))
-    expect(config.rewrites).toEqual([{ source: '/(.*)', destination: '/index.html' }])
+    expect(config.rewrites.at(-1)).toEqual({ source: '/(.*)', destination: '/index.html' })
+    expect(config.rewrites[0].destination).toBe('/api/storefront?handle=:handle')
   })
 })

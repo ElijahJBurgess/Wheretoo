@@ -1754,7 +1754,7 @@ Deno.test("checkout keeps exact-origin CORS and allows the bearer header", async
   assertEquals(preflight.status, 204);
   assertEquals(
     preflight.headers.get("access-control-allow-headers"),
-    "authorization, content-type, x-client-info, apikey, x-whereto-confirmation-bearer",
+    "authorization, content-type, x-client-info, apikey, x-whereto-confirmation-bearer, x-wheretoo-storefront",
   );
   let touched = false;
   const denied = await createStripeCreateCheckoutHandler(dependencies({
@@ -1809,4 +1809,12 @@ Deno.test("default anonymous limiter hashes caller identity", async () => {
   );
   assertEquals(JSON.stringify(capturedArgs).includes("203.0.113.9"), false);
   assertEquals(result, { allowed: false, retryAfterSeconds: 23 });
+});
+
+Deno.test("optional storefront measurement failure never rejects canonical checkout", async () => {
+  const response = await createStripeCreateCheckoutHandler(dependencies({
+    associateStorefront: async () => { throw new Error("measurement unavailable"); },
+  }))(request());
+  assertEquals(response.status, 200);
+  assertEquals(await responseHasCheckoutUrl(response), true);
 });

@@ -1,3 +1,4 @@
+import { freezeStorefrontAttribution } from '../storefront/storefront.attribution'
 import { supabase } from '../../lib/supabase/client'
 import { isCanonicalCheckoutBearer } from './checkout.attempt'
 import { checkoutInputSchema, type CheckoutInput } from './checkout.schemas'
@@ -87,7 +88,7 @@ export async function createCheckout(input: CheckoutInput, confirmationBearer: s
   const data = await invokeCheckoutFunction(
     'stripe-create-checkout',
     parsed.data,
-    { 'X-Whereto-Confirmation-Bearer': confirmationBearer },
+    { 'X-Whereto-Confirmation-Bearer': confirmationBearer, ...freezeStorefrontAttribution(input.eventId,input.clientRequestId) },
   )
   if (!isRecord(data) || Object.keys(data).length !== 1 || typeof data.checkoutUrl !== 'string' || !isStripeCheckoutUrl(data.checkoutUrl)) {
     throw new CheckoutApiError('CHECKOUT_UNAVAILABLE')

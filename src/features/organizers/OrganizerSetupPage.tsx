@@ -78,7 +78,7 @@ function OrganizerSetupForm({ initialValues, userId, onSavingChange }: Organizer
 
       try {
         await saveOrganizerMutation.mutateAsync(input)
-        if (mounted.current) navigate('/organizer/settings/payments', { replace: true })
+        if (mounted.current) navigate('/organizer/setup/identity', { replace: true })
       } catch (error) {
         if (!mounted.current) return
         setServerError(errorMessage(error))

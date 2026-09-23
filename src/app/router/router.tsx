@@ -97,6 +97,10 @@ export function createAppRoutes(runtime: TicketExperienceRuntime) {
               lazy: lazyComponent(() => import('./OrganizerShell'), 'OrganizerShell'),
               children: [
                 {
+                  path: '/organizer/setup/identity',
+                  lazy: lazyComponent(() => import('../../features/storefront/StorefrontIdentityPage'), 'StorefrontIdentityPage'),
+                },
+                {
                   path: '/organizer/setup',
                   lazy: lazyComponent(
                     () => import('../../features/organizers/OrganizerSetupPage'),
@@ -139,6 +143,8 @@ export function createAppRoutes(runtime: TicketExperienceRuntime) {
                       lazy: lazyComponent(() => import('../../features/organizer-settings/SettingsLayout'), 'SettingsLayout'),
                       children: [
                         { index: true, lazy: lazyComponent(() => import('../../features/organizer-settings/SettingsLayout'), 'SettingsIndexPage') },
+                        { path: 'storefront', lazy: lazyComponent(() => import('../../features/storefront/OrganizerStorefrontEditorPage'), 'OrganizerStorefrontEditorPage') },
+                        { path: 'storefront/preview', lazy: lazyComponent(() => import('../../features/storefront/StorefrontPreviewPage'), 'StorefrontPreviewPage') },
                         { path: 'account', lazy: lazyComponent(() => import('../../features/organizer-settings/AccountSecurityPage'), 'AccountSecurityPage') },
                         { path: 'profile', lazy: lazyComponent(() => import('../../features/organizer-settings/OrganizerProfilePage'), 'OrganizerProfilePage') },
                         { path: 'payments', lazy: lazyComponent(() => import('../../features/payments/OrganizerPaymentsPage'), 'OrganizerPaymentsPage') },
@@ -205,6 +211,7 @@ export function createAppRoutes(runtime: TicketExperienceRuntime) {
       ],
     },
     ...runtime.developmentRoutes,
+    { path: '/:organizerHandle', lazy: lazyComponent(() => import('../../features/storefront/OrganizerStorefrontPage'), 'OrganizerStorefrontPage') },
     { path: '*', element: <UnmatchedRouteFallback /> },
   ]
 

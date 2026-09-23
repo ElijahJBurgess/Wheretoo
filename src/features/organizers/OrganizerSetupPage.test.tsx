@@ -22,7 +22,7 @@ function renderPage() {
       <Routes>
         <Route path="/organizer/setup" element={<OrganizerSetupPage />} />
         <Route path="/organizer/events" element={<p>events destination</p>} />
-        <Route path="/organizer/settings/payments" element={<p>payouts destination</p>} />
+        <Route path="/organizer/setup/identity" element={<p>payouts destination</p>} />
       </Routes>
     </MemoryRouter>,
   )
@@ -157,7 +157,7 @@ describe('OrganizerSetupPage', () => {
     view.rerender(<MemoryRouter initialEntries={['/organizer/setup']}><Routes>
       <Route path="/organizer/setup" element={<OrganizerSetupPage />} />
       <Route path="/organizer/events" element={<p>events destination</p>} />
-      <Route path="/organizer/settings/payments" element={<p>payouts destination</p>} />
+      <Route path="/organizer/setup/identity" element={<p>payouts destination</p>} />
     </Routes></MemoryRouter>)
     expect(await screen.findByText('events destination')).toBeInTheDocument()
     await act(async () => finishSave({ id: 'user-1' }))
