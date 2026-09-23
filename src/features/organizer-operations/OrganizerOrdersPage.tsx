@@ -1,3 +1,4 @@
+import { EventExportControl } from './EventExportControl'
 import { ReadState } from '../../components/ui/ReadState'
 import { isOperationsAccessDenied } from './operations.errors'
 import type { OrderFilter, OrderSummary } from './operations.schemas'
@@ -40,6 +41,7 @@ function EventOrders({ ownerId, eventId }: { ownerId: string; eventId: string })
         <h1>Orders</h1>
         <p>Manage and view ticket orders for this event.</p>
       </header>
+      {verifiedEvent?.admission_type === 'paid' && <EventExportControl eventId={eventId} source='paid' eventStatus={verifiedEvent.status} />}
       <form
         className='ops-search'
         onSubmit={(e) => {
