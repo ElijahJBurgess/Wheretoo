@@ -1,5 +1,10 @@
 import { getServiceClient } from "../_shared/database.ts";
 import { getAppBaseUrl } from "../_shared/env.ts";
+import {
+  CoverError,
+  coverRevision,
+  mutateEventCover,
+} from "./coverMutation.ts";
 import { validImageBytes } from "./imageBytes.ts";
 
 const uuid =
@@ -44,10 +49,10 @@ export async function handler(request: Request): Promise<Response> {
     const appOrigin = getAppBaseUrl();
     if (origin === appOrigin) {
       headers.set("Access-Control-Allow-Origin", appOrigin);
-      headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+      headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS");
       headers.set(
         "Access-Control-Allow-Headers",
-        "authorization, apikey, content-type, x-event-id, x-client-info",
+        "authorization, apikey, content-type, x-event-id, x-client-info, x-cover-revision, x-request-id",
       );
     }
     if (request.method === "OPTIONS") {
@@ -74,7 +79,9 @@ export async function handler(request: Request): Promise<Response> {
       headers.set("Content-Type", file.data.type);
       return new Response(bytes, { headers });
     }
-    if (request.method !== "POST") return fail(405, "METHOD_NOT_ALLOWED");
+    if (!["POST", "PUT"].includes(request.method)) {
+      return fail(405, "METHOD_NOT_ALLOWED");
+    }
     if (origin !== appOrigin) return fail(403, "ORIGIN_DENIED");
     const bearer = request.headers.get("authorization") ?? "";
     if (!bearer.startsWith("Bearer ")) return fail(401, "SIGN_IN_REQUIRED");
@@ -90,6 +97,13 @@ export async function handler(request: Request): Promise<Response> {
     );
     if (error) return fail(503, "UPLOAD_UNAVAILABLE");
     if (!event) return fail(403, "EVENT_NOT_OWNED");
+    coverRevision(request.headers.get("x-cover-revision"));
+    if (request.method === "PUT") {
+      return Response.json(
+        await mutateEventCover(client, request, eventId, auth.user.id),
+        { headers },
+      );
+    }
     const mime = request.headers.get("content-type") ?? "";
     if (!["image/jpeg", "image/png", "image/webp"].includes(mime)) {
       return fail(415, "UNSUPPORTED_IMAGE");
@@ -101,25 +115,12 @@ export async function handler(request: Request): Promise<Response> {
       return fail(413, "IMAGE_TOO_LARGE");
     }
     if (!validImageBytes(bytes, mime)) return fail(415, "INVALID_IMAGE_BYTES");
-    const extension = mime === "image/jpeg"
-      ? "jpg"
-      : mime === "image/png"
-      ? "png"
-      : "webp";
-    const path = `${eventId}/${crypto.randomUUID()}.${extension}`;
-    const result = await client.storage.from("event-images").upload(
-      path,
-      bytes,
-      {
-        contentType: mime,
-        cacheControl: "0",
-        upsert: false,
-        metadata: { organizer_id: auth.user.id },
-      },
+    return Response.json(
+      await mutateEventCover(client, request, eventId, auth.user.id, bytes),
+      { status: 201, headers },
     );
-    if (result.error) return fail(409, "UPLOAD_NOT_CONFIRMED");
-    return Response.json({ path }, { status: 201, headers });
-  } catch {
+  } catch (error) {
+    if (error instanceof CoverError) return fail(error.status, error.message);
     return fail(503, "IMAGE_UNAVAILABLE");
   }
 }

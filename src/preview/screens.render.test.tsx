@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
   tiers: vi.fn(), publicEvent: vi.fn(), confirmation: vi.fn(), moderationCase: vi.fn(), queue: vi.fn(), eventChangeContext: vi.fn(), eventMetrics: vi.fn(),
   blocked: vi.fn(() => { throw new Error('Preview attempted a side effect') }),
 }))
-vi.mock('../features/event-images/eventImages.queries', () => ({ useEventImages: () => loaded([]) }))
+vi.mock('../features/event-images/eventImages.queries', () => ({ useEventImages: () => loaded([]), useEventCoverState: () => loaded({ revision: 0, images: [], latestGenerationId: null }) }))
 vi.mock('../features/event-images/publicEventImages', () => ({ usePublicEventImages: () => loaded([]) }))
 vi.mock('../lib/supabase/client', () => ({ supabase: new Proxy({}, { get: mocks.blocked }) }))
 vi.mock('../features/auth/SessionProvider', () => ({ useSession: mocks.session, SessionProvider: ({ children }: PropsWithChildren) => children }))

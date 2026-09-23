@@ -11,7 +11,7 @@ Status: V1 architecture direction. Some implementation choices are intentionally
 - Storage: Supabase Storage
 - Map: Mapbox GL JS
 - Payments: Stripe + Stripe Connect
-- AI flyer generation: OpenAI image generation
+- AI event cover generation: server-side image provider (OpenAI candidate)
 - Transactional email: Resend
 - Hosting/deployment: Vercel
 - Source control: GitHub
@@ -77,7 +77,7 @@ src/
     rsvp/
     ticketing/
     check-in/
-    flyers/
+    event-images/
     analytics/
 
   components/
@@ -115,7 +115,7 @@ Likely V1 entities:
 - tickets/admissions
 - check_ins
 - payment/Stripe references
-- flyer assets/generations
+- private event-cover generations/candidates
 - analytics events where useful
 
 ### Event
@@ -297,22 +297,12 @@ Event cancellation must:
 
 Do not assume one webhook event name covers every Stripe refund scenario; test against Stripe test mode.
 
-## 15. AI Flyer Architecture
-Keep AI generation behind a server-side integration.
+## 15. AI Event Cover Architecture
+Keep generation behind a server-side provider adapter. Use existing saved event data, one creative preference and optional short direction; generate three private 4:5 candidates. No reference-image or typography-composition system in V1.
 
-Inputs may include:
-- event context
-- creative prompt
-- up to 3 reference images
+Durable generation/candidate records preserve progress and selection across refresh/navigation. Explicit selection promotes validated bytes into the existing private event-images bucket and canonical position-1 attachment. Candidates have no public delivery path. Shared revision checks serialize manual cover changes and AI selections; duplicate selections return receipts without restoring old covers.
 
-Outputs:
-- generated assets stored/associated with organizer/event
-- target 3 options
-- selection state
-
-Exact event text should be rendered deterministically by Whereto where needed rather than trusting image generation to spell critical details perfectly.
-
-Generation failure must not destroy event draft state.
+Phase 1 implements persistence, private storage and safe selection with local fixtures only. Provider integration, generation UI and execution/cleanup infrastructure are later work. Generation failure must preserve the event draft and current cover. AI Flyer Generator is deferred to V3/V4.
 
 ## 16. Email
 Resend can send:

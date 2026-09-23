@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useSession } from '../auth/SessionProvider'
-import { listEventImages } from './eventImages.api'
+import { getEventCoverState, listEventImages } from './eventImages.api'
 
 export function useEventImages(ids: readonly string[]) {
   const session = useSession()
@@ -13,5 +13,15 @@ export function useEventImages(ids: readonly string[]) {
     gcTime: 0,
     refetchInterval: 40_000,
     retry: false,
+  })
+}
+
+export function useEventCoverState(eventId: string) {
+  const session = useSession()
+  return useQuery({
+    queryKey: ['event-images', 'cover-state', session.user?.id, session.identityVersion, eventId],
+    queryFn: () => getEventCoverState(eventId),
+    enabled: !!eventId && session.status === 'authenticated',
+    staleTime: 0, gcTime: 0, refetchInterval: 40_000, retry: false,
   })
 }

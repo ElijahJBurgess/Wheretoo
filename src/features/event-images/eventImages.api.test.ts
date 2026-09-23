@@ -16,3 +16,10 @@ it('empty records stay empty and failures do not become placeholders',async()=>{
  mock.rpc.mockResolvedValueOnce({data:[],error:null});expect(await listEventImages([row.eventId])).toEqual([])
  mock.rpc.mockResolvedValueOnce({data:null,error:new Error('offline')});await expect(listEventImages([row.eventId])).rejects.toThrow('offline')
 })
+
+it('reads revision and image metadata from the same server snapshot', async () => {
+ const { getEventCoverState } = await import('./eventImages.api')
+ mock.rpc.mockResolvedValue({data:{revision:7,images:[]},error:null})
+ expect(await getEventCoverState(row.eventId)).toEqual({revision:7,images:[]})
+ expect(mock.rpc).toHaveBeenCalledWith('get_event_cover_state',{p_event_id:row.eventId})
+})

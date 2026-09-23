@@ -1032,6 +1032,21 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_event_cover_state: { Args: { p_event_id: string }; Returns: Json }
+      get_event_cover_generation: { Args: { p_generation_id: string }; Returns: Json }
+      server_recover_cover_generation: { Args: { p_generation_id: string; p_organizer_id: string }; Returns: undefined }
+      server_claim_cover_candidate: { Args: { p_generation_id: string; p_slot: number; p_organizer_id: string; p_attempt: number }; Returns: Json }
+      server_finish_cover_candidate: { Args: { p_generation_id: string; p_slot: number; p_claim_token: string; p_path: string | null; p_failure_code?: string | null }; Returns: undefined }
+      server_expire_cover_candidates: { Args: { p_organizer_id: string }; Returns: Json }
+      server_ack_cover_cleanup: { Args: { p_generation_id: string }; Returns: undefined }
+      server_cover_recovery_objects: { Args: { p_generation_id: string; p_organizer_id: string }; Returns: Json }
+      server_reconcile_cover_object: { Args: { p_generation_id: string; p_organizer_id: string; p_slot: number; p_path: string }; Returns: undefined }
+      create_event_cover_generation: { Args: { p_event_id: string; p_request_id: string; p_expected_revision: number; p_input?: Json }; Returns: Json }
+      server_complete_event_cover_candidate: { Args: { p_generation_id: string; p_slot: number; p_path: string | null; p_failure_code?: string | null }; Returns: undefined }
+      server_get_event_cover_candidate: { Args: { p_generation_id: string; p_slot: number; p_organizer_id: string; p_expected_revision: number }; Returns: Json }
+      server_commit_event_cover: { Args: { p_event_id: string; p_organizer_id: string; p_expected_revision: number; p_path: string; p_generation_id?: string | null; p_slot?: number | null }; Returns: Json }
+      server_remove_event_cover: { Args: { p_event_id: string; p_organizer_id: string; p_expected_revision: number }; Returns: Json }
+
       accept_current_event_policies: {
         Args: { p_event_id: string }
         Returns: {

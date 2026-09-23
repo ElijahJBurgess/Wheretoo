@@ -16,7 +16,7 @@ for name in ['logo','merch']:
 code,data=p.http('/rest/v1/rpc/confirm_owned_storefront_handle',token,{'p_handle':'night-sessions','p_logo_id':assets[0]});assert code==200
 for n in range(1,7):
  event=f'd1310000-0000-4000-8000-{n:012}'
- req=urllib.request.Request(p.BASE+'/functions/v1/event-images',method='POST',data=(ROOT/'.superpowers/storefront/screenshots/flyer.png').read_bytes(),headers={'apikey':p.CONFIG['ANON_KEY'],'Authorization':'Bearer '+token,'content-type':'image/png','Origin':'http://127.0.0.1:3070','x-event-id':event})
+ req=urllib.request.Request(p.BASE+'/functions/v1/event-images',method='POST',data=(ROOT/'.superpowers/storefront/screenshots/flyer.png').read_bytes(),headers={'apikey':p.CONFIG['ANON_KEY'],'Authorization':'Bearer '+token,'content-type':'image/png','Origin':'http://127.0.0.1:3070','x-event-id':event,'x-cover-revision':'0','x-request-id':str(uuid.uuid4())})
  with urllib.request.urlopen(req) as response:assert response.status in (200,201)
 # Artwork changes use the canonical publication review; fixture re-accepts and republishes.
 p.local.sql("begin;select set_config('request.jwt.claim.sub','"+owner+"',true);set local role authenticated;select public.accept_current_event_policies(id) from public.events;select public.publish_event(id) from public.events;reset role;commit;")

@@ -4,12 +4,12 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, expect, it, vi } from 'vitest'
 const mock = vi.hoisted(() => ({ images: vi.fn(), upload: vi.fn(), remove: vi.fn(), refetch: vi.fn() }))
 vi.mock('../auth/SessionProvider', () => ({ useSession: () => ({ status: 'authenticated', user: { id: 'owner' }, identityVersion: 1 }) }))
-vi.mock('./eventImages.queries', () => ({ useEventImages: mock.images }))
+vi.mock('./eventImages.queries', () => ({ useEventCoverState: mock.images }))
 vi.mock('./eventFlyer.api', () => ({ replaceEventFlyer: mock.upload, removeEventFlyer: mock.remove }))
 import { EventImageManager } from './EventImageManager'
 const rows = [1,2,3].map(n => ({ id: `image-${n}`, eventId: 'event', path: `event/${n}.png`, position: n, url: `https://example.invalid/${n}.png`, owned: true }))
 function show(count=0, state={}) {
- mock.images.mockReturnValue({ data: rows.slice(0,count), isPending: false, isError: false, refetch: mock.refetch, ...state })
+ mock.images.mockReturnValue({ data: { images: rows.slice(0,count), revision: 7 }, isPending: false, isError: false, refetch: mock.refetch, ...state })
  return render(<QueryClientProvider client={new QueryClient()}><EventImageManager eventId="event" /></QueryClientProvider>)
 }
 beforeEach(() => { vi.resetAllMocks(); mock.upload.mockResolvedValue(undefined); mock.remove.mockResolvedValue(undefined) })
@@ -35,7 +35,7 @@ it('rejects unsupported files and multiple dropped flyers before upload', async 
 it('removes the event flyer and reports uncertain failure', async () => {
  const user=userEvent.setup();show(2);mock.remove.mockRejectedValue(new Error('Removal could not be confirmed.'))
  await user.click(screen.getByRole('button',{name:'Remove flyer'}))
- expect(mock.remove).toHaveBeenCalledWith('event',expect.any(Function))
+ expect(mock.remove).toHaveBeenCalledWith('event',expect.any(Function),7)
  expect(await screen.findByRole('alert')).toHaveTextContent('Removal could not be confirmed')
 })
 it('blocks mutation while loading and exposes read failure retry', async () => {
@@ -55,7 +55,7 @@ it('creates the draft before uploading and shows the selected preview while savi
  expect(await screen.findByAltText('Uploading flyer')).toBeInTheDocument()
  expect(mock.upload).not.toHaveBeenCalled()
  resolveDraft('saved-draft')
- await waitFor(()=>expect(mock.upload).toHaveBeenCalledWith('saved-draft',expect.any(File),expect.any(Function)))
+ await waitFor(()=>expect(mock.upload).toHaveBeenCalledWith('saved-draft',expect.any(File),expect.any(Function),0))
  await waitFor(()=>expect(settled).toHaveBeenCalledWith('saved-draft',null))
 })
 it('does not create a draft for unsupported files or upload after draft creation fails', async () => {
@@ -75,5 +75,5 @@ it('does not create a draft for unsupported files or upload after draft creation
 it('accepts a dropped image through the same validated upload path', async () => {
  const view=show()
  fireEvent.drop(view.container.querySelector('.event-image-dropzone')!, { dataTransfer: { files: [new File(['png'],'drop.png',{type:'image/png'})] } })
- await waitFor(()=>expect(mock.upload).toHaveBeenCalledWith('event',expect.any(File),expect.any(Function)))
+ await waitFor(()=>expect(mock.upload).toHaveBeenCalledWith('event',expect.any(File),expect.any(Function),7))
 })
