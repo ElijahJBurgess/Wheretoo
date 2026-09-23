@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useSession } from '../auth/SessionProvider'
 import { captureIdentityLifetime } from '../auth/identityLifetime'
-import { useEventImages } from './eventImages.queries'
+import { useEventCoverState } from './eventImages.queries'
 import { removeEventFlyer, replaceEventFlyer } from './eventFlyer.api'
 import { validateImageSelection } from './imageFiles'
+import { AiCoverChooser } from './AiCoverChooser'
 import './event-images.css'
 
 type ImageManagerProps = {
@@ -19,7 +20,7 @@ export function EventImageManager(props: ImageManagerProps) {
   return <ImageManager key={`${props.eventId}:${session.user?.id ?? 'none'}:${session.identityVersion}`} {...props} />
 }
 function ImageManager({ eventId, disabled = false, ensureEventId, onBusyChange, onUploadSettled }: ImageManagerProps) {
-  const images = useEventImages(eventId ? [eventId] : [])
+  const images = useEventCoverState(eventId)
   const session = useSession()
   const client = useQueryClient()
   const [previews, setPreviews] = useState<string[]>([])
@@ -29,7 +30,8 @@ function ImageManager({ eventId, disabled = false, ensureEventId, onBusyChange, 
   const lock = useRef(false)
   const mounted = useRef(false)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
-  const records = images.data ?? []
+  const records = images.data?.images ?? []
+  const revision = eventId ? images.data?.revision : 0
   const unavailable = disabled || busy || (!!eventId && (images.isPending || images.isError)) || session.status !== 'authenticated'
   async function run(action: (current: () => boolean) => Promise<void>) {
     if (lock.current || unavailable) return
@@ -64,7 +66,7 @@ function ImageManager({ eventId, disabled = false, ensureEventId, onBusyChange, 
         if (!savedId) savedId = await ensureEventId?.() ?? ''
         if (!current()) return
         if (!savedId) throw new Error('Your draft could not be saved. Try again.')
-        await replaceEventFlyer(savedId, files[0], current)
+        await replaceEventFlyer(savedId, files[0], current, revision ?? -1)
       } catch (e) {
         failure = e instanceof Error ? e.message : 'Your flyer could not be saved.'
         throw e
@@ -102,6 +104,7 @@ function ImageManager({ eventId, disabled = false, ensureEventId, onBusyChange, 
     {!!eventId && images.isError ? <p role="alert">Your flyer could not load. <button type="button" onClick={() => void images.refetch()}>Refresh flyer</button></p> : null}
     <p className="event-image-status" aria-live="polite">{busy ? 'Saving flyer…' : flyer ? 'Your flyer saves automatically.' : 'Upload now, or come back to it later.'}</p>
     {error ? <p role="alert">{error} {eventId ? <button type="button" disabled={busy} onClick={() => void images.refetch()}>Refresh flyer</button> : null}</p> : null}
-    {flyer ? <div className="event-image-actions"><button type="button" disabled={unavailable} onClick={() => void run(async current => removeEventFlyer(eventId, current))}>Remove flyer</button></div> : null}
+    {flyer ? <div className="event-image-actions"><button type="button" disabled={unavailable} onClick={() => void run(async current => removeEventFlyer(eventId, current, revision ?? -1))}>Remove flyer</button></div> : null}
+    <AiCoverChooser eventId={eventId} revision={revision} latestGenerationId={images.data?.latestGenerationId} disabled={unavailable} />
   </section>
 }

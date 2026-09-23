@@ -24,3 +24,16 @@
 .event-image-actions button:focus-visible { outline: 2px solid #bc9bff; outline-offset: 3px; }
 .event-image-actions button:disabled { cursor: default; opacity: .5; }
 @media (prefers-reduced-motion: reduce) { .event-image-dropzone { transition: none; } }
+.ai-cover-chooser { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--color-border); }
+.ai-cover-controls { display: grid; gap: .75rem; margin-block: .75rem; }
+.ai-cover-controls label { display: grid; gap: .35rem; font-size: .8rem; }
+.ai-cover-controls label span { opacity: .7; }
+.ai-cover-controls select, .ai-cover-controls textarea { width: 100%; min-height: 44px; box-sizing: border-box; padding: .6rem; border-radius: 8px; border: 1px solid var(--color-border); color: inherit; background: var(--color-surface, #18191d); font: inherit; }
+.ai-cover-controls textarea { resize: vertical; }
+.ai-cover-controls :focus-visible { outline: 2px solid #bc9bff; outline-offset: 3px; }
+.ai-cover-options { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .75rem; margin-block: 1rem; }
+.ai-cover-art { aspect-ratio: 4/5; display: grid; place-items: center; border-radius: 8px; overflow: hidden; background: #101216; border: 1px solid var(--color-border); color: #d4d4d4; }
+.ai-cover-art img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.ai-cover-art span { padding: .5rem; text-align: center; font-size: .8rem; }
+.ai-cover-option > .event-image-actions { margin-top: .5rem; }
+@media (max-width: 480px) { .ai-cover-options { grid-template-columns: 1fr; } .ai-cover-art { max-width: 240px; } }

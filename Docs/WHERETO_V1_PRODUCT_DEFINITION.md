@@ -127,7 +127,7 @@ Account creation must not block basic discovery or purchase/RSVP.
 - up to 3 ticket tiers
 - choose available map animation
 - upload event artwork
-- use AI flyer generation
+- use AI event cover generation
 - preview
 - publish
 - edit published event
@@ -172,18 +172,13 @@ Subscriptions are V1.5, not V1.
 - Invalid, cancelled, or refunded credentials must not be accepted.
 - Check-in state is persisted.
 
-## 14. AI Flyers
-AI flyer generation is a V1 differentiator.
+## 14. AI Event Cover
 
-Current product direction:
-- organizer may provide up to 3 reference images
-- system can generate multiple creative options (target: 3)
-- AI generates visual creative/artwork
-- Whereto controls exact event typography/text where practical
-- organizer can use generated artwork or upload their own
-- no full in-app design editor
+V1 generates three private 4:5 event-cover options from existing event data and minimal creative preference. The organizer explicitly selects one; it becomes the same canonical cover used by manual uploads across Wheretoo. Generation failure must preserve the current cover and event draft.
 
-Exact token/pricing mechanics are intentionally not hard-locked for V1. Subscription monetization is V1.5.
+Generate atmosphere, subject, mood and event identity. The interface supplies title, date, address and ticket information; there is no typography-composition pipeline. No reference-image uploads, design editor, exports or promotional formats in V1.
+
+AI Flyer Generator is a distinct V3/V4 product. It may later provide embedded event details, typography templates, sponsor logos and promotional exports. Token/subscription economies remain outside this V1 cover workflow.
 
 ## 15. Organizer Analytics
 Keep V1 analytics simple and based on real captured events. Examples:

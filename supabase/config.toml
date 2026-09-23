@@ -483,3 +483,7 @@ verify_jwt = false
 [functions.event-images]
 verify_jwt = false
 import_map = "../deno.json"
+
+[functions.event-cover-generation]
+verify_jwt = false
+import_map = "../deno.json"

@@ -1,0 +1,35 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions;
+select no_plan();
+select has_table('private','event_cover_generations','durable generation foundation exists');
+select has_table('private','event_cover_candidates','durable candidate slots exist');
+select is((select public from storage.buckets where id='event-cover-candidates'),false,'candidate bucket is private');
+insert into auth.users(id,email) values ('22150000-0000-4000-8000-000000000001','cover-owner@example.invalid'),('22150000-0000-4000-8000-000000000002','cover-other@example.invalid');
+insert into public.organizers(id,display_name) values ('22150000-0000-4000-8000-000000000001','Owner'),('22150000-0000-4000-8000-000000000002','Other');
+insert into public.events(id,organizer_id,title) values ('22150000-0000-4000-8000-000000000010','22150000-0000-4000-8000-000000000001','Saved cover event');
+select set_config('request.jwt.claim.sub','22150000-0000-4000-8000-000000000001',true);
+set local role authenticated;
+select is(public.get_event_cover_state('22150000-0000-4000-8000-000000000010')->>'revision','0','empty cover has durable revision zero');
+select public.create_event_cover_generation('22150000-0000-4000-8000-000000000010','22150000-0000-4000-8000-000000000020',0,'{}');
+select public.create_event_cover_generation('22150000-0000-4000-8000-000000000010','22150000-0000-4000-8000-000000000020',0,'{}');
+select is(jsonb_array_length(public.get_event_cover_generation('22150000-0000-4000-8000-000000000020')->'candidates'),3,'three candidates survive reload and request deduplication');
+select throws_ok($$select public.create_event_cover_generation('22150000-0000-4000-8000-000000000010','22150000-0000-4000-8000-000000000020',0,'{"different":true}')$$,'P0001','COVER_REQUEST_CONFLICT','same request cannot change payload');
+select set_config('request.jwt.claim.sub','22150000-0000-4000-8000-000000000002',true);
+select throws_ok($$select public.get_event_cover_generation('22150000-0000-4000-8000-000000000020')$$,'P0001','COVER_NOT_OWNED','foreign owner cannot reload generation');
+select throws_ok($$select public.create_event_cover_generation('22150000-0000-4000-8000-000000000010','22150000-0000-4000-8000-000000000021',0,'{}')$$,'P0001','COVER_NOT_OWNED','foreign owner cannot generate');
+reset role;
+select is((select count(*) from private.event_cover_generations where event_id='22150000-0000-4000-8000-000000000010'),1::bigint,'request deduplicates durably');
+select is((select count(*) from private.event_cover_candidates where generation_id='22150000-0000-4000-8000-000000000020'),3::bigint,'exactly three slots created');
+select ok(not has_function_privilege('anon','public.get_event_cover_generation(uuid)','execute'),'anonymous generation reads denied');
+select ok(not has_function_privilege('authenticated','public.reorder_event_images(uuid,uuid[])','execute'),'legacy reorder cannot bypass revision');
+select ok(not has_table_privilege('authenticated','private.event_cover_candidates','select'),'no direct candidate table access');
+-- Stage bytes metadata as Storage would; no attachment appears until commit.
+insert into storage.objects(id,bucket_id,name,metadata,user_metadata) values
+('22150000-0000-4000-8000-000000000030','event-images','22150000-0000-4000-8000-000000000010/22150000-0000-4000-8000-000000000030.png','{"size":100,"mimetype":"image/png"}','{"organizer_id":"22150000-0000-4000-8000-000000000001","cover_staged":true,"cover_revision":0}');
+select is((select count(*) from private.event_images where event_id='22150000-0000-4000-8000-000000000010'),0::bigint,'staging is not attachment');
+select public.server_commit_event_cover('22150000-0000-4000-8000-000000000010','22150000-0000-4000-8000-000000000001',0,'22150000-0000-4000-8000-000000000010/22150000-0000-4000-8000-000000000030.png');
+select public.server_remove_event_cover('22150000-0000-4000-8000-000000000010','22150000-0000-4000-8000-000000000001',1);
+select throws_ok($$select public.server_commit_event_cover('22150000-0000-4000-8000-000000000010','22150000-0000-4000-8000-000000000001',2,'22150000-0000-4000-8000-000000000010/22150000-0000-4000-8000-000000000030.png')$$,'P0001','COVER_STALE','retired object cannot be reattached while delayed cleanup may still delete it');
+select * from finish();
+rollback;

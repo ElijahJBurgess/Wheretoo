@@ -1,0 +1,13 @@
+// LOCAL TEST ENTRY ONLY. Copied into the ignored dedicated runtime, never deployed.
+import { createHandler } from "./handler.ts";
+import { ProviderError } from "./provider.ts";
+import fixtures from './fixtures.json' with {type:'json'};
+const failures = new Set<string>();
+Deno.serve(createHandler(async prompt => {
+  const slot = Number(prompt.match(/Treatment (\d):/)?.[1] ?? '1');
+  // Deterministic one-time failure for slot 2, using the event's unique title.
+  const identity = prompt.match(/"title":"([^"]+)/)?.[1] ?? '';
+  if(slot === 2 && !failures.has(identity)) { failures.add(identity); throw new ProviderError('PROVIDER_FAILED'); }
+  await new Promise(resolve=>setTimeout(resolve,100));
+  return Uint8Array.from(atob(fixtures[slot-1]),c=>c.charCodeAt(0));
+}));

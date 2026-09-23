@@ -94,7 +94,7 @@ The experience must distinguish valid, cancelled, refunded, used/checked-in, and
    - category
 3. Chooses free RSVP or paid.
 4. If paid, configures up to 3 ticket tiers.
-5. Adds/uploads artwork or uses AI flyer workflow.
+5. Adds/uploads artwork or uses AI event cover workflow.
 6. Chooses an available map animation/marker preset.
 7. Saves draft or previews.
 8. Publishes.
@@ -108,16 +108,15 @@ The experience must distinguish valid, cancelled, refunded, used/checked-in, and
 - paid-event organizer payment capability as required
 - moderation/safety checks
 
-## 7. Organizer: AI Flyer
-1. Organizer enters event creative context.
-2. May provide up to 3 reference images.
-3. Requests generation.
-4. System returns target of 3 creative options.
-5. Organizer selects one or uploads their own artwork.
-6. Whereto applies/controls exact event text treatment where designed.
-7. Selected artwork attaches to event.
+## 7. Organizer: AI Event Cover
+1. Organizer chooses Generate with AI alongside the existing cover upload.
+2. Save the current draft/revision and use existing event information.
+3. Organizer chooses a lightweight creative preference and optional short direction.
+4. Generate three private 4:5 cover options with independently persisted states.
+5. Organizer chooses one; only explicit successful selection replaces the canonical cover.
+6. Organizer may regenerate or replace the cover with an upload.
 
-Failure states must not destroy previously entered event data.
+Refresh/reopening restores the generation and candidates. Partial failures preserve successful options. Generation does not lock other event editing or overwrite a newer cover. AI Flyer Generator, reference images, typography editing and exports are deferred to V3/V4.
 
 ## 8. Organizer: Preview and Publish
 1. Organizer previews event experience/map representation.
