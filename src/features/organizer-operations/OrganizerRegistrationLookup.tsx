@@ -1,3 +1,5 @@
+import { EventExportControl } from './EventExportControl'
+import { useOwnedEvent } from '../events/event.queries'
 import { isOperationsAccessDenied } from './operations.errors'
 import { ReadState } from '../../components/ui/ReadState'
 import { useState } from 'react'
@@ -13,6 +15,8 @@ export function OrganizerRegistrationLookup() {
   return <RegistrationLookup key={`${ownerId}:${session.identityVersion ?? 0}:${eventId}`} ownerId={ownerId} identityVersion={session.identityVersion ?? 0} eventId={eventId} />
 }
 function RegistrationLookup({ ownerId, identityVersion, eventId }: { ownerId: string; identityVersion: number; eventId: string }) {
+  const event = useOwnedEvent(eventId, ownerId, { revalidateOnMount: true })
+  const verifiedEvent = event.isFetchedAfterMount && !event.isError ? event.data : undefined
   const [draft, setDraft] = useState('')
   const [search, setSearch] = useState('')
   const query = useFreeAdmissions(ownerId, eventId, identityVersion, search)
@@ -21,6 +25,7 @@ function RegistrationLookup({ ownerId, identityVersion, eventId }: { ownerId: st
   return <section className='operations-page'>
     <Link className='ops-back' to={`/organizer/events/${eventId}/dashboard`}>← Event dashboard</Link>
     <h1>Find a registration</h1><p className='ops-muted'>Find a free RSVP to view its tickets or resend access to the recorded email.</p>
+    {verifiedEvent?.admission_type === 'free' && <EventExportControl eventId={eventId} source='free' eventStatus={verifiedEvent.status} />}
     <form className='registration-search' onSubmit={event => { event.preventDefault(); setSearch(draft.trim()) }}>
       <label htmlFor='registration-search'>Name or email</label><input id='registration-search' maxLength={320} value={draft} onChange={event => setDraft(event.target.value)} />
       <button className='ops-button ops-button--primary' disabled={!draft.trim()}>Find registration</button>

@@ -1,3 +1,4 @@
+import { EventExportControl } from './EventExportControl'
 import { ReadState } from '../../components/ui/ReadState'
 import { Link, useParams } from 'react-router-dom'
 import { useSession } from '../auth/SessionProvider'
@@ -77,6 +78,7 @@ function DashboardContent({ ownerId, identityVersion, event, publicEventQuery }:
         <Link className='ops-button' to={`/organizer/events/${eventId}/changes`}>Changes and notices</Link>
         <Link className='ops-button' to={`/organizer/events/${eventId}/cancellation`}>Cancellation status</Link>
       </div>
+      <EventExportControl eventId={eventId} source={event.admission_type === 'free' ? 'free' : 'paid'} eventStatus={event.status} />
       {!admissionEligible && (
         <p className='ops-action-note'>
           Check-in is closed for this event. New admissions are unavailable based on the current

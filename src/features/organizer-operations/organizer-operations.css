@@ -870,3 +870,8 @@
   .ops-detail .ops-back { margin-bottom: 18px; }
   .ops-ticket-list { gap: 10px; }
 }
+
+.ops-export { margin-block: 1rem; min-width: 0; overflow-wrap: anywhere; }
+.ops-export__choices { display: flex; flex-wrap: wrap; gap: .5rem; margin-block: .5rem; }
+.ops-export .ops-note { margin-block: .5rem; }
+.ops-export [role="status"]:empty { display: none; }
