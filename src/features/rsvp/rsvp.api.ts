@@ -1,3 +1,4 @@
+import { freezeStorefrontAttribution } from '../storefront/storefront.attribution'
 import { z } from 'zod'
 import { publicEnv } from '../../lib/env'
 import { publicFreeEventSchema } from '../tickets/ticket.schemas'
@@ -18,13 +19,13 @@ export const freeEventSchema = z.strictObject({
 export type FreeRsvpEvent = z.infer<typeof freeEventSchema>
 type AttemptInput = Pick<RsvpAttempt, 'requestId' | 'collectionBearer' | 'submission'>
 export function createRsvpApi(fetcher: typeof fetch = (...args) => fetch(...args)) {
-  async function post(path: string, body: unknown): Promise<unknown> {
+  async function post(path: string, body: unknown, attribution:Record<string,string>={}): Promise<unknown> {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 15000)
     try {
       const response = await fetcher(publicEnv.supabaseUrl + path, {
         method: 'POST',
-        headers: { apikey: publicEnv.supabasePublishableKey, 'content-type': 'application/json' },
+        headers: { ...attribution, apikey: publicEnv.supabasePublishableKey, 'content-type': 'application/json' },
         body: JSON.stringify(body),
         credentials: 'omit',
         cache: 'no-store',
@@ -52,7 +53,7 @@ export function createRsvpApi(fetcher: typeof fetch = (...args) => fetch(...args
           ...attempt.submission,
           requestId: attempt.requestId,
           collectionBearer: attempt.collectionBearer,
-        }),
+        },freezeStorefrontAttribution(attempt.submission.eventId,attempt.requestId)),
       )
     },
     async resolve(

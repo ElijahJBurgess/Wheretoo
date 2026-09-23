@@ -2,7 +2,7 @@ import { getAppBaseUrl } from "./env.ts";
 import { jsonResponse } from "./http.ts";
 
 const ALLOWED_HEADERS =
-  "authorization, content-type, x-client-info, apikey, x-whereto-confirmation-bearer";
+  "authorization, content-type, x-client-info, apikey, x-whereto-confirmation-bearer, x-wheretoo-storefront";
 const ALLOWED_METHODS = "POST, OPTIONS";
 
 export function getCorsHeaders(

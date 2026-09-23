@@ -47,6 +47,7 @@ export default defineConfig(({ command, mode }) => {
       exclude: [
         ...configDefaults.exclude,
         '.worktrees/**',
+        '.supabase/**',
         '.superpowers/**',
         'supabase/functions/**',
         'tests/integration/**',

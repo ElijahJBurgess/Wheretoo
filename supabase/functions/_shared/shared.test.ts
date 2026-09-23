@@ -304,7 +304,7 @@ Deno.test("CORS allows the Checkout confirmation bearer only for the exact appli
 
   assertEquals(
     allowed.get("access-control-allow-headers"),
-    "authorization, content-type, x-client-info, apikey, x-whereto-confirmation-bearer",
+    "authorization, content-type, x-client-info, apikey, x-whereto-confirmation-bearer, x-wheretoo-storefront",
   );
   assertEquals(denied.has("access-control-allow-headers"), false);
 });

@@ -87,3 +87,10 @@ Deno.test('throttling preserves identity and is not full', async () => {
   assertEquals(response.headers.get('retry-after'), '30')
   assertEquals(calls.length, 0)
 })
+Deno.test('optional measurement failure preserves confirmed RSVP response', async () => {
+ const { dependencies }=setup()
+ const handler=createFreeRsvpHandler('create',{...dependencies,associateStorefront:async()=>{throw new Error('offline')}})
+ const response=await handler(request())
+ assertEquals(response.status,200)
+ assertEquals(await response.json(),{kind:'confirmed',registrationId:id,eventId:id,quantity:3})
+})

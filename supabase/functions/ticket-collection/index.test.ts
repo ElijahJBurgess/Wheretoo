@@ -409,7 +409,7 @@ Deno.test("exact origin, POST-only body and bounded streaming request apply no-s
       );
       assertEquals(
         response.headers.get("access-control-allow-headers"),
-        "authorization, content-type, x-client-info, apikey, x-whereto-confirmation-bearer",
+        "authorization, content-type, x-client-info, apikey, x-whereto-confirmation-bearer, x-wheretoo-storefront",
       );
       assertEquals(response.headers.get("vary"), "Origin");
     }

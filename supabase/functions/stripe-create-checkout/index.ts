@@ -1,3 +1,4 @@
+import { associateStorefront } from '../_shared/storefrontAttribution.ts';
 import type Stripe from "stripe";
 import { deriveConnectStatus } from "../_shared/connectState.ts";
 import { getCorsHeaders, handleCorsPreflight } from "../_shared/cors.ts";
@@ -133,6 +134,7 @@ export interface StripeCreateCheckoutDependencies {
   releaseReservation(orderId: string, reason: string): Promise<void>;
   nowEpochSeconds(): number;
   operationalSink?: OperationalEventSink;
+  associateStorefront?(requestId: string, eventId: string, request: Request): Promise<void>;
 }
 
 type FailureReleaseOrigin =
@@ -875,6 +877,7 @@ function defaultDependencies(): StripeCreateCheckoutDependencies {
     rateLimit: defaultAnonymousRateLimit,
     refreshConnect: defaultRefreshConnect,
     reserveCheckout: defaultReserveCheckout,
+    associateStorefront: (id, eventId, request) => associateStorefront("paid", id, eventId, request),
     createSession: (params, options) =>
       stripe.checkout.sessions.create(params, options),
     retrieveSession: (sessionId, params) =>
@@ -1088,6 +1091,8 @@ export function createStripeCreateCheckoutHandler(
       ) {
         throw new CheckoutHttpError(500, "INTERNAL_ERROR");
       }
+
+      try { await dependencies.associateStorefront?.(input.clientRequestId, input.eventId, request); } catch { /* Measurement must not reject checkout. */ }
 
       const expected: ExpectedSession = {
         reservation,

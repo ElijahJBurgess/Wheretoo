@@ -110,7 +110,7 @@ describe('organizer API', () => {
       website_url: null,
       base_city: null,
       country_code: 'US',
-      onboarding_completed_at: expect.any(String),
+      onboarding_completed_at: null,
     })
     expect(update).not.toHaveBeenCalled()
     expect(mutationSelect).toHaveBeenCalledWith('id,display_name,organizer_type,bio,website_url,base_city,country_code,onboarding_completed_at,created_at,updated_at')

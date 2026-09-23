@@ -33,7 +33,7 @@ export function OrganizerShell() {
   const creationOutcome = query.get('created') === '1' && pathname === `/organizer/events/${eventId}`
   const eventWorkflow = pathname.startsWith('/organizer/events/') && !match
   const outlet = eventWorkflow ? <div className="organizer-event-workflow"><Outlet /></div> : <Outlet />
-  if (pathname === '/organizer/setup' || pathname === '/organizer/events/new' || creationEdit || creationDetail || creationOutcome) return outlet
+  if (pathname === '/organizer/settings/storefront/preview' || pathname.startsWith('/organizer/setup') || pathname === '/organizer/events/new' || creationEdit || creationDetail || creationOutcome) return outlet
   if (pathname === '/organizer/events' || pathname.startsWith('/organizer/settings') || match) return <OperationsLayout eventId={match?.[1]} admissionType={admissionType === 'paid' || admissionType === 'free' ? admissionType : null} signOutPending={controller.pending} onSignOut={() => void handleSignOut()} staffRole={staffRoleQuery.data ?? null}><FormErrorSummary errors={signOutError ? [signOutError] : []} title="Sign out failed" /><Outlet /></OperationsLayout>
   return (
     <OrganizerLayout signOutPending={controller.pending} onSignOut={() => void handleSignOut()} staffRole={staffRoleQuery.data ?? null}>

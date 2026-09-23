@@ -1,3 +1,28 @@
 {
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+  "rewrites": [
+    {
+      "source": "/:handle([A-Za-z0-9][A-Za-z0-9-]{1,28}[A-Za-z0-9])",
+      "destination": "/api/storefront?handle=:handle"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ],
+  "functions": {
+    "api/storefront.ts": {
+      "includeFiles": "dist/index.html"
+    }
+  },
+  "headers": [
+    {
+      "source": "/organizer/:path*",
+      "headers": [
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow"
+        }
+      ]
+    }
+  ]
 }

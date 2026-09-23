@@ -67,6 +67,7 @@ function show(seedMetrics?: typeof data) {
   )
 }
 beforeEach(() => {
+  vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-09-01T12:00:00Z'))
   getEventMetrics.mockReset()
   getFreeRegistrationMetrics.mockReset()
   ownedRefetch.mockReset()

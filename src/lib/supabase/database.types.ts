@@ -630,9 +630,19 @@ export type Database = {
           country_code: string
           created_at: string
           display_name: string
+          handle: string | null
+          handle_confirmed_at: string | null
           id: string
           onboarding_completed_at: string | null
           organizer_type: string | null
+          storefront_accent: string | null
+          storefront_cover_asset_id: string | null
+          storefront_featured_event_id: string | null
+          storefront_links: Json
+          storefront_logo_asset_id: string | null
+          storefront_merch: Json
+          storefront_status: string
+          storefront_store_url: string | null
           updated_at: string
           website_url: string | null
         }
@@ -642,9 +652,19 @@ export type Database = {
           country_code?: string
           created_at?: string
           display_name: string
+          handle?: string | null
+          handle_confirmed_at?: string | null
           id: string
           onboarding_completed_at?: string | null
           organizer_type?: string | null
+          storefront_accent?: string | null
+          storefront_cover_asset_id?: string | null
+          storefront_featured_event_id?: string | null
+          storefront_links?: Json
+          storefront_logo_asset_id?: string | null
+          storefront_merch?: Json
+          storefront_status?: string
+          storefront_store_url?: string | null
           updated_at?: string
           website_url?: string | null
         }
@@ -654,13 +674,31 @@ export type Database = {
           country_code?: string
           created_at?: string
           display_name?: string
+          handle?: string | null
+          handle_confirmed_at?: string | null
           id?: string
           onboarding_completed_at?: string | null
           organizer_type?: string | null
+          storefront_accent?: string | null
+          storefront_cover_asset_id?: string | null
+          storefront_featured_event_id?: string | null
+          storefront_links?: Json
+          storefront_logo_asset_id?: string | null
+          storefront_merch?: Json
+          storefront_status?: string
+          storefront_store_url?: string | null
           updated_at?: string
           website_url?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "organizers_storefront_featured_event_id_fkey"
+            columns: ["storefront_featured_event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       platform_fee_rules: {
         Row: {
@@ -1008,8 +1046,6 @@ export type Database = {
       server_get_event_cover_candidate: { Args: { p_generation_id: string; p_slot: number; p_organizer_id: string; p_expected_revision: number }; Returns: Json }
       server_commit_event_cover: { Args: { p_event_id: string; p_organizer_id: string; p_expected_revision: number; p_path: string; p_generation_id?: string | null; p_slot?: number | null }; Returns: Json }
       server_remove_event_cover: { Args: { p_event_id: string; p_organizer_id: string; p_expected_revision: number }; Returns: Json }
-      list_event_images: { Args: { p_event_ids: string[] }; Returns: Json }
-      reorder_event_images: { Args: { p_event_id: string; p_image_ids: string[] }; Returns: undefined }
 
       accept_current_event_policies: {
         Args: { p_event_id: string }
@@ -1201,6 +1237,10 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      confirm_owned_storefront_handle: {
+        Args: { p_handle: string; p_logo_id: string }
+        Returns: Json
+      }
       get_current_event_review_request: {
         Args: { p_event_id: string }
         Returns: {
@@ -1316,6 +1356,13 @@ export type Database = {
           weapons_present: boolean
         }[]
       }
+      get_owned_storefront_editor: { Args: never; Returns: Json }
+      get_owned_storefront_identity: { Args: never; Returns: Json }
+      get_owned_storefront_insights: { Args: never; Returns: Json }
+      get_owned_storefront_preview: {
+        Args: { p_cursor?: Json; p_limit?: number }
+        Returns: Json
+      }
       get_public_event: { Args: { p_event_id: string }; Returns: Json[] }
       get_public_event_ticketing: {
         Args: { p_event_id: string }
@@ -1350,6 +1397,10 @@ export type Database = {
           venue_label: string
         }[]
       }
+      get_public_organizer_storefront: {
+        Args: { p_cursor?: Json; p_handle: string; p_limit?: number }
+        Returns: Json
+      }
       get_required_event_policies: {
         Args: never
         Returns: {
@@ -1374,6 +1425,7 @@ export type Database = {
         }
         Returns: Json
       }
+      list_event_images: { Args: { p_event_ids: string[] }; Returns: Json }
       list_moderation_queue: {
         Args: { p_limit: number }
         Returns: {
@@ -1566,6 +1618,10 @@ export type Database = {
       redeem_owned_ticket: {
         Args: { p_event_id: string; p_ticket_id: string }
         Returns: Json
+      }
+      reorder_event_images: {
+        Args: { p_event_id: string; p_image_ids: string[] }
+        Returns: undefined
       }
       request_event_review: {
         Args: { p_event_id: string; p_organizer_note: string }
@@ -1781,9 +1837,19 @@ export type Database = {
           country_code: string
           created_at: string
           display_name: string
+          handle: string | null
+          handle_confirmed_at: string | null
           id: string
           onboarding_completed_at: string | null
           organizer_type: string | null
+          storefront_accent: string | null
+          storefront_cover_asset_id: string | null
+          storefront_featured_event_id: string | null
+          storefront_links: Json
+          storefront_logo_asset_id: string | null
+          storefront_merch: Json
+          storefront_status: string
+          storefront_store_url: string | null
           updated_at: string
           website_url: string | null
         }
@@ -1802,9 +1868,19 @@ export type Database = {
           country_code: string
           created_at: string
           display_name: string
+          handle: string | null
+          handle_confirmed_at: string | null
           id: string
           onboarding_completed_at: string | null
           organizer_type: string | null
+          storefront_accent: string | null
+          storefront_cover_asset_id: string | null
+          storefront_featured_event_id: string | null
+          storefront_links: Json
+          storefront_logo_asset_id: string | null
+          storefront_merch: Json
+          storefront_status: string
+          storefront_store_url: string | null
           updated_at: string
           website_url: string | null
         }
@@ -1826,6 +1902,18 @@ export type Database = {
           display_name: string
           updated_at: string
         }[]
+      }
+      save_owned_storefront: {
+        Args: { p_expected_updated_at: string; p_input: Json }
+        Returns: Json
+      }
+      save_owned_storefront_merch: {
+        Args: {
+          p_expected_updated_at?: string
+          p_items: Json
+          p_store_url?: string
+        }
+        Returns: Json
       }
       save_ticket_tiers: {
         Args: { p_event_id: string; p_tiers: Json }
@@ -1984,6 +2072,15 @@ export type Database = {
           ticket_status: string
         }[]
       }
+      server_associate_storefront_transaction: {
+        Args: {
+          p_event_id: string
+          p_kind: string
+          p_request_id: string
+          p_token_hash?: string
+        }
+        Returns: undefined
+      }
       server_attach_checkout_session: {
         Args: { p_expires_at: string; p_order_id: string; p_session_id: string }
         Returns: string
@@ -1995,6 +2092,10 @@ export type Database = {
       server_begin_ticket_email_dispatch: {
         Args: { p_attempt_id: string; p_lease_id: string }
         Returns: Json
+      }
+      server_can_manage_event_images: {
+        Args: { p_event_id: string; p_organizer_id: string }
+        Returns: boolean
       }
       server_cancel_checkout_reservation: {
         Args: { p_order_id: string; p_reason: string }
@@ -2086,6 +2187,10 @@ export type Database = {
         }
         Returns: string
       }
+      server_find_organizer_media: {
+        Args: { p_owner: string; p_path: string }
+        Returns: string
+      }
       server_finish_ticket_email_dispatch: {
         Args: {
           p_attempt_id: string
@@ -2156,6 +2261,10 @@ export type Database = {
           stripe_account_id: string
         }[]
       }
+      server_get_organizer_media: {
+        Args: { p_id: string; p_owner?: string }
+        Returns: string
+      }
       server_get_organizer_refund_context: {
         Args: { p_event_id: string; p_order_id: string; p_organizer_id: string }
         Returns: Json
@@ -2163,6 +2272,10 @@ export type Database = {
       server_get_public_discovery_events: {
         Args: { p_query: Json }
         Returns: Json
+      }
+      server_get_public_event_image: {
+        Args: { p_image_id: string }
+        Returns: string
       }
       server_get_unattached_checkout_review_snapshot: {
         Args: {
@@ -2399,6 +2512,10 @@ export type Database = {
           ticket_count: number
         }[]
       }
+      server_record_storefront_telemetry: {
+        Args: { p_identity_hash: string; p_input: Json }
+        Returns: boolean
+      }
       server_record_webhook_receipt: {
         Args: {
           p_api_version: string
@@ -2504,6 +2621,10 @@ export type Database = {
         }
         Returns: boolean
       }
+      server_set_contextual_moderation_testing_override: {
+        Args: { p_enabled: boolean; p_reason: string }
+        Returns: undefined
+      }
       server_stop_ticket_email: {
         Args: { p_attempt_id: string; p_lease_id: string; p_reason: string }
         Returns: boolean
@@ -2520,6 +2641,18 @@ export type Database = {
       server_ticket_email_confirmation_status: {
         Args: { p_access_hash: string; p_ip_hash: string; p_kind: string }
         Returns: Json
+      }
+      server_unused_organizer_media: {
+        Args: { p_owner: string }
+        Returns: Json
+      }
+      set_owned_storefront_published: {
+        Args: { p_expected_updated_at: string; p_published: boolean }
+        Returns: Json
+      }
+      storefront_handle_available: {
+        Args: { p_handle: string }
+        Returns: boolean
       }
       submit_owned_event_notice: {
         Args: {

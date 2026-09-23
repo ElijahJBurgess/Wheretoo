@@ -22,7 +22,7 @@ function renderPage() {
       <Routes>
         <Route path="/organizer/setup" element={<OrganizerSetupPage />} />
         <Route path="/organizer/events" element={<p>events destination</p>} />
-        <Route path="/organizer/settings/payments" element={<p>payouts destination</p>} />
+        <Route path="/organizer/setup/identity" element={<p>identity destination</p>} />
       </Routes>
     </MemoryRouter>,
   )
@@ -136,7 +136,7 @@ describe('OrganizerSetupPage', () => {
     expect(screen.queryByText('events destination')).not.toBeInTheDocument()
 
     resolveSave({ id: 'user-1' })
-    expect(await screen.findByText('payouts destination')).toBeInTheDocument()
+    expect(await screen.findByText('identity destination')).toBeInTheDocument()
   })
 
   it('sends a returning completed organizer to events without repeating setup', async () => {
@@ -157,12 +157,12 @@ describe('OrganizerSetupPage', () => {
     view.rerender(<MemoryRouter initialEntries={['/organizer/setup']}><Routes>
       <Route path="/organizer/setup" element={<OrganizerSetupPage />} />
       <Route path="/organizer/events" element={<p>events destination</p>} />
-      <Route path="/organizer/settings/payments" element={<p>payouts destination</p>} />
+      <Route path="/organizer/setup/identity" element={<p>identity destination</p>} />
     </Routes></MemoryRouter>)
     expect(await screen.findByText('events destination')).toBeInTheDocument()
     await act(async () => finishSave({ id: 'user-1' }))
     expect(screen.getByText('events destination')).toBeInTheDocument()
-    expect(screen.queryByText('payouts destination')).not.toBeInTheDocument()
+    expect(screen.queryByText('identity destination')).not.toBeInTheDocument()
   })
 
   it('resets local form state when the same organizer id starts a new identity lifetime', async () => {

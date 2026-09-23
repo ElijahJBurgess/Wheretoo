@@ -1,3 +1,4 @@
+import { associateStorefront } from './storefrontAttribution.ts'
 import { getCorsHeaders } from './cors.ts'
 import { getServiceClient } from './database.ts'
 import { getAppBaseUrl } from './env.ts'
@@ -14,6 +15,7 @@ import {
 } from './freeRegistration.ts'
 type Operation = 'create' | 'status'
 export interface FreeRsvpDependencies {
+  associateStorefront?(requestId: string, eventId: string, request: Request): Promise<void>
   appOrigin: string
   getSecret(): Uint8Array
   rateLimit(
@@ -126,6 +128,9 @@ export function createFreeRsvpHandler(operation: Operation, dependencies: FreeRs
       if (operation === 'create' && result.kind === 'not_found') {
         throw new Error('Incoherent creation result')
       }
+      if (operation === 'create' && result.kind === 'confirmed') {
+        try { await dependencies.associateStorefront?.(requestId, result.eventId, request) } catch { /* Measurement is optional. */ }
+      }
       return reply(result)
     } catch {
       // A dependency can fail after commit. Never convert this to a definite rejection.
@@ -136,6 +141,7 @@ export function createFreeRsvpHandler(operation: Operation, dependencies: FreeRs
 export function defaultFreeRsvpHandler(operation: Operation) {
   return createFreeRsvpHandler(operation, {
     appOrigin: getAppBaseUrl(),
+    associateStorefront: (id, eventId, request) => associateStorefront('free', id, eventId, request),
     getSecret: getTicketCredentialSecret,
     rpc: async (name, args) => {
       const { data, error } = await getServiceClient().rpc(name, args)
