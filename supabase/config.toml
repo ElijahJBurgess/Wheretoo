@@ -509,3 +509,19 @@ import_map = "../deno.json"
 [functions.organizer-message-worker]
 verify_jwt = false
 import_map = "../deno.json"
+
+[functions.waitlist-join]
+verify_jwt = false
+import_map = "../deno.json"
+
+[functions.waitlist-leave]
+verify_jwt = false
+import_map = "../deno.json"
+
+[functions.waitlist-observer]
+verify_jwt = false
+import_map = "../deno.json"
+
+[functions.waitlist-email-worker]
+verify_jwt = false
+import_map = "../deno.json"

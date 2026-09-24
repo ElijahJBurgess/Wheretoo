@@ -12,6 +12,7 @@ export const reservedHandles = [
   'refund-details',
   'rsvp',
   'ticket-access',
+  'waitlist',
   'tickets',
   'assets',
   'api',

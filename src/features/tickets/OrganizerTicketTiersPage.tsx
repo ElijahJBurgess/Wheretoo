@@ -334,6 +334,7 @@ export function OrganizerTicketTiersPage() {
           <p className="organizer-eyebrow">Paid event setup</p>
           <h1 id="ticket-tiers-title">Ticket tiers</h1>
           <p>Set the tickets guests can buy. Prices are shown in USD.</p>
+          <Link to={`/organizer/events/${eventId}/waitlist`}>Waitlist</Link>
         </div>
         <p className={`event-save-state${dirty ? ' event-save-state--dirty' : ''}`} aria-live="polite">{dirty ? 'Unsaved' : 'Saved'}</p>
       </header>

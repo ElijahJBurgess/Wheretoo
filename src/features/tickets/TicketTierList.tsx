@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { BuyerIcon } from '../buyer-journey/BuyerPrimitives'
 import type { PublicTicketTierTuple } from './ticket.types'
 
@@ -13,6 +14,7 @@ function formatTicketPrice(unitAmountMinor: number): string {
 }
 
 type TicketTierListProps = {
+  renderWaitlist?: (tierId: string) => ReactNode
   availabilityKnown?: boolean
   quantities: Readonly<Record<string, number>>
   maxTotal: number
@@ -20,7 +22,7 @@ type TicketTierListProps = {
   onQuantityChange: (tierId: string, quantity: number) => void
 }
 
-export function TicketTierList({ quantities, maxTotal, tiers, onQuantityChange, availabilityKnown = true }: TicketTierListProps) {
+export function TicketTierList({ quantities, maxTotal, tiers, onQuantityChange, availabilityKnown = true, renderWaitlist }: TicketTierListProps) {
   const total = Object.values(quantities).reduce((sum, quantity) => sum + quantity, 0)
   const hasInvalidQuantity = tiers.some((tier) => {
     const quantity = quantities[tier.id] ?? 0
@@ -72,6 +74,7 @@ export function TicketTierList({ quantities, maxTotal, tiers, onQuantityChange, 
                   value={quantity}
                 />
               </span>
+              {availabilityKnown && !available && renderWaitlist ? <div className="public-ticket-tier__waitlist">{renderWaitlist(tier.id)}</div> : null}
             </div>
           )
         })}

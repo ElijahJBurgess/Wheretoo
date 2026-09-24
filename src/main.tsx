@@ -1,12 +1,14 @@
 import '@fontsource-variable/space-grotesk'
 import '@fontsource-variable/manrope'
 import './styles/global.css'
+import { captureWaitlistLeave } from './features/waitlist/waitlist.session'
 import { captureTicketAccess } from './features/ticket-delivery/delivery.session'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { startApplication } from './app/startApplication'
 import { StartupErrorBoundary } from './app/StartupErrorBoundary'
 
+captureWaitlistLeave()
 captureTicketAccess()
 
 const isPreviewPath = window.location.pathname === '/preview' || window.location.pathname.startsWith('/preview/')

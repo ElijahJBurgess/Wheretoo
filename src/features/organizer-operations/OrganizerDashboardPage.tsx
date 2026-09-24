@@ -75,6 +75,7 @@ function DashboardContent({ ownerId, identityVersion, event, publicEventQuery }:
           <Link className='ops-button' to={`/events/${eventId}`}>View event</Link>
         )}
         {event.status !== 'cancelled' ? <Link className='ops-button' to={`/organizer/events/${eventId}/edit`}>Edit event</Link> : null}
+        {event.admission_type === 'paid' && <Link className='ops-button' to={`/organizer/events/${eventId}/waitlist`}>Waitlist</Link>}
         <Link className='ops-button' to={`/organizer/events/${eventId}/changes`}>Changes and notices</Link>
         <Link className='ops-button' to={`/organizer/events/${eventId}/cancellation`}>Cancellation status</Link>
       </div>
