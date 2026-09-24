@@ -875,3 +875,7 @@
 .ops-export__choices { display: flex; flex-wrap: wrap; gap: .5rem; margin-block: .5rem; }
 .ops-export .ops-note { margin-block: .5rem; }
 .ops-export [role="status"]:empty { display: none; }
+
+.event-list__actions { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem; padding: 0 1rem 1rem; }
+.event-list__actions span { font-size: .875rem; }
+.events-index__duplicate-status { flex-basis: 100%; margin-block: .5rem; }

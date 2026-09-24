@@ -1032,6 +1032,30 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      server_commit_event_cover_without_duplicate_guard: {
+        Args: {
+          p_event_id: string
+          p_expected_revision: number
+          p_generation_id?: string
+          p_organizer_id: string
+          p_path: string
+          p_slot?: number
+        }
+        Returns: Json
+      }
+      get_owned_event_duplicate_context: {
+        Args: { p_source_event_id: string }
+        Returns: Json
+      }
+      duplicate_owned_event: {
+        Args: {
+          p_expected_fingerprint: string
+          p_new_event_id: string
+          p_source_event_id: string
+          p_staged_path?: string
+        }
+        Returns: string
+      }
       get_event_cover_state: { Args: { p_event_id: string }; Returns: Json }
       get_event_cover_generation: { Args: { p_generation_id: string }; Returns: Json }
       server_recover_cover_generation: { Args: { p_generation_id: string; p_organizer_id: string }; Returns: undefined }

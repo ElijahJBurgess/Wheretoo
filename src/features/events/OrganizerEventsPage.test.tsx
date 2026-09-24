@@ -1,11 +1,12 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EventRow } from './event.types'
 
-const { refetch, useOwnedEvents, useSession, useEventImages } = vi.hoisted(() => ({
+const { refetch, useOwnedEvents, useSession, useEventImages, useDuplicateEvent } = vi.hoisted(() => ({
   refetch: vi.fn(),
+  useDuplicateEvent: vi.fn(),
   useEventImages: vi.fn(),
   useOwnedEvents: vi.fn(),
   useSession: vi.fn(),
@@ -13,9 +14,10 @@ const { refetch, useOwnedEvents, useSession, useEventImages } = vi.hoisted(() =>
 
 vi.mock('../auth/SessionProvider', () => ({ useSession }))
 vi.mock('../event-images/eventImages.queries', () => ({ useEventImages }))
-vi.mock('./event.queries', () => ({ useOwnedEvents }))
+vi.mock('./event.queries', () => ({ useOwnedEvents, useDuplicateEvent }))
 vi.mock('../organizer-operations/operations.queries', () => ({ useEventMetrics: () => ({ isPending: false, isError: true }) }))
 
+import { DuplicateEventError } from './duplicateEvent.api'
 import { OrganizerEventsPage } from './OrganizerEventsPage'
 
 const baseEvent: EventRow = {
@@ -28,8 +30,8 @@ const baseEvent: EventRow = {
   created_at: '2026-08-24T12:00:00.000Z', updated_at: '2026-08-24T13:00:00.000Z',
 }
 
-function renderPage() {
-  return render(
+function pageTree() {
+  return (
     <MemoryRouter initialEntries={['/organizer/events']}>
       <Routes>
         <Route path="/organizer/events" element={<OrganizerEventsPage />} />
@@ -37,13 +39,15 @@ function renderPage() {
         <Route path="/organizer/events/:eventId/edit" element={<p>edit destination</p>} />
         <Route path="/organizer/events/:eventId" element={<p>detail destination</p>} />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   )
 }
+function renderPage() { return render(pageTree()) }
 
 describe('OrganizerEventsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    useDuplicateEvent.mockReturnValue({ mutateAsync: vi.fn() })
     useEventImages.mockReturnValue({ data: [] })
     useSession.mockReturnValue({ status: 'authenticated', session: {}, user: { id: 'organizer-1' } })
     useOwnedEvents.mockReturnValue({ data: undefined, isPending: true, isError: false, refetch })
@@ -182,4 +186,55 @@ it('does not batch cancelled artwork into authorized active flyer reads', () => 
   useEventImages.mockReturnValue({ data: [] })
   renderPage()
   expect(useEventImages).toHaveBeenCalledWith(['event-1'])
+})
+
+
+it('duplicates outside the row link and synchronously fences double activation', async () => {
+  let finish!: (v: { eventId: string; isCurrent: () => boolean }) => void
+  const mutateAsync = vi.fn(() => new Promise<{ eventId: string; isCurrent: () => boolean }>(resolve => { finish = resolve }))
+  useDuplicateEvent.mockReturnValue({ mutateAsync })
+  useOwnedEvents.mockReturnValue({ data: [baseEvent], isPending: false, isError: false, refetch })
+  renderPage()
+  const action = screen.getByRole('button', { name: 'Duplicate event: Night Market' })
+  expect(action.closest('a')).toBeNull()
+  await userEvent.dblClick(action)
+  expect(mutateAsync).toHaveBeenCalledTimes(1)
+  expect(action).toBeDisabled()
+  finish({ eventId: 'new-event', isCurrent: () => true })
+  expect(await screen.findByText('edit destination')).toBeInTheDocument()
+})
+
+it('reveals drafts after checking an unknown result from a filtered list', async () => {
+  useSession.mockReturnValue({ status: 'authenticated', user: { id: 'organizer-1' }, identityVersion: 1 })
+  useEventImages.mockReturnValue({ data: [] })
+  useDuplicateEvent.mockReturnValue({ mutateAsync: vi.fn().mockRejectedValue(new DuplicateEventError('DUPLICATE_OUTCOME_UNKNOWN')) })
+  refetch.mockResolvedValue({ isError: false })
+  useOwnedEvents.mockReturnValue({ data: [{ ...baseEvent, status: 'cancelled' }, { ...baseEvent, id: 'copy', title: 'Possible new draft' }], isPending: false, isError: false, refetch })
+  renderPage()
+  await userEvent.click(screen.getByRole('button', { name: 'Cancelled' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Duplicate event: Night Market' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('result could not be confirmed')
+  expect(screen.queryByRole('link', { name: /Possible new draft/ })).not.toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: 'Check My Events' }))
+  expect(await screen.findByRole('link', { name: /Possible new draft/ })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true')
+})
+
+it.each(['account round trip', 'logout'])('discards late success after %s', async (change) => {
+  let finish!: (result: { eventId: string; isCurrent: () => boolean }) => void
+  useSession.mockReturnValue({ status: 'authenticated', user: { id: 'organizer-1' }, identityVersion: 1 })
+  useEventImages.mockReturnValue({ data: [] })
+  useOwnedEvents.mockReturnValue({ data: [baseEvent], isPending: false, isError: false, refetch })
+  useDuplicateEvent.mockReturnValue({ mutateAsync: () => new Promise(resolve => { finish = resolve }) })
+  const view = renderPage()
+  await userEvent.click(screen.getByRole('button', { name: 'Duplicate event: Night Market' }))
+  useSession.mockReturnValue(change === 'logout' ? { status: 'anonymous', identityVersion: 2 } : { status: 'authenticated', user: { id: 'organizer-2' }, identityVersion: 2 })
+  view.rerender(pageTree())
+  if (change === 'account round trip') {
+    useSession.mockReturnValue({ status: 'authenticated', user: { id: 'organizer-1' }, identityVersion: 3 })
+    view.rerender(pageTree())
+  }
+  await act(async () => { finish({ eventId: 'stale-copy', isCurrent: () => true }) })
+  expect(screen.queryByText('edit destination')).not.toBeInTheDocument()
+  expect(screen.queryByText('Duplicating event…')).not.toBeInTheDocument()
 })

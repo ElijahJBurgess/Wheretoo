@@ -495,3 +495,8 @@ import_map = "../deno.json"
 [functions.event-cover-generation]
 verify_jwt = false
 import_map = "../deno.json"
+
+# Handler validates organizer JWT; source ownership remains enforced by auth.uid() RPCs.
+[functions.duplicate-event]
+verify_jwt = false
+import_map = "../deno.json"

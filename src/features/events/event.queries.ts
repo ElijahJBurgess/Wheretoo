@@ -1,3 +1,4 @@
+import { duplicateEvent } from './duplicateEvent.api'
 import { captureIdentityLifetime } from '../auth/identityLifetime'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { moderationKeys } from '../moderation/moderation.queries'
@@ -121,6 +122,24 @@ export function usePublishEvent(organizerId: string) {
       await Promise.all(
         contracts.map((queryKey) => queryClient.invalidateQueries({ queryKey, exact: true })),
       )
+    },
+  })
+}
+
+export function useDuplicateEvent(organizerId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationKey: ['events', 'duplicate', organizerId],
+    gcTime: 0,
+    retry: false,
+    mutationFn: async (sourceEventId: string) => {
+      const isCurrent = captureIdentityLifetime(queryClient, organizerId)
+      const result = await duplicateEvent(sourceEventId, isCurrent)
+      if (isCurrent()) {
+        // Creation already succeeded; a list refresh failure is not mutation failure.
+        void queryClient.invalidateQueries({ queryKey: eventKeys.ownedList(organizerId), exact: true }).catch(() => undefined)
+      }
+      return { ...result, isCurrent }
     },
   })
 }
