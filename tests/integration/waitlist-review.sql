@@ -1,0 +1,43 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions;
+select no_plan();
+select private.configure_policy_environment('development');
+grant select on public.orders,public.order_items,public.tickets to service_role;
+\ir ../../supabase/tests/database/helpers/spec09_refund_setup.inc
+reset role;
+revoke select on public.orders,public.order_items,public.tickets from service_role;
+select public.server_configure_waitlist('{"acceptingJoins":true,"observerEnabled":true,"deliveryEnabled":true,"senderEmail":"notify@example.invalid","replyTo":"support@example.invalid","appOrigin":"https://example.invalid","capacityMinute":10000,"capacityDay":10000,"capacityMonth":10000}');
+select public.server_acknowledge_waitlist_worker();
+update public.ticket_tiers set quantity_total=2 where id='a6300000-0000-4000-8000-000000000001';
+
+select public.server_join_waitlist('a6200000-0000-4000-8000-000000000001','a6300000-0000-4000-8000-000000000001','Pause Buyer','pause@example.invalid',gen_random_uuid(),repeat('a',64));
+create temp table claim as select d.id,gen_random_uuid() lease from private.waitlist_deliveries d join private.waitlist_enrollments w on w.id=d.enrollment_id where w.normalized_email='pause@example.invalid';
+update private.waitlist_deliveries set lease_id=(select lease from claim),lease_until=clock_timestamp()+interval '2 minutes' where id=(select id from claim);
+set local session_replication_role=replica;
+update public.events set status='draft' where id='a6200000-0000-4000-8000-000000000001';
+set local session_replication_role=origin;
+select ok(public.server_prepare_waitlist_delivery((select id from claim),(select lease from claim)) is null,'uncertain policy pauses preparation');
+select is((select state from private.waitlist_deliveries where id=(select id from claim)),'queued','transient pause never permanently suppresses unsent message');
+
+set local session_replication_role=replica;
+update public.events set status='published' where id='a6200000-0000-4000-8000-000000000001';
+set local session_replication_role=origin;
+update private.waitlist_deliveries set lease_until=clock_timestamp()+interval '2 minutes' where id=(select id from claim);
+create temp table prepared as select public.server_prepare_waitlist_delivery((select id from claim),(select lease from claim)) doc;
+select ok((select doc->>'factsDigest' from prepared) is not null,'policy recovery resumes prepared confirmation with bound facts');
+update public.ticket_tiers set unit_amount_minor=2100 where id='a6300000-0000-4000-8000-000000000001';
+select ok(not public.server_save_waitlist_payload((select id from claim),(select lease from claim),'{"version":1,"keyId":"local","nonce":"AAAAAAAAAAAAAAAA","ciphertext":"AAAAAAAAAAAAAAAAAAAAAA"}',repeat('4',64),(select doc->>'factsDigest' from prepared)),'edit between preparation and save rejects stale rendered facts');
+select ok((select payload is null from private.waitlist_deliveries where id=(select id from claim)),'stale encrypted bytes are never persisted');
+select ok(public.server_save_waitlist_payload((select id from claim),(select lease from claim),'{"version":1,"keyId":"local","nonce":"AAAAAAAAAAAAAAAA","ciphertext":"AAAAAAAAAAAAAAAAAAAAAA"}',repeat('4',64),public.server_prepare_waitlist_delivery((select id from claim),(select lease from claim))->>'factsDigest'),'fresh preparation can save after edit');
+select public.server_join_waitlist('a6200000-0000-4000-8000-000000000001','a6300000-0000-4000-8000-000000000001','Other Buyer','other-pause@example.invalid',gen_random_uuid(),repeat('b',64));
+select public.server_configure_waitlist('{"pageSize":1}');
+update public.ticket_tiers set status='archived' where id='a6300000-0000-4000-8000-000000000001';
+select public.server_observe_waitlist('a6300000-0000-4000-8000-000000000001');
+select is((select count(*) from private.waitlist_enrollments where event_id='a6200000-0000-4000-8000-000000000001' and operational_closed_at is null),1::bigint,'closure is bounded to configured single-row page');
+update public.ticket_tiers set status='active' where id='a6300000-0000-4000-8000-000000000001';
+select public.server_observe_waitlist('a6300000-0000-4000-8000-000000000001');
+select is((select count(*) from private.waitlist_enrollments where event_id='a6200000-0000-4000-8000-000000000001' and operational_closed_at is null),0::bigint,'restoration between pages cannot revive old enrollment');
+select is(public.server_join_waitlist('a6200000-0000-4000-8000-000000000001','a6300000-0000-4000-8000-000000000001','Buyer','pause@example.invalid',gen_random_uuid(),repeat('a',64))->>'kind','joined','rejoin after closure explicitly creates fresh lifecycle');
+select is((select count(*) from private.waitlist_enrollments where normalized_email='pause@example.invalid'),2::bigint,'closed identity has new UUID on explicit rejoin');
+select * from finish();rollback;

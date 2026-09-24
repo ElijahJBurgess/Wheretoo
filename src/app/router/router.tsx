@@ -30,6 +30,7 @@ export function createAppRoutes(runtime: TicketExperienceRuntime) {
   captureEventStatusAccess()
   captureTicketAccess()
   const routes: RouteObject[] = [
+    { path: '/waitlist/leave', lazy: lazyComponent(() => import('../../features/waitlist/WaitlistLeavePage'), 'WaitlistLeavePage') },
     { path: '/tickets/recover', lazy: lazyComponent(() => import('../../features/ticket-delivery/TicketRecoveryPage'), 'TicketRecoveryPage') },
     { path: '/ticket-access', lazy: lazyComponent(() => import('../../features/ticket-delivery/TicketEmailAccessPage'), 'TicketEmailAccessPage') },
     { path: '/event-status', lazy: lazyComponent(() => import('../../features/event-changes/EventStatusPage'), 'EventStatusPage') },
@@ -160,6 +161,7 @@ export function createAppRoutes(runtime: TicketExperienceRuntime) {
                       path: '/organizer/events/:eventId/edit',
                       lazy: lazyComponent(() => import('../../features/events/EventEditorPage'), 'EventEditorPage'),
                     },
+                    { path: '/organizer/events/:eventId/waitlist', lazy: lazyComponent(() => import('../../features/waitlist/OrganizerWaitlistPage'), 'OrganizerWaitlistPage') },
                     { path: '/organizer/events/:eventId/email-attendees', lazy: lazyComponent(() => import('../../features/organizer-messages/OrganizerMessagePage'), 'OrganizerMessagePage') },
                     { path: '/organizer/events/:eventId/changes', lazy: lazyComponent(() => import('../../features/event-changes/EventChangesPage'), 'EventChangesPage') },
                     { path: '/organizer/events/:eventId/cancellation', lazy: lazyComponent(() => import('../../features/event-changes/EventCancellationPage'), 'EventCancellationPage') },

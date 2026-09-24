@@ -5,18 +5,17 @@ set local search_path = public, extensions;
 
 select no_plan();
 
-select ok(
-  pg_catalog.pg_get_functiondef(
-    'public.get_public_event_ticketing(uuid)'::regprocedure
-  ) like '%''paid'', ''payment_processing'', ''requires_review'', ''partially_refunded''%'
-  and pg_catalog.pg_get_functiondef(
-    'public.get_public_event_ticketing(uuid)'::regprocedure
-  ) like '%reservation_expires_at > pg_catalog.statement_timestamp()%'
-  and pg_catalog.pg_get_functiondef(
-    'public.get_public_event_ticketing(uuid)'::regprocedure
-  ) not like '%orders.status in (''paid'', ''payment_processing'')%',
-  'public tier availability permanently commits paid, processing, review, and partial-refund orders'
-);
+-- The protected predicate now lives in a read-only helper; retain the same
+-- source invariant and additionally require the public caller's original clock.
+select ok(case when to_regprocedure('private.ticket_tier_inventory(uuid,timestamptz)') is not null then
+ regexp_replace(pg_get_functiondef(to_regprocedure('private.ticket_tier_inventory(uuid,timestamptz)')),'\s','','g') like '%''paid'',''payment_processing'',''requires_review'',''partially_refunded''%'
+ and regexp_replace(pg_get_functiondef(to_regprocedure('private.ticket_tier_inventory(uuid,timestamptz)')),'\s','','g') like '%reservation_expires_at>p_as_of%'
+ and regexp_replace(pg_get_functiondef('public.get_public_event_ticketing(uuid)'::regprocedure),'\s','','g') like '%private.ticket_tier_inventory(tiers.id,pg_catalog.statement_timestamp())%'
+ else
+ pg_get_functiondef('public.get_public_event_ticketing(uuid)'::regprocedure) like '%''paid'', ''payment_processing'', ''requires_review'', ''partially_refunded''%'
+ and pg_get_functiondef('public.get_public_event_ticketing(uuid)'::regprocedure) like '%reservation_expires_at > pg_catalog.statement_timestamp()%'
+ and pg_get_functiondef('public.get_public_event_ticketing(uuid)'::regprocedure) not like '%orders.status in (''paid'', ''payment_processing'')%'
+ end,'public tier availability permanently commits paid, processing, review, and partial-refund orders');
 
 select has_function(
   'private', 'event_is_publicly_eligible', array['uuid', 'timestamp with time zone'],

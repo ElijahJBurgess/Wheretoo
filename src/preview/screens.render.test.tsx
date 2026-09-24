@@ -1,3 +1,4 @@
+vi.mock('../features/waitlist/waitlist.queries', () => ({ useWaitlistCapability: () => ({isError:false,data:{enabled:false,eligible:false}}) }))
 /// <reference types="node" />
 import { readFileSync, writeFileSync } from 'node:fs'
 import { render, cleanup } from '@testing-library/react'

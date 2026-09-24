@@ -1,0 +1,18 @@
+.waitlist-form{display:grid;gap:10px;width:100%;margin-top:14px;text-align:left}.waitlist-form p{margin:4px 0}.waitlist-form input{width:100%;min-height:44px;padding:10px;border:1px solid #777;border-radius:8px;background:#131617;color:#f7f5f9;font:inherit}.waitlist-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}.waitlist-feedback{margin:12px 0}.waitlist-leave{padding:32px 20px}.waitlist-owner{padding:24px;max-width:1100px;margin:auto}.waitlist-tiers{display:flex;flex-wrap:wrap;gap:12px;margin:20px 0}.waitlist-tiers button{display:grid;gap:6px;min-width:150px;padding:16px;text-align:left}.waitlist-tiers button[aria-pressed=true]{outline:2px solid currentColor}.waitlist-table-wrap{overflow-x:auto}.waitlist-table-wrap table{width:100%;border-collapse:collapse;text-align:left}.waitlist-table-wrap th,.waitlist-table-wrap td{padding:12px 8px;border-bottom:1px solid #777;overflow-wrap:anywhere}.waitlist-owner dialog{max-width:min(480px,calc(100vw - 32px));padding:24px;border-radius:12px}.waitlist-owner dialog::backdrop{background:#0009}.public-ticket-tier__waitlist{grid-column:1/-1;width:100%}@media(max-width:440px){.waitlist-owner{padding:16px}.waitlist-table-wrap th,.waitlist-table-wrap td{padding:8px 4px;min-width:90px}}
+/* Existing tier cards are flex rows; the inline form belongs below all tier facts. */
+.buyer-page .public-ticket-tier:has(.public-ticket-tier__waitlist){flex-wrap:wrap;opacity:1}
+.buyer-page .public-ticket-tier:has(.public-ticket-tier__waitlist) .public-ticket-tier__copy{flex:1;min-width:0}
+.public-ticket-tier__waitlist{flex:0 0 100%;min-width:0}
+.waitlist-owner{width:100%;min-width:0;box-sizing:border-box}
+.waitlist-table-wrap{max-width:100%;min-width:0}
+.waitlist-table-wrap table{min-width:660px}
+.waitlist-owner button{min-height:44px;padding:10px 14px;border:1px solid #61566e;border-radius:8px;background:#211b2a;color:#f5f0fa;font:inherit;cursor:pointer}
+.waitlist-owner button:disabled{opacity:.6;cursor:wait}
+.waitlist-owner button:focus-visible{outline:2px solid #be98ff;outline-offset:3px}
+.waitlist-owner dialog{background:#17131d;color:#f5f0fa;border:1px solid #61566e}
+.waitlist-owner dialog h2{font-size:1.4rem}
+.organizer-layout:has(.waitlist-owner){grid-template-columns:minmax(0,1fr)}
+.organizer-layout__main:has(.waitlist-owner){min-width:0}
+
+.waitlist-table-wrap th:nth-child(4),.waitlist-table-wrap td:nth-child(4){white-space:nowrap}
+.buyer-page .public-ticket-tier__quantity label{white-space:nowrap}

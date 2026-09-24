@@ -7,6 +7,31 @@ export type Json =
   | Json[]
 
 export type Database = {
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
       disputes: {
@@ -1387,6 +1412,10 @@ export type Database = {
         Args: { p_cursor?: Json; p_limit?: number }
         Returns: Json
       }
+      get_owned_waitlist: {
+        Args: { p_cursor?: Json; p_event_id: string; p_tier_id?: string }
+        Returns: Json
+      }
       get_public_event: { Args: { p_event_id: string }; Returns: Json[] }
       get_public_event_ticketing: {
         Args: { p_event_id: string }
@@ -1423,6 +1452,10 @@ export type Database = {
       }
       get_public_organizer_storefront: {
         Args: { p_cursor?: Json; p_handle: string; p_limit?: number }
+        Returns: Json
+      }
+      get_public_waitlist_capability: {
+        Args: { p_event_id: string }
         Returns: Json
       }
       get_required_event_policies: {
@@ -1651,6 +1684,10 @@ export type Database = {
       redeem_owned_ticket: {
         Args: { p_event_id: string; p_ticket_id: string }
         Returns: Json
+      }
+      remove_owned_waitlist: {
+        Args: { p_enrollment_id: string; p_event_id: string; p_tier_id: string }
+        Returns: boolean
       }
       reorder_event_images: {
         Args: { p_event_id: string; p_image_ids: string[] }
@@ -2025,6 +2062,7 @@ export type Database = {
         Args: never
         Returns: boolean
       }
+      server_acknowledge_waitlist_worker: { Args: never; Returns: boolean }
       server_apply_dispute: {
         Args: {
           p_amount_minor: number
@@ -2138,6 +2176,10 @@ export type Database = {
         Args: { p_attempt_id: string; p_lease_id: string }
         Returns: Json
       }
+      server_begin_waitlist_dispatch: {
+        Args: { p_attempt_id: string; p_lease_id: string }
+        Returns: Json
+      }
       server_can_manage_event_images: {
         Args: { p_event_id: string; p_organizer_id: string }
         Returns: boolean
@@ -2184,6 +2226,7 @@ export type Database = {
         Returns: Json
       }
       server_claim_ticket_email: { Args: never; Returns: Json }
+      server_claim_waitlist_delivery: { Args: never; Returns: Json }
       server_clear_ticket_email_recipient_block: {
         Args: { p_source_id: string; p_source_kind: string }
         Returns: boolean
@@ -2223,6 +2266,10 @@ export type Database = {
         Args: { p_configuration: Json }
         Returns: boolean
       }
+      server_configure_waitlist: {
+        Args: { p_config: Json }
+        Returns: undefined
+      }
       server_confirm_free_registration: {
         Args: {
           p_access_hash: string
@@ -2253,6 +2300,10 @@ export type Database = {
       server_cover_recovery_objects: {
         Args: { p_generation_id: string; p_organizer_id: string }
         Returns: Json
+      }
+      server_defer_waitlist_delivery: {
+        Args: { p_attempt_id: string; p_lease_id: string }
+        Returns: boolean
       }
       server_enqueue_refund_notices: {
         Args: { p_limit?: number }
@@ -2309,6 +2360,15 @@ export type Database = {
         Returns: boolean
       }
       server_finish_ticket_email_dispatch: {
+        Args: {
+          p_attempt_id: string
+          p_lease_id: string
+          p_outcome: string
+          p_provider_id?: string
+        }
+        Returns: boolean
+      }
+      server_finish_waitlist_dispatch: {
         Args: {
           p_attempt_id: string
           p_lease_id: string
@@ -2424,6 +2484,21 @@ export type Database = {
           subtotal_minor: number
           total_minor: number
         }[]
+      }
+      server_join_waitlist: {
+        Args: {
+          p_email: string
+          p_event_id: string
+          p_ip_hash: string
+          p_name: string
+          p_request_id: string
+          p_tier_id: string
+        }
+        Returns: Json
+      }
+      server_leave_waitlist: {
+        Args: { p_ip_hash: string; p_token_hash: string }
+        Returns: Json
       }
       server_lookup_checkout_cancellation: {
         Args: { p_token_hash: string }
@@ -2542,6 +2617,7 @@ export type Database = {
           ticket_status: string
         }[]
       }
+      server_next_waitlist_tiers: { Args: { p_limit?: number }; Returns: Json }
       server_note_refund_observation: {
         Args: {
           p_event_id: string
@@ -2582,6 +2658,17 @@ export type Database = {
         }
         Returns: boolean
       }
+      server_observe_waitlist: { Args: { p_tier_id: string }; Returns: Json }
+      server_observe_waitlist_email: {
+        Args: {
+          p_attempt_id: string
+          p_kind: string
+          p_observed_at: string
+          p_provider_id: string
+          p_webhook_id: string
+        }
+        Returns: boolean
+      }
       server_persist_connect_status_if_current: {
         Args: {
           p_currently_due_count: number
@@ -2610,6 +2697,10 @@ export type Database = {
         }
         Returns: Json
       }
+      server_prepare_waitlist_delivery: {
+        Args: { p_attempt_id: string; p_lease_id: string }
+        Returns: Json
+      }
       server_prepare_whole_order_refund: {
         Args: { p_order_id: string; p_reason: string }
         Returns: {
@@ -2626,6 +2717,7 @@ export type Database = {
       }
       server_prune_organizer_message_history: { Args: never; Returns: number }
       server_prune_ticket_email_history: { Args: never; Returns: number }
+      server_prune_waitlist: { Args: never; Returns: number }
       server_read_event_status_access: {
         Args: { p_ip_hash: string; p_token_hash: string }
         Returns: Json
@@ -2797,6 +2889,16 @@ export type Database = {
         }
         Returns: boolean
       }
+      server_save_waitlist_payload: {
+        Args: {
+          p_attempt_id: string
+          p_facts_digest: string
+          p_lease_id: string
+          p_payload: Json
+          p_token_hash: string
+        }
+        Returns: boolean
+      }
       server_set_contextual_moderation_testing_override: {
         Args: { p_enabled: boolean; p_reason: string }
         Returns: undefined
@@ -2806,6 +2908,10 @@ export type Database = {
         Returns: boolean
       }
       server_stop_ticket_email: {
+        Args: { p_attempt_id: string; p_lease_id: string; p_reason: string }
+        Returns: boolean
+      }
+      server_stop_waitlist_delivery: {
         Args: { p_attempt_id: string; p_lease_id: string; p_reason: string }
         Returns: boolean
       }
@@ -2983,6 +3089,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {},
   },

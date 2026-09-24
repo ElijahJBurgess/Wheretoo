@@ -1,8 +1,10 @@
+import { useWaitlistCapability } from '../waitlist/waitlist.queries'
+import { WaitlistJoinForm } from '../waitlist/WaitlistJoinForm'
 import { usePublicEventImages } from '../event-images/publicEventImages'
 import '../buyer-journey/buyer-availability.css'
 import { discoveryReturnPath } from '../discovery/discovery.navigation'
 import { FreeRsvpEntry } from '../rsvp/FreeRsvpEntry'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { BuyerHeader, BuyerIcon } from '../buyer-journey/BuyerPrimitives'
 import { EventPageView } from '../buyer-journey/EventPageView'
@@ -78,9 +80,21 @@ type PublicTicketPurchaseProps = {
   eventId: string
   tiers: PublicTicketTierTuple
   availabilityKnown: boolean
+  startsAt: string
+  refresh: () => Promise<unknown>
 }
 
-function PublicTicketPurchase({ eventId, tiers, availabilityKnown }: PublicTicketPurchaseProps) {
+function PublicTicketPurchase({ eventId, tiers, availabilityKnown, startsAt, refresh }: PublicTicketPurchaseProps) {
+  const capability=useWaitlistCapability(eventId)
+  const [joinTier,setJoinTier]=useState<string|null>(null)
+  const [waitlistNotice,setWaitlistNotice]=useState('')
+  const focusTier=useRef<string|null>(null)
+  const [focusRequest,setFocusRequest]=useState(0)
+  useEffect(()=>{if(!focusTier.current)return;const input=document.getElementById(`ticket-quantity-${focusTier.current}`);if(input instanceof HTMLInputElement&&!input.disabled){input.focus();focusTier.current=null}},[tiers,availabilityKnown,focusRequest])
+  const [now,setNow]=useState(()=>Date.now())
+  useEffect(()=>{const timer=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(timer)},[])
+  const canJoin=availabilityKnown&&!capability.isError&&capability.data?.enabled&&capability.data.eligible&&now<Date.parse(startsAt)
+  async function reopened(id:string){setJoinTier(null);setWaitlistNotice('Checking ticket availability…');try{const result=await refresh() as {isError?:boolean};if(result?.isError)throw Error();setWaitlistNotice('Ticket availability refreshed. Review the current selection.');focusTier.current=id;setFocusRequest(value=>value+1)}catch{focusTier.current=null;setWaitlistNotice('Could not refresh ticket availability. Please check again before purchasing.')}}
   const navigate = useNavigate()
   const location = useLocation()
   const [quantities, setQuantities] = useState<Record<string, number>>(() =>
@@ -134,7 +148,9 @@ function PublicTicketPurchase({ eventId, tiers, availabilityKnown }: PublicTicke
         {allSoldOut ? <p>All ticket types are sold out.</p> : !hasAvailableTier ? <p>We cannot offer tickets for this event right now.</p> : null}
       </div>
       <TicketTierList maxTotal={MAX_CHECKOUT_QUANTITY} onQuantityChange={(id, quantity) => saveQuantities({ ...quantities, [id]: quantity })}
-        quantities={quantities} tiers={tiers} availabilityKnown={availabilityKnown} />
+        quantities={quantities} tiers={tiers} availabilityKnown={availabilityKnown}
+        renderWaitlist={canJoin?(id)=>joinTier===id?<WaitlistJoinForm key={id} eventId={eventId} tierId={id} tierName={tiers.find(t=>t.id===id)?.name??'this tier'} onAvailable={()=>reopened(id)} onCancel={()=>{setJoinTier(null);requestAnimationFrame(()=>document.getElementById(`waitlist-join-${id}`)?.focus())}}/>:<button id={`waitlist-join-${id}`} type='button' className='ui-button ui-button--secondary' onClick={()=>setJoinTier(id)}>Join Waitlist</button>:undefined} />
+      {waitlistNotice&&<p role='status'>{waitlistNotice}</p>}
       {unavailableItems.length > 0 ? <div className="buyer-availability-review" role="status">
         <p>These tickets are no longer available in your selection:</p>
         <ul>{unavailableItems.map(item => <li key={item.tierId}>{knownNames[item.tierId] ?? 'Unavailable ticket'} × {item.quantity}</li>)}</ul>
@@ -201,7 +217,7 @@ export function PublicTicketEventPage({ selection = false }: { selection?: boole
         badge={event.admission_type==='free'?'Free RSVP':undefined}
         action={!selection && paidAvailable ? <Link className="ui-button buyer-primary" to={`/events/${event.id}/tickets`} state={publicReturnState}>Get tickets<BuyerIcon name="arrow" /></Link> : undefined}
       >
-        {paidPublicEvent !== null ? <PublicTicketPurchase key={event.id} eventId={event.id} tiers={paidPublicEvent.tiers} availabilityKnown={!hasRetryableStaleEvent} /> : (
+        {paidPublicEvent !== null ? <PublicTicketPurchase key={event.id} eventId={event.id} startsAt={event.starts_at} refresh={()=>eventQuery.refetch()} tiers={paidPublicEvent.tiers} availabilityKnown={!hasRetryableStaleEvent} /> : (
           <section className="public-event__tickets"><h2>Free RSVP</h2><p>No payment required.</p><FreeRsvpEntry eventId={event.id}/></section>
         )}
         {!hasRetryableStaleEvent ? <ReportEventDialog eventId={event.id} /> : null}

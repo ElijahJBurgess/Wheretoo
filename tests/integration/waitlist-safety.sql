@@ -1,0 +1,63 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions;
+select no_plan();
+select private.configure_policy_environment('development');
+grant select on public.orders,public.order_items,public.tickets to service_role;
+\ir ../../supabase/tests/database/helpers/spec09_refund_setup.inc
+reset role;
+revoke select on public.orders,public.order_items,public.tickets from service_role;
+select public.server_configure_waitlist('{"acceptingJoins":true,"observerEnabled":true,"deliveryEnabled":true,"senderEmail":"notify@example.invalid","replyTo":"support@example.invalid","appOrigin":"https://example.invalid","capacityMinute":10000,"capacityDay":10000,"capacityMonth":10000}');
+select public.server_acknowledge_waitlist_worker();
+update public.ticket_tiers set quantity_total=2 where id='a6300000-0000-4000-8000-000000000001';
+create function pg_temp.joiner(email text,req uuid default gen_random_uuid()) returns text language sql as $$select public.server_join_waitlist('a6200000-0000-4000-8000-000000000001','a6300000-0000-4000-8000-000000000001','Buyer',email,req,encode(extensions.digest(email,'sha256'),'hex'))->>'kind'$$;
+select is(pg_temp.joiner('safety@example.invalid'),'joined','new enrollment');
+select is(pg_temp.joiner('safety@example.invalid'),'joined','second join generic');
+select is(pg_temp.joiner('safety@example.invalid'),'joined','third join generic');
+select is(pg_temp.joiner('safety@example.invalid'),'RATE_LIMITED','fourth hourly attempt denied durably');
+select is(pg_temp.joiner('safety+alias@example.invalid'),'joined','plus alias not collapsed');
+select is(pg_temp.joiner('s.a.f.e.t.y@example.invalid'),'joined','dots not collapsed');
+create temp table target as select id from private.waitlist_enrollments where normalized_email='safety@example.invalid';
+-- Event closure is durable, and reopening requires an explicit new enrollment.
+update public.ticket_tiers set status='archived' where id='a6300000-0000-4000-8000-000000000001';
+select is(pg_temp.joiner('closed@example.invalid'),'WAITLIST_UNAVAILABLE','inactive tier rejects join');
+select public.server_observe_waitlist('a6300000-0000-4000-8000-000000000001');
+select ok((select operational_closed_at is not null from private.waitlist_enrollments where id=(select id from target)),'observer closes existing demand');
+update public.ticket_tiers set status='active' where id='a6300000-0000-4000-8000-000000000001';
+select public.server_observe_waitlist('a6300000-0000-4000-8000-000000000001');
+select ok((select operational_closed_at is not null from private.waitlist_enrollments where id=(select id from target)),'reactivation never resurrects enrollment');
+select is(pg_temp.joiner('new-safety@example.invalid'),'joined','new explicit lifecycle may join');
+create temp table live as select id from private.waitlist_enrollments where normalized_email='new-safety@example.invalid';
+-- Lease setup is scoped fixture preparation; all state decisions use real service functions.
+update private.waitlist_deliveries set lease_id='a6400000-0000-4000-8000-000000000050',lease_until=clock_timestamp()+interval '2 minutes' where enrollment_id=(select id from live);
+create temp table mail as select id from private.waitlist_deliveries where enrollment_id=(select id from live);
+select ok(public.server_prepare_waitlist_delivery((select id from mail),'a6400000-0000-4000-8000-000000000050') is not null,'prepare current confirmation');
+select ok(public.server_save_waitlist_payload((select id from mail),'a6400000-0000-4000-8000-000000000050','{"version":1,"keyId":"local","nonce":"AAAAAAAAAAAAAAAA","ciphertext":"AAAAAAAAAAAAAAAAAAAAAA"}',repeat('7',64),(select private.ticket_email_fingerprint(private.waitlist_facts(id)::text) from private.waitlist_enrollments where event_id='a6200000-0000-4000-8000-000000000001' limit 1)),'persist hashed leave authorization');
+select public.server_configure_waitlist('{"acceptingJoins":false,"observerEnabled":false,"deliveryEnabled":false}');
+select is(public.server_leave_waitlist(repeat('7',64),repeat('8',64))->>'kind','removed','leave remains enabled with every runtime gate off');
+select public.server_configure_waitlist('{"acceptingJoins":true,"observerEnabled":true,"deliveryEnabled":true}');
+select is(pg_temp.joiner('new-safety@example.invalid'),'joined','explicit rejoin after removal');
+select is(public.server_leave_waitlist(repeat('7',64),repeat('8',64))->>'kind','removed','old token harmless repeat');
+select is((select count(*) from private.waitlist_enrollments where normalized_email='new-safety@example.invalid' and lifecycle='active'),1::bigint,'old leave token cannot remove future enrollment');
+select ok(public.server_begin_waitlist_dispatch((select id from mail),'a6400000-0000-4000-8000-000000000050') is null,'leave before first dispatch prevents sending');
+select is((select state from private.waitlist_deliveries where id=(select id from mail)),'suppressed','never dispatched removal is suppressed');
+-- The same event's current price/availability are rechecked immediately before dispatch.
+update public.ticket_tiers set quantity_total=3 where id='a6300000-0000-4000-8000-000000000001';
+select public.server_observe_waitlist('a6300000-0000-4000-8000-000000000001');
+select public.server_observe_waitlist('a6300000-0000-4000-8000-000000000001');
+select public.server_observe_waitlist('a6300000-0000-4000-8000-000000000001');
+select public.server_observe_waitlist('a6300000-0000-4000-8000-000000000001');
+create temp table restock as select d.id from private.waitlist_deliveries d join private.waitlist_enrollments w on w.id=d.enrollment_id where w.normalized_email='new-safety@example.invalid' and w.lifecycle='active' and d.purpose='restock';
+select is((select count(*) from restock),1::bigint,'one restock membership for reopened cycle');
+update private.waitlist_deliveries set lease_id='a6400000-0000-4000-8000-000000000051',lease_until=clock_timestamp()+interval '2 minutes' where id=(select id from restock);
+select ok(public.server_save_waitlist_payload((select id from restock),'a6400000-0000-4000-8000-000000000051','{"version":1,"keyId":"local","nonce":"AAAAAAAAAAAAAAAA","ciphertext":"AAAAAAAAAAAAAAAAAAAAAA"}',repeat('9',64),(select private.ticket_email_fingerprint(private.waitlist_facts(id)::text) from private.waitlist_enrollments where event_id='a6200000-0000-4000-8000-000000000001' limit 1)),'prepare restock immutable payload');
+update public.ticket_tiers set quantity_total=2 where id='a6300000-0000-4000-8000-000000000001';
+select ok(public.server_begin_waitlist_dispatch((select id from restock),'a6400000-0000-4000-8000-000000000051') is null,'re-sold-out before dispatch suppresses stale notification');
+select is((select state from private.waitlist_deliveries where id=(select id from restock)),'suppressed','stale email never marked accepted');
+-- Sensitive cleanup keeps durable hashes and cannot purge unresolved delivery evidence.
+insert into private.waitlist_enrollments(id,event_id,tier_id,name,normalized_email,recipient_hash,lifecycle,joined_at,removed_at) values('a6400000-0000-4000-8000-000000000070','a6200000-0000-4000-8000-000000000001','a6300000-0000-4000-8000-000000000001','Old Buyer','old-safety@example.invalid',repeat('1',64),'removed',clock_timestamp()-interval '92 days',clock_timestamp()-interval '91 days');
+insert into private.waitlist_deliveries(enrollment_id,purpose,state,dispatch_stopped_reason) values('a6400000-0000-4000-8000-000000000070','confirmation','suppressed','enrollment_closed');
+select ok(public.server_prune_waitlist()>=1,'90-day terminal cleanup runs');
+select ok((select name is null and normalized_email is null and recipient_hash=repeat('1',64) from private.waitlist_enrollments where id='a6400000-0000-4000-8000-000000000070'),'PII removed with minimal identity receipt retained');
+select * from finish();
+rollback;
