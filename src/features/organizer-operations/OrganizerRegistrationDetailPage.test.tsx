@@ -41,3 +41,7 @@ it('rejects malformed registration IDs before a private read', () => {
   expect(screen.getByRole('heading', { name: 'Registration unavailable' })).toBeVisible()
   expect(mocks.useFreeRegistration).not.toHaveBeenCalled()
 })
+it('opens the individual email audience by registration ID without an address in the URL', async () => {
+  show()
+  expect(await screen.findByRole('link', { name: 'Email registrant' })).toHaveAttribute('href', `/organizer/events/${eventId}/email-attendees?registration=${registrationId}`)
+})

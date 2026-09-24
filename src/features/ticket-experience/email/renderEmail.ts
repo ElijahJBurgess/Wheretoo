@@ -1,3 +1,4 @@
+import { OrganizerMessageEmail } from './OrganizerMessageEmail'
 import { render, toPlainText } from '@react-email/render'
 import { createElement } from 'react'
 import type { EmailRenderer, EmailTemplateInput } from './email.types'
@@ -14,6 +15,8 @@ function assertNever(value: never): never {
 
 function templateFor(input: EmailTemplateInput) {
   switch (input.kind) {
+    case 'organizer_message':
+      return createElement(OrganizerMessageEmail, input.props)
     case 'event_changed':
       return createElement(EventChangedEmail, input.props)
     case 'order_refunded':

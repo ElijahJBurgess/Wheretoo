@@ -160,6 +160,7 @@ export function createAppRoutes(runtime: TicketExperienceRuntime) {
                       path: '/organizer/events/:eventId/edit',
                       lazy: lazyComponent(() => import('../../features/events/EventEditorPage'), 'EventEditorPage'),
                     },
+                    { path: '/organizer/events/:eventId/email-attendees', lazy: lazyComponent(() => import('../../features/organizer-messages/OrganizerMessagePage'), 'OrganizerMessagePage') },
                     { path: '/organizer/events/:eventId/changes', lazy: lazyComponent(() => import('../../features/event-changes/EventChangesPage'), 'EventChangesPage') },
                     { path: '/organizer/events/:eventId/cancellation', lazy: lazyComponent(() => import('../../features/event-changes/EventCancellationPage'), 'EventCancellationPage') },
                     {

@@ -500,3 +500,12 @@ import_map = "../deno.json"
 [functions.duplicate-event]
 verify_jwt = false
 import_map = "../deno.json"
+
+# Owner JWT is forwarded to narrowly authorized RPCs; worker uses its own disabled-by-default secret.
+[functions.organizer-message]
+verify_jwt = false
+import_map = "../deno.json"
+
+[functions.organizer-message-worker]
+verify_jwt = false
+import_map = "../deno.json"

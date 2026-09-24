@@ -86,6 +86,7 @@ function OrderDetailContent(
           <div><dt>Tax</dt><dd>{money(order.taxMinor)}</dd></div>
         </dl>
       </div>
+      <Link className="ops-button" to={`/organizer/events/${eventId}/email-attendees?order=${orderId}`}>Email customer</Link>
       <h2>Purchased</h2>
       <div className='ops-panel'>
         {order.items.map((item, index) => (

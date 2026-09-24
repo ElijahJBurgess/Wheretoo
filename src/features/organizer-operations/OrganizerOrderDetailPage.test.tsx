@@ -158,3 +158,8 @@ it('disposes pending admission UI when the same owner returns in a new identity 
   expect(screen.queryByRole('button', { name: /Admitting/ })).not.toBeInTheDocument()
   client.clear()
 })
+it('opens a non-editable individual email audience by order ID', async () => {
+  getOrderDetails.mockResolvedValue(data)
+  show()
+  expect(await screen.findByRole('link', { name: 'Email customer' })).toHaveAttribute('href', '/organizer/events/event/email-attendees?order=order')
+})
