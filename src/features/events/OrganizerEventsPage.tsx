@@ -1,12 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { EventSalesSummary } from '../organizer-operations/EventSalesSummary'
 import { EventArtwork } from '../organizer-operations/EventArtwork'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { ReadState } from '../../components/ui/ReadState'
 import { Button } from '../../components/ui/Button'
 import { useSession } from '../auth/SessionProvider'
 import { useEventImages } from '../event-images/eventImages.queries'
-import { useOwnedEvents } from './event.queries'
+import { useOwnedEvents, useDuplicateEvent } from './event.queries'
+import { DuplicateEventError, duplicateMessages } from './duplicateEvent.api'
 import type { EventRow } from './event.types'
 
 const dateTimeFormatter = new Intl.DateTimeFormat('en-US', {
@@ -50,11 +51,53 @@ export function OrganizerEventsPage() {
   const sessionState = useSession()
   const organizerId = sessionState.status === 'authenticated' ? sessionState.user.id : ''
   const eventsQuery = useOwnedEvents(organizerId)
+  const navigate = useNavigate()
+  const duplication = useDuplicateEvent(organizerId)
+  const activeRequest = useRef(false)
+  const mounted = useRef(false)
+  const identity = `${organizerId}:${sessionState.identityVersion}`
+  const currentIdentity = useRef(identity)
+  useLayoutEffect(() => { currentIdentity.current = identity }, [identity])
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+  const [duplicateState, setDuplicateState] = useState<{ identity: string; source?: string; errorFor?: string; error?: string; unknown?: boolean } | null>(null)
+  const displayedDuplicateState = duplicateState?.identity === identity ? duplicateState : null
+  async function onDuplicate(sourceEventId: string) {
+    if (activeRequest.current || displayedDuplicateState?.unknown) return
+    activeRequest.current = true
+    const startedIdentity = identity
+    setDuplicateState({ identity, source: sourceEventId })
+    try {
+      const result = await duplication.mutateAsync(sourceEventId)
+      if (!mounted.current || currentIdentity.current !== startedIdentity || !result.isCurrent()) return
+      navigate(`/organizer/events/${result.eventId}/edit?resume=1`, {
+        state: { duplicated: true },
+      })
+    } catch (error) {
+      if (!mounted.current || currentIdentity.current !== startedIdentity) return
+      const code = error instanceof DuplicateEventError ? error.code : 'DUPLICATE_OUTCOME_UNKNOWN'
+      setDuplicateState({ identity: startedIdentity, errorFor: sourceEventId, error: duplicateMessages[code], unknown: code === 'DUPLICATE_OUTCOME_UNKNOWN' })
+    } finally {
+      activeRequest.current = false
+    }
+  }
 
   const displayedEvents = (Array.isArray(eventsQuery.data) ? eventsQuery.data : []).filter(event =>
     filter === 'All' || organizerEventStatus(event).label === filter
   ).slice(0, visible)
   const images = useEventImages(sessionState.status === 'authenticated' ? displayedEvents.filter(event => event.status === 'draft' || event.status === 'published').map(event => event.id) : [])
+
+  const duplicateFeedback = displayedDuplicateState?.error ? <div role='alert' className='events-index__duplicate-status'>
+        <p>{displayedDuplicateState.error}</p>
+        {displayedDuplicateState.unknown ? <Button variant='secondary' onClick={() => {
+          void eventsQuery.refetch().then(result => {
+            if (!result.isError && mounted.current && currentIdentity.current === identity) {
+              setFilter('All')
+              setVisible(12)
+              setDuplicateState(null)
+            }
+          }).catch(() => undefined)
+        }}>Check My Events</Button> : null}
+      </div> : null
 
   if (eventsQuery.isPending || sessionState.status !== 'authenticated') {
     return <ReadState headingAs="h1" paused={eventsQuery.fetchStatus === 'paused'} status='loading' skeleton='event-cards' title='Loading your events' />
@@ -115,6 +158,7 @@ export function OrganizerEventsPage() {
         ))}
       </div>
       {images.isError ? <p role='status'>Flyers could not load. <button className='ops-button' type='button' onClick={() => void images.refetch()}>Retry flyers</button></p> : null}
+      {!displayedEvents.some(event => event.id === displayedDuplicateState?.errorFor) ? duplicateFeedback : null}
       <ul className='event-list'>
         {displayedEvents.map((event) => {
           const title = event.title?.trim() || 'Untitled event'
@@ -144,6 +188,17 @@ export function OrganizerEventsPage() {
                 )}
                 <span aria-hidden='true' className='event-list__arrow'>→</span>
               </Link>
+              <div className='event-list__actions'>
+                <button type='button' className='ops-button'
+                  aria-label={`Duplicate event: ${title}`}
+                  aria-busy={displayedDuplicateState?.source === event.id}
+                  disabled={Boolean(displayedDuplicateState?.source || displayedDuplicateState?.unknown) || event.moderation_status === 'blocked' || event.moderation_status === 'removed'}
+                  onClick={() => void onDuplicate(event.id)}>
+                  {displayedDuplicateState?.source === event.id ? 'Duplicating…' : 'Duplicate event'}
+                </button>
+                {displayedDuplicateState?.errorFor === event.id ? duplicateFeedback : null}
+                {event.moderation_status === 'blocked' || event.moderation_status === 'removed' ? <span>Blocked or removed events cannot be duplicated.</span> : null}
+              </div>
             </li>
           )
         })}

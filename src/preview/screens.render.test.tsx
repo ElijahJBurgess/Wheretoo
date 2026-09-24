@@ -21,7 +21,7 @@ vi.mock('../features/auth/SessionProvider', () => ({ useSession: mocks.session, 
 vi.mock('../features/moderation/staffContext', () => ({ useStaffContext: () => ({ role: 'moderator', staffUserId: organizerId }) }))
 vi.mock('../features/auth/auth.api', () => ({ signInOrganizer: mocks.blocked, signUpOrganizer: mocks.blocked }))
 vi.mock('../features/events/event.queries', () => ({
-  useOwnedEvent: mocks.ownedEvent, useOwnedEvents: mocks.ownedEvents,
+  useOwnedEvent: mocks.ownedEvent, useOwnedEvents: mocks.ownedEvents, useDuplicateEvent: mutation,
   useSaveEventDraft: mutation, useSaveEventRevision: mutation, usePublishEvent: mutation, useCancelOwnedEvent: mutation,
 }))
 vi.mock('../features/event-changes/eventChanges.queries', () => ({ useEventChangeContext: mocks.eventChangeContext }))

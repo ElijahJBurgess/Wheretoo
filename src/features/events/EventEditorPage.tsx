@@ -600,6 +600,7 @@ export function EventEditorPage() {
           </div>
         ) : (
           <>
+            {routeLocation.state?.duplicated === true && ownedEvent?.status === 'draft' ? <p role="status">Draft created. Choose a new date and time before publishing.</p> : null}
             <p aria-live="polite" className="event-creation__save">
               {writeState === 'conflict' ? 'Conflict' : writeState === 'unknown' ? 'Unknown' : hasUnsavedChanges || isNew ? 'Unsaved' : 'Saved'}
             </p>
