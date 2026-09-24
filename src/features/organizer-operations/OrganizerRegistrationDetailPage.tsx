@@ -28,7 +28,7 @@ function RegistrationDetail({ ownerId, identityVersion, eventId, registrationId 
       <p className='ops-muted'>{registration.registrantEmail}</p>
       <dl className='ops-order-facts'><div><dt>Registered</dt><dd>{dateTime(registration.createdAt)}</dd></div><div><dt>Admissions</dt><dd>{registration.quantity}</dd></div></dl>
     </div>
-    <div className='ops-actions'><button className='ops-button ops-button--primary' onClick={() => setResendOpen(true)}>Resend tickets</button></div>
+    <div className='ops-actions'><Link className='ops-button' to={`/organizer/events/${eventId}/email-attendees?registration=${registrationId}`}>Email registrant</Link><button className='ops-button ops-button--primary' onClick={() => setResendOpen(true)}>Resend tickets</button></div>
     <h2>Tickets</h2><div className='ops-ticket-list'>{registration.tickets.map(ticket => <article className='ops-panel ops-ticket' key={ticket.ticketId}>
       <div className='ops-section-heading'><h3>Ticket {ticket.position} of {registration.quantity}</h3><span className={`ops-badge ops-badge--${ticket.status}`}>{statusLabel(ticket.status)}</span></div><p>{ticket.admissionLabel}</p>{ticket.usedAt && <p className='ops-note'>Checked in · {dateTime(ticket.usedAt)}</p>}
       <Link className='ops-button' to={`/organizer/events/${eventId}/check-in/find/registrations/${registrationId}/${ticket.ticketId}`} aria-label={`Open Ticket ${ticket.position} of ${registration.quantity}`}>View check-in status</Link>

@@ -36,6 +36,7 @@
     "playwright.spec12.config.ts",
     "playwright.spec13.config.ts",
     "playwright.csv-export.config.ts",
-    "playwright.duplicate-event.config.ts"
+    "playwright.duplicate-event.config.ts",
+    "playwright.email-attendees.config.ts"
   ]
 }

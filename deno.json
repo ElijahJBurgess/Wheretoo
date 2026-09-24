@@ -16,7 +16,8 @@
     "./src/features/ticket-experience/email/TicketsReadyEmail": "./src/features/ticket-experience/email/TicketsReadyEmail.tsx",
     "./src/features/ticket-experience/email/TicketRecoveryEmail": "./src/features/ticket-experience/email/TicketRecoveryEmail.tsx",
     "./src/features/ticket-experience/email/OrderRefundedEmail": "./src/features/ticket-experience/email/OrderRefundedEmail.tsx",
-    "./src/features/ticket-experience/email/EventChangedEmail": "./src/features/ticket-experience/email/EventChangedEmail.tsx"
+    "./src/features/ticket-experience/email/EventChangedEmail": "./src/features/ticket-experience/email/EventChangedEmail.tsx",
+    "./src/features/ticket-experience/email/OrganizerMessageEmail": "./src/features/ticket-experience/email/OrganizerMessageEmail.tsx"
   },
   "tasks": {
     "test": "deno test --allow-env supabase/functions",

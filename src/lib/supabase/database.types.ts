@@ -1032,45 +1032,6 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      server_commit_event_cover_without_duplicate_guard: {
-        Args: {
-          p_event_id: string
-          p_expected_revision: number
-          p_generation_id?: string
-          p_organizer_id: string
-          p_path: string
-          p_slot?: number
-        }
-        Returns: Json
-      }
-      get_owned_event_duplicate_context: {
-        Args: { p_source_event_id: string }
-        Returns: Json
-      }
-      duplicate_owned_event: {
-        Args: {
-          p_expected_fingerprint: string
-          p_new_event_id: string
-          p_source_event_id: string
-          p_staged_path?: string
-        }
-        Returns: string
-      }
-      get_event_cover_state: { Args: { p_event_id: string }; Returns: Json }
-      get_event_cover_generation: { Args: { p_generation_id: string }; Returns: Json }
-      server_recover_cover_generation: { Args: { p_generation_id: string; p_organizer_id: string }; Returns: undefined }
-      server_claim_cover_candidate: { Args: { p_generation_id: string; p_slot: number; p_organizer_id: string; p_attempt: number }; Returns: Json }
-      server_finish_cover_candidate: { Args: { p_generation_id: string; p_slot: number; p_claim_token: string; p_path: string | null; p_failure_code?: string | null }; Returns: undefined }
-      server_expire_cover_candidates: { Args: { p_organizer_id: string }; Returns: Json }
-      server_ack_cover_cleanup: { Args: { p_generation_id: string }; Returns: undefined }
-      server_cover_recovery_objects: { Args: { p_generation_id: string; p_organizer_id: string }; Returns: Json }
-      server_reconcile_cover_object: { Args: { p_generation_id: string; p_organizer_id: string; p_slot: number; p_path: string }; Returns: undefined }
-      create_event_cover_generation: { Args: { p_event_id: string; p_request_id: string; p_expected_revision: number; p_input?: Json }; Returns: Json }
-      server_complete_event_cover_candidate: { Args: { p_generation_id: string; p_slot: number; p_path: string | null; p_failure_code?: string | null }; Returns: undefined }
-      server_get_event_cover_candidate: { Args: { p_generation_id: string; p_slot: number; p_organizer_id: string; p_expected_revision: number }; Returns: Json }
-      server_commit_event_cover: { Args: { p_event_id: string; p_organizer_id: string; p_expected_revision: number; p_path: string; p_generation_id?: string | null; p_slot?: number | null }; Returns: Json }
-      server_remove_event_cover: { Args: { p_event_id: string; p_organizer_id: string; p_expected_revision: number }; Returns: Json }
-
       accept_current_event_policies: {
         Args: { p_event_id: string }
         Returns: {
@@ -1265,6 +1226,24 @@ export type Database = {
         Args: { p_handle: string; p_logo_id: string }
         Returns: Json
       }
+      create_event_cover_generation: {
+        Args: {
+          p_event_id: string
+          p_expected_revision: number
+          p_input?: Json
+          p_request_id: string
+        }
+        Returns: Json
+      }
+      duplicate_owned_event: {
+        Args: {
+          p_expected_fingerprint: string
+          p_new_event_id: string
+          p_source_event_id: string
+          p_staged_path?: string
+        }
+        Returns: string
+      }
       get_current_event_review_request: {
         Args: { p_event_id: string }
         Returns: {
@@ -1274,6 +1253,11 @@ export type Database = {
           status: string
         }[]
       }
+      get_event_cover_generation: {
+        Args: { p_generation_id: string }
+        Returns: Json
+      }
+      get_event_cover_state: { Args: { p_event_id: string }; Returns: Json }
       get_moderation_case: {
         Args: { p_event_id: string }
         Returns: {
@@ -1359,6 +1343,10 @@ export type Database = {
         Args: { p_event_id: string }
         Returns: Json
       }
+      get_owned_event_duplicate_context: {
+        Args: { p_source_event_id: string }
+        Returns: Json
+      }
       get_owned_event_notice_status: {
         Args: { p_event_id: string; p_purpose: string }
         Returns: Json
@@ -1383,6 +1371,14 @@ export type Database = {
           organizer_terms_version_id: string
           weapons_present: boolean
         }[]
+      }
+      get_owned_organizer_message_options: {
+        Args: { p_event_id: string }
+        Returns: Json
+      }
+      get_owned_organizer_message_receipt: {
+        Args: { p_event_id: string; p_request_id: string }
+        Returns: Json
       }
       get_owned_storefront_editor: { Args: never; Returns: Json }
       get_owned_storefront_identity: { Args: never; Returns: Json }
@@ -1541,6 +1537,15 @@ export type Database = {
       }
       preview_owned_event_notice: {
         Args: { p_event_id: string; p_purpose: string }
+        Returns: Json
+      }
+      preview_owned_organizer_message: {
+        Args: {
+          p_body: string
+          p_event_id: string
+          p_selector: Json
+          p_subject: string
+        }
         Returns: Json
       }
       publish_event: {
@@ -2012,6 +2017,14 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      server_ack_cover_cleanup: {
+        Args: { p_generation_id: string }
+        Returns: undefined
+      }
+      server_acknowledge_organizer_message_worker: {
+        Args: never
+        Returns: boolean
+      }
       server_apply_dispute: {
         Args: {
           p_amount_minor: number
@@ -2117,6 +2130,10 @@ export type Database = {
         Args: { p_stripe_account_id: string }
         Returns: number
       }
+      server_begin_organizer_message_dispatch: {
+        Args: { p_attempt_id: string; p_lease_id: string }
+        Returns: Json
+      }
       server_begin_ticket_email_dispatch: {
         Args: { p_attempt_id: string; p_lease_id: string }
         Returns: Json
@@ -2139,6 +2156,15 @@ export type Database = {
           queued_moderation_version: number
         }[]
       }
+      server_claim_cover_candidate: {
+        Args: {
+          p_attempt: number
+          p_generation_id: string
+          p_organizer_id: string
+          p_slot: number
+        }
+        Returns: Json
+      }
       server_claim_moderation_evaluation: {
         Args: { p_worker_reference: string }
         Returns: {
@@ -2152,6 +2178,7 @@ export type Database = {
           queued_moderation_version: number
         }[]
       }
+      server_claim_organizer_message_recipient: { Args: never; Returns: Json }
       server_claim_owned_refund: {
         Args: { p_event_id: string; p_order_id: string; p_organizer_id: string }
         Returns: Json
@@ -2159,6 +2186,41 @@ export type Database = {
       server_claim_ticket_email: { Args: never; Returns: Json }
       server_clear_ticket_email_recipient_block: {
         Args: { p_source_id: string; p_source_kind: string }
+        Returns: boolean
+      }
+      server_commit_event_cover: {
+        Args: {
+          p_event_id: string
+          p_expected_revision: number
+          p_generation_id?: string
+          p_organizer_id: string
+          p_path: string
+          p_slot?: number
+        }
+        Returns: Json
+      }
+      server_commit_event_cover_without_duplicate_guard: {
+        Args: {
+          p_event_id: string
+          p_expected_revision: number
+          p_generation_id?: string
+          p_organizer_id: string
+          p_path: string
+          p_slot?: number
+        }
+        Returns: Json
+      }
+      server_complete_event_cover_candidate: {
+        Args: {
+          p_failure_code?: string
+          p_generation_id: string
+          p_path: string
+          p_slot: number
+        }
+        Returns: undefined
+      }
+      server_configure_organizer_messages: {
+        Args: { p_configuration: Json }
         Returns: boolean
       }
       server_confirm_free_registration: {
@@ -2188,6 +2250,10 @@ export type Database = {
         Args: { p_identity_hash: string; p_operation: string }
         Returns: Json
       }
+      server_cover_recovery_objects: {
+        Args: { p_generation_id: string; p_organizer_id: string }
+        Returns: Json
+      }
       server_enqueue_refund_notices: {
         Args: { p_limit?: number }
         Returns: number
@@ -2195,6 +2261,10 @@ export type Database = {
       server_expire_checkout_reservations: {
         Args: { p_now: string }
         Returns: number
+      }
+      server_expire_cover_candidates: {
+        Args: { p_organizer_id: string }
+        Returns: Json
       }
       server_expire_event_report_fingerprints: { Args: never; Returns: number }
       server_fail_moderation_evaluation: {
@@ -2218,6 +2288,25 @@ export type Database = {
       server_find_organizer_media: {
         Args: { p_owner: string; p_path: string }
         Returns: string
+      }
+      server_finish_cover_candidate: {
+        Args: {
+          p_claim_token: string
+          p_failure_code?: string
+          p_generation_id: string
+          p_path: string
+          p_slot: number
+        }
+        Returns: undefined
+      }
+      server_finish_organizer_message_dispatch: {
+        Args: {
+          p_attempt_id: string
+          p_lease_id: string
+          p_outcome: string
+          p_provider_id?: string
+        }
+        Returns: boolean
       }
       server_finish_ticket_email_dispatch: {
         Args: {
@@ -2288,6 +2377,15 @@ export type Database = {
           organizer_id: string
           stripe_account_id: string
         }[]
+      }
+      server_get_event_cover_candidate: {
+        Args: {
+          p_expected_revision: number
+          p_generation_id: string
+          p_organizer_id: string
+          p_slot: number
+        }
+        Returns: Json
       }
       server_get_organizer_media: {
         Args: { p_id: string; p_owner?: string }
@@ -2454,6 +2552,26 @@ export type Database = {
         }
         Returns: undefined
       }
+      server_observe_email: {
+        Args: {
+          p_attempt_id: string
+          p_kind: string
+          p_observed_at: string
+          p_provider_id: string
+          p_webhook_id: string
+        }
+        Returns: boolean
+      }
+      server_observe_organizer_message: {
+        Args: {
+          p_attempt_id: string
+          p_kind: string
+          p_observed_at: string
+          p_provider_id: string
+          p_webhook_id: string
+        }
+        Returns: boolean
+      }
       server_observe_ticket_email: {
         Args: {
           p_attempt_id: string
@@ -2480,6 +2598,10 @@ export type Database = {
           persistence_result: string
         }[]
       }
+      server_prepare_organizer_message_recipient: {
+        Args: { p_attempt_id: string; p_lease_id: string }
+        Returns: Json
+      }
       server_prepare_ticket_email_context: {
         Args: {
           p_attempt_id: string
@@ -2502,6 +2624,7 @@ export type Database = {
           transfer_id: string
         }[]
       }
+      server_prune_organizer_message_history: { Args: never; Returns: number }
       server_prune_ticket_email_history: { Args: never; Returns: number }
       server_read_event_status_access: {
         Args: { p_ip_hash: string; p_token_hash: string }
@@ -2523,6 +2646,15 @@ export type Database = {
           p_token_hash: string
         }
         Returns: Json
+      }
+      server_reconcile_cover_object: {
+        Args: {
+          p_generation_id: string
+          p_organizer_id: string
+          p_path: string
+          p_slot: number
+        }
+        Returns: undefined
       }
       server_reconcile_unattached_paid_checkout: {
         Args: {
@@ -2560,6 +2692,10 @@ export type Database = {
           should_process: boolean
         }[]
       }
+      server_recover_cover_generation: {
+        Args: { p_generation_id: string; p_organizer_id: string }
+        Returns: undefined
+      }
       server_redeem_organizer_ticket: {
         Args: {
           p_credential_hash: string
@@ -2594,6 +2730,14 @@ export type Database = {
           p_queued_moderation_version: number
         }
         Returns: string
+      }
+      server_remove_event_cover: {
+        Args: {
+          p_event_id: string
+          p_expected_revision: number
+          p_organizer_id: string
+        }
+        Returns: Json
       }
       server_request_ticket_recovery: {
         Args: {
@@ -2640,6 +2784,10 @@ export type Database = {
         Args: { p_grant_id: string }
         Returns: boolean
       }
+      server_save_organizer_message_payload: {
+        Args: { p_attempt_id: string; p_lease_id: string; p_payload: Json }
+        Returns: boolean
+      }
       server_save_ticket_email_payload: {
         Args: {
           p_attempt_id: string
@@ -2652,6 +2800,10 @@ export type Database = {
       server_set_contextual_moderation_testing_override: {
         Args: { p_enabled: boolean; p_reason: string }
         Returns: undefined
+      }
+      server_stop_organizer_message_recipient: {
+        Args: { p_attempt_id: string; p_lease_id: string; p_reason: string }
+        Returns: boolean
       }
       server_stop_ticket_email: {
         Args: { p_attempt_id: string; p_lease_id: string; p_reason: string }
@@ -2688,6 +2840,17 @@ export type Database = {
           p_preview_token: string
           p_purpose: string
           p_request_id: string
+        }
+        Returns: Json
+      }
+      submit_owned_organizer_message: {
+        Args: {
+          p_body: string
+          p_event_id: string
+          p_fingerprint: string
+          p_request_id: string
+          p_selector: Json
+          p_subject: string
         }
         Returns: Json
       }

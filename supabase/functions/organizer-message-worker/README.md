@@ -1,0 +1,15 @@
+# Organizer Message worker
+
+This is an independent, disabled-by-default delivery lane. `POST` requires its own `ORGANIZER_MESSAGE_WORKER_SECRET` bearer (32–256 characters) and `ORGANIZER_MESSAGE_WORKER_ENABLED=true`. Configuration and authorization are checked before SQL worker-health acknowledgement. `RESEND_API_KEY` and the existing `TICKET_EMAIL_PAYLOAD_KEY_ID` / `TICKET_EMAIL_PAYLOAD_KEYS_JSON` encryption key ring must validate first. Preserve old encryption keys while immutable deliveries remain retryable.
+
+SQL independently requires worker enablement, capacity allocation, platform sender, monitored support reply-to, application/media origins, template version and fresh health for new confirmations. The owner façade calls the JWT owner RPC directly; SQL durable request replay precedes new-send gates. A missing façade environment must never make the browser assume an unknown prior submit rolled back.
+
+One invocation claims at most one recipient. The worker prepares the immutable source, renders the frozen `organizer-message-v1` React Email template shared with preview, encrypts with `{kind:'provider',attemptId,grantId:null}`, saves, and commits begin-dispatch before provider network I/O. No ticket grant, ticket member, issuance/recovery/resend RPC is called. Claim/preparation/begin all remain narrowly scoped service contracts. SQL owns leases, suppression, event safety, transactional priority, quota, retry scheduling and retention.
+
+Provider key is exactly `organizer-message/<recipientDeliveryUUID>`. Once saved, retries decrypt the same payload and never regenerate from live facts. The begin result must agree with the decrypted payload/key. Six attempts, a 23-hour idempotency safety window and at least 20 seconds of remaining lease bound network use. The existing provider adapter has a 15-second timeout and treats transport failures, 429/5xx/conflict and malformed success as unknown. A rejection on a later attempt cannot erase earlier uncertainty. Lease/storage failure does not imply delivery or authorize new payload creation.
+
+The existing signed provider webhook verifies raw bytes first, then calls `server_observe_email` to dispatch an attempt UUID into exactly one ledger. Provider-ID binding and cross-domain suppression provenance are enforced in SQL. No recipient/time guessing.
+
+Activation is a separate operational task: approve shared provider capacity and transactional reserve; verify authorized sender and monitored support; provision retained encryption keys and independent secret; deploy migration/functions; verify webhook routing; configure SQL limits/capacity and health threshold; install independent scheduling; only then explicitly enable this lane. None of those production changes or real sends occur in Build + Prove. Database gates and example environment remain disabled.
+
+Local tests inject RPC/clock/fetch or provider transport through `createOrganizerMessageWorkerHandler` / `processOrganizerMessage`; no real email is needed. The worker progresses independently of the browser once the request is durably queued.

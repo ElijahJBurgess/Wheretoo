@@ -43,7 +43,14 @@ export type EventChangedProps = {
  changes: { label: string; previous: string; current: string }[]
 }
 
+export type OrganizerMessageProps = {
+  subject: string; body: string; organizerName: string; eventName: string;
+  startsAtLabel: string; venueName: string; supportEmail: string;
+  eventUrl?: string; flyerUrl?: string; organizerLogoUrl?: string
+}
+
 export type EmailTemplateInput =
+  | { kind: 'organizer_message'; props: OrganizerMessageProps }
   | { kind: 'event_changed'; props: EventChangedProps }
   | { kind: 'order_refunded'; props: OrderRefundedProps }
   | { kind: 'ticket_recovery'; props: TicketRecoveryProps }

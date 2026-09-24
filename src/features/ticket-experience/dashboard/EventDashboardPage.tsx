@@ -195,6 +195,7 @@ export function EventDashboardPage({
         </div>
         <div className="event-dashboard__action-list">
           <Link className="ui-button ui-button--primary" to={scannerPath}>Check in guests</Link>
+          <Link className="ui-button ui-button--secondary" to={`/organizer/events/${encodeURIComponent(eventId)}/email-attendees`}>Email Attendees</Link>
           <Link className="ui-button ui-button--secondary" to={dashboard.manageEventPath}>Manage event</Link>
           <button
             aria-label="View attendees — Coming later"

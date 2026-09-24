@@ -1,0 +1,75 @@
+-- Rollback-only supplementary founder decision matrix. Never runs against hosted DB.
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions;
+select no_plan();
+truncate private.organizer_messages cascade;
+truncate private.ticket_email_outbox cascade;
+\ir ../../supabase/tests/database/free_registration_fixture.inc
+update private.ticket_email_settings set enabled_at=null,worker_enabled=false;
+select public.server_configure_organizer_messages('{"acceptingSends":true,"workerEnabled":true,"senderEmail":"notify@example.invalid","replyTo":"support@example.invalid","appOrigin":"https://example.invalid","capacityPerMinute":10,"capacityPerDay":100,"capacityPerMonth":1000,"healthMaxAgeSeconds":300}');
+select public.server_acknowledge_organizer_message_worker();
+select pg_temp.register(8101,1,2);
+create temp table policy_proof(k text primary key,v jsonb);
+insert into policy_proof values('initial',public.preview_owned_organizer_message('b6200000-0000-4000-8000-000000000002','{"kind":"everyone"}','Policy','Body'));
+select is((select v->>'recipientCount' from policy_proof where k='initial'),'1','upcoming event permits preview');
+select is(private.organizer_message_event_policy('b6200000-0000-4000-8000-000000000002',(select starts_at+interval '1 minute' from public.events where id='b6200000-0000-4000-8000-000000000002')),null::text,'during event allowed');
+select is(private.organizer_message_event_policy('b6200000-0000-4000-8000-000000000002',(select ends_at from public.events where id='b6200000-0000-4000-8000-000000000002')),null::text,'exact event end allowed');
+insert into private.staff_roles(user_id,role,granted_by) values('b6100000-0000-4000-8000-000000000002','admin','b6100000-0000-4000-8000-000000000001');
+select set_config('request.jwt.claim.sub','b6100000-0000-4000-8000-000000000002',true);
+select throws_ok($$select public.preview_owned_organizer_message('b6200000-0000-4000-8000-000000000002','{"kind":"everyone"}','Policy','Body')$$,'P0001','EVENT_UNAVAILABLE','staff admin is not owner authorization');
+select set_config('request.jwt.claim.sub','b6100000-0000-4000-8000-000000000001',true);
+select is(public.preview_owned_organizer_message('b6200000-0000-4000-8000-000000000001',jsonb_build_object('kind','registration','id',(select id from public.free_registrations where request_id='b6300000-0000-4000-8000-000000008101')),'Policy','Body')->'error'->>'code','INACTIVE_INDIVIDUAL','registration from another owned event cannot be selected');
+-- Fixture mutations bypass existing domain triggers only in this rollback transaction,
+-- to test defensive states normally created by separate operational workflows.
+set constraints all immediate;
+alter table public.events disable trigger user;
+savepoint event_state;
+update public.events set status='cancelled' where id='b6200000-0000-4000-8000-000000000002';
+select is(public.preview_owned_organizer_message('b6200000-0000-4000-8000-000000000002','{"kind":"everyone"}','Policy','Body')->'error'->>'code','EVENT_CANCELLED','cancelled event denies new preview');
+select is(private.organizer_message_event_policy('b6200000-0000-4000-8000-000000000002',clock_timestamp(),true),null::text,'committed dispatch survives later cancellation');
+rollback to event_state;
+update public.events set status='draft' where id='b6200000-0000-4000-8000-000000000002';
+select is(public.preview_owned_organizer_message('b6200000-0000-4000-8000-000000000002','{"kind":"everyone"}','Policy','Body')->'error'->>'code','EVENT_DRAFT','draft denies new preview');
+rollback to event_state;
+update public.events set moderation_status='blocked' where id='b6200000-0000-4000-8000-000000000002';
+select is(public.preview_owned_organizer_message('b6200000-0000-4000-8000-000000000002','{"kind":"everyone"}','Policy','Body')->'error'->>'code','MODERATION_BLOCKED','blocked event denies preview');
+select is(private.organizer_message_event_policy('b6200000-0000-4000-8000-000000000002',clock_timestamp(),true),'MODERATION_BLOCKED','platform block stops committed dispatch');
+rollback to event_state;
+update public.events set moderation_status='removed' where id='b6200000-0000-4000-8000-000000000002';
+select is(public.preview_owned_organizer_message('b6200000-0000-4000-8000-000000000002','{"kind":"everyone"}','Policy','Body')->'error'->>'code','MODERATION_BLOCKED','removed event denies preview');
+rollback to event_state;
+update public.events set moderation_status='under_review' where id='b6200000-0000-4000-8000-000000000002';
+select is(public.preview_owned_organizer_message('b6200000-0000-4000-8000-000000000002','{"kind":"everyone"}','Policy','Body')->'error'->>'code','MODERATION_BLOCKED','unresolved review denies preview');
+rollback to event_state;
+update public.events set moderation_status='not_evaluated' where id='b6200000-0000-4000-8000-000000000002';
+select is(public.preview_owned_organizer_message('b6200000-0000-4000-8000-000000000002','{"kind":"everyone"}','Policy','Body')->'error'->>'code','MODERATION_BLOCKED','unevaluated moderation denies preview');
+rollback to event_state;
+update public.events set moderated_revision=null where id='b6200000-0000-4000-8000-000000000002';
+select is(public.preview_owned_organizer_message('b6200000-0000-4000-8000-000000000002','{"kind":"everyone"}','Policy','Body')->'error'->>'code','MODERATION_BLOCKED','stale clear moderation revision denies preview');
+rollback to event_state;
+insert into private.event_moderation_actions(event_id,content_revision,input_sha256,actor_type,actor_user_id,source,action,previous_status,new_status,reason_code,moderation_version)
+select id,content_revision,private.compute_event_input_sha256(id),'admin','b6100000-0000-4000-8000-000000000002','manual','hold','clear','under_review','user_report',moderation_version from public.events where id='b6200000-0000-4000-8000-000000000002';
+select is(public.preview_owned_organizer_message('b6200000-0000-4000-8000-000000000002','{"kind":"everyone"}','Policy','Body')->'error'->>'code','MODERATION_BLOCKED','current active hold denies even if displayed moderation status is clear');
+rollback to event_state;
+update public.events set starts_at=null where id='b6200000-0000-4000-8000-000000000002';
+select is(public.preview_owned_organizer_message('b6200000-0000-4000-8000-000000000002','{"kind":"everyone"}','Policy','Body')->'error'->>'code','INVALID_SCHEDULE','invalid canonical schedule denied');
+rollback to event_state;
+update public.events set timezone='Invalid/Timezone' where id='b6200000-0000-4000-8000-000000000002';
+select is(public.preview_owned_organizer_message('b6200000-0000-4000-8000-000000000002','{"kind":"everyone"}','Policy','Body')->'error'->>'code','INVALID_SCHEDULE','invalid timezone denied');
+rollback to event_state;
+update public.events set starts_at=starts_at+interval '1 day',ends_at=ends_at+interval '1 day' where id='b6200000-0000-4000-8000-000000000002';
+select throws_ok($$select public.submit_owned_organizer_message('b6200000-0000-4000-8000-000000000002','{"kind":"everyone"}','Policy','Body',(select v->>'fingerprint' from policy_proof where k='initial'),gen_random_uuid())$$,'P0001','PREVIEW_CHANGED','schedule change invalidates fingerprint');
+rollback to event_state;
+alter table public.events enable trigger user;
+-- Simulate a later deployed template version; runtime configuration deliberately rejects unknown versions.
+update private.organizer_message_settings set template_version='organizer-message-v2';
+select throws_ok($$select public.submit_owned_organizer_message('b6200000-0000-4000-8000-000000000002','{"kind":"everyone"}','Policy','Body',(select v->>'fingerprint' from policy_proof where k='initial'),gen_random_uuid())$$,'P0001','PREVIEW_CHANGED','template version invalidates fingerprint');
+update private.organizer_message_settings set template_version='organizer-message-v1';
+select throws_ok($$select public.submit_owned_organizer_message('b6200000-0000-4000-8000-000000000002','{"kind":"everyone"}','Policy','Changed body',(select v->>'fingerprint' from policy_proof where k='initial'),gen_random_uuid())$$,'P0001','PREVIEW_CHANGED','body change invalidates fingerprint');
+update private.organizer_message_settings set worker_healthy_at=clock_timestamp()-interval '1 hour';
+select throws_ok($$select public.submit_owned_organizer_message('b6200000-0000-4000-8000-000000000002','{"kind":"everyone"}','Policy','Body',(select v->>'fingerprint' from policy_proof where k='initial'),gen_random_uuid())$$,'P0001','EMAIL_UNAVAILABLE','stale worker health fails before commit');
+select is((select count(*) from private.organizer_messages),0::bigint,'all policy and drift failures leave no campaign');
+select is((select count(*) from private.organizer_message_rate_events where lane='send'),0::bigint,'all policy and drift failures leave no send debit');
+select * from finish();
+rollback;

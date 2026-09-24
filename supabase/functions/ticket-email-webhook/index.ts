@@ -56,7 +56,7 @@ export function createTicketEmailWebhookHandler(deps: WebhookDependencies) {
       return response(400);
     }
     try {
-      const saved = await deps.rpc("server_observe_ticket_email", observation);
+      const saved = await deps.rpc("server_observe_email", observation);
       return response(saved === true ? 200 : 400);
     } catch {
       return response(503);

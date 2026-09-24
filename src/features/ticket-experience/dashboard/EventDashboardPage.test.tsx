@@ -172,3 +172,7 @@ describe('EventDashboardPage', () => {
     expect(signal?.aborted).toBe(true)
   })
 })
+it('opens email attendees for this event', async () => {
+  renderDashboard({ reader: readerReturning(dashboardFixture) })
+  expect(await screen.findByRole('link', { name: 'Email Attendees' })).toHaveAttribute('href', '/organizer/events/event-a/email-attendees')
+})
