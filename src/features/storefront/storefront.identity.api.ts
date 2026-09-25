@@ -12,7 +12,9 @@ export const identitySchema = z.strictObject({
 })
 export async function readIdentity() {
   const { data, error } = await supabase.rpc('get_owned_storefront_identity')
-  if (error) throw new Error('Your storefront identity could not load.')
+  if (error) throw new Error(error.code === 'PGRST202'
+    ? 'Organizer profile setup is not available in this environment yet. Please try again after the service is updated.'
+    : 'Your storefront identity could not load. Try again.')
   return data === null ? null : identitySchema.parse(data)
 }
 export async function handleAvailable(handle: string) {
@@ -60,14 +62,17 @@ export async function uploadOrganizerMedia(
 }
 export async function confirmIdentity(
   handle: string,
-  logoId: string,
+  logoId: string | null,
   userId: string,
+  isCurrent: () => boolean = () => true,
 ) {
   const token = await sessionToken(userId)
+  if (!isCurrent()) throw new Error('Your session changed. Sign in again.')
   const { data, error } = await supabase.rpc(
     'confirm_owned_storefront_handle',
     { p_handle: handle, p_logo_id: logoId },
   ).setHeader('Authorization', `Bearer ${token}`)
+  if (!isCurrent()) throw new Error('Your session changed. Sign in again.')
   if (error) {
     throw new Error(
       error.message === 'HANDLE_TAKEN'

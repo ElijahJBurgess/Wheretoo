@@ -226,3 +226,20 @@
 @media (prefers-reduced-motion: reduce) {
   .onboarding *, .onboarding *::before, .onboarding *::after { animation: none !important; transition: none !important; }
 }
+
+/* Scoped consolidation: keep the existing onboarding and Settings palettes. */
+.profile-editor .auth-form { min-height: 0; grid-template-rows: none; }
+.profile-editor__group { display: grid; gap: 16px; min-width: 0; margin: 0; border: 0; border-top: 1px solid #2a3a50; padding: 20px 0 0; }
+.profile-editor__group legend { padding: 0 10px 0 0; font-size: 15px; font-weight: 700; }
+.profile-editor__hint { margin: 0; color: #bec6d5; font-size: 13px; line-height: 1.6; }
+.profile-editor__url { margin: 0; overflow-wrap: anywhere; font-size: 14px; }
+.profile-editor__logo { width: 80px; height: 80px; border-radius: 14px; object-fit: cover; background: #172131; }
+.profile-editor__confirmation { display: flex; gap: 12px; align-items: flex-start; min-height: 44px; font-size: 13px; line-height: 1.6; cursor: pointer; }
+.profile-editor__confirmation input { flex: 0 0 20px; width: 20px; height: 20px; margin-top: 3px; }
+.profile-editor input[type='file'] { width: 100%; min-width: 0; padding: 10px; }
+.profile-editor input::file-selector-button { max-width: 100%; min-height: 32px; margin-right: 8px; }
+.profile-editor__navigation { display: flex; justify-content: space-between; gap: 16px; }
+.profile-editor__navigation button { min-height: 44px; border: 0; color: #d4c7ff; background: transparent; cursor: pointer; }
+.profile-editor .ui-field { min-width: 0; }
+
+.profile-payout-progress { max-width: 448px; margin: 24px auto; }

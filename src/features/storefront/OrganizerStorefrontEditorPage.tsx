@@ -200,8 +200,8 @@ function Editor(
           ? <p>@{saved.handle} · Your handle cannot change.</p>
           : (
             <p>
-              <Link to='/organizer/setup/identity'>
-                Confirm your handle and logo
+              <Link to='/organizer/settings/profile'>
+                Complete your organizer profile
               </Link>
             </p>
           )}

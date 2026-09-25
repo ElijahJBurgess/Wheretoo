@@ -1247,8 +1247,12 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      save_owned_organizer_setup: {
+        Args: { p_profile: Json; p_expected_updated_at: string | null; p_logo_id: string | null }
+        Returns: Json
+      }
       confirm_owned_storefront_handle: {
-        Args: { p_handle: string; p_logo_id: string }
+        Args: { p_handle: string; p_logo_id: string | null }
         Returns: Json
       }
       create_event_cover_generation: {
