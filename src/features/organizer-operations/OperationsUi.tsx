@@ -52,6 +52,7 @@ export function OperationsLayout(
         <div className='operations-sidebar__footer'>
           <Link to='/organizer/settings/payments'>Payments</Link>
           {staffRole && <Link to='/moderation'>Moderation</Link>}
+          {staffRole === 'admin' && <Link to='/moderation/event-imports'>CSV imports</Link>}
           <button disabled={signOutPending} onClick={onSignOut} type='button'>{signOutPending ? 'Signing out…' : 'Sign out'}</button>
           <span>Organizer</span>
         </div>

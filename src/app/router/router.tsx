@@ -113,6 +113,14 @@ export function createAppRoutes(runtime: TicketExperienceRuntime) {
                   lazy: lazyComponent(() => import('../../features/moderation/RequireStaff'), 'RequireStaff'),
                   children: [
                     {
+                      lazy: lazyComponent(() => import('../../features/event-imports/RequireImportAdmin'), 'RequireImportAdmin'),
+                      children: [
+                        { path: '/moderation/event-imports', lazy: lazyComponent(() => import('../../features/event-imports/EventImportsPage'), 'EventImportsPage') },
+                        { path: '/moderation/event-imports/drafts/:eventId', lazy: lazyComponent(() => import('../../features/event-imports/EventImportDraftPage'), 'EventImportDraftPage') },
+                        { path: '/moderation/event-imports/:batchId', lazy: lazyComponent(() => import('../../features/event-imports/EventImportBatchPage'), 'EventImportBatchPage') },
+                      ],
+                    },
+                    {
                       path: '/moderation',
                       lazy: lazyComponent(
                         () => import('../../features/moderation/ModerationQueuePage'),

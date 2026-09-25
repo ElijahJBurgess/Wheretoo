@@ -1283,6 +1283,11 @@ export type Database = {
         Returns: Json
       }
       get_event_cover_state: { Args: { p_event_id: string }; Returns: Json }
+      get_event_import_batch: {
+        Args: { p_batch: string; p_offset?: number }
+        Returns: Json
+      }
+      get_event_import_draft: { Args: { p_event: string }; Returns: Json }
       get_moderation_case: {
         Args: { p_event_id: string }
         Returns: {
@@ -1483,6 +1488,7 @@ export type Database = {
         Returns: Json
       }
       list_event_images: { Args: { p_event_ids: string[] }; Returns: Json }
+      list_event_import_batches: { Args: never; Returns: Json }
       list_moderation_queue: {
         Args: { p_limit: number }
         Returns: {
@@ -2164,6 +2170,10 @@ export type Database = {
         Args: { p_expires_at: string; p_order_id: string; p_session_id: string }
         Returns: string
       }
+      server_authorize_event_import: {
+        Args: { p_actor: string }
+        Returns: boolean
+      }
       server_begin_connect_refresh: {
         Args: { p_stripe_account_id: string }
         Returns: number
@@ -2188,6 +2198,10 @@ export type Database = {
         Args: { p_order_id: string; p_reason: string }
         Returns: string
       }
+      server_cancel_event_import_batch: {
+        Args: { p_actor: string; p_batch: string }
+        Returns: undefined
+      }
       server_claim_checkout_integrity_fixture_evaluation: {
         Args: { p_event_id: string; p_fixture_prefix: string }
         Returns: {
@@ -2205,6 +2219,10 @@ export type Database = {
           p_organizer_id: string
           p_slot: number
         }
+        Returns: Json
+      }
+      server_claim_event_import_work: {
+        Args: { p_actor: string; p_batch: string }
         Returns: Json
       }
       server_claim_moderation_evaluation: {
@@ -2262,6 +2280,17 @@ export type Database = {
         }
         Returns: undefined
       }
+      server_complete_event_import_geocode: {
+        Args: {
+          p_actor: string
+          p_batch: string
+          p_result: Json
+          p_revision: number
+          p_row: string
+          p_token: string
+        }
+        Returns: boolean
+      }
       server_configure_organizer_messages: {
         Args: { p_configuration: Json }
         Returns: boolean
@@ -2300,6 +2329,17 @@ export type Database = {
       server_cover_recovery_objects: {
         Args: { p_generation_id: string; p_organizer_id: string }
         Returns: Json
+      }
+      server_create_event_import_batch: {
+        Args: {
+          p_actor: string
+          p_digest: string
+          p_error?: string
+          p_filename: string
+          p_request: string
+          p_rows: Json
+        }
+        Returns: string
       }
       server_defer_waitlist_delivery: {
         Args: { p_attempt_id: string; p_lease_id: string }
@@ -2447,6 +2487,10 @@ export type Database = {
         }
         Returns: Json
       }
+      server_get_event_import_progress: {
+        Args: { p_actor: string; p_batch: string }
+        Returns: Json
+      }
       server_get_organizer_media: {
         Args: { p_id: string; p_owner?: string }
         Returns: string
@@ -2484,6 +2528,10 @@ export type Database = {
           subtotal_minor: number
           total_minor: number
         }[]
+      }
+      server_import_event_row: {
+        Args: { p_actor: string; p_batch: string; p_row: string }
+        Returns: Json
       }
       server_join_waitlist: {
         Args: {
@@ -2715,6 +2763,7 @@ export type Database = {
           transfer_id: string
         }[]
       }
+      server_prune_event_imports: { Args: never; Returns: number }
       server_prune_organizer_message_history: { Args: never; Returns: number }
       server_prune_ticket_email_history: { Args: never; Returns: number }
       server_prune_waitlist: { Args: never; Returns: number }
@@ -2831,6 +2880,10 @@ export type Database = {
         }
         Returns: Json
       }
+      server_request_event_import_rows: {
+        Args: { p_actor: string; p_batch: string; p_rows: Json }
+        Returns: undefined
+      }
       server_request_ticket_recovery: {
         Args: {
           p_ip_hash: string
@@ -2867,6 +2920,16 @@ export type Database = {
           subtotal_minor: number
           total_minor: number
         }[]
+      }
+      server_resolve_event_import_row: {
+        Args: {
+          p_action: string
+          p_actor: string
+          p_batch: string
+          p_digest?: string
+          p_row: string
+        }
+        Returns: boolean
       }
       server_resolve_free_registration: {
         Args: { p_access_hash: string; p_request_id: string }
