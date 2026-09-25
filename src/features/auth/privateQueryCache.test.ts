@@ -1,6 +1,18 @@
 import { QueryClient } from '@tanstack/react-query'
 import { expect, it } from 'vitest'
 import { evictPrivateIdentityQueries } from './privateQueryCache'
+it('clears private import queries and uncertain-upload receipts when identity changes', () => {
+  const client = new QueryClient()
+  client.setQueryData(['event-imports', 'owner-a', 'batch'], { private: true })
+  const receiptKey = 'event-import-upload:owner-a:digest:private.csv'
+  sessionStorage.setItem(receiptKey, 'request-id')
+  sessionStorage.setItem('unrelated-preference', 'keep')
+  evictPrivateIdentityQueries(client)
+  expect(client.getQueryData(['event-imports', 'owner-a', 'batch'])).toBeUndefined()
+  expect(sessionStorage.getItem(receiptKey)).toBeNull()
+  expect(sessionStorage.getItem('unrelated-preference')).toBe('keep')
+  sessionStorage.removeItem('unrelated-preference')
+})
 it('evicts organizer operations PII while preserving public queries on identity changes', () => {
   const client = new QueryClient()
   client.setQueryData(['organizer-operations', 'owner-a', 'event-a', 'orders'], {

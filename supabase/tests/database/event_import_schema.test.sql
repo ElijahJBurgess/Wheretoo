@@ -1,0 +1,12 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions;
+select plan(6);
+select has_table('private','event_import_settings','private settings exists');
+select has_table('private','event_import_batches','private batches exists');
+select has_table('private','event_import_rows','private rows exists');
+select ok((select not enabled from private.event_import_settings where singleton),'disabled by default');
+select ok(not has_table_privilege('authenticated','private.event_import_rows','SELECT'),'no browser table access');
+select ok(not has_table_privilege('service_role','private.event_import_rows','INSERT'),'service has RPC only');
+select * from finish();
+rollback;

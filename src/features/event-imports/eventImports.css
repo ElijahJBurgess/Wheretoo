@@ -1,0 +1,135 @@
+.event-imports {
+  max-width: 1200px;
+  margin: auto;
+  padding: 24px;
+  overflow-wrap: anywhere;
+}
+.event-imports h1 {
+  font-size: clamp(1.6rem,4vw,2.4rem);
+}
+.event-imports form,
+.event-imports__actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: end;
+  margin: 24px 0;
+}
+.event-imports label {
+  display: grid;
+  gap: 8px;
+}
+.event-imports button {
+  padding: 10px 14px;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.event-imports button:disabled {
+  opacity: .5;
+  cursor: default;
+}
+.event-imports button:focus-visible,
+.event-imports input:focus-visible {
+  outline: 3px solid #20605d;
+  outline-offset: 3px;
+}
+.event-imports__table {
+  max-width: 100%;
+  overflow: auto;
+  margin: 20px 0;
+  border: 1px solid #c5ccc8;
+}
+.event-imports table {
+  width: 100%;
+  min-width: 980px;
+  border-collapse: collapse;
+}
+.event-imports th,
+.event-imports td {
+  padding: 12px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid #c5ccc8;
+  max-width: 260px;
+}
+.event-imports td p {
+  font-size: .875rem;
+}
+.event-imports td button {
+  margin: 6px 4px 0 0;
+}
+.event-imports nav {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.event-imports [role=alert] {
+  color: #9a231d;
+}
+.event-imports input[type=file] {
+  max-width: 100%;
+}
+@media (max-width:600px) {
+  .event-imports {
+    padding: 16px;
+  }
+  .event-imports form {
+    display: grid;
+  }
+  .event-imports__actions button {
+    flex: 1 1 45%;
+  }
+}
+/* Keep form intrinsic widths and the wide review table inside the staff shell. */
+.event-imports {
+  width: 100%;
+  min-width: 0;
+}
+.event-imports form,
+.event-imports label {
+  min-width: 0;
+}
+.event-imports input[type=file] {
+  width: 100%;
+  min-width: 0;
+}
+
+/* Intrinsic table width must not enlarge the shell's grid track. */
+.organizer-layout:has(.event-imports) {
+  grid-template-columns: minmax(0, 1fr);
+}
+.organizer-layout__main:has(.event-imports) {
+  min-width: 0;
+}
+.event-imports table {
+  table-layout: fixed;
+  min-width: 1040px;
+}
+.event-imports th:first-child,
+.event-imports td:first-child {
+  width: 76px;
+}
+.event-imports th:nth-child(2),
+.event-imports td:nth-child(2) {
+  width: 50px;
+}
+.event-imports th:nth-child(3),
+.event-imports td:nth-child(3) {
+  width: 180px;
+}
+.event-imports th:last-child,
+.event-imports td:last-child {
+  width: 210px;
+}
+
+.event-imports__actions {
+  align-items: stretch;
+}
+.event-imports td:last-child > strong {
+  display: block;
+  margin-bottom: 8px;
+}

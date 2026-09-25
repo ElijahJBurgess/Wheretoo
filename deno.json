@@ -17,7 +17,10 @@
     "./src/features/ticket-experience/email/TicketRecoveryEmail": "./src/features/ticket-experience/email/TicketRecoveryEmail.tsx",
     "./src/features/ticket-experience/email/OrderRefundedEmail": "./src/features/ticket-experience/email/OrderRefundedEmail.tsx",
     "./src/features/ticket-experience/email/EventChangedEmail": "./src/features/ticket-experience/email/EventChangedEmail.tsx",
-    "./src/features/ticket-experience/email/OrganizerMessageEmail": "./src/features/ticket-experience/email/OrganizerMessageEmail.tsx"
+    "./src/features/ticket-experience/email/OrganizerMessageEmail": "./src/features/ticket-experience/email/OrganizerMessageEmail.tsx",
+    "csv-parse/sync": "npm:csv-parse@7.0.2/sync",
+    "react/jsx-runtime": "npm:react@19.2.8/jsx-runtime",
+    "react/jsx-dev-runtime": "npm:react@19.2.8/jsx-dev-runtime"
   },
   "tasks": {
     "test": "deno test --allow-env supabase/functions",
@@ -26,6 +29,10 @@
   },
   "compilerOptions": {
     "jsx": "react-jsx",
-    "jsxImportSource": "react"
-  }
+    "jsxImportSource": "react",
+    "types": [
+      "npm:@types/react@19.2.18"
+    ]
+  },
+  "nodeModulesDir": "none"
 }

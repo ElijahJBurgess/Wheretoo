@@ -20,6 +20,7 @@ export function OrganizerLayout({ children, onSignOut, signOutPending = false, s
             <a href="/organizer/settings/payments">Payments</a>
             <a href="/organizer/settings">Settings</a>
             {staffRole ? <a href="/moderation">Moderation</a> : null}
+            {staffRole === 'admin' ? <a href="/moderation/event-imports">CSV imports</a> : null}
             <button disabled={signOutPending} className="organizer-layout__sign-out" onClick={onSignOut} type="button">
               {signOutPending ? 'Signing out…' : 'Sign out'}
             </button>

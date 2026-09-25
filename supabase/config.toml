@@ -525,3 +525,11 @@ import_map = "../deno.json"
 [functions.waitlist-email-worker]
 verify_jwt = false
 import_map = "../deno.json"
+
+[functions.event-import-upload]
+verify_jwt = false
+import_map = "../deno.json"
+
+[functions.event-import-process]
+verify_jwt = false
+import_map = "../deno.json"
