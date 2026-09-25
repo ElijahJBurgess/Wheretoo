@@ -156,7 +156,7 @@ export function createAppRoutes(runtime: TicketExperienceRuntime) {
                         { path: 'storefront/preview', lazy: lazyComponent(() => import('../../features/storefront/StorefrontPreviewPage'), 'StorefrontPreviewPage') },
                         { path: 'account', lazy: lazyComponent(() => import('../../features/organizer-settings/AccountSecurityPage'), 'AccountSecurityPage') },
                         { path: 'profile', lazy: lazyComponent(() => import('../../features/organizer-settings/OrganizerProfilePage'), 'OrganizerProfilePage') },
-                        { path: 'payments', lazy: lazyComponent(() => import('../../features/payments/OrganizerPaymentsPage'), 'OrganizerPaymentsPage') },
+                        { path: 'payments', lazy: lazyComponent(() => import('../../features/organizers/OrganizerPayoutsRoute'), 'OrganizerPayoutsRoute') },
                         { path: 'help', lazy: lazyComponent(() => import('../../features/organizer-settings/HelpLegalPage'), 'HelpLegalPage') },
                         { path: 'actions', lazy: lazyComponent(() => import('../../features/organizer-settings/AccountActionsPage'), 'AccountActionsPage') },
                       ],

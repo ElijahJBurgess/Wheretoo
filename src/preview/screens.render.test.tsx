@@ -27,6 +27,7 @@ vi.mock('../features/events/event.queries', () => ({
 }))
 vi.mock('../features/event-changes/eventChanges.queries', () => ({ useEventChangeContext: mocks.eventChangeContext }))
 vi.mock('../features/organizer-operations/operations.queries', () => ({ useEventMetrics: mocks.eventMetrics }))
+vi.mock('../features/organizers/organizer.api', () => ({ getOrganizer: () => new Promise(() => undefined) }))
 vi.mock('../features/organizers/organizer.queries', () => ({ useOrganizer: mocks.organizer, useSaveOrganizer: mutation }))
 vi.mock('../features/tickets/ticket.queries', () => ({ useOwnedTicketTiers: mocks.tiers, useSaveTicketTiers: mutation }))
 vi.mock('../features/tickets/publicTicketing.queries', () => ({ usePublicTicketingEvent: mocks.publicEvent }))
@@ -84,6 +85,7 @@ it('keeps visual fixtures current with the real screens, without calling service
   function capture(key: string, path: string, page: ReactNode, consoleScreen = false) {
     const sideEffectsBeforeCapture = mocks.blocked.mock.calls.length
     const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    if (key === 'organizer-setup') client.setQueryData(['organizer-settings', 'profile-identity', organizerId], { organizer, identity: { name: organizer.display_name, handle: null, logoId: null } })
     const route = path.split('?')[0].replace(eventId, ':eventId')
     const router = createMemoryRouter([{ path: route, element: consoleScreen ? <OrganizerLayout onSignOut={mocks.blocked} staffRole={key.startsWith('moderation') ? 'moderator' : null}>{page}</OrganizerLayout> : page }], { initialEntries: [path] })
     const view = render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>)
