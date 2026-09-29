@@ -217,6 +217,15 @@ export function EventEditorPage() {
   }, [routeLocation.key])
 
   useEffect(() => {
+    // Consume the one-time handoff after the saved draft and image panel mount.
+    // Reloading a closed panel must not resurrect generation UI from history.
+    if (hasBaseline && routeLocation.state?.openAi === true) {
+      approvedNavigationRef.current = true
+      void navigate(routeLocation.pathname + routeLocation.search, { replace: true, state: { ...routeLocation.state, openAi: false } })
+    }
+  }, [hasBaseline, navigate, routeLocation.pathname, routeLocation.search, routeLocation.state])
+
+  useEffect(() => {
     const requested = creationStepFromSearch(routeLocation.search)
     // Browser navigation can select a saved creation stage independently of button handlers.
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -280,7 +289,7 @@ export function EventEditorPage() {
     if (!isNew) {
       // Even a no-op save validates the displayed baseline before later policy/publish actions.
       const isCurrent = captureEditorIdentity()
-      const next = await saveEventIfCurrent(eventId, organizerId, expectedContext(), valuesToSave)
+      const next = await saveEventIfCurrent(eventId, organizerId, expectedContext(), valuesToSave, baselineRef.current?.event)
       adoptContext(next, isCurrent)
       reset(eventRowToFormValues(next.event))
       return next.event
@@ -288,7 +297,7 @@ export function EventEditorPage() {
     const isCurrent = captureEditorIdentity()
     const saved = await saveDraftMutation.mutateAsync({ eventId: null, organizerId, values: valuesToSave })
     if (!isCurrent()) throw new EventChangeError('unknown')
-    if (saved.organizer_id !== organizerId || !saved.id) throw new Error('SAVED_EVENT_IDENTITY_MISMATCH')
+    if (saved.organizer_id !== organizerId || !saved.id) throw new Error('Your draft could not be confirmed. Reload and try again.')
     reset(eventRowToFormValues(saved))
     return saved
   }
@@ -296,10 +305,33 @@ export function EventEditorPage() {
   async function ensureArtworkDraft(): Promise<string> {
     if (eventId) return eventId
     if (artworkDraftRef.current?.identity === routeIdentity) return artworkDraftRef.current.id
-    const values = eventDraftSchema.parse(getValues())
-    const saved = await persistForCurrentLifecycle(values)
+    const values = eventDraftSchema.safeParse(getValues())
+    if (!values.success) throw new Error('Check your event details before adding an image.')
+    const saved = await persistForCurrentLifecycle(values.data)
     artworkDraftRef.current = { id: saved.id, identity: routeIdentity }
     return saved.id
+  }
+
+  async function prepareAiCover(): Promise<string> {
+    if (activeActionRef.current !== null) throw new Error('Finish saving before generating an image.')
+    activeActionRef.current = 'save'
+    setWriting(true)
+    const revisionChanged = isDirty
+    try {
+      const values = eventDraftSchema.safeParse(getValues())
+      if (!values.success) throw new Error('Finish the highlighted event details before generating an image.')
+      const saved = await persistForCurrentLifecycle(values.data)
+      if (revisionChanged) resetDisplayedAgreement()
+      if (isNew) {
+        artworkDraftRef.current = { id: saved.id, identity: routeIdentity }
+        approvedNavigationRef.current = true
+        void navigate(`/organizer/events/${saved.id}/edit?step=basics`, { replace: true, state: { openAi: true } })
+      }
+      return saved.id
+    } catch (error) {
+      if (error instanceof EventChangeError) recordWriteFailure(error)
+      throw new Error('Your details could not be confirmed. Save or reload the draft before generating an image.', { cause: error })
+    } finally { activeActionRef.current = null; setWriting(false) }
   }
 
   function finishArtworkUpload(savedId: string, error: string | null) {
@@ -410,7 +442,9 @@ export function EventEditorPage() {
         const saved = await persistForCurrentLifecycle(values)
         if (revisionChanged) resetDisplayedAgreement()
         const next = (step + 1) as CreationEditorStep
-        setActiveStep(next)
+        // The new draft route hydrates its own next stage. Exposing it here
+        // would let early input be overwritten by that canonical hydration.
+        if (!isNew) setActiveStep(next)
         navigateApproved(`/organizer/events/${saved.id}/edit?step=${creationStepNames[next]}`, true)
       } catch (error) {
         if (!isNew) recordWriteFailure(error)
@@ -624,20 +658,20 @@ export function EventEditorPage() {
             <form noValidate onSubmit={(event) => event.preventDefault()}>
               <fieldset className="event-creation__form" disabled={isBusy}>
                 <FormErrorSummary errors={summaryErrors} title={serverError || agreementError ? 'Changes were not saved' : 'Missing information'} />
-                {activeStep === 1 ? <div className="event-editor__basics"><EventDetailsStep creation errors={errors} register={register} /><EventImageManager eventId={eventId} disabled={isBusy} ensureEventId={ensureArtworkDraft} onBusyChange={setArtworkBusy} onUploadSettled={finishArtworkUpload} /></div> : null}
-                {activeStep === 2 ? <EventScheduleLocationStep creation errors={errors} location={location} onLocationChange={setLocation} register={register} /> : null}
+                {activeStep === 1 ? <div className="event-editor__basics"><EventDetailsStep creation errors={errors} register={register} /><EventImageManager eventId={eventId} disabled={isBusy} ensureEventId={ensureArtworkDraft} onBusyChange={setArtworkBusy} onUploadSettled={finishArtworkUpload} onPrepareAi={prepareAiCover} initialAiOpen={routeLocation.state?.openAi === true} /></div> : null}
+                {activeStep === 2 ? <EventScheduleLocationStep control={control} creation errors={errors} location={location} onLocationChange={setLocation} register={register} /> : null}
                 {activeStep === 3 ? <div className="event-step">
-                  <header className="event-step__header"><h1>Ticket Type</h1><p>How will people attend your event?</p></header>
+                  <header className="event-step__header"><h1>Admission</h1><p>How will people attend?</p></header>
                   <fieldset className="event-choice-group"><legend className="event-creation__sr">Admission</legend>
-                    <label><input type="radio" value="paid" {...register('admissionType')} /><span><strong>Paid Tickets</strong><small>Sell tickets with card payments through Stripe.</small></span></label>
+                    <label><input type="radio" value="paid" {...register('admissionType')} /><span><strong>Paid Tickets</strong><small>Sell tickets. Configure up to three tiers.</small></span></label>
                     <label><input type="radio" value="free" {...register('admissionType')} /><span><strong>Free RSVP</strong><small>Let people attend for free.</small></span></label>
                   </fieldset>
                   {admissionType === 'free' ? <Field error={errors.capacity?.message} label="Capacity (optional)" name="capacity"><input min="1" inputMode="numeric" type="number" {...register('capacity', { setValueAs: (value) => value === '' || value == null ? null : Number(value) })} /></Field> : null}
                 </div> : null}
                 {requirementsInitialState()}
                 {activeStep >= 4 && requirementsAreHydrated ? <>
-                  <header className="event-step__header"><h1>Event Details</h1><p>Review your event and complete the final details.</p></header>
-                  {ownedEvent ? <div className="event-editor__overview"><EventCompositionSummary event={ownedEvent} /><EventImageManager key={eventId} eventId={eventId} disabled={isBusy} onBusyChange={setArtworkBusy} /></div> : null}
+                  <header className="event-step__header"><h1>Review</h1><p>Check your event, answer the requirements and accept the current policies.</p></header>
+                  {ownedEvent ? <EventCompositionSummary event={ownedEvent} /> : null}
                   <EventRequirementsStep control={requirementsControl} errors={requirementErrors} onRequirementChange={resetDisplayedAgreement} register={registerRequirement} />
                   {organizerTerms && eventPolicy ? <OrganizerAgreementStep error={requirementErrors.organizerAgreement?.message} eventPolicy={eventPolicy} needsAcceptance={currentNeedsAcceptance} onAgreementChange={() => { setAgreementError(null); requirementsForm.clearErrors('organizerAgreement') }} organizerTerms={organizerTerms} register={registerRequirement} /> : <ReadState status="unavailable" title="Publication policies are not available" description="You can save your draft and images. Agreement and publication will be available once Wheretoo has configured its policies." />}
                 </> : null}
@@ -677,8 +711,8 @@ export function EventEditorPage() {
         <aside className="event-editor__rail"><StepRail current={activeStep} labels={steps} /></aside>
         <form className="event-editor__form" noValidate onSubmit={(event) => event.preventDefault()}>
           <FormErrorSummary errors={summaryErrors} title={serverError || agreementError ? 'Save needs review' : 'Check the highlighted fields'} />
-          {activeStep === 1 ? <div className="event-editor__basics"><EventDetailsStep errors={errors} register={register} />{eventId ? <EventImageManager key={eventId} eventId={eventId} disabled={isBusy} onBusyChange={setArtworkBusy} /> : null}</div> : null}
-          {activeStep === 2 ? <EventScheduleLocationStep errors={errors} location={location} onLocationChange={setLocation} register={register} /> : null}
+          {activeStep === 1 ? <div className="event-editor__basics"><EventDetailsStep errors={errors} register={register} />{eventId ? <EventImageManager collapsed key={eventId} eventId={eventId} disabled={isBusy} onBusyChange={setArtworkBusy} onPrepareAi={prepareAiCover} /> : null}</div> : null}
+          {activeStep === 2 ? <EventScheduleLocationStep control={control} errors={errors} location={location} onLocationChange={setLocation} register={register} /> : null}
           {activeStep === 3 ? <EventReviewStep eventId={isNew ? undefined : eventId} values={getValues()} /> : null}
           {requirementsInitialState()}
           {activeStep === 4 && requirementsAreHydrated ? (

@@ -104,6 +104,27 @@ describe('LocationSearchField', () => {
     expect(document.querySelector('mapbox-search-box')).not.toBeInTheDocument()
   })
 
+  it('shows one compact verified address and invalidates it when Change is chosen', async () => {
+    const { onChange } = renderHarness(verifiedLocation)
+    expect(screen.queryByLabelText('Search for a California address')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Change address' }))
+    expect(onChange).toHaveBeenCalledWith(null)
+    expect(screen.getByRole('combobox')).toHaveValue('')
+    await waitFor(() => expect(screen.getByRole('combobox')).toHaveFocus())
+  })
+
+  it('explains an empty search and permits retry after a transport error', async () => {
+    renderHarness()
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Unknown address' } })
+    expect(await screen.findByText('No addresses found. Try a street address.')).toBeVisible()
+    mapbox.session.suggest.mockRejectedValueOnce(new Error('private provider diagnostic'))
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Market St' } })
+    expect(await screen.findByRole('button', { name: 'Retry search' })).toBeEnabled()
+    expect(screen.queryByText('private provider diagnostic')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Retry search' }))
+    expect(await screen.findByText('No addresses found. Try a street address.')).toBeVisible()
+  })
+
   it('renders suggestions with attribution and retrieves a verified selection', async () => {
     const user = userEvent.setup()
     const { onChange } = renderHarness()
@@ -198,7 +219,7 @@ describe('LocationSearchField', () => {
   it('clears a verified location once, starts a new session, and returns focus to search', async () => {
     const user = userEvent.setup()
     const { onChange } = renderHarness(verifiedLocation)
-    await user.click(screen.getByRole('button', { name: 'Clear address' }))
+    await user.click(screen.getByRole('button', { name: 'Change address' }))
     expect(onChange).toHaveBeenCalledOnce()
     expect(onChange).toHaveBeenCalledWith(null)
     expect(mapbox.session.abort).toHaveBeenCalled()
@@ -209,7 +230,7 @@ describe('LocationSearchField', () => {
   it('keeps an externally supplied verified location outside the search lifecycle', () => {
     const onChange = vi.fn()
     render(<LocationSearchField value={verifiedLocation} onChange={onChange} />)
-    expect(screen.getByLabelText('Search for a California address')).toHaveAttribute('readonly')
+    expect(screen.queryByLabelText('Search for a California address')).not.toBeInTheDocument()
     expect(screen.getByText('Verified address')).toBeInTheDocument()
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
     expect(mapbox.session.suggest).not.toHaveBeenCalled()

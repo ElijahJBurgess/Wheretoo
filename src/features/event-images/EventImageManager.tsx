@@ -14,12 +14,15 @@ type ImageManagerProps = {
   ensureEventId?: () => Promise<string>
   onBusyChange?: (busy: boolean) => void
   onUploadSettled?: (eventId: string, error: string | null) => void
+  collapsed?: boolean
+  initialAiOpen?: boolean
+  onPrepareAi?: () => Promise<string>
 }
 export function EventImageManager(props: ImageManagerProps) {
   const session = useSession()
   return <ImageManager key={`${props.eventId}:${session.user?.id ?? 'none'}:${session.identityVersion}`} {...props} />
 }
-function ImageManager({ eventId, disabled = false, ensureEventId, onBusyChange, onUploadSettled }: ImageManagerProps) {
+function ImageManager({ eventId, disabled = false, ensureEventId, onBusyChange, onUploadSettled, collapsed = false, initialAiOpen = false, onPrepareAi }: ImageManagerProps) {
   const images = useEventCoverState(eventId)
   const session = useSession()
   const client = useQueryClient()
@@ -27,6 +30,9 @@ function ImageManager({ eventId, disabled = false, ensureEventId, onBusyChange, 
   const [busy, setBusy] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState(!collapsed)
+  const [aiOpen, setAiOpen] = useState(initialAiOpen)
+  const aiButtonRef = useRef<HTMLButtonElement>(null)
   const lock = useRef(false)
   const mounted = useRef(false)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
@@ -78,33 +84,44 @@ function ImageManager({ eventId, disabled = false, ensureEventId, onBusyChange, 
     })
   }
   const flyer = records.find(image => image.position === 1)
-  const uploadLabel = flyer ? 'Replace flyer' : 'Upload flyer'
-  return <section className="event-image-manager" aria-label="Event flyer">
-    <header className="event-image-heading"><h2>Event flyer <span>Optional</span></h2></header>
-    <p className="event-image-status">Your event’s cover, from discovery to tickets.</p>
-    <p className="event-image-status">4:5 portrait recommended. Other sizes fit inside the frame without cropping.</p>
-    {previews.length || flyer ? <div className="event-flyer-preview">
-      <img src={previews[0] ?? flyer?.url} alt={previews.length ? 'Uploading flyer' : 'Event flyer'} />
-      {previews.length ? <span role="status">Saving…</span> : null}
-    </div> : null}
-    <div className={`event-image-dropzone${dragging ? ' event-image-dropzone--active' : ''}${flyer ? ' event-image-dropzone--compact' : ''}`}
+  const uploadLabel = flyer ? 'Replace image' : 'Upload image'
+  const closeAi = () => { setAiOpen(false); aiButtonRef.current?.focus() }
+  return <section className="event-image-manager event-image-manager--compact" aria-label="Event image">
+    <header className="event-image-heading"><h2>Event image <span>Optional</span></h2></header>
+    <div className="event-image-compact-row">
+      <div className="event-flyer-preview">
+        {previews.length || flyer ? <img src={previews[0] ?? flyer?.url} alt={previews.length ? 'Uploading image' : 'Event image'} /> : <span>No image yet</span>}
+      </div>
+      <div className="event-image-compact-controls">
+      {!expanded ? <div className="event-image-actions"><button type="button" onClick={() => setExpanded(true)}>Change image</button></div> : <>
+    <div className={`event-image-dropzone event-image-dropzone--compact${dragging ? ' event-image-dropzone--active' : ''}`}
       onDragOver={event => { event.preventDefault(); if (!unavailable) setDragging(true) }}
       onDragLeave={() => setDragging(false)}
       onDrop={event => { event.preventDefault(); setDragging(false); if (!unavailable) upload(Array.from(event.dataTransfer.files)) }}>
-      <svg aria-hidden="true" viewBox="0 0 32 32" fill="none"><rect x="4" y="6" width="24" height="20" rx="4" stroke="currentColor" strokeWidth="1.5"/><circle cx="11" cy="12" r="2" fill="currentColor"/><path d="m6 23 7-7 4 4 5-6 5 9" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/></svg>
       <label className="event-image-upload">
         <strong>{uploadLabel}</strong>
         <input aria-label={uploadLabel} type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" disabled={unavailable}
           onChange={event => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ''; upload(files) }} />
       </label>
-      <p>or drag and drop here</p>
-      <small>JPEG, PNG or WebP · 5 MB maximum</small>
     </div>
+    <div className="event-image-actions"><button ref={aiButtonRef} type="button" disabled={unavailable || (!eventId && !onPrepareAi)} aria-expanded={aiOpen} onClick={() => {
+      if (aiOpen) { closeAi(); return }
+      void run(async current => {
+        const preparedId = onPrepareAi ? await onPrepareAi() : eventId
+        if (current() && preparedId === eventId) setAiOpen(true)
+      })
+    }}>Generate with AI</button></div>
+    {flyer ? <div className="event-image-actions"><button type="button" disabled={unavailable} onClick={() => void run(async current => removeEventFlyer(eventId, current, revision ?? -1))}>Remove image</button></div> : null}
+    </>}
+    <p className="event-image-status">JPEG, PNG or WebP · up to 5 MB</p>
+    </div></div>
     {!!eventId && images.isPending ? <p role="status">Loading flyer…</p> : null}
     {!!eventId && images.isError ? <p role="alert">Your flyer could not load. <button type="button" onClick={() => void images.refetch()}>Refresh flyer</button></p> : null}
-    <p className="event-image-status" aria-live="polite">{busy ? 'Saving flyer…' : flyer ? 'Your flyer saves automatically.' : 'Upload now, or come back to it later.'}</p>
+    <p className="event-image-status" aria-live="polite">{busy ? 'Saving image…' : flyer ? 'Image saved.' : 'You can add an image later.'}</p>
     {error ? <p role="alert">{error} {eventId ? <button type="button" disabled={busy} onClick={() => void images.refetch()}>Refresh flyer</button> : null}</p> : null}
-    {flyer ? <div className="event-image-actions"><button type="button" disabled={unavailable} onClick={() => void run(async current => removeEventFlyer(eventId, current, revision ?? -1))}>Remove flyer</button></div> : null}
-    <AiCoverChooser eventId={eventId} revision={revision} latestGenerationId={images.data?.latestGenerationId} disabled={unavailable} />
+    {aiOpen ? <section className="event-image-ai-panel" aria-label="Generate event image">
+      <div className="event-image-heading"><h3>Generate an image</h3><button type="button" onClick={closeAi}>Close</button></div>
+      <AiCoverChooser eventId={eventId} revision={revision} latestGenerationId={images.data?.latestGenerationId} disabled={unavailable} embedded onSelected={closeAi} />
+    </section> : null}
   </section>
 }
