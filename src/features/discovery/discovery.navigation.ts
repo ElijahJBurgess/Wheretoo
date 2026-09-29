@@ -10,3 +10,8 @@ export function discoveryScrollPosition(state: unknown): number {
   const scroll = typeof state === 'object' && state !== null && 'discoveryScroll' in state ? state.discoveryScroll : null
   return typeof scroll === 'number' && Number.isFinite(scroll) && scroll >= 0 && scroll <= 1_000_000 ? scroll : 0
 }
+
+export function discoveryCardScrollPosition(state: unknown): number {
+  const scroll = typeof state === 'object' && state !== null && 'discoveryCardScroll' in state ? state.discoveryCardScroll : null
+  return typeof scroll === 'number' && Number.isFinite(scroll) && scroll >= 0 && scroll <= 1_000_000 ? scroll : 0
+}

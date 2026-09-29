@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import type { EventCategory } from '../events/event.types'
-import { defaultDiscoveryFilters, toggleDiscoveryFilter } from './discovery.filters'
+import { eventCategories, type EventCategory } from '../events/event.types'
+import { defaultDiscoveryFilters } from './discovery.filters'
 import {
   categoryLabel,
   discoveryAdmissionLabel,
@@ -10,7 +10,7 @@ import {
 } from './discovery.presentation'
 import type { DiscoveryDisplayItem, DiscoveryFilters } from './discovery.types'
 import './discovery.css'
-import discoveryHero from './assets/discovery-hero.svg'
+import discoveryHero from './assets/bay-bridge-night.jpg'
 
 export type DiscoveryViewProps = {
   filters: DiscoveryFilters
@@ -38,7 +38,12 @@ const dateFilters = [
   ['weekend', 'This weekend'],
 ] as const
 
-const categoryShortcuts = ['music', 'nightlife', 'food_drink'] as const satisfies readonly EventCategory[]
+const shortcuts = [
+  ['This Weekend', 'Make a little room for going out.', '/discover?when=weekend'],
+  ['Free Events', 'Good plans. No ticket price.', '/discover?price=free'],
+  ['Music', 'Find your next live soundtrack.', '/discover?category=music'],
+  ['Food & Drink', 'Something worth gathering around.', '/discover?category=food_drink'],
+] as const
 
 const fallbackMarks = {
   food_drink: 'F+D', music: 'M', fitness: 'MOVE', art_culture: 'A+C',
@@ -100,7 +105,7 @@ function EventLink({ item, publicSearch, variant, eventHref }: {
       <article className="discovery-hero">
         <div className="discovery-hero__flyer"><DiscoveryArtwork hero item={item} /></div>
         <div className="discovery-hero__copy">
-          <p className="discovery-kicker">Coming up</p>
+          <p className="discovery-kicker">Featured</p>
           <h2>{item.title}</h2>
           <p className="discovery-event-schedule">{discoverySchedule(item)}</p>
           <EventPlace item={item} />
@@ -128,10 +133,10 @@ function EventLink({ item, publicSearch, variant, eventHref }: {
           <strong>{item.title}</strong>
           <span className="discovery-event-schedule">{discoverySchedule(item)}</span>
           <EventPlace item={item} />
-          <span className="discovery-admission discovery-event-row__mobile-admission" data-testid="mobile-admission">{discoveryAdmissionLabel(item)}</span>
+          <span className="discovery-admission">{discoveryAdmissionLabel(item)}</span>
         </span>
         <span className="discovery-event-row__end">
-          <span className="discovery-admission">{discoveryAdmissionLabel(item)}</span>
+          <span>View event</span>
           <ArrowMark />
         </span>
       </Link>
@@ -144,43 +149,20 @@ function DiscoveryFiltersView({ filters, onChange }: {
   onChange(filters: DiscoveryFilters): void
 }) {
   const filtered = filters.when !== 'upcoming' || filters.category !== null || filters.price !== null
-  const categories: readonly EventCategory[] = filters.category && !categoryShortcuts.includes(filters.category as typeof categoryShortcuts[number])
-    ? [...categoryShortcuts, filters.category]
-    : categoryShortcuts
   return (
     <section aria-label="Filter events" className="discovery-filters">
-      <div aria-label="Date" className="discovery-chip-group" role="group">
-        {dateFilters.map(([value, label]) => (
-          <button
-            aria-pressed={filters.when === value}
-            key={value}
-            onClick={() => onChange({ ...filters, when: value })}
-            type="button"
-          >{label}</button>
-        ))}
-      </div>
-      <div className="discovery-filter-scroll discovery-secondary-filters">
-        <div aria-label="Category" className="discovery-chip-group" role="group">
-          {categories.map((category) => (
-            <button
-              aria-pressed={filters.category === category}
-              key={category}
-              onClick={() => onChange(toggleDiscoveryFilter(filters, 'category', category))}
-              type="button"
-            >{categoryLabel(category)}</button>
-          ))}
-        </div>
-        <div aria-label="Admission" className="discovery-chip-group discovery-chip-group--price" role="group">
-          {(['free', 'paid'] as const).map((price) => (
-            <button
-              aria-pressed={filters.price === price}
-              key={price}
-              onClick={() => onChange(toggleDiscoveryFilter(filters, 'price', price))}
-              type="button"
-            >{price === 'free' ? 'Free' : 'Paid'}</button>
-          ))}
-        </div>
-      </div>
+      <div className="discovery-filter-region"><PinMark /><span>SF Bay Area</span></div>
+      <label>Date<select value={filters.when} onChange={(event) => onChange({ ...filters, when: event.target.value as DiscoveryFilters['when'] })}>
+        {dateFilters.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+      </select></label>
+      <label>Category<select value={filters.category ?? ''} onChange={(event) => onChange({ ...filters, category: (event.target.value || null) as EventCategory | null })}>
+        <option value="">All categories</option>
+        {eventCategories.map((category) => <option key={category} value={category}>{categoryLabel(category)}</option>)}
+      </select></label>
+      <label>Admission<select value={filters.price ?? ''} onChange={(event) => onChange({ ...filters, price: (event.target.value || null) as DiscoveryFilters['price'] })}>
+        <option value="">Any price</option><option value="free">Free</option><option value="paid">Paid</option>
+      </select></label>
+      <a className="discovery-explore" href="#discovery-results">Explore events <ArrowMark /></a>
       {filtered ? <button className="discovery-clear-filters" onClick={() => onChange(defaultDiscoveryFilters)} type="button">Clear filters</button> : null}
     </section>
   )
@@ -227,7 +209,6 @@ export function DiscoveryView({
       <div className="discovery-shell">
         <header className="discovery-header">
           <Link aria-label="Wheretoo discovery home" className="discovery-wordmark" to="/discover">wheretoo</Link>
-          <p className="discovery-location"><PinMark /><span>SF Bay Area</span></p>
           <nav aria-label="Public navigation" className="discovery-nav">
             <Link aria-current="page" to={discoverDestination}><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="m15 9-2 4-4 2 2-4Z" /></svg>Discover</Link>
             <Link to="/organizer/events"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="15" rx="3" /><path d="M8 3v6m8-6v6M4 12h16" /></svg>Organize</Link>
@@ -235,16 +216,17 @@ export function DiscoveryView({
         </header>
 
         <section className="discovery-intro">
-          <div className="discovery-intro__copy"><h1>Somewhere to <em>go?</em></h1>
-            <p>People. Places. Good times.</p></div>
-          <img className="discovery-intro__media" src={discoveryHero} width="640" height="480" alt="Wheretoo after-hours poster composition: music, food, and local culture" fetchPriority="high" />
+          <div className="discovery-intro__copy"><p className="discovery-eyebrow">Bay Area events · Curated for real life</p><h1>Find somewhere worth going.</h1>
+            <p>Live music. Great food. Late nights. New people. <span className="discovery-intro__continuation">A more interesting Bay Area awaits.</span></p></div>
+          <img className="discovery-intro__media" src={discoveryHero} width="2103" height="748" alt="" fetchPriority="high" />
         </section>
 
         <DiscoveryFiltersView filters={filters} onChange={onFiltersChange} />
 
         <section aria-labelledby="discovery-results-heading" className="discovery-results" id="discovery-results">
+          {highlight ? <EventLink eventHref={eventHref} item={highlight} publicSearch={publicSearch} variant="hero" /> : null}
           <div className="discovery-results__heading">
-            <h2 id="discovery-results-heading">Events</h2>
+            <h2 id="discovery-results-heading">{filters.when === 'today' ? 'Today in the Bay' : filters.when === 'weekend' ? 'This weekend in the Bay' : 'Coming up in the Bay'}</h2>
             <span>{windowLabel}</span>
             <button disabled={retryDelayed} onClick={onRefresh} type="button">Refresh</button>
           </div>
@@ -266,7 +248,6 @@ export function DiscoveryView({
             </section>
           ) : null}
 
-          {highlight ? <EventLink eventHref={eventHref} item={highlight} publicSearch={publicSearch} variant="hero" /> : null}
           {status === 'ready' && rows.length > 0 ? (
             <ul aria-label="Events" className="discovery-event-list">
               {rows.map((item) => <EventLink eventHref={eventHref} item={item} key={item.id} publicSearch={publicSearch} variant="row" />)}
@@ -286,6 +267,11 @@ export function DiscoveryView({
           ) : null}
           {status === 'ready' && items.length > 0 && !hasMore && !moreError ? <p className="discovery-end">That’s everything coming up.</p> : null}
         </section>
+        <nav aria-label="Explore more events" className="discovery-shortcuts">
+          {shortcuts.map(([title, description, destination]) => <Link key={title} to={destination}>
+            <span><strong>{title}</strong><span>{description}</span></span><ArrowMark />
+          </Link>)}
+        </nav>
       </div>
     </main>
   )
