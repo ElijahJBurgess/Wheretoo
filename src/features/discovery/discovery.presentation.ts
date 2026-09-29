@@ -38,5 +38,5 @@ export function discoverySchedule(item: DiscoveryDisplayItem): string {
 }
 
 export function selectDiscoveryHighlight(items: readonly DiscoveryDisplayItem[]): DiscoveryDisplayItem | null {
-  return items.find((item) => item.artworkReference !== null && item.admission.state === 'open') ?? null
+  return items.find((item) => item.artworkReference !== null) ?? items[0] ?? null
 }

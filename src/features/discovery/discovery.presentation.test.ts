@@ -40,14 +40,18 @@ describe('discovery presentation', () => {
     expect(discoveryAdmissionLabel(item({ admission: { state: 'not_yet_on_sale', minimumBuyerAmountMinor: null, currency: null } }))).toBe('Not yet on sale')
   })
 
-  it('selects the earliest open item with artwork and never promotes unknown availability', () => {
+  it('selects first artwork without inventing availability and falls back to the first result', () => {
     const unknownArtwork = item({ artworkReference: '/unknown.jpg' })
     const openArtwork = item({
       id: '00000000-0000-4000-8000-000000000002',
       artworkReference: '/open.jpg',
       admission: { state: 'open', minimumBuyerAmountMinor: 1500, currency: 'usd' },
     })
-    expect(selectDiscoveryHighlight([unknownArtwork, openArtwork])).toBe(openArtwork)
-    expect(selectDiscoveryHighlight([item(), unknownArtwork])).toBeNull()
+    expect(selectDiscoveryHighlight([unknownArtwork, openArtwork])).toBe(unknownArtwork)
+    expect(discoveryAdmissionLabel(unknownArtwork)).toBe('View prices')
+    expect(selectDiscoveryHighlight([item(), unknownArtwork])).toBe(unknownArtwork)
+    const fallback = item()
+    expect(selectDiscoveryHighlight([fallback])).toBe(fallback)
+    expect(selectDiscoveryHighlight([])).toBeNull()
   })
 })

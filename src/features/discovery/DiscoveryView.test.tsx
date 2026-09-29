@@ -31,37 +31,40 @@ function renderView(input: DiscoveryViewProps) {
 }
 
 describe('DiscoveryView', () => {
-  it('renders one public landmark, the three category shortcuts, and only working navigation', async () => {
+  it('renders one public landmark, all supported filters, and only working navigation', async () => {
     const onFiltersChange = vi.fn()
     renderView(props({ onFiltersChange }))
 
-    expect(screen.getByRole('heading', { level: 1, name: 'Somewhere to go?' })).toBeVisible()
+    expect(screen.getByRole('heading', { level: 1, name: 'Find somewhere worth going.' })).toBeVisible()
     expect(screen.getByText('SF Bay Area')).toBeVisible()
-    expect(screen.getAllByRole('button', { pressed: false })).toHaveLength(7)
-    expect(screen.getByRole('button', { name: 'Upcoming', pressed: true })).toBeVisible()
-    expect(screen.queryByRole('button', { name: 'Fitness' })).toBeNull()
+    expect(screen.getByRole('combobox', { name: 'Date' })).toHaveValue('upcoming')
+    expect(screen.getByRole('combobox', { name: 'Category' })).toHaveValue('')
+    expect(screen.getByRole('option', { name: 'Fitness' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /This Weekend/ })).toHaveAttribute('href', '/discover?when=weekend')
+    expect(screen.getByRole('link', { name: /Free Events/ })).toHaveAttribute('href', '/discover?price=free')
+    expect(screen.queryByRole('link', { name: /Calendar|For You|Explore on map/ })).toBeNull()
     expect(screen.getByRole('link', { name: 'Discover' })).toHaveAttribute('href', '/discover')
     expect(screen.getByRole('link', { name: 'Organize' })).toHaveAttribute('href', '/organizer/events')
     expect(screen.queryByRole('link', { name: 'Tickets' })).toBeNull()
 
-    await userEvent.click(screen.getByRole('button', { name: 'Music' }))
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Category' }), 'music')
     expect(onFiltersChange).toHaveBeenCalledWith({ when: 'upcoming', category: 'music', price: null })
   })
 
   it('surfaces an active non-shortcut category and always offers Clear filters for nondefault state', async () => {
     const onFiltersChange = vi.fn()
     renderView(props({ filters: { when: 'upcoming', category: 'fitness', price: null }, onFiltersChange }))
-    expect(screen.getByRole('button', { name: 'Fitness', pressed: true })).toBeVisible()
+    expect(screen.getByRole('combobox', { name: 'Category' })).toHaveValue('fitness')
     await userEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
     expect(onFiltersChange).toHaveBeenCalledWith(filters)
   })
 
-  it('uses one open artwork event as the hero, removes it from rows, and carries public return state', async () => {
+  it('uses one artwork event as the hero, removes it from rows, and carries public return state', async () => {
     const hero = item({ artworkReference: '/hero.jpg', admission: { state: 'open', minimumBuyerAmountMinor: 1500, currency: 'usd' } })
     const row = item({ id: '00000000-0000-4000-8000-000000000002', title: 'Night Garden', category: 'art_culture' })
     const { router } = renderView(props({ items: [hero, row], publicSearch: '?when=today&category=music' }))
 
-    expect(screen.getByText('Coming up')).toBeVisible()
+    expect(screen.getByText('Featured')).toBeVisible()
     expect(screen.getAllByText('Sunset Rooftop Sessions')).toHaveLength(1)
     expect(screen.getByRole('list', { name: 'Events' })).toHaveTextContent('Night Garden')
     expect(screen.getByRole('list', { name: 'Events' })).not.toHaveTextContent('Sunset Rooftop Sessions')
@@ -73,13 +76,9 @@ describe('DiscoveryView', () => {
 
   it('renders branded category art when production items have no photo', () => {
     renderView(props({ items: [item({ title: 'A very long event title designed to wrap safely without hiding its date, place, or honest price information' })] }))
-    expect(screen.queryByText('Coming up')).toBeNull()
+    expect(screen.getByText('Featured')).toBeVisible()
     expect(screen.getByLabelText('Music event artwork')).toBeVisible()
-    const mobileAdmission = screen.getByTestId('mobile-admission')
-    expect(mobileAdmission).toHaveTextContent('View prices')
-    expect(mobileAdmission.closest('.discovery-event-row__copy')).not.toBeNull()
-    expect(mobileAdmission).not.toHaveAttribute('aria-hidden')
-    expect(mobileAdmission.closest('.discovery-event-row')?.querySelector('.discovery-event-row__end .discovery-admission')).not.toHaveAttribute('aria-hidden')
+    expect(screen.getByText('View prices')).toBeVisible()
   })
 
   it('keeps the shell truthful across loading, filtered empty, and rate-limited states', async () => {
@@ -115,12 +114,12 @@ describe('DiscoveryView', () => {
   it('selects a hero only from the supplied stable first-page candidates', () => {
     const firstPage = item()
     const laterArtwork = item({
-      id: '00000000-0000-4000-8000-000000000002', artworkReference: '/later.jpg',
+      id: '00000000-0000-4000-8000-000000000002', title: 'Later artwork event', artworkReference: '/later.jpg',
       admission: { state: 'open', minimumBuyerAmountMinor: 2000, currency: 'usd' },
     })
     renderView(props({ items: [firstPage, laterArtwork], highlightItems: [firstPage] }))
-    expect(screen.queryByText('Coming up')).toBeNull()
-    expect(screen.getByRole('list', { name: 'Events' })).toHaveTextContent('Sunset Rooftop Sessions')
+    expect(screen.getByText('Featured')).toBeVisible()
+    expect(screen.getByRole('list', { name: 'Events' })).not.toHaveTextContent('Sunset Rooftop Sessions')
   })
 
   it('preserves rows when pagination fails and retries load more independently', async () => {

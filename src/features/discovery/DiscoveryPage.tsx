@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useLocation, useNavigate, useNavigationType } from 'react-router-dom'
 import { DiscoveryView } from './DiscoveryView'
 import { parseDiscoverySearch, serializeDiscoveryFilters } from './discovery.filters'
-import { discoveryScrollPosition } from './discovery.navigation'
+import { discoveryScrollPosition, discoveryCardScrollPosition } from './discovery.navigation'
 import { discoveryKeys, useDiscovery } from './discovery.queries'
 import type { DiscoveryFilters } from './discovery.types'
 
@@ -16,8 +16,15 @@ export function DiscoveryPage() {
   const filters = parseDiscoverySearch(location.search)
   const search = serializeDiscoveryFilters(filters)
   const discovery = useDiscovery(filters)
-  const images = usePublicEventImages(discovery.items.map(item => item.id))
-  const withImage = (item: (typeof discovery.items)[number]) => ({ ...item, artworkReference: images.data?.find(image => image.eventId === item.id && image.position === 1)?.url ?? null })
+  const firstPageIds = new Set(discovery.highlightItems.map(item => item.id))
+  // Keep first-page artwork independent of appended IDs: a new image query must
+  // not temporarily replace the feature with the first no-artwork fallback.
+  const firstPageImages = usePublicEventImages([...firstPageIds])
+  const appendedImages = usePublicEventImages(discovery.items.filter(item => !firstPageIds.has(item.id)).map(item => item.id))
+  const withImage = (item: (typeof discovery.items)[number]) => {
+    const images = firstPageIds.has(item.id) ? firstPageImages.data : appendedImages.data
+    return { ...item, artworkReference: images?.find(image => image.eventId === item.id && image.position === 1)?.url ?? null }
+  }
   const restored = useRef<string | null>(null)
 
   useEffect(() => {
@@ -30,7 +37,10 @@ export function DiscoveryPage() {
   useLayoutEffect(() => {
     if (discovery.status === 'loading' || restored.current === location.key) return
     restored.current = location.key
-    if (navigationType === 'POP') window.scrollTo({ top: discoveryScrollPosition(location.state), behavior: 'instant' })
+    if (navigationType === 'POP') {
+      window.scrollTo({ top: discoveryScrollPosition(location.state), behavior: 'instant' })
+      document.querySelector('.discovery-event-list')?.scrollTo({ left: discoveryCardScrollPosition(location.state), behavior: 'instant' })
+    }
   }, [discovery.status, location.key, location.state, navigationType])
 
   function changeFilters(next: DiscoveryFilters) {
@@ -57,7 +67,7 @@ export function DiscoveryPage() {
     if (!link || !link.getAttribute('href')?.startsWith('/events/')) return
     // Only public scroll state belongs to this history entry. The destination
     // link carries the normalized public search, never a private return URL.
-    window.history.replaceState({ ...window.history.state, usr: { discoveryScroll: Math.min(1_000_000, Math.max(0, window.scrollY)) } }, '')
+    window.history.replaceState({ ...window.history.state, usr: { discoveryScroll: Math.min(1_000_000, Math.max(0, window.scrollY)), discoveryCardScroll: Math.min(1_000_000, Math.max(0, document.querySelector('.discovery-event-list')?.scrollLeft ?? 0)) } }, '')
   }}>
     <DiscoveryView {...discovery} items={discovery.items.map(withImage)} highlightItems={discovery.highlightItems.map(withImage)} filters={filters} publicSearch={search}
       onFiltersChange={changeFilters} onRefresh={() => void discovery.refresh()}

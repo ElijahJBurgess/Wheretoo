@@ -24,7 +24,7 @@ it.each(['Clear filters', 'Wheretoo discovery home'])('starts a new first page o
   expect(document.querySelector('img[src="https://example.invalid/secondary.png"]')).not.toBeInTheDocument()
   await userEvent.click(screen.getByRole('button', { name: 'Load more' }))
   await screen.findByText('Event second')
-  await userEvent.click(screen.getByRole('button', { name: 'Music' }))
+  await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Category' }), 'music')
   await screen.findByText('Event music')
   await userEvent.click(control === 'Clear filters' ? screen.getByRole('button', { name: control }) : screen.getByRole('link', { name: control }))
   await waitFor(() => expect(read).toHaveBeenCalledTimes(4))

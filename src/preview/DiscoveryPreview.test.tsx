@@ -6,7 +6,7 @@ import { DiscoveryPreview } from './DiscoveryPreview'
 
 it('switches among isolated visual states without requesting external data', async () => {
   render(<MemoryRouter><DiscoveryPreview /></MemoryRouter>)
-  expect(screen.getByText('Coming up')).toBeVisible()
+  expect(screen.getByText('Featured')).toBeVisible()
   await userEvent.click(screen.getByRole('button', { name: 'Malformed mix' }))
   expect(screen.getByText('2 events could not be shown.')).toBeVisible()
   await userEvent.click(screen.getByRole('button', { name: 'Rate limited' }))
@@ -38,7 +38,7 @@ it('opens the isolated buyer preview without making a request', async () => {
 
 it('uses the current Friday-to-Monday weekend at the fixed Sunday preview clock', async () => {
   render(<MemoryRouter><DiscoveryPreview /></MemoryRouter>)
-  await userEvent.click(screen.getByRole('button', { name: 'This weekend' }))
+  await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Date' }), 'weekend')
   expect(screen.getByText('Sunset Rooftop Sessions')).toBeVisible()
   expect(screen.getByText('Taco Social')).toBeVisible()
   expect(screen.queryByText('Lake Merritt Morning Miles')).not.toBeInTheDocument()
