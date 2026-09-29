@@ -1,6 +1,6 @@
 import { ReadState } from '../../components/ui/ReadState'
 import type { PropsWithChildren } from 'react'
-import { Link, NavLink } from 'react-router-dom'
+import { Link, NavLink, useLocation } from 'react-router-dom'
 import type { StaffRole } from '../moderation/moderation.types'
 import type { EventRow } from '../events/event.types'
 import { organizerEventLocation, organizerEventStatus } from '../events/organizerEventPresentation'
@@ -8,8 +8,9 @@ import type { EventMetrics } from './operations.schemas'
 import './organizer-operations.css'
 import { EventArtwork } from './EventArtwork'
 import { dateTime, eventLabel, timeZoneLabel } from './operations.format'
-function NavigationIcon({ kind }: { kind: 'events' | 'dashboard' | 'orders' | 'registrations' | 'scan' }) {
+function NavigationIcon({ kind }: { kind: 'events' | 'storefront' | 'dashboard' | 'orders' | 'registrations' | 'scan' }) {
   const paths = {
+    storefront: 'M3 8h14l-2-5H5L3 8Zm1 0v9h12V8M8 17v-5h4v5',
     events: 'M5 3v4m10-4v4M3 9h14M4 5h12a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z',
     dashboard: 'M3 3h5v6H3zm9 0h5v4h-5zM3 13h5v4H3zm9-2h5v6h-5z',
     orders: 'M4 3h12v14l-3-2-3 2-3-2-3 2V3Zm3 4h6m-6 4h6',
@@ -23,6 +24,8 @@ export function OperationsLayout(
     { eventId?: string; admissionType?: 'paid' | 'free' | null; signOutPending?: boolean; onSignOut(): void; staffRole: StaffRole | null }
   >,
 ) {
+  const { pathname } = useLocation()
+  const storefrontActive = /^\/organizer\/settings\/storefront(?:\/|$)/.test(pathname)
   return (
     <div className='operations-layout'>
       <aside className='operations-sidebar'>
@@ -30,6 +33,9 @@ export function OperationsLayout(
         <nav aria-label='Organizer operations'>
           <NavLink to='/organizer/events' end>
             <NavigationIcon kind='events' /> <span>My Events</span>
+          </NavLink>
+          <NavLink to='/organizer/settings/storefront'>
+            <NavigationIcon kind='storefront' /> <span>Storefront</span>
           </NavLink>
           {eventId && (
             <>
@@ -47,7 +53,7 @@ export function OperationsLayout(
               </NavLink>
             </>
           )}
-          <NavLink to='/organizer/settings'><span aria-hidden='true'>⚙</span> <span>Settings</span></NavLink>
+          <NavLink to='/organizer/settings' end={storefrontActive}><span aria-hidden='true'>⚙</span> <span>Settings</span></NavLink>
         </nav>
         <div className='operations-sidebar__footer'>
           <Link to='/organizer/settings/payments'>Payments</Link>
