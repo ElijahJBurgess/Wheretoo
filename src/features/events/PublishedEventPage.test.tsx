@@ -38,7 +38,7 @@ const event = {
 
 function renderPage(
   row: EventRow | null = event,
-  queryState?: { data: EventRow | null | undefined; isPending: boolean; isError: boolean; refetch: typeof eventRefetch },
+  queryState?: { data: EventRow | null | undefined; isPending: boolean; isError: boolean; isFetchedAfterMount?: boolean; isFetching?: boolean; refetch: typeof eventRefetch },
   path = '/organizer/events/event-1',
 ) {
   useOwnedEvent.mockReturnValue(queryState ?? { data: row, isPending: false, isError: false, refetch: eventRefetch })
@@ -53,6 +53,31 @@ function renderPage(
 }
 
 describe('PublishedEventPage', () => {
+  it('waits for canonical owner validation instead of redirecting a cached draft', () => {
+    const { router } = renderPage(event, { data: { ...event, status: 'draft' }, isPending: false, isError: false, isFetching: true, isFetchedAfterMount: false, refetch: eventRefetch })
+    expect(screen.getByRole('heading', { name: 'Loading published event' })).toBeVisible()
+    expect(router.state.location.pathname).toBe('/organizer/events/event-1')
+  })
+
+  it('refreshes both owner status and public eligibility from a held creation outcome', async () => {
+    usePublicEvent.mockReturnValue({ data: null, isPending: false, isError: false, refetch: publicEventRefetch })
+    renderPage({ ...event, moderation_status: 'under_review' }, undefined, '/organizer/events/event-1?created=1')
+    await userEvent.click(screen.getByRole('button', { name: 'Check public availability again' }))
+    expect(eventRefetch).toHaveBeenCalledOnce()
+    expect(publicEventRefetch).toHaveBeenCalledOnce()
+  })
+
+  it('does not show Live for a current hold even if the older public read is cached', () => {
+    renderPage({ ...event, moderation_status: 'blocked' }, undefined, '/organizer/events/event-1?created=1')
+    expect(screen.getByRole('heading', { name: 'Your event is blocked' })).toBeVisible()
+    expect(screen.queryByRole('link', { name: 'View event' })).not.toBeInTheDocument()
+  })
+
+  it('hides stale live actions while owner status is refreshing', () => {
+    renderPage(event, { data: event, isPending: false, isError: false, isFetching: true, isFetchedAfterMount: true, refetch: eventRefetch }, '/organizer/events/event-1?created=1')
+    expect(screen.queryByRole('link', { name: 'View event' })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Checking public availability…' })).toBeVisible()
+  })
   beforeEach(() => {
     vi.clearAllMocks()
     ownerRead.mockResolvedValue(event)
@@ -172,9 +197,9 @@ describe('PublishedEventPage', () => {
 
   it('queries owner and canonical public projection before confirming publication', () => {
     renderPage()
-    expect(useOwnedEvent).toHaveBeenCalledWith('event-1', 'organizer-1')
+    expect(useOwnedEvent).toHaveBeenCalledWith('event-1', 'organizer-1', { revalidateOnMount: true, refetchInterval: 15000 })
     expect(useOrganizer).toHaveBeenCalledWith('organizer-1')
-    expect(usePublicEvent).toHaveBeenCalledWith('event-1')
+    expect(usePublicEvent).toHaveBeenCalledWith('event-1', { revalidateOnMount: true, refetchInterval: 15000 })
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
     expect(screen.getByRole('heading', { level: 1, name: 'Published' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 2, name: 'Friday Night Makers' })).toBeInTheDocument()

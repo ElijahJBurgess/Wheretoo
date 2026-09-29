@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase/client'
 import { draftPayload } from '../events/event.api'
 import type { EventFormValues } from '../events/event.types'
 import { eventRequirementsInputSchema } from '../moderation/moderation.schemas'
+import { publishErrorCopy } from '../events/publishErrors'
 import type { EventRequirementsInput } from '../moderation/moderation.types'
 import { cancellationSummarySchema, eventChangeContextSchema, noticePreviewSchema, noticeReceiptSchema, noticeStatusSchema, type EventChangeContext, type NoticePurpose } from './eventChanges.schemas'
 export class EventChangeError extends Error {
@@ -42,6 +43,8 @@ export async function acceptPoliciesIfCurrent(eventId: string, ownerId: string, 
 }
 export async function publishIfCurrent(eventId: string, ownerId: string, token: string) {
  const { data, error } = await supabase.rpc('publish_event_if_current', { p_event_id: eventId, p_expected_context: token })
+ // Preserve only known public blocker codes for the existing friendly copy.
+ if (error && Object.hasOwn(publishErrorCopy, error.message)) throw new Error(error.message)
  fail(error); return envelope(data, eventId, ownerId)
 }
 export async function previewEventNotice(eventId: string, purpose: NoticePurpose) {

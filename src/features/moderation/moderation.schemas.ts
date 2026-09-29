@@ -74,7 +74,18 @@ const disclosureValuesSchema = z.strictObject({
   highRiskActivity: z.boolean(),
 })
 
-export const eventRequirementsSchema = disclosureValuesSchema.extend({
+// Reads can represent an unanswered draft; publication writes remain strict.
+export const disclosureReadSchema = z.strictObject({
+  minimumAge: minimumAgeSchema.nullable(),
+  alcoholPresent: z.boolean().nullable(),
+  cannabisPresent: z.boolean().nullable(),
+  explicitAdultContent: z.boolean().nullable(),
+  gamblingPresent: z.boolean().nullable(),
+  weaponsPresent: z.boolean().nullable(),
+  highRiskActivity: z.boolean().nullable(),
+})
+
+export const eventRequirementsSchema = disclosureReadSchema.extend({
   needsAcceptance: z.boolean(),
   organizerTerms: requiredPolicySchema,
   eventPolicy: requiredPolicySchema,

@@ -36,6 +36,14 @@ beforeEach(() => {
  reload.mockImplementation(async () => current)
 })
 describe('atomic saved preview', () => {
+ it('does not present unanswered requirements as No or offer publication', () => {
+  current.requirements.minimumAge = null
+  current.requirements.alcoholPresent = null
+  renderPreview()
+  expect(screen.getByRole('heading', { name: 'Finish event requirements' })).toBeVisible()
+  expect(screen.queryByRole('button', { name: 'Publish event' })).not.toBeInTheDocument()
+  expect(screen.getByRole('link', { name: 'Complete requirements' })).toHaveAttribute('href', '/organizer/events/event-1/edit?step=requirements')
+ })
  it('requires deliberate confirmation before invoking the current-context publisher', async () => {
   const user = userEvent.setup(); const { router } = renderPreview()
   await user.click(screen.getByRole('button', { name: 'Publish event' }))

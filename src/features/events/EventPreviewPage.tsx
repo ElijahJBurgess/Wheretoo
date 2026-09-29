@@ -22,6 +22,7 @@ import { EventAttendeePreview } from './EventAttendeePreview'
 import { EventCreationLayout } from './EventCreationLayout'
 import { EventPublishConfirmation } from './EventPublishConfirmation'
 import { getPublishErrorMessage } from './publishErrors'
+import { eventRequirementsInputSchema } from '../moderation/moderation.schemas'
 
 export function EventPreviewPage() {
   return <div className="organizer-preview-route"><EventPreviewContent /></div>
@@ -167,6 +168,9 @@ function EventPreviewContent() {
   }
 
   const needsPaidSetup = isPaidDraft && (paidTiersQuery.data?.length ?? 0) === 0
+  if (!eventRequirementsInputSchema.strip().safeParse(requirements).success) {
+    return <ReadState headingAs="h1" status="unavailable" title="Finish event requirements" description="Choose the minimum age and answer every disclosure before publishing." action={<Link className="ui-button ui-button--secondary" to={`/organizer/events/${event.id}/edit?step=requirements`}>Complete requirements</Link>} />
+  }
   const publicationSchema = event.status === 'published' ? eventRepublishSchema : eventPublishSchema
   const publishResult = needsPaidSetup ? null : publicationSchema.safeParse(eventRowToFormValues(event))
   const persistedEventId = event.id

@@ -1,11 +1,22 @@
 import { describe, expect, it, vi } from 'vitest'
 const { rpc } = vi.hoisted(() => ({ rpc: vi.fn() }))
 vi.mock('../../lib/supabase/client', () => ({ supabase: { rpc } }))
-import { parseEventContext, saveEventIfCurrent, EventChangeError } from './eventChanges.api'
+import { parseEventContext, saveEventIfCurrent, publishIfCurrent, EventChangeError } from './eventChanges.api'
+import { getPublishErrorMessage } from '../events/publishErrors'
 import { eventRowToFormValues } from '../events/event.api'
 import type { EventRow } from '../events/event.types'
 describe('conditional event writers', () => {
+ it.each(['EVENT_DISCLOSURES_REQUIRED', 'EVENT_POLICY_ACCEPTANCE_REQUIRED', 'EVENT_MODERATION_BLOCKED', 'EVENT_LOCATION_INVALID'])('preserves safe publication blocker %s', async code => {
+  rpc.mockResolvedValue({ data: null, error: { message: code } })
+  const error = await publishIfCurrent('event', 'owner', 'token').catch(error => error)
+  expect(getPublishErrorMessage(error)).toBe(getPublishErrorMessage(new Error(code)))
+ })
+ it('sanitizes unknown publication diagnostics', async () => {
+  rpc.mockResolvedValue({ data: null, error: { message: 'private SQL diagnostic' } })
+  await expect(publishIfCurrent('event', 'owner', 'token')).rejects.toEqual(new EventChangeError('unknown'))
+ })
  it('sends the pinned context and never retries a stale write', async () => {
+  rpc.mockClear()
   rpc.mockResolvedValue({ data: null, error: { message: 'EVENT_CONTEXT_CONFLICT' } })
   const values = eventRowToFormValues({ title: 'Test', description: null, category: null, starts_at: null, ends_at: null, venue_name: null, mapbox_feature_id: null, admission_type: 'free', capacity: null } as EventRow)
   await expect(saveEventIfCurrent('event', 'owner', 'reviewed-token', values)).rejects.toEqual(new EventChangeError('conflict'))
@@ -22,7 +33,7 @@ it('loads draft context while publication policies are unconfigured, without inv
   gambling_present: null, weapons_present: null, high_risk_activity: null,
  } }
  const result = parseEventContext(raw, 'event-1', 'organizer-1')
- expect(result.requirements).toMatchObject({ needsAcceptance: true, organizerTerms: null, eventPolicy: null, minimumAge: 'all_ages' })
+ expect(result.requirements).toMatchObject({ needsAcceptance: true, organizerTerms: null, eventPolicy: null, minimumAge: null, alcoholPresent: null, cannabisPresent: null, explicitAdultContent: null, gamblingPresent: null, weaponsPresent: null, highRiskActivity: null })
  expect(() => parseEventContext(raw, 'event-1', 'foreign-owner')).toThrow()
  expect(() => parseEventContext({ ...raw, requirements: { ...raw.requirements, needs_acceptance: false } }, 'event-1', 'organizer-1')).toThrow()
 })

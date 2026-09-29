@@ -55,8 +55,12 @@ export function useCurrentEventReviewRequest(organizerId: string, eventId: strin
   })
 }
 
-export function usePublicEvent(eventId: string) {
-  return useQuery({ queryKey: moderationKeys.publicEvent(eventId), queryFn: () => getPublicEvent(eventId), enabled: eventId.length > 0 })
+export function usePublicEvent(eventId: string, options?: { revalidateOnMount?: boolean; refetchInterval?: number }) {
+  return useQuery({
+    queryKey: moderationKeys.publicEvent(eventId), queryFn: () => getPublicEvent(eventId), enabled: eventId.length > 0,
+    refetchInterval: options?.refetchInterval, refetchIntervalInBackground: false,
+    ...(options?.revalidateOnMount ? { staleTime: 0, refetchOnMount: 'always' as const } : {}),
+  })
 }
 
 export function useSaveEventRequirements(organizerId: string, eventId: string) {

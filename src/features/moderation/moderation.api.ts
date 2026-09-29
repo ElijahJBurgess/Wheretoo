@@ -101,13 +101,13 @@ function parseContract<T>(schema: z.ZodType<T>, value: unknown): T {
 
 export function requirementsFromRpc(row: z.infer<typeof requirementsRpcRowSchema>): EventRequirements {
   return parseContract(eventRequirementsSchema, {
-    minimumAge: row.minimum_age ?? 'all_ages',
-    alcoholPresent: row.alcohol_present ?? false,
-    cannabisPresent: row.cannabis_present ?? false,
-    explicitAdultContent: row.explicit_adult_content ?? false,
-    gamblingPresent: row.gambling_present ?? false,
-    weaponsPresent: row.weapons_present ?? false,
-    highRiskActivity: row.high_risk_activity ?? false,
+    minimumAge: row.minimum_age,
+    alcoholPresent: row.alcohol_present,
+    cannabisPresent: row.cannabis_present,
+    explicitAdultContent: row.explicit_adult_content,
+    gamblingPresent: row.gambling_present,
+    weaponsPresent: row.weapons_present,
+    highRiskActivity: row.high_risk_activity,
     needsAcceptance: row.needs_acceptance,
     organizerTerms: {
       policyKind: 'organizer_terms', label: row.organizer_terms_label, versionId: row.organizer_terms_version_id,
