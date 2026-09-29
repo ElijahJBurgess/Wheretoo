@@ -56,9 +56,13 @@ function EditorLoader({ userId }: { userId: string }) {
     },
     retry: false,
     refetchOnWindowFocus: false,
+    refetchOnMount: 'always',
     gcTime: 0,
   })
-  if (query.isPending) return <p role='status'>Loading settings…</p>
+  // Do not seed the form from stale cache while canonical profile data refreshes.
+  if (query.isPending || (query.isFetching && !query.isFetchedAfterMount)) {
+    return <p role='status'>Loading settings…</p>
+  }
   if (query.isError) {
     return (
       <div>
@@ -358,6 +362,10 @@ function Editor(
               ))}
             </select>
           </label>
+          {preview.isPending ? <p role='status'>Loading eligible events…</p> : null}
+          {preview.isSuccess && events.length === 0
+            ? <p role='status'>No eligible public events yet.</p>
+            : null}
           {preview.hasNextPage
             ? (
               <button

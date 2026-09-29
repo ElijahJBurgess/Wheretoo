@@ -17,6 +17,7 @@ export function OrganizerLayout({ children, onSignOut, signOutPending = false, s
         <nav aria-label="Organizer">
           <div className="organizer-layout__nav">
             <a href="/organizer/events">Events</a>
+            <a href="/organizer/settings/storefront">Storefront</a>
             <a href="/organizer/settings/payments">Payments</a>
             <a href="/organizer/settings">Settings</a>
             {staffRole ? <a href="/moderation">Moderation</a> : null}

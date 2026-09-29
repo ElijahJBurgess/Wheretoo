@@ -23,3 +23,12 @@ it('shows only the navigation for the confirmed event source and none while unkn
   expect(screen.getByRole('link', { name: /My Events/ })).toBeVisible()
   expect(screen.getByRole('link', { name: /Settings/ })).toBeVisible()
 })
+
+it.each(['/organizer/settings/storefront', '/organizer/events'])('keeps primary navigation coherent at %s', path => {
+  render(<MemoryRouter initialEntries={[path]}><OperationsLayout onSignOut={() => undefined} staffRole={null}><p>Page</p></OperationsLayout></MemoryRouter>)
+  const storefront = screen.getByRole('link', { name: 'Storefront' })
+  expect(storefront).toHaveAttribute('href', '/organizer/settings/storefront')
+  expect(storefront.previousElementSibling).toBe(screen.getByRole('link', { name: 'My Events' }))
+  expect(screen.getByRole('link', { name: path.endsWith('storefront') ? 'Storefront' : 'My Events' })).toHaveAttribute('aria-current', 'page')
+  expect(screen.getByRole('link', { name: /Settings/ })).not.toHaveAttribute('aria-current')
+})
