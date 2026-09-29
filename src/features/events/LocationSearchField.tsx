@@ -61,6 +61,7 @@ export function LocationSearchField({ error, onChange, value }: LocationSearchFi
   const [suggestions, setSuggestions] = useState<SearchSuggestion[]>([])
   const [showAttribution, setShowAttribution] = useState(false)
   const [retrievalError, setRetrievalError] = useState<string | null>(null)
+  const [searchStatus, setSearchStatus] = useState<'idle' | 'searching' | 'empty'>('idle')
   const inputRef = useRef<HTMLInputElement>(null)
   const optionRefs = useRef<Array<HTMLLIElement | null>>([])
   const requestIdRef = useRef(0)
@@ -111,17 +112,21 @@ export function LocationSearchField({ error, onChange, value }: LocationSearchFi
     clearSuggestions()
 
     if (nextText.trim().length < 2) {
+      setSearchStatus('idle')
       searchSession.abort()
       return
     }
 
+    setSearchStatus('searching')
     void searchSession.suggest(nextText).then((response) => {
       if (!mountedRef.current || requestId !== requestIdRef.current) return
       setSuggestions(response.suggestions)
+      setSearchStatus(response.suggestions.length ? 'idle' : 'empty')
       setShowAttribution(response.suggestions.length > 0 || Boolean(response.attribution))
     }).catch(() => {
       if (!mountedRef.current || requestId !== requestIdRef.current) return
       clearSuggestions()
+      setSearchStatus('idle')
       setRetrievalError(unavailableLocationMessage)
     })
   }
@@ -174,6 +179,7 @@ export function LocationSearchField({ error, onChange, value }: LocationSearchFi
   }
 
   function clearField() {
+    setSearchStatus('idle')
     requestIdRef.current += 1
     searchSession.abort()
     searchSession.incrementSession()
@@ -263,21 +269,23 @@ export function LocationSearchField({ error, onChange, value }: LocationSearchFi
             </a>
           ) : null}
         </div>
-      ) : (
-        <input aria-label="Search for a California address" readOnly value={searchText} />
-      )}
+      ) : null}
 
       {value !== null ? (
         <div className="location-search-field__verified" role="status">
           <p className="location-search-field__verified-label">Verified address</p>
           <p>{value.addressLine1}</p>
           <p>{value.city}, {value.region} {value.postalCode}</p>
+          <Button onClick={handleExternalClear} variant="secondary">Change address</Button>
         </div>
       ) : null}
 
-      {searchText || value !== null ? (
+      {value === null && searchText ? (
         <Button onClick={handleExternalClear} variant="secondary">Clear address</Button>
       ) : null}
+      {value === null && searchStatus === 'searching' ? <p role="status">Searching addresses…</p> : null}
+      {value === null && searchStatus === 'empty' ? <p role="status">No addresses found. Try a street address.</p> : null}
+      {value === null && retrievalError ? <Button onClick={() => requestSuggestions(searchText)} variant="secondary">Retry search</Button> : null}
 
       {displayedError ? (
         <p aria-live="assertive" className="ui-field__error" id={errorId} role="alert">{displayedError}</p>

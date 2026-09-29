@@ -83,15 +83,17 @@ function rowLocation(event: EventRow): NormalizedLocation | null {
   }
 }
 
-export function draftPayload(values: EventFormValues): EventDraftPayload {
+export function draftPayload(values: EventFormValues, baseline?: EventRow): EventDraftPayload {
   const location = values.location
+  const savedTime = (value: string, original: string | null | undefined) =>
+    original && instantToLosAngelesWallTime(original) === value ? original : wallTimeToDatabase(value)
 
   return {
     title: optionalText(values.title),
     description: optionalText(values.description),
     category: optionalText(values.category),
-    starts_at: wallTimeToDatabase(values.startsAt),
-    ends_at: wallTimeToDatabase(values.endsAt),
+    starts_at: savedTime(values.startsAt, baseline?.starts_at),
+    ends_at: savedTime(values.endsAt, baseline?.ends_at),
     timezone: values.timezone,
     venue_name: optionalText(values.venueName),
     address_line1: location === null ? null : optionalText(location.addressLine1),

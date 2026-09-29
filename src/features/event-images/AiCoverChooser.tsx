@@ -10,6 +10,8 @@ type Props = {
   revision: number | undefined
   latestGenerationId?: string | null
   disabled?: boolean
+  embedded?: boolean
+  onSelected?: () => void
 }
 const retryable = new Set([
   'PROVIDER_TIMEOUT',
@@ -19,10 +21,10 @@ const retryable = new Set([
   'INVALID_PROVIDER_IMAGE',
 ])
 export function AiCoverChooser(
-  { eventId, revision, latestGenerationId, disabled = false }: Props,
+  { eventId, revision, latestGenerationId, disabled = false, embedded = false, onSelected }: Props,
 ) {
   const session = useSession(), client = useQueryClient()
-  const [open, setOpen] = useState(false),
+  const [open, setOpen] = useState(embedded),
     [chosenMood, setMood] = useState<string | null>(null),
     [chosenDirection, setDirection] = useState<string | null>(null)
   const [localId, setLocalId] = useState<string | null>(null),
@@ -168,12 +170,13 @@ export function AiCoverChooser(
           client.invalidateQueries({ queryKey: ['event-images'] }),
           client.invalidateQueries({ queryKey: ['public-event-images'] }),
         ])
+        if (current()) onSelected?.()
       }
     })
   }
   return (
     <div className='ai-cover-chooser'>
-      <div className='event-image-actions'>
+      {!embedded ? <div className='event-image-actions'>
         <button
           type='button'
           disabled={unavailable}
@@ -182,7 +185,7 @@ export function AiCoverChooser(
         >
           Generate with AI
         </button>
-      </div>
+      </div> : null}
       {!eventId
         ? (
           <p className='event-image-status'>
@@ -287,7 +290,7 @@ export function AiCoverChooser(
                           !!generation.selectedSlot}
                         onClick={() => void select(c.slot)}
                       >
-                        Use this cover
+                        {embedded ? 'Use this image' : 'Use this cover'}
                       </button>
                     </div>
                   )

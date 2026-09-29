@@ -19,9 +19,8 @@ export function EventDetailsStep({ errors, register, creation = false }: EventDe
   return (
     <div className="event-step">
       <header className="event-step__header">
-        <p className="organizer-eyebrow">Stage 1</p>
-        <Heading>{creation ? 'Event Basics' : 'Give the event a clear shape'}</Heading>
-        <p>Start with the public basics. Every field can stay in draft until you are ready.</p>
+        <Heading>{creation ? 'Details' : 'Event Details'}</Heading>
+        <p>Tell people what you’re putting on.</p>
       </header>
       <div className="event-step__fields">
         <Field error={errors.title?.message} label={creation ? 'Event name' : 'Event title'} name="title">

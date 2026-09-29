@@ -27,13 +27,13 @@ body:has(.organizer-event-workflow) .organizer-layout__header {
 }
 body:has(.organizer-event-workflow) .organizer-layout__main { max-width: 64rem; }
 body:has(.organizer-event-workflow) a { color: #bc9bff; }
-.organizer-event-workflow { min-height: 100dvh; min-width: 0; padding-block: 1.5rem 3rem; }
+.organizer-event-workflow { min-width: 0; padding-block: 1.5rem 3rem; }
 .organizer-event-workflow > :not(.event-creation):not(.organizer-preview-route) { max-width: 60rem; margin-inline: auto; }
 .organizer-event-workflow .organizer-preview-route { padding-block: 0; min-height: auto; }
 .organizer-event-workflow .event-creation {
   --color-violet-deep: #b998ff;
   width: calc(100% - 3rem);
-  max-width: 60rem;
+  max-width: 50rem;
   min-height: auto;
   border-radius: 1rem;
   box-shadow: none;
@@ -74,11 +74,11 @@ body:has(.organizer-event-workflow) a { color: #bc9bff; }
   .organizer-event-workflow .event-creation__progress li,
   .organizer-event-workflow .event-creation__progress li:last-child { flex: 1; min-width: 0; flex-direction: column; gap: .65rem; text-align: center; color: var(--color-muted); }
   .organizer-event-workflow .event-creation__progress li::after { display: none; }
-  .organizer-event-workflow .event-creation__progress li > span:first-child { width: 10px; height: 10px; flex-shrink: 0; }
+  .organizer-event-workflow .event-creation__progress li > span:first-child { width: 24px; height: 24px; flex-shrink: 0; }
   .organizer-event-workflow .event-creation__progress .event-creation__sr { position: static; width: auto; height: auto; margin: 0; overflow: visible; clip: auto; white-space: normal; font-size: .7rem; line-height: 1.4; }
   .organizer-event-workflow .event-creation__progress li[aria-current] { color: #d3bdff; font-weight: 800; }
   .organizer-event-workflow .event-creation__progress p { display: none; }
-  .organizer-event-workflow .event-editor__basics,
+  .organizer-event-workflow .event-editor__basics { grid-template-columns:minmax(0,1fr); gap:1.25rem; }
   .organizer-event-workflow .event-editor__overview { grid-template-columns: minmax(0, 1fr) minmax(15rem, .62fr); gap: 2rem; }
   .organizer-event-workflow .event-preview__overview:has(> .event-flyer-preview) { grid-template-columns: minmax(13rem, .65fr) minmax(0, 1fr); }
   .organizer-event-workflow .event-preview__overview > .event-flyer-preview { margin-block: 0; }
@@ -110,7 +110,7 @@ body:has(.organizer-event-workflow) a { color: #bc9bff; }
 }
 @media (max-width: 47.999rem) {
   .organizer-event-workflow { padding-block: 0 2rem; }
-  .organizer-event-workflow .event-creation { width: 100%; border: 0; border-radius: 0; min-height: 100dvh; }
+  .organizer-event-workflow .event-creation { width: 100%; border: 0; border-radius: 0; min-height:0; }
   .organizer-event-workflow .event-creation__header { padding: .75rem 1rem; }
   .organizer-event-workflow .event-creation__body { padding: .5rem 1.25rem 1.5rem; }
   .organizer-event-workflow .event-creation__progress { padding: 1rem 1.5rem; }

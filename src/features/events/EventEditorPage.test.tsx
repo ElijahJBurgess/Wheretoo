@@ -19,9 +19,9 @@ vi.mock('./LocationSearchField', () => { locationLoaded(); return { default: () 
 import { EventEditorPage } from './EventEditorPage'
 import { EventChangeError } from '../event-changes/eventChanges.api'
 let current: EventChangeContext
-function renderEditor(path = '/organizer/events/event-1/edit?step=basics', initialEntries = [path]) {
+function renderEditor(path = '/organizer/events/event-1/edit?step=basics', initialEntries = [path], editReady?: Promise<void>) {
  const router = createMemoryRouter([
-  { path: '/organizer/events/new', element: <EventEditorPage /> }, { path: '/organizer/events/:eventId/edit', element: <EventEditorPage /> },
+  { path: '/organizer/events/new', element: <EventEditorPage /> }, { path: '/organizer/events/:eventId/edit', element: <EventEditorPage />, loader: editReady ? () => editReady : undefined },
   { path: '/organizer/events/:eventId/preview', element: <p>preview destination</p> }, { path: '/organizer/events/:eventId/tickets', element: <p>ticket setup destination</p> },
   { path: '/away', element: <p>away destination</p> },
  ], { initialEntries, initialIndex: initialEntries.length - 1 })
@@ -47,6 +47,50 @@ beforeEach(() => {
  })
 })
 describe('atomic-context event editor', () => {
+ it('does not expose the next stage before the saved draft route is ready', async () => {
+  let ready!: () => void
+  const pending = new Promise<void>(resolve => { ready = resolve })
+  const { router } = renderEditor('/organizer/events/new', ['/organizer/events/new'], pending)
+  await userEvent.type(screen.getByLabelText('Event name'), 'A neighborhood gathering')
+  await userEvent.type(screen.getByLabelText('Description'), 'A gathering with enough detail to continue.')
+  await userEvent.selectOptions(screen.getByLabelText('Category'), 'community')
+  await userEvent.click(screen.getByRole('button', { name: 'Continue' }))
+  await waitFor(() => expect(create).toHaveBeenCalledOnce())
+  expect(router.state.location.pathname).toBe('/organizer/events/new')
+  expect(screen.queryByLabelText('Start date')).not.toBeInTheDocument()
+  await act(async () => ready())
+  expect(await screen.findByLabelText('Start date')).toBeVisible()
+ })
+ it('requires fresh agreement after AI preparation saves changed accepted event details', async () => {
+  current.requirements.needsAcceptance = false
+  save.mockImplementation(async (_id, _owner, _token, values) => {
+   current = { ...current, context_token: 'saved-token', event: { ...current.event, title: values.title }, requirements: { ...current.requirements, needsAcceptance: true } }
+   return current
+  })
+  const user = userEvent.setup(); renderEditor()
+  await user.type(screen.getByLabelText('Event name'), ' revised')
+  await user.click(screen.getByRole('button', { name: 'Generate with AI' }))
+  await screen.findByRole('region', { name: 'Generate event image' })
+  await user.click(screen.getByRole('button', { name: 'Close' }))
+  await toRequirements(user)
+  expect(screen.getByRole('checkbox')).not.toBeChecked()
+  await user.click(screen.getByRole('button', { name: 'Continue' }))
+  expect(accept).not.toHaveBeenCalled()
+  await user.click(screen.getByRole('checkbox'))
+  await user.click(screen.getByRole('button', { name: 'Continue' }))
+  await waitFor(() => expect(accept).toHaveBeenCalledOnce())
+ })
+ it('prepares one new draft for AI on Details without generating automatically', async () => {
+  const { router } = renderEditor('/organizer/events/new')
+  await userEvent.type(screen.getByLabelText('Event name'), 'A neighborhood gathering')
+  await userEvent.click(screen.getByRole('button', { name: 'Generate with AI' }))
+  await waitFor(() => expect(router.state.location.pathname).toBe('/organizer/events/event-1/edit'))
+  expect(create).toHaveBeenCalledOnce()
+  expect(router.state.location.search).toBe('?step=basics')
+  expect(await screen.findByRole('region', { name: 'Generate event image' })).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Generate 3 covers' })).toBeEnabled()
+  await waitFor(() => expect(router.state.location.state?.openAi).not.toBe(true))
+ })
  it('requires explicit answers for a draft with no saved disclosures before saving requirements', async () => {
   current = { ...current, requirements: { ...current.requirements, minimumAge: null, alcoholPresent: null, cannabisPresent: null, explicitAdultContent: null, gamblingPresent: null, weaponsPresent: null, highRiskActivity: null } } as unknown as EventChangeContext
   const user = userEvent.setup(); renderEditor('/organizer/events/event-1/edit?step=requirements')
@@ -76,7 +120,7 @@ describe('atomic-context event editor', () => {
   upload.mockImplementation(() => new Promise<void>(resolve => { finishUpload = resolve }))
   const user = userEvent.setup(); const { router } = renderEditor('/organizer/events/new')
   await user.type(screen.getByLabelText('Event name'), 'Artwork draft')
-  await user.upload(screen.getByLabelText('Upload flyer'), new File(['png'], 'flyer.png', { type: 'image/png' }))
+  await user.upload(screen.getByLabelText('Upload image'), new File(['png'], 'flyer.png', { type: 'image/png' }))
   await waitFor(() => expect(upload).toHaveBeenCalledWith('event-1', expect.any(File), expect.any(Function), 0))
   expect(create).toHaveBeenCalledOnce()
   expect(create).toHaveBeenCalledWith(expect.objectContaining({ values: expect.objectContaining({ title: 'Artwork draft' }) }))
@@ -88,41 +132,41 @@ describe('atomic-context event editor', () => {
   await act(async () => finishUpload())
   await waitFor(() => expect(router.state.location.pathname).toBe('/organizer/events/event-1/edit'))
   expect(router.state.location.search).toBe('?step=basics')
-  expect(screen.getByLabelText('Upload flyer')).toBeEnabled()
+  expect(screen.getByLabelText('Upload image')).toBeEnabled()
  })
  it('releases artwork busy state for a replacement same-owner session and ignores the old completion', async () => {
   let finishUpload!: () => void
   upload.mockImplementation(() => new Promise<void>(resolve => { finishUpload = resolve }))
   const { router } = renderEditor('/organizer/events/new')
-  await userEvent.setup().upload(screen.getByLabelText('Upload flyer'), new File(['png'], 'flyer.png', { type: 'image/png' }))
+  await userEvent.setup().upload(screen.getByLabelText('Upload image'), new File(['png'], 'flyer.png', { type: 'image/png' }))
   await waitFor(() => expect(upload).toHaveBeenCalledOnce())
   expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled()
   identity.version = 2
   await act(async () => router.navigate('/organizer/events/new?session=2'))
   // The unsaved-navigation guard still applies to a route navigation.
   if (screen.queryByRole('button', { name: 'Leave without saving' })) await userEvent.click(screen.getByRole('button', { name: 'Leave without saving' }))
-  await waitFor(() => expect(screen.getByLabelText('Upload flyer')).toBeEnabled())
+  await waitFor(() => expect(screen.getByLabelText('Upload image')).toBeEnabled())
   await act(async () => finishUpload())
   expect(router.state.location.pathname).toBe('/organizer/events/new')
  })
  it('keeps the persisted draft when its image upload fails so retry cannot create another draft', async () => {
   upload.mockRejectedValue(new Error('Upload response lost.'))
   const user = userEvent.setup(); const { router } = renderEditor('/organizer/events/new')
-  const unsavedInput = screen.getByLabelText('Upload flyer')
-  await user.upload(screen.getByLabelText('Upload flyer'), new File(['png'], 'flyer.png', { type: 'image/png' }))
+  const unsavedInput = screen.getByLabelText('Upload image')
+  await user.upload(screen.getByLabelText('Upload image'), new File(['png'], 'flyer.png', { type: 'image/png' }))
   await waitFor(() => expect(router.state.location.pathname).toBe('/organizer/events/event-1/edit'))
   expect(screen.getByText(/Your draft is saved. Upload response lost/)).toBeInTheDocument()
-  await waitFor(() => expect(screen.getByLabelText('Upload flyer')).not.toBe(unsavedInput))
-  await waitFor(() => expect(screen.getByLabelText('Upload flyer')).toBeEnabled())
-  await user.upload(screen.getByLabelText('Upload flyer'), new File(['png'], 'flyer.png', { type: 'image/png' }))
+  await waitFor(() => expect(screen.getByLabelText('Upload image')).not.toBe(unsavedInput))
+  await waitFor(() => expect(screen.getByLabelText('Upload image')).toBeEnabled())
+  await user.upload(screen.getByLabelText('Upload image'), new File(['png'], 'flyer.png', { type: 'image/png' }))
   await waitFor(() => expect(upload).toHaveBeenCalledTimes(2))
   expect(create).toHaveBeenCalledOnce()
  })
  it('does not attach artwork to a returned draft owned by somebody else', async () => {
   create.mockResolvedValue({ ...testEvent, organizer_id: 'other-owner' })
   const { router } = renderEditor('/organizer/events/new')
-  await userEvent.setup().upload(screen.getByLabelText('Upload flyer'), new File(['png'], 'flyer.png', { type: 'image/png' }))
-  expect(await screen.findByRole('alert')).toHaveTextContent('SAVED_EVENT_IDENTITY_MISMATCH')
+  await userEvent.setup().upload(screen.getByLabelText('Upload image'), new File(['png'], 'flyer.png', { type: 'image/png' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('Your draft could not be confirmed.')
   expect(upload).not.toHaveBeenCalled()
   expect(router.state.location.pathname).toBe('/organizer/events/new')
  })
@@ -136,7 +180,7 @@ describe('atomic-context event editor', () => {
   current = testContext({ ...testEvent, admission_type: 'paid' })
   useTiers.mockReturnValue({ data: [{ id: 'tier-1', status: 'draft' }], isPending: false, isError: false })
   const resumed = renderEditor('/organizer/events/event-1/edit?resume=1')
-  expect(await screen.findByRole('heading', { name: 'Event Details' })).toBeInTheDocument()
+  expect(await screen.findByRole('heading', { name: 'Review' })).toBeInTheDocument()
   expect(useTiers).toHaveBeenCalledWith('organizer-1', 'event-1')
   resumed.unmount()
  })
@@ -145,10 +189,10 @@ describe('atomic-context event editor', () => {
   renderEditor('/organizer/events/event-1/edit?step=details')
   expect(useTiers).toHaveBeenCalledWith('organizer-1', '')
  })
- it('preserves the seven stages and loads address UI only at the location stage', async () => {
+ it('presents four stages and loads address UI only at the location stage', async () => {
   const user = userEvent.setup(); renderEditor('/organizer/events/new')
   expect(screen.getByRole('navigation', { name: 'Event creation progress' })).toBeInTheDocument()
-  for (const text of ['Basics', 'Date & Location', 'Ticket Type', 'Event Details', 'Preview', 'Publish Confirmation', 'Publication Outcome']) expect(screen.getAllByText(text).length).toBeGreaterThan(0)
+  for (const text of ['Details', 'When & Where', 'Admission', 'Review']) expect(screen.getAllByText(text).length).toBeGreaterThan(0)
   expect(screen.queryByLabelText('Minimum age')).not.toBeInTheDocument()
   await user.type(screen.getByLabelText('Event name'), 'New event')
   await user.type(screen.getByLabelText('Description'), 'A complete description for the new event.')
@@ -169,7 +213,7 @@ describe('atomic-context event editor', () => {
   await act(async () => view.router.navigate('/organizer/events/event-1/edit?refresh'))
   expect(screen.getByLabelText(/Event (?:name|title)/)).toHaveValue('Working title')
   await user.click(screen.getByRole('button', { name: 'Save draft' }))
-  expect(save).toHaveBeenCalledWith('event-1', 'organizer-1', 'baseline-token', expect.objectContaining({ title: 'Working title' }))
+  expect(save).toHaveBeenCalledWith('event-1', 'organizer-1', 'baseline-token', expect.objectContaining({ title: 'Working title' }), expect.objectContaining({ id: 'event-1' }))
  })
  it('rejects a late save after an A to B to A event switch', async () => {
   let resolveSave!: (value: EventChangeContext) => void
@@ -185,8 +229,8 @@ describe('atomic-context event editor', () => {
  it('preserves Los Angeles datetime-local conversion', async () => {
   const user = userEvent.setup(); renderEditor()
   await user.click(screen.getByRole('button', { name: 'Continue' }))
-  expect(screen.getByLabelText('Starts')).toHaveValue('2027-12-01T18:30')
-  expect(screen.getByLabelText('Ends')).toHaveValue('2027-12-01T20:00')
+  expect(screen.getByLabelText('Start date')).toHaveValue('2027-12-01'); expect(screen.getByLabelText('Start time')).toHaveValue('18:30')
+  expect(screen.getByLabelText('End time')).toHaveValue('20:00')
  })
  it('shows loading and retries an atomic owner-context failure without leaking identities', async () => {
   useContext.mockReturnValue({ data: undefined, isPending: true, isError: false, refetch }); const view = renderEditor()
@@ -212,12 +256,13 @@ describe('atomic-context event editor', () => {
   await user.type(screen.getByLabelText('Description'), 'A complete paid event description.')
   await user.selectOptions(screen.getByLabelText('Category'), 'community')
   await user.click(screen.getByRole('button', { name: 'Continue' }))
-  await user.click(await screen.findByRole('button', { name: 'Continue' }))
-  await user.click(screen.getByRole('radio', { name: /Paid Tickets/ }))
+  await screen.findByLabelText('Start date')
+  await user.click(screen.getByRole('button', { name: 'Continue' }))
+  await user.click(await screen.findByRole('radio', { name: /Paid Tickets/ }))
   await user.click(screen.getByRole('button', { name: 'Continue' }))
   await waitFor(() => expect(router.state.location.pathname).toBe('/organizer/events/event-1/tickets'))
   expect(create).toHaveBeenCalledOnce()
-  expect(save).toHaveBeenCalledWith('event-1', 'organizer-1', expect.any(String), expect.objectContaining({ admissionType: 'paid' }))
+  expect(save).toHaveBeenCalledWith('event-1', 'organizer-1', expect.any(String), expect.objectContaining({ admissionType: 'paid' }), expect.objectContaining({ id: 'event-1' }))
  })
  it('saves an existing draft conditionally without changing route history', async () => {
   const user = userEvent.setup(); const { router } = renderEditor('/organizer/events/event-1/edit?step=basics', ['/away', '/organizer/events/event-1/edit?step=basics'])
@@ -284,7 +329,7 @@ describe('atomic-context event editor', () => {
   current = testContext({ ...testEvent, status: 'published', moderation_status }); const user = userEvent.setup(); renderEditor()
   expect(screen.getByText(moderation_status === 'blocked' ? 'Blocked' : 'Removed')).toBeInTheDocument()
   await user.type(screen.getByLabelText('Event title'), ' revision'); await user.click(screen.getByRole('button', { name: 'Save changes' }))
-  expect(save).toHaveBeenCalledWith('event-1', 'organizer-1', 'baseline-token', expect.any(Object)); expect(create).not.toHaveBeenCalled()
+  expect(save).toHaveBeenCalledWith('event-1', 'organizer-1', 'baseline-token', expect.any(Object), expect.objectContaining({ id: 'event-1' })); expect(create).not.toHaveBeenCalled()
  })
  it('uses atomic requirements response moderation state without a racy post-save fetch', async () => {
   current = testContext({ ...testEvent, status: 'published', moderation_status: 'clear' })
@@ -313,11 +358,11 @@ it('keeps draft location, ticket type, details and images available when publica
  expect(await screen.findByText('Mock address search')).toBeInTheDocument()
  expect(screen.queryByText('Your event could not load')).not.toBeInTheDocument()
  await user.click(screen.getByRole('button', { name: 'Continue' }))
- expect(await screen.findByRole('heading', { name: 'Ticket Type' })).toBeInTheDocument()
+ expect(await screen.findByRole('heading', { name: 'Admission' })).toBeInTheDocument()
  await user.click(screen.getByRole('button', { name: 'Continue' }))
- expect(await screen.findByRole('heading', { name: 'Event Details' })).toBeInTheDocument()
+ expect(await screen.findByRole('heading', { name: 'Review' })).toBeInTheDocument()
  expect(screen.getByText('Publication policies are not available')).toBeInTheDocument()
- expect(screen.getByLabelText('Upload flyer')).toBeInTheDocument()
+ expect(screen.queryByLabelText('Upload image')).not.toBeInTheDocument()
  expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled()
  expect(screen.getByRole('button', { name: 'Save draft' })).toBeEnabled()
  expect(accept).not.toHaveBeenCalled()
