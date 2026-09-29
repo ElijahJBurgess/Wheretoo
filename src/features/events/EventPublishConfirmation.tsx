@@ -20,6 +20,6 @@ export function EventPublishConfirmation({ event, organizer, tiers }: { event: E
       {event.admission_type === 'paid' ? <div><dt>Ticket tiers</dt><dd>{activeTiers.length}</dd></div> : null}
       <div><dt>Capacity</dt><dd>{capacity ?? 'Not specified'}</dd></div>
     </dl>
-    <p>Review your saved event before submitting it for publication. Public availability depends on review.</p>
+    <p>Review your saved event before publishing. Events that pass all checks go live immediately. If review is needed, we will show your event’s status after publishing.</p>
   </div>
 }

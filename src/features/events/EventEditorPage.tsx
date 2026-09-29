@@ -14,6 +14,7 @@ import { StepRail } from '../../components/ui/StepRail'
 import { useSession } from '../auth/SessionProvider'
 import { EventRequirementsStep, type OrganizerRequirementsFormValues } from '../moderation/EventRequirementsStep'
 import { OrganizerAgreementStep } from '../moderation/OrganizerAgreementStep'
+import { eventRequirementsInputSchema } from '../moderation/moderation.schemas'
 import {
   useRequiredEventPolicies,
 } from '../moderation/moderation.queries'
@@ -52,9 +53,9 @@ const emptyEvent: EventFormValues = {
 }
 
 const emptyRequirements: OrganizerRequirementsFormValues = {
-  agreementInvalidatedByEdit: false, hydratedEventId: '', minimumAge: '', alcoholPresent: false, cannabisPresent: false,
-  explicitAdultContent: false, gamblingPresent: false, weaponsPresent: false,
-  highRiskActivity: false, organizerAgreement: false,
+  agreementInvalidatedByEdit: false, hydratedEventId: '', minimumAge: '', alcoholPresent: null, cannabisPresent: null,
+  explicitAdultContent: null, gamblingPresent: null, weaponsPresent: null,
+  highRiskActivity: null, organizerAgreement: false,
 }
 
 const draftSaveError = 'Draft could not be saved. Check your connection and try again.'
@@ -199,7 +200,7 @@ export function EventEditorPage() {
       resetRequirements({
         agreementInvalidatedByEdit: false,
         hydratedEventId: eventId,
-        minimumAge: requirements.minimumAge,
+        minimumAge: requirements.minimumAge ?? '',
         alcoholPresent: requirements.alcoholPresent,
         cannabisPresent: requirements.cannabisPresent,
         explicitAdultContent: requirements.explicitAdultContent,
@@ -269,7 +270,7 @@ export function EventEditorPage() {
       const next = await getEventChangeContext(eventId, organizerId)
       adoptContext(next, isCurrent)
       reset(eventRowToFormValues(next.event))
-      resetRequirements({ ...next.requirements, agreementInvalidatedByEdit: false, hydratedEventId: eventId, organizerAgreement: !next.requirements.needsAcceptance })
+      resetRequirements({ ...next.requirements, minimumAge: next.requirements.minimumAge ?? '', agreementInvalidatedByEdit: false, hydratedEventId: eventId, organizerAgreement: !next.requirements.needsAcceptance })
       setWriteState('ready'); setServerError(null); setAgreementError(null); setConfirmReload(false)
     } catch { setServerError('The current saved event could not be loaded. Your inputs are still here.') }
     finally { setWriting(false) }
@@ -313,15 +314,15 @@ export function EventEditorPage() {
 
   async function persistRequirements() {
     const isCurrent = captureEditorIdentity()
-      const next = await saveRequirementsIfCurrent(eventId, organizerId, expectedContext(), requirementsInput())
+    const next = await saveRequirementsIfCurrent(eventId, organizerId, expectedContext(), requirementsInput())
     adoptContext(next, isCurrent)
     return next.requirements
   }
 
   function requirementsInput() {
     const values = getRequirementValues()
-    if (values.minimumAge === '') throw new Error('REQUIREMENTS_NOT_HYDRATED')
-    return {
+    requirementsForm.clearErrors()
+    const parsed = eventRequirementsInputSchema.safeParse({
       minimumAge: values.minimumAge,
       alcoholPresent: values.alcoholPresent,
       cannabisPresent: values.cannabisPresent,
@@ -329,7 +330,15 @@ export function EventEditorPage() {
       gamblingPresent: values.gamblingPresent,
       weaponsPresent: values.weaponsPresent,
       highRiskActivity: values.highRiskActivity,
+    })
+    if (!parsed.success) {
+      parsed.error.issues.forEach((issue, index) => {
+        const field = issue.path[0] as keyof OrganizerRequirementsFormValues
+        setRequirementError(field, { type: 'required', message: field === 'minimumAge' ? 'Choose the minimum age.' : 'Choose Yes or No.' }, { shouldFocus: index === 0 })
+      })
+      throw new Error('EVENT_DISCLOSURES_REQUIRED')
     }
+    return parsed.data
   }
 
   const submitAction = (action: 'save' | 'tickets') => {
@@ -349,6 +358,7 @@ export function EventEditorPage() {
             && !eventRevisionChanged && !requirementsChanged && !agreementInvalidatedByEdit
           resetRequirements({
             ...savedRequirements,
+            minimumAge: savedRequirements.minimumAge ?? '',
             agreementInvalidatedByEdit: !agreementWasCurrent,
             hydratedEventId: eventId,
             organizerAgreement: agreementWasCurrent,
@@ -365,6 +375,7 @@ export function EventEditorPage() {
           setDraftSaved(true)
         }
       } catch (error) {
+        if (error instanceof Error && error.message === 'EVENT_DISCLOSURES_REQUIRED') return
         if (!isNew) recordWriteFailure(error)
         setServerError(activeStep >= 4 && action === 'save'
           ? requirementsSaveError
@@ -459,12 +470,14 @@ export function EventEditorPage() {
         && !agreementInvalidatedByEdit && !requirementsWereDirty
       resetRequirements({
         ...savedRequirements,
+        minimumAge: savedRequirements.minimumAge ?? '',
         agreementInvalidatedByEdit: !agreementWasCurrent,
         hydratedEventId: eventId,
         organizerAgreement: agreementWasCurrent,
       })
       setActiveStep(5)
     } catch (error) {
+      if (error instanceof Error && error.message === 'EVENT_DISCLOSURES_REQUIRED') return
       recordWriteFailure(error)
       setServerError(requirementsSaveError)
     } finally {
@@ -475,6 +488,7 @@ export function EventEditorPage() {
 
   function submitAgreement() {
     if (activeActionRef.current !== null || eventId === '') return
+    try { requirementsInput() } catch { return }
     const agreementChecked = getRequirementValues('organizerAgreement')
     if (!agreementChecked) {
       setRequirementError('organizerAgreement', {
@@ -501,6 +515,7 @@ export function EventEditorPage() {
         }
         resetRequirements({
           ...savedRequirements,
+          minimumAge: savedRequirements.minimumAge ?? '',
           agreementInvalidatedByEdit: false,
           hydratedEventId: eventId,
           organizerAgreement: true,

@@ -43,6 +43,7 @@ export function useCancelOwnedEvent(organizerId: string) {
 
 type OwnedEventQueryOptions = {
   revalidateOnMount?: boolean
+  refetchInterval?: number
 }
 
 export function useOwnedEvent(
@@ -54,6 +55,8 @@ export function useOwnedEvent(
     queryKey: eventKeys.detail(organizerId, eventId),
     queryFn: () => getOwnedEvent(eventId, organizerId),
     enabled: eventId.length > 0 && organizerId.length > 0,
+    refetchInterval: options?.refetchInterval,
+    refetchIntervalInBackground: false,
     ...(options?.revalidateOnMount
       ? { staleTime: 0, refetchOnMount: 'always' as const }
       : {}),

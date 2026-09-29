@@ -2,7 +2,9 @@ import { Controller, type Control, type FieldErrors, type UseFormRegister } from
 import { Field } from '../../components/ui/Field'
 import type { EventRequirementsInput } from './moderation.types'
 
-export type OrganizerRequirementsFormValues = Omit<EventRequirementsInput, 'minimumAge'> & {
+export type OrganizerRequirementsFormValues = {
+  [K in Exclude<keyof EventRequirementsInput, 'minimumAge'>]: boolean | null
+} & {
   agreementInvalidatedByEdit?: boolean
   hydratedEventId?: string
   minimumAge: EventRequirementsInput['minimumAge'] | ''
@@ -36,6 +38,7 @@ export function EventRequirementsStep({ control, errors, onRequirementChange, re
       <div aria-label="Event requirements" className="event-requirements__grid" role="region">
         <Field error={errors.minimumAge?.message} label="Minimum age" name="minimumAge">
           <select {...register('minimumAge', { onChange: onRequirementChange })}>
+            <option value="">Choose minimum age</option>
             <option value="all_ages">All ages</option>
             <option value="18_plus">18+</option>
             <option value="21_plus">21+</option>

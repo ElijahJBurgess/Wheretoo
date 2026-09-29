@@ -66,10 +66,10 @@ export function PublishedEventPage() {
   const [searchParams] = useSearchParams()
   const sessionState = useSession()
   const authenticatedOrganizerId = sessionState.status === 'authenticated' ? sessionState.user.id : ''
-  const eventQuery = useOwnedEvent(eventId, authenticatedOrganizerId)
+  const eventQuery = useOwnedEvent(eventId, authenticatedOrganizerId, { revalidateOnMount: true, refetchInterval: 15000 })
   const persistedOrganizerId = eventQuery.data?.organizer_id ?? ''
   const organizerQuery = useOrganizer(persistedOrganizerId)
-  const publicEventQuery = usePublicEvent(eventId)
+  const publicEventQuery = usePublicEvent(eventId, { revalidateOnMount: true, refetchInterval: 15000 })
   const reviewQuery = useCurrentEventReviewRequest(authenticatedOrganizerId, eventId)
   const requestReviewMutation = useRequestEventReview(authenticatedOrganizerId, eventId)
   const withdrawReviewMutation = useWithdrawEventReview(authenticatedOrganizerId, eventId)
@@ -85,16 +85,20 @@ export function PublishedEventPage() {
     if (reviewFeedback !== null) reviewStatusRef.current?.focus()
   }, [reviewFeedback])
 
+  function refreshAvailability() {
+    void Promise.all([eventQuery.refetch(), publicEventQuery.refetch()])
+  }
+
   if (cancelledEventId === eventId) return <ConfirmedEventCancellation eventId={eventId} ownerId={authenticatedOrganizerId} />
 
   if (
     sessionState.status !== 'authenticated' ||
-    ((eventQuery.isPending || eventQuery.data === undefined) && !eventQuery.isError)
+    ((eventQuery.isPending || eventQuery.data === undefined || eventQuery.isFetchedAfterMount === false) && !eventQuery.isError)
   ) {
     return <ReadState headingAs="h1" paused={eventQuery.fetchStatus === 'paused'} status="loading" skeleton="detail-fields" title="Loading published event" />
   }
   if (eventQuery.isError) {
-    return <ReadState headingAs="h1" action={<Button onClick={() => void eventQuery.refetch()}>Try again</Button>} description="Check your connection, then try again." status="unavailable" title="Published event could not load" />
+    return <ReadState headingAs="h1" action={<Button onClick={refreshAvailability}>Try again</Button>} description="Check your connection, then try again." status="unavailable" title="Published event could not load" />
   }
   const event = eventQuery.data
   if (event === null) {
@@ -119,24 +123,32 @@ export function PublishedEventPage() {
   const cancellationSucceeded = cancelledEventId === eventId
   const isPublished = event.status === 'published' && !cancellationSucceeded
   const status = organizerStatus(cancellationSucceeded ? { ...event, status: 'cancelled' } : event)
-  const publicAvailabilityIsPending = publicEventQuery.isPending || publicEventQuery.isFetching || publicEventQuery.data === undefined
-  const isPublic = isPublished && !publicEventQuery.isError && !publicAvailabilityIsPending && publicEventQuery.data !== null
+  const availabilityIsPaused = eventQuery.fetchStatus === 'paused' || publicEventQuery.fetchStatus === 'paused'
+  const publicAvailabilityIsPending = availabilityIsPaused || eventQuery.isFetching || publicEventQuery.isPending || publicEventQuery.isFetching || publicEventQuery.isFetchedAfterMount === false || publicEventQuery.data === undefined
+  const isPublic = isPublished && event.moderation_status === 'clear' && event.moderated_revision === event.content_revision
+    && !publicEventQuery.isError && !publicAvailabilityIsPending && publicEventQuery.data !== null
   const canSetUpPaidTickets = isPublic && event.admission_type === 'free'
   const canRequestReview = isPublished && ['under_review', 'blocked', 'removed'].includes(event.moderation_status)
   const currentReview = reviewQuery.data
   const reviewIsBusy = requestReviewMutation.isPending || withdrawReviewMutation.isPending
 
   if (searchParams.get('created') === '1') {
-    const outcomeState = publicEventQuery.isError
+    const outcomeState = availabilityIsPaused
+      ? 'offline'
+      : publicEventQuery.isError
       ? 'unknown'
       : publicAvailabilityIsPending
         ? 'loading'
         : isPublic
           ? 'live'
+          : event.moderation_status === 'blocked'
+            ? 'blocked'
+          : event.moderation_status === 'removed'
+            ? 'removed'
           : status.heading === 'Under review'
             ? 'review'
             : 'unavailable'
-    return <EventCreationOutcome eventId={eventId} onCheck={() => void publicEventQuery.refetch()} state={outcomeState} />
+    return <EventCreationOutcome eventId={eventId} onCheck={refreshAvailability} state={outcomeState} />
   }
 
   async function requestReview() {
@@ -186,11 +198,12 @@ export function PublishedEventPage() {
         ) : null}
       </header>
       <div aria-live="polite" className={`published-event__notice${isPublic ? ' published-event__notice--public' : ''}`}>
-        {publicEventQuery.isError
+        {availabilityIsPaused
+          ? <p>Reconnect to check your event’s current status.</p>
+          : publicEventQuery.isError
           ? (
               <div>
                 <p>Public availability could not be confirmed.</p>
-                <Button onClick={() => void publicEventQuery.refetch()} variant="secondary">Check public availability again</Button>
               </div>
             )
           : publicAvailabilityIsPending
@@ -198,6 +211,7 @@ export function PublishedEventPage() {
             : isPublic
               ? <p>This event is publicly available.</p>
               : <p>{status.copy}</p>}
+        {publicEventQuery.isError || !publicAvailabilityIsPending ? <Button onClick={refreshAvailability} variant="secondary">Check public availability again</Button> : null}
       </div>
       <EventSummary event={event} organizer={organizer} />
       {canRequestReview ? (
@@ -253,6 +267,7 @@ export function PublishedEventPage() {
       ) : null}
       {isPublished ? <CancellationPanel key={eventId} eventId={eventId} ownerId={authenticatedOrganizerId} onConfirmed={() => setCancelledEventId(eventId)} /> : null}
       <footer className="published-event__actions">
+        {isPublic ? <Link className="ui-button ui-button--primary" to={`/events/${eventId}`}>View event</Link> : null}
         {canSetUpPaidTickets ? <Link className="ui-button ui-button--primary" to={`/organizer/events/${event.id}/tickets`}>Set up paid tickets</Link> : null}
         <Link className="ui-button ui-button--secondary" to={`/organizer/events/${event.id}/edit`}>Edit event</Link>
         {isPublished ? <Link className="ui-button ui-button--secondary" to={`/organizer/events/${event.id}/check-in`}>Check in guests</Link> : null}

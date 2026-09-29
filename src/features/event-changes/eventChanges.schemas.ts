@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { requirementsFromRpc, requirementsRpcRowSchema } from '../moderation/moderation.api'
-import { eventRequirementsInputSchema } from '../moderation/moderation.schemas'
+import { disclosureReadSchema } from '../moderation/moderation.schemas'
 import { eventNoticeFactsSchema } from './eventStatus.schemas'
 import type { EventRow } from '../events/event.types'
 const count = z.number().int().nonnegative().safe()
@@ -31,11 +31,11 @@ const unavailablePolicyRequirementsSchema = z.strictObject({
  const disclosures = [row.minimum_age, row.alcohol_present, row.cannabis_present, row.explicit_adult_content, row.gambling_present, row.weapons_present, row.high_risk_activity]
  return disclosures.every(value => value === null) || disclosures.every(value => value !== null)
 }, 'Disclosure projection must be wholly absent or complete.').transform(row => ({
- ...eventRequirementsInputSchema.parse({
-  minimumAge: row.minimum_age ?? 'all_ages', alcoholPresent: row.alcohol_present ?? false,
-  cannabisPresent: row.cannabis_present ?? false, explicitAdultContent: row.explicit_adult_content ?? false,
-  gamblingPresent: row.gambling_present ?? false, weaponsPresent: row.weapons_present ?? false,
-  highRiskActivity: row.high_risk_activity ?? false,
+ ...disclosureReadSchema.parse({
+  minimumAge: row.minimum_age, alcoholPresent: row.alcohol_present,
+  cannabisPresent: row.cannabis_present, explicitAdultContent: row.explicit_adult_content,
+  gamblingPresent: row.gambling_present, weaponsPresent: row.weapons_present,
+  highRiskActivity: row.high_risk_activity,
  }),
  needsAcceptance: true as const, organizerTerms: null, eventPolicy: null,
 }))

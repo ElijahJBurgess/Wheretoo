@@ -67,7 +67,7 @@ describe('moderation browser API', () => {
     await expect(getOwnedEventRequirements(eventId)).resolves.toBeNull()
   })
 
-  it('defaults the all-null disclosure projection for a first draft but rejects partial nulls', async () => {
+  it('preserves unanswered disclosures for a first draft and rejects partial nulls', async () => {
     const firstDraftRow = {
       ...requirementsRow,
       minimum_age: null,
@@ -80,13 +80,13 @@ describe('moderation browser API', () => {
     }
     rpc.mockResolvedValueOnce({ data: [firstDraftRow], error: null })
     await expect(getOwnedEventRequirements(eventId)).resolves.toMatchObject({
-      minimumAge: 'all_ages',
-      alcoholPresent: false,
-      cannabisPresent: false,
-      explicitAdultContent: false,
-      gamblingPresent: false,
-      weaponsPresent: false,
-      highRiskActivity: false,
+      minimumAge: null,
+      alcoholPresent: null,
+      cannabisPresent: null,
+      explicitAdultContent: null,
+      gamblingPresent: null,
+      weaponsPresent: null,
+      highRiskActivity: null,
       needsAcceptance: true,
     })
 

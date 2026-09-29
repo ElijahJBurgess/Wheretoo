@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -47,6 +47,30 @@ beforeEach(() => {
  })
 })
 describe('atomic-context event editor', () => {
+ it('requires explicit answers for a draft with no saved disclosures before saving requirements', async () => {
+  current = { ...current, requirements: { ...current.requirements, minimumAge: null, alcoholPresent: null, cannabisPresent: null, explicitAdultContent: null, gamblingPresent: null, weaponsPresent: null, highRiskActivity: null } } as unknown as EventChangeContext
+  const user = userEvent.setup(); renderEditor('/organizer/events/event-1/edit?step=requirements')
+  expect(screen.getAllByRole('radio').every(input => !(input as HTMLInputElement).checked)).toBe(true)
+  await user.click(screen.getByRole('button', { name: 'Continue' }))
+  expect(requirements).not.toHaveBeenCalled()
+  const fields = within(screen.getByRole('region', { name: 'Event requirements' }))
+  expect(fields.getByText('Choose the minimum age.')).toBeVisible()
+  expect(fields.getAllByText('Choose Yes or No.')).toHaveLength(6)
+  await user.selectOptions(screen.getByLabelText('Minimum age'), 'all_ages')
+  for (const radio of screen.getAllByRole('radio', { name: 'No' })) await user.click(radio)
+  await user.click(screen.getByRole('checkbox'))
+  await user.click(screen.getByRole('button', { name: 'Continue' }))
+  await waitFor(() => expect(requirements).toHaveBeenCalledOnce())
+  expect(requirements).toHaveBeenCalledWith('event-1', 'organizer-1', 'saved-token', expect.objectContaining({ minimumAge: 'all_ages', alcoholPresent: false, cannabisPresent: false, explicitAdultContent: false, gamblingPresent: false, weaponsPresent: false, highRiskActivity: false }))
+ })
+ it('keeps an unanswered draft editable after Save draft validation', async () => {
+  current.requirements.alcoholPresent = null
+  const user = userEvent.setup(); renderEditor('/organizer/events/event-1/edit?step=requirements')
+  await user.click(screen.getByRole('button', { name: 'Save draft' }))
+  expect(requirements).not.toHaveBeenCalled()
+  expect(screen.queryByText('Unknown')).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled()
+ })
  it('silently saves the entered Basics before artwork and stays on Basics with the real draft', async () => {
   let finishUpload!: () => void
   upload.mockImplementation(() => new Promise<void>(resolve => { finishUpload = resolve }))
