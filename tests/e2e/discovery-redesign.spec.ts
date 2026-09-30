@@ -2,7 +2,7 @@ import { mkdirSync } from 'node:fs'
 import { expect, test, type Page } from '@playwright/test'
 
 const service = 'https://discovery-local.supabase.co'
-const captures = '.superpowers/discovery-redesign/visual'
+const captures = '.superpowers/discovery-redesign/refinement-visual'
 const titles = ['Sunset Rooftop Sessions', 'Taco Social', 'Night Garden', 'Lake Merritt Morning Miles', 'Community Supper', 'Oakland Art Walk', 'Late Night Sessions']
 const categories = ['music', 'food_drink', 'art_culture', 'fitness', 'community', 'art_culture', 'nightlife']
 const id = (index: number) => `d1590000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`
@@ -66,7 +66,7 @@ async function noOverflow(page: Page) {
 }
 async function capture(page: Page, name: string) {
   await page.evaluate(() => document.fonts.ready)
-  await page.locator('.discovery-shortcuts').scrollIntoViewIfNeeded()
+  if (await page.locator('.discovery-shortcuts').count()) await page.locator('.discovery-shortcuts').scrollIntoViewIfNeeded()
   await page.evaluate(() => window.scrollTo(0, 0))
   await page.screenshot({ path: `${captures}/${name}.png`, fullPage: true })
 }
@@ -77,6 +77,14 @@ test('desktop artwork, supported controls, bounded pagination and truthful price
   await expect(page.locator('.discovery-hero img')).toBeVisible()
   await expect(page.locator('.discovery-event-row')).toHaveCount(6)
   await expect(page.locator('.discovery-hero')).toContainText('View prices')
+  const brand = page.getByRole('link', { name: 'Wheretoo discovery home' })
+  await expect(brand).toHaveCSS('font-family', '"Manrope Variable", sans-serif')
+  expect(await brand.evaluate(el => getComputedStyle(el, '::before').content)).toBe('none')
+  await expect(page.locator('.discovery-hero img')).toHaveCSS('object-fit', 'contain')
+  const feature = await page.locator('.discovery-hero').boundingBox()
+  const map = await page.getByRole('complementary', { name: 'Map area' }).boundingBox()
+  expect(map!.x).toBeGreaterThan(feature!.x + feature!.width)
+  expect(map!.y).toBe(feature!.y)
   await capture(page, 'desktop-1440')
   await noOverflow(page)
   await page.getByRole('button', { name: 'Load more', exact: true }).click()
@@ -91,12 +99,16 @@ test('mobile filters, shortcuts, event navigation and browser return', async ({ 
   const proof = await setup(page)
   await page.goto('/discover')
   await expect(page.locator('.discovery-hero img')).toBeVisible()
+  await expect(page.locator('.discovery-hero img')).toHaveCSS('object-fit', 'contain')
+  const feature = await page.locator('.discovery-hero').boundingBox()
+  const map = await page.getByRole('complementary', { name: 'Map area' }).boundingBox()
+  expect(map!.y).toBeGreaterThan(feature!.y + feature!.height)
   await capture(page, 'mobile-390')
   await noOverflow(page)
   await page.getByRole('combobox', { name: 'Admission' }).selectOption('free')
   await expect(page).toHaveURL('/discover?price=free')
   await expect(page.getByRole('status', { name: 'Discovery results' })).toHaveText('7 events')
-  expect(proof.requests.at(-1)?.admissionType).toBe('free')
+  await expect.poll(() => proof.requests.at(-1)?.admissionType).toBe('free')
   await page.getByRole('link', { name: /This Weekend/ }).click()
   await expect(page).toHaveURL('/discover?when=weekend')
   await expect.poll(() => proof.requests.at(-1)?.when).toBe('weekend')
@@ -209,3 +221,20 @@ for (const appendImageFailure of [false, true]) {
     await expect(page.locator('.discovery-hero img')).toBeVisible()
   })
 }
+
+test('shared onboarding wordmark preserves desktop and mobile layout', async ({ page }) => {
+  await setup(page)
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto('/auth/sign-up')
+    const brand = page.locator('.onboarding__brand')
+    await expect(brand).toHaveText('wheretoo')
+    await expect(brand).toHaveCSS('font-family', '"Manrope Variable", sans-serif')
+    await expect(brand).toHaveCSS('font-size', '30px')
+    await expect(brand).toHaveCSS('font-weight', '850')
+    await expect(brand).toHaveCSS('letter-spacing', '-2px')
+    await expect(brand).toHaveCSS('color', 'rgb(248, 247, 255)')
+    await noOverflow(page)
+    await capture(page, `onboarding-${width}`)
+  }
+})
