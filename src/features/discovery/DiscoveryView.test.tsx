@@ -31,6 +31,15 @@ function renderView(input: DiscoveryViewProps) {
 }
 
 describe('DiscoveryView', () => {
+  it('reuses platform branding and reserves a noninteractive map slot beside the feature', () => {
+    const { container } = renderView(props())
+    expect(screen.getByRole('link', { name: 'Wheretoo discovery home' })).toHaveClass('platform-wordmark')
+    const map = screen.getByRole('complementary', { name: 'Map area' })
+    expect(map).toHaveTextContent('Map coming later')
+    expect(map.querySelector('a, button, img')).toBeNull()
+    expect(map.parentElement).toBe(container.querySelector('.discovery-hero')?.parentElement)
+  })
+
   it('renders one public landmark, all supported filters, and only working navigation', async () => {
     const onFiltersChange = vi.fn()
     renderView(props({ onFiltersChange }))

@@ -10,6 +10,7 @@ import {
 } from './discovery.presentation'
 import type { DiscoveryDisplayItem, DiscoveryFilters } from './discovery.types'
 import './discovery.css'
+import '../../components/layout/platform-brand.css'
 import discoveryHero from './assets/bay-bridge-night.jpg'
 
 export type DiscoveryViewProps = {
@@ -208,7 +209,7 @@ export function DiscoveryView({
     <main className="discovery-page">
       <div className="discovery-shell">
         <header className="discovery-header">
-          <Link aria-label="Wheretoo discovery home" className="discovery-wordmark" to="/discover">wheretoo</Link>
+          <Link aria-label="Wheretoo discovery home" className="discovery-wordmark platform-wordmark" to="/discover">wheretoo</Link>
           <nav aria-label="Public navigation" className="discovery-nav">
             <Link aria-current="page" to={discoverDestination}><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="m15 9-2 4-4 2 2-4Z" /></svg>Discover</Link>
             <Link to="/organizer/events"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="15" rx="3" /><path d="M8 3v6m8-6v6M4 12h16" /></svg>Organize</Link>
@@ -224,7 +225,12 @@ export function DiscoveryView({
         <DiscoveryFiltersView filters={filters} onChange={onFiltersChange} />
 
         <section aria-labelledby="discovery-results-heading" className="discovery-results" id="discovery-results">
-          {highlight ? <EventLink eventHref={eventHref} item={highlight} publicSearch={publicSearch} variant="hero" /> : null}
+          {highlight ? <div className="discovery-feature-row">
+            <EventLink eventHref={eventHref} item={highlight} publicSearch={publicSearch} variant="hero" />
+            <aside aria-label="Map area" className="discovery-map-placeholder">
+              <span>Map coming later</span>
+            </aside>
+          </div> : null}
           <div className="discovery-results__heading">
             <h2 id="discovery-results-heading">{filters.when === 'today' ? 'Today in the Bay' : filters.when === 'weekend' ? 'This weekend in the Bay' : 'Coming up in the Bay'}</h2>
             <span>{windowLabel}</span>
