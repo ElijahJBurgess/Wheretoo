@@ -36,6 +36,7 @@ export const eventDraftSchema = z.object({
   location: normalizedLocationSchema.nullable(),
   admissionType: z.enum(['free', 'paid']),
   capacity: z.number().int().positive().max(2_147_483_647).nullable(),
+  mapIconVersionId: z.string().uuid().nullable().optional(),
 })
 
 function publicationSchema(requireFutureStart: boolean) {

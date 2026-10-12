@@ -1,12 +1,22 @@
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { selectBrowserEnv } from './browserEnv'
 
 describe('selectBrowserEnv', () => {
+  it('accepts the configured application verification token fixture', () => {
+    const manifest = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: Record<string, string> }
+    const token = manifest.scripts['test:build25'].match(/VITE_MAPBOX_ACCESS_TOKEN=([^ ]+)/)?.[1]
+    expect(token).toBeDefined()
+    expect(() => selectBrowserEnv({ VITE_MAPBOX_ACCESS_TOKEN: token })).not.toThrow()
+  })
+  it.each(['sk.secret', ' pk.public', '', 'mapbox-token'])('rejects a non-public Mapbox token: %s', value => {
+    expect(() => selectBrowserEnv({ VITE_MAPBOX_ACCESS_TOKEN: value })).toThrow('Invalid VITE_MAPBOX_ACCESS_TOKEN')
+  })
   it('selects only the exact browser environment allowlist', () => {
     const selected = selectBrowserEnv({
       VITE_SUPABASE_URL: 'https://project.supabase.co',
       VITE_SUPABASE_PUBLISHABLE_KEY: 'publishable-key',
-      VITE_MAPBOX_ACCESS_TOKEN: 'mapbox-token',
+      VITE_MAPBOX_ACCESS_TOKEN: 'pk.mapbox-test',
       VITE_STRIPE_PUBLISHABLE_KEY: 'pk_test_browser',
       VITE_SUPABASE_URL_SUFFIX: 'must-not-be-exposed',
       VITE_UNAPPROVED_VALUE: 'must-not-be-exposed',
@@ -16,7 +26,7 @@ describe('selectBrowserEnv', () => {
     expect(selected).toEqual({
       VITE_SUPABASE_URL: 'https://project.supabase.co',
       VITE_SUPABASE_PUBLISHABLE_KEY: 'publishable-key',
-      VITE_MAPBOX_ACCESS_TOKEN: 'mapbox-token',
+      VITE_MAPBOX_ACCESS_TOKEN: 'pk.mapbox-test',
       VITE_STRIPE_PUBLISHABLE_KEY: 'pk_test_browser',
     })
   })
@@ -30,7 +40,7 @@ describe('selectBrowserEnv', () => {
       selectBrowserEnv({
         VITE_SUPABASE_URL: 'https://project.supabase.co',
         VITE_SUPABASE_PUBLISHABLE_KEY: 'publishable-key',
-        VITE_MAPBOX_ACCESS_TOKEN: 'mapbox-token',
+        VITE_MAPBOX_ACCESS_TOKEN: 'pk.mapbox-test',
         VITE_STRIPE_PUBLISHABLE_KEY: stripePublishableKey,
       }),
     ).toThrow('Invalid VITE_STRIPE_PUBLISHABLE_KEY')

@@ -4,7 +4,6 @@ import { instantToLosAngelesWallTime, losAngelesWallTimeToIso } from './event.ti
 import { eventCategories } from './event.types'
 import type { EventCategory, EventFormValues, EventRow, NormalizedLocation } from './event.types'
 
-type EventInsert = Database['public']['Tables']['events']['Insert']
 type EventUpdate = Database['public']['Tables']['events']['Update']
 
 type EventDraftPayload = Pick<
@@ -27,6 +26,7 @@ type EventDraftPayload = Pick<
   | 'longitude'
   | 'admission_type'
   | 'capacity'
+  | 'map_icon_version_id'
 >
 
 function optionalText(value: string): string | null {
@@ -107,6 +107,7 @@ export function draftPayload(values: EventFormValues, baseline?: EventRow): Even
     longitude: location?.longitude ?? null,
     admission_type: values.admissionType,
     capacity: values.capacity,
+    ...(values.mapIconVersionId !== undefined ? { map_icon_version_id: values.mapIconVersionId } : {}),
   }
 }
 
@@ -155,6 +156,7 @@ export function eventRowToFormValues(event: EventRow): EventFormValues {
     location: rowLocation(event),
     admissionType: event.admission_type === 'paid' ? 'paid' : 'free',
     capacity: event.capacity,
+    mapIconVersionId: event.map_icon_version_id ?? null,
   }
 }
 
@@ -162,28 +164,22 @@ export async function saveEventDraft(input: {
   eventId: string | null
   organizerId: string
   values: EventFormValues
+  requestId?: string
+  expectedUpdatedAt?: string
 }): Promise<EventRow> {
   const payload = draftPayload(input.values)
-  const result =
-    input.eventId === null
-      ? await supabase
-          .from('events')
-          .insert({ ...payload, organizer_id: input.organizerId } satisfies EventInsert)
-          .select('*')
-          .single()
-      : await supabase
-          .from('events')
-          .update(payload)
-          .eq('id', input.eventId)
-          .eq('organizer_id', input.organizerId)
-          .select('*')
-          .single()
+  const result = await supabase.rpc('save_owned_event_draft', {
+    p_event_id: input.eventId,
+    p_event: payload,
+    p_expected_updated_at: input.expectedUpdatedAt ?? null,
+    p_request_id: input.requestId ?? crypto.randomUUID(),
+  })
 
   if (result.error) {
     throw result.error
   }
 
-  if (!result.data) {
+  if (!result.data || result.data.organizer_id !== input.organizerId || (input.eventId !== null && result.data.id !== input.eventId)) {
     throw new Error('Saved event was not returned')
   }
 
@@ -195,9 +191,13 @@ export async function saveEventRevision(input: {
   organizerId: string
   values: EventFormValues
 }): Promise<EventRow> {
+  // Legacy admission-only callers do not own icon selection. The editor uses
+  // saveEventIfCurrent with its pinned context and immutable-version baseline.
+  const payload = draftPayload(input.values)
+  delete payload.map_icon_version_id
   const { data, error } = await supabase.rpc('save_owned_event_revision', {
     p_event_id: input.eventId,
-    p_event: draftPayload(input.values),
+    p_event: payload,
   })
 
   if (error) throw error

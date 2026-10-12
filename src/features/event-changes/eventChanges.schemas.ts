@@ -17,6 +17,7 @@ const eventSchema = z.object({
  first_publicly_eligible_at: nullableText, public_eligibility_version: count,
  publicly_authorized_revision: count.nullable(), publicly_authorized_action_id: nullableText,
  location: z.unknown(), artwork_path: nullableText, animation_preset: z.string(),
+ map_icon_version_id: z.string().uuid().nullable().default(null),
  published_at: nullableText, created_at: z.string(), updated_at: z.string(),
 }).passthrough().transform(row => row as EventRow)
 export const snapshotSchema = z.strictObject({ snapshot_id: z.string().uuid(), snapshot_version: count, content_revision: count, captured_at: z.string(), facts: eventNoticeFactsSchema })

@@ -78,7 +78,7 @@ const event: EventRow = {
   location: 'computed geography',
   admission_type: 'free',
   capacity: 250,
-  artwork_path: null,
+  map_icon_version_id: null, artwork_path: null,
   animation_preset: 'generic',
   published_at: null,
   created_at: '2026-08-24T12:00:00.000Z',
@@ -178,16 +178,15 @@ describe('owned event API', () => {
     await expect(getOwnedEvent('event-1', 'organizer-1')).rejects.toBe(error)
   })
 
-  it('inserts ownership only for a first save and normalizes optional strings', async () => {
-    single.mockResolvedValue({ data: event, error: null })
+  it('creates through the atomic owner RPC and normalizes optional strings', async () => {
+    rpc.mockResolvedValue({ data: event, error: null })
 
     await expect(
       saveEventDraft({ eventId: null, organizerId: 'organizer-1', values }),
     ).resolves.toEqual(event)
 
-    const payload = insert.mock.calls[0]?.[0] as Record<string, unknown>
+    const payload = rpc.mock.calls[0]?.[1]?.p_event as Record<string, unknown>
     expect(payload).toMatchObject({
-      organizer_id: 'organizer-1',
       venue_name: null,
       address_line2: null,
       country_code: 'US',
@@ -197,26 +196,27 @@ describe('owned event API', () => {
       ends_at: '2026-08-25T05:00:00.000Z',
     })
     expectSafePayload(payload)
-    expect(mutationSelect).toHaveBeenCalledWith('*')
-    expect(single).toHaveBeenCalledOnce()
+    expect(rpc).toHaveBeenCalledWith('save_owned_event_draft', expect.objectContaining({ p_event_id: null, p_expected_updated_at: null, p_request_id: expect.any(String) }))
+    expect(payload).not.toHaveProperty('organizer_id')
+    expect(from).not.toHaveBeenCalled()
   })
 
   it('updates only the supplied owned ID without writing organizer ownership', async () => {
-    single.mockResolvedValue({ data: event, error: null })
+    rpc.mockResolvedValue({ data: event, error: null })
 
     await expect(
-      saveEventDraft({ eventId: 'event-1', organizerId: 'organizer-1', values }),
+      saveEventDraft({ eventId: event.id, organizerId: 'organizer-1', values, expectedUpdatedAt: event.updated_at }),
     ).resolves.toEqual(event)
 
-    const payload = update.mock.calls[0]?.[0] as Record<string, unknown>
+    const payload = rpc.mock.calls[0]?.[1]?.p_event as Record<string, unknown>
     expect(payload).not.toHaveProperty('organizer_id')
     expectSafePayload(payload)
-    expect(firstEq).toHaveBeenCalledWith('id', 'event-1')
-    expect(secondEq).toHaveBeenCalledWith('organizer_id', 'organizer-1')
+    expect(rpc).toHaveBeenCalledWith('save_owned_event_draft', expect.objectContaining({ p_event_id: event.id, p_expected_updated_at: event.updated_at }))
+    expect(from).not.toHaveBeenCalled()
   })
 
   it('normalizes blank draft fields and a cleared location to writable nulls', async () => {
-    single.mockResolvedValue({ data: event, error: null })
+    rpc.mockResolvedValue({ data: event, error: null })
 
     await saveEventDraft({
       eventId: null,
@@ -232,7 +232,7 @@ describe('owned event API', () => {
       },
     })
 
-    expect(insert).toHaveBeenCalledWith(
+    expect(rpc.mock.calls[0]?.[1]?.p_event).toEqual(
       expect.objectContaining({
         title: null,
         description: null,
@@ -260,6 +260,7 @@ describe('owned event API', () => {
   it('maps a persisted database row to the single editor form contract', () => {
     expect(eventRowToFormValues(event)).toEqual({
       ...values,
+      mapIconVersionId: null,
       venueName: 'Civic Center Plaza',
       location: { ...values.location, addressLine2: '' },
     })
@@ -275,9 +276,9 @@ describe('owned event API', () => {
     expect(mapped.startsAt).toBe(wallTime)
     expect(mapped.endsAt).toBe(wallTime)
 
-    single.mockResolvedValue({ data: persisted, error: null })
+    rpc.mockResolvedValue({ data: persisted, error: null })
     await saveEventDraft({ eventId: 'event-returned', organizerId: 'organizer-1', values: mapped })
-    expect(update).toHaveBeenCalledWith(
+    expect(rpc.mock.calls[0]?.[1]?.p_event).toEqual(
       expect.objectContaining({ starts_at: instant, ends_at: instant }),
     )
   })
@@ -288,9 +289,9 @@ describe('owned event API', () => {
     expect(mapped.startsAt).toBe('')
     expect(mapped.endsAt).toBe('')
 
-    single.mockResolvedValue({ data: persisted, error: null })
+    rpc.mockResolvedValue({ data: persisted, error: null })
     await saveEventDraft({ eventId: 'event-returned', organizerId: 'organizer-1', values: mapped })
-    expect(update).toHaveBeenCalledWith(expect.objectContaining({ starts_at: null, ends_at: null }))
+    expect(rpc.mock.calls[0]?.[1]?.p_event).toEqual(expect.objectContaining({ starts_at: null, ends_at: null }))
   })
 
   it('round-trips instants immediately across the spring-forward gap', async () => {
@@ -303,9 +304,9 @@ describe('owned event API', () => {
     expect(mapped.startsAt).toBe('2026-03-08T01:59')
     expect(mapped.endsAt).toBe('2026-03-08T03:00')
 
-    single.mockResolvedValue({ data: persisted, error: null })
+    rpc.mockResolvedValue({ data: persisted, error: null })
     await saveEventDraft({ eventId: 'event-returned', organizerId: 'organizer-1', values: mapped })
-    expect(update).toHaveBeenCalledWith(
+    expect(rpc.mock.calls[0]?.[1]?.p_event).toEqual(
       expect.objectContaining({
         starts_at: '2026-03-08T09:59:00.000Z',
         ends_at: '2026-03-08T10:00:00.000Z',
@@ -323,9 +324,9 @@ describe('owned event API', () => {
     expect(mapped.startsAt).toBe('2026-11-01T01:30')
     expect(mapped.endsAt).toBe('2026-11-01T01:30')
 
-    single.mockResolvedValue({ data: persisted, error: null })
+    rpc.mockResolvedValue({ data: persisted, error: null })
     await saveEventDraft({ eventId: 'event-returned', organizerId: 'organizer-1', values: mapped })
-    expect(update).toHaveBeenCalledWith(
+    expect(rpc.mock.calls[0]?.[1]?.p_event).toEqual(
       expect.objectContaining({
         starts_at: '2026-11-01T08:30:00.000Z',
         ends_at: '2026-11-01T08:30:00.000Z',
@@ -373,7 +374,7 @@ describe('owned event API', () => {
         rpc.mockResolvedValue({ data: null, error })
         await expect(publishEvent('event-1')).rejects.toBe(error)
       } else {
-        single.mockResolvedValue({ data: null, error })
+        rpc.mockResolvedValue({ data: null, error })
         await expect(
           saveEventDraft({
             eventId: operation === 'insert' ? null : 'event-1',
@@ -427,7 +428,7 @@ describe('event query cache contracts', () => {
   })
 
   it('save seeds only returned detail and invalidates only returned owner list', async () => {
-    single.mockResolvedValue({ data: event, error: null })
+    rpc.mockResolvedValue({ data: event, error: null })
     const { queryClient, wrapper } = setupQueryClient()
     queryClient.setQueryData(eventKeys.ownedList('organizer-1'), ['old'])
     queryClient.setQueryData(eventKeys.ownedList('organizer-2'), ['unrelated'])

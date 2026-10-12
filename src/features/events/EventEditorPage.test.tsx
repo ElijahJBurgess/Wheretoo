@@ -18,6 +18,9 @@ vi.mock('../../lib/supabase/client', () => ({ supabase: {} }))
 vi.mock('./LocationSearchField', () => { locationLoaded(); return { default: () => <button>Mock address search</button> } })
 import { EventEditorPage } from './EventEditorPage'
 import { EventChangeError } from '../event-changes/eventChanges.api'
+import { flagDescriptor } from '../map-icons/icon.test-fixtures'
+const { catalog, ownedIcon } = vi.hoisted(() => ({ catalog: vi.fn(), ownedIcon: vi.fn() }))
+vi.mock('../map-icons/icon.catalog.api', () => ({ listSelectableMapIcons: catalog, getOwnedEventMapIcon: ownedIcon }))
 let current: EventChangeContext
 function renderEditor(path = '/organizer/events/event-1/edit?step=basics', initialEntries = [path], editReady?: Promise<void>) {
  const router = createMemoryRouter([
@@ -37,6 +40,8 @@ beforeEach(() => {
  vi.clearAllMocks(); identity.version = 1; current = testContext()
  useContext.mockImplementation((eventId: string) => ({ data: eventId ? current : undefined, isPending: false, isFetching: false, isError: false, refetch }))
  create.mockResolvedValue(testEvent)
+ catalog.mockResolvedValue({ selectionEnabled: true, catalogRevision: 1, nextCursor: null, icons: [{ ...flagDescriptor, url: '/flag.png' }] })
+ ownedIcon.mockResolvedValue(null)
  save.mockImplementation(async (_id, _owner, _token, values) => { current = { ...current, context_token: 'saved-token', event: { ...current.event, title: values.title, admission_type: values.admissionType } }; return current })
  requirements.mockImplementation(async (_id, _owner, _token, values) => { current = { ...current, context_token: 'requirements-token', requirements: { ...current.requirements, ...values } }; return current })
  accept.mockImplementation(async () => { if (!current.requirements.organizerTerms || !current.requirements.eventPolicy) throw new Error('Policies unavailable'); current = { ...current, context_token: 'accepted-token', requirements: { ...current.requirements, needsAcceptance: false } }; return current })
@@ -47,6 +52,36 @@ beforeEach(() => {
  })
 })
 describe('atomic-context event editor', () => {
+ it('saves the picker through the reviewed current-main context and hydrates the returned choice', async () => {
+  const user = userEvent.setup(); renderEditor()
+  save.mockImplementation(async (_id, _owner, _token, values) => {
+   current = { ...current, context_token: 'icon-token', event: { ...current.event, map_icon_version_id: values.mapIconVersionId } }
+   return current
+  })
+  await user.click(await screen.findByRole('radio', { name: 'Wheretoo Flag' }))
+  await user.click(screen.getByRole('button', { name: 'Save draft' }))
+  await waitFor(() => expect(save).toHaveBeenCalledWith('event-1', 'organizer-1', 'baseline-token',
+   expect.objectContaining({ mapIconVersionId: flagDescriptor.versionId }), expect.objectContaining({ content_revision: 1 })))
+  await user.click(await screen.findByRole('button', { name: 'Continue Editing' }))
+  expect(screen.getByRole('radio', { name: 'Wheretoo Flag' })).toBeChecked()
+ })
+ it('reuses creation identity after an ambiguous response and replaces it only after inputs change', async () => {
+  const user = userEvent.setup(); renderEditor('/organizer/events/new')
+  create.mockRejectedValue(new Error('Response lost'))
+  await user.type(screen.getByLabelText('Event name'), 'My unsaved gathering')
+  await user.click(await screen.findByRole('radio', { name: 'Wheretoo Flag' }))
+  await user.click(screen.getByRole('button', { name: 'Save draft' }))
+  await waitFor(() => expect(create).toHaveBeenCalledTimes(1))
+  await user.click(await screen.findByRole('button', { name: 'Try saving again' }))
+  await waitFor(() => expect(create).toHaveBeenCalledTimes(2))
+  expect(create.mock.calls[1][0].requestId).toBe(create.mock.calls[0][0].requestId)
+  expect(screen.getByLabelText('Event name')).toHaveValue('My unsaved gathering')
+  expect(screen.getByRole('radio', { name: 'Wheretoo Flag' })).toBeChecked()
+  await user.type(screen.getByLabelText('Event name'), ' changed')
+  await user.click(screen.getByRole('button', { name: 'Try saving again' }))
+  await waitFor(() => expect(create).toHaveBeenCalledTimes(3))
+  expect(create.mock.calls[2][0].requestId).not.toBe(create.mock.calls[0][0].requestId)
+ })
  it('does not expose the next stage before the saved draft route is ready', async () => {
   let ready!: () => void
   const pending = new Promise<void>(resolve => { ready = resolve })

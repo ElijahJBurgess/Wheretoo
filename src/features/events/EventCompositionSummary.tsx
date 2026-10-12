@@ -2,6 +2,7 @@ import { useOrganizer } from '../organizers/organizer.queries'
 import { useOwnedTicketTiers } from '../tickets/ticket.queries'
 import type { EventRow } from './event.types'
 import { useEventCoverState } from '../event-images/eventImages.queries'
+import { MapIconSummary } from '../map-icons/MapIconSummary'
 import './eventSchedule.css'
 export function EventCompositionSummary({ event }: { event: EventRow }) {
   const organizer = useOrganizer(event.organizer_id)
@@ -20,5 +21,5 @@ export function EventCompositionSummary({ event }: { event: EventRow }) {
     <div><dt>Ends</dt><dd>{event.ends_at ? new Intl.DateTimeFormat('en-US', { dateStyle:'medium', timeStyle:'short', timeZone:'America/Los_Angeles' }).format(new Date(event.ends_at)) : 'End not added'} · Pacific Time</dd></div>
     <div><dt>Where</dt><dd>{event.venue_name}<br />{[event.address_line1,event.city,event.region].filter(Boolean).join(', ')}</dd></div>
     <div><dt>Admission</dt><dd>{event.admission_type === 'paid' ? retained ? `${retained.length} ticket ${retained.length === 1 ? 'tier' : 'tiers'}` : tiers.isError ? 'Ticket details unavailable' : 'Loading tickets…' : 'Free RSVP'}</dd></div>
-  </dl></section>
+  </dl><MapIconSummary organizerId={event.organizer_id} eventId={event.id} value={event.map_icon_version_id ?? null} /></section>
 }

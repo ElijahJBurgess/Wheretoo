@@ -21,7 +21,7 @@ export const event: EventRow = {
   timezone: 'America/Los_Angeles', venue_name: 'Lakeview Rooftop', address_line1: '123 Lakeview Avenue',
   address_line2: null, city: 'Oakland', region: 'CA', postal_code: '94612', country_code: 'US',
   mapbox_feature_id: 'preview.address', latitude: 37.8, longitude: -122.26, location: 'preview only',
-  admission_type: 'paid', capacity: 100, artwork_path: null, animation_preset: 'generic', published_at: null,
+  admission_type: 'paid', capacity: 100, map_icon_version_id: null, artwork_path: null, animation_preset: 'generic', published_at: null,
   created_at: '2026-09-01T12:00:00Z', updated_at: '2026-09-01T12:00:00Z',
 }
 export const tier: TicketTierRow = {

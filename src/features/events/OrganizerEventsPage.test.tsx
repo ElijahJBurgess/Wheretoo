@@ -26,7 +26,7 @@ const baseEvent: EventRow = {
   ends_at: null, timezone: 'America/Los_Angeles', venue_name: null, address_line1: null,
   address_line2: null, city: null, region: null, postal_code: null, country_code: 'US',
   mapbox_feature_id: null, latitude: null, longitude: null, location: null, admission_type: 'free',
-  capacity: null, artwork_path: null, animation_preset: 'generic', published_at: null,
+  capacity: null, map_icon_version_id: null, artwork_path: null, animation_preset: 'generic', published_at: null,
   created_at: '2026-08-24T12:00:00.000Z', updated_at: '2026-08-24T13:00:00.000Z',
 }
 

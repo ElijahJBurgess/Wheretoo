@@ -133,6 +133,7 @@ export type Database = {
           latitude: number | null
           location: unknown
           longitude: number | null
+          map_icon_version_id: string | null
           mapbox_feature_id: string | null
           moderated_revision: number | null
           moderation_status: string
@@ -172,6 +173,7 @@ export type Database = {
           latitude?: number | null
           location?: unknown
           longitude?: number | null
+          map_icon_version_id?: string | null
           mapbox_feature_id?: string | null
           moderated_revision?: number | null
           moderation_status?: string
@@ -211,6 +213,7 @@ export type Database = {
           latitude?: number | null
           location?: unknown
           longitude?: number | null
+          map_icon_version_id?: string | null
           mapbox_feature_id?: string | null
           moderated_revision?: number | null
           moderation_status?: string
@@ -1124,6 +1127,7 @@ export type Database = {
           latitude: number | null
           location: unknown
           longitude: number | null
+          map_icon_version_id: string | null
           mapbox_feature_id: string | null
           moderated_revision: number | null
           moderation_status: string
@@ -1172,6 +1176,7 @@ export type Database = {
           latitude: number | null
           location: unknown
           longitude: number | null
+          map_icon_version_id: string | null
           mapbox_feature_id: string | null
           moderated_revision: number | null
           moderation_status: string
@@ -1220,6 +1225,7 @@ export type Database = {
           latitude: number | null
           location: unknown
           longitude: number | null
+          map_icon_version_id: string | null
           mapbox_feature_id: string | null
           moderated_revision: number | null
           moderation_status: string
@@ -1246,10 +1252,6 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
-      }
-      save_owned_organizer_setup: {
-        Args: { p_profile: Json; p_expected_updated_at: string | null; p_logo_id: string | null }
-        Returns: Json
       }
       confirm_owned_storefront_handle: {
         Args: { p_handle: string; p_logo_id: string | null }
@@ -1381,6 +1383,7 @@ export type Database = {
         Args: { p_source_event_id: string }
         Returns: Json
       }
+      get_owned_event_map_icon: { Args: { p_event_id: string }; Returns: Json }
       get_owned_event_notice_status: {
         Args: { p_event_id: string; p_purpose: string }
         Returns: Json
@@ -1451,6 +1454,7 @@ export type Database = {
           event_id: string
           latitude: number
           longitude: number
+          map_icon_version_id: string
           minimum_age: string
           minimum_price_minor: number
           starts_at: string
@@ -1459,6 +1463,7 @@ export type Database = {
           venue_label: string
         }[]
       }
+      get_public_map_icon_versions: { Args: { p_ids: string[] }; Returns: Json }
       get_public_organizer_storefront: {
         Args: { p_cursor?: Json; p_handle: string; p_limit?: number }
         Returns: Json
@@ -1562,6 +1567,10 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      list_selectable_map_icons: {
+        Args: { p_after?: string; p_limit?: number }
+        Returns: Json
+      }
       lock_event_ticketing_operation: {
         Args: { p_event_id: string }
         Returns: undefined
@@ -1577,6 +1586,16 @@ export type Database = {
           p_reason_code: string
         }
         Returns: string
+      }
+      prepare_map_icon_version: {
+        Args: {
+          p_metadata: Json
+          p_name: string
+          p_provenance: Json
+          p_request_id: string
+          p_slug: string
+        }
+        Returns: Json
       }
       preview_owned_event_notice: {
         Args: { p_event_id: string; p_purpose: string }
@@ -1612,6 +1631,7 @@ export type Database = {
           latitude: number | null
           location: unknown
           longitude: number | null
+          map_icon_version_id: string | null
           mapbox_feature_id: string | null
           moderated_revision: number | null
           moderation_status: string
@@ -1664,6 +1684,7 @@ export type Database = {
           latitude: number | null
           location: unknown
           longitude: number | null
+          map_icon_version_id: string | null
           mapbox_feature_id: string | null
           moderated_revision: number | null
           moderation_status: string
@@ -1729,6 +1750,60 @@ export type Database = {
         }
         Returns: string
       }
+      save_owned_event_draft: {
+        Args: {
+          p_event: Json
+          p_event_id: string | null
+          p_expected_updated_at: string | null
+          p_request_id: string
+        }
+        Returns: {
+          address_line1: string | null
+          address_line2: string | null
+          admission_type: string
+          animation_preset: string
+          artwork_path: string | null
+          capacity: number | null
+          category: string | null
+          city: string | null
+          content_revision: number
+          country_code: string
+          created_at: string
+          description: string | null
+          ends_at: string | null
+          first_publicly_eligible_at: string | null
+          id: string
+          latitude: number | null
+          location: unknown
+          longitude: number | null
+          map_icon_version_id: string | null
+          mapbox_feature_id: string | null
+          moderated_revision: number | null
+          moderation_status: string
+          moderation_updated_at: string | null
+          moderation_version: number
+          organizer_id: string
+          postal_code: string | null
+          public_eligibility_version: number
+          public_history_status: string
+          publicly_authorized_action_id: string | null
+          publicly_authorized_revision: number | null
+          published_at: string | null
+          region: string | null
+          starts_at: string | null
+          status: string
+          timezone: string
+          title: string | null
+          updated_at: string
+          venue_name: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "events"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       save_owned_event_requirements: {
         Args: { p_event_id: string; p_requirements: Json }
         Returns: {
@@ -1782,6 +1857,7 @@ export type Database = {
           latitude: number | null
           location: unknown
           longitude: number | null
+          map_icon_version_id: string | null
           mapbox_feature_id: string | null
           moderated_revision: number | null
           moderation_status: string
@@ -1834,6 +1910,7 @@ export type Database = {
           latitude: number | null
           location: unknown
           longitude: number | null
+          map_icon_version_id: string | null
           mapbox_feature_id: string | null
           moderated_revision: number | null
           moderation_status: string
@@ -1882,6 +1959,7 @@ export type Database = {
           latitude: number | null
           location: unknown
           longitude: number | null
+          map_icon_version_id: string | null
           mapbox_feature_id: string | null
           moderated_revision: number | null
           moderation_status: string
@@ -1982,6 +2060,14 @@ export type Database = {
           display_name: string
           updated_at: string
         }[]
+      }
+      save_owned_organizer_setup: {
+        Args: {
+          p_expected_updated_at: string | null
+          p_logo_id: string | null
+          p_profile: Json
+        }
+        Returns: Json
       }
       save_owned_storefront: {
         Args: { p_expected_updated_at: string; p_input: Json }
@@ -3026,6 +3112,15 @@ export type Database = {
           p_subject: string
         }
         Returns: Json
+      }
+      transition_map_icon_version: {
+        Args: {
+          p_action: string
+          p_package_hash: string
+          p_reason: string
+          p_version_id: string
+        }
+        Returns: string
       }
       withdraw_event_review: { Args: { p_event_id: string }; Returns: string }
     }

@@ -1,0 +1,10 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions;
+select plan(4);
+select is(private.storefront_handle_valid('map'),false,'map cannot shadow the Living Map route');
+select is(public.storefront_handle_available(' MAP '),false,'public availability normalizes and rejects the map route');
+select is(private.storefront_handle_valid('waitlist'),false,'existing main reserved routes remain reserved');
+select is(private.storefront_handle_valid('oakland-makers'),true,'ordinary organizer handles remain valid');
+select * from finish();
+rollback;

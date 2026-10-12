@@ -29,7 +29,7 @@ export async function getEventChangeContext(eventId: string, ownerId: string, si
  fail(error); return parseEventContext(data, eventId, ownerId)
 }
 export async function saveEventIfCurrent(eventId: string, ownerId: string, token: string, values: EventFormValues, baseline?: EventRow) {
- const { data, error } = await supabase.rpc('save_owned_event_revision_if_current', { p_event_id: eventId, p_expected_context: token, p_event: draftPayload(values, baseline) })
+ const { data, error } = await supabase.rpc('save_owned_event_revision_if_current', { p_event_id: eventId, p_expected_context: token, p_event: { ...draftPayload(values, baseline), ...(baseline ? { expected_content_revision: baseline.content_revision } : {}) } })
  fail(error); return envelope(data, eventId, ownerId)
 }
 export async function saveRequirementsIfCurrent(eventId: string, ownerId: string, token: string, input: EventRequirementsInput) {

@@ -2,6 +2,7 @@ export const reservedHandles = [
   'auth',
   'discover',
   'discovery',
+  'map',
   'event-policy',
   'event-status',
   'events',
