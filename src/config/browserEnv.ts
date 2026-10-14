@@ -8,6 +8,13 @@ export const browserEnvKeys = [
 type BrowserEnvKey = (typeof browserEnvKeys)[number]
 type EnvironmentSource = Readonly<Record<string, string | undefined>>
 
+export function requirePublicMapboxAccessToken(value: unknown): string {
+  if (typeof value !== 'string' || !value.startsWith('pk.') || value.length <= 3) {
+    throw new Error('Invalid VITE_MAPBOX_ACCESS_TOKEN: use a public Mapbox token')
+  }
+  return value
+}
+
 export function requireTestStripePublishableKey(value: unknown): string {
   if (typeof value !== 'string' || value.trim().length === 0) {
     throw new Error('Missing VITE_STRIPE_PUBLISHABLE_KEY')

@@ -1,80 +1,27 @@
 import { useState } from 'react'
+import type { ReactNode } from 'react'
 import { Button } from '../../components/ui/Button'
 import { MAX_CHECKOUT_QUANTITY } from '../checkout/checkout.cart'
+import { EventPageView } from '../buyer-journey/EventPageView'
 import { TicketTierList } from './TicketTierList'
 import type { PublicTicketTierTuple } from './ticket.types'
 
 const mockTiers = [
-  {
-    id: '00000000-0000-4000-8000-000000000001',
-    name: 'General Admission',
-    description: 'Access to event',
-    unit_amount_minor: 2500,
-    currency: 'usd',
-    availability_status: 'available',
-  },
-  {
-    id: '00000000-0000-4000-8000-000000000002',
-    name: 'VIP',
-    description: 'Priority entry + exclusive lounge',
-    unit_amount_minor: 6000,
-    currency: 'usd',
-    availability_status: 'available',
-  },
+  { id: '00000000-0000-4000-8000-000000000001', name: 'General Admission', description: 'Access to event', unit_amount_minor: 2500, currency: 'usd', availability_status: 'available' },
+  { id: '00000000-0000-4000-8000-000000000002', name: 'VIP', description: 'Priority entry + exclusive lounge', unit_amount_minor: 6000, currency: 'usd', availability_status: 'available' },
 ] satisfies PublicTicketTierTuple
 
-export function TicketSelectionPreviewPage() {
-  const [quantities, setQuantities] = useState<Record<string, number>>({ [mockTiers[0].id]: 1 })
+export function TicketSelectionPreviewPage({ artwork, back, initialQuantities, onContinue }: {
+  artwork?: string; back?: ReactNode; initialQuantities?: Readonly<Record<string, number>>; onContinue?: (quantities: Readonly<Record<string, number>>) => void
+}) {
+  const [quantities, setQuantities] = useState<Readonly<Record<string, number>>>(initialQuantities ?? { [mockTiers[0].id]: 1 })
   const total = mockTiers.reduce((sum, tier) => sum + (quantities[tier.id] ?? 0), 0)
-  const validCart = total > 0 && total <= MAX_CHECKOUT_QUANTITY &&
-    Object.values(quantities).every((quantity) => Number.isSafeInteger(quantity) && quantity >= 0 && quantity <= MAX_CHECKOUT_QUANTITY)
-
-  return (
-    <main className="public-event-layout">
-      <article aria-labelledby="preview-event-title" className="public-event">
-        <div
-          aria-label="Sunset Rooftop Sessions event artwork"
-          className="public-event__artwork public-event__artwork--preview"
-          role="img"
-        >
-          <div className="public-event__artwork-shade" />
-          <div className="public-event__artwork-copy">
-            <span>Whereto presents</span>
-            <strong>Sunset Rooftop Sessions</strong>
-            <small>Music</small>
-          </div>
-        </div>
-        <div className="public-event__content">
-          <header className="public-event__header">
-            <p className="public-event__eyebrow">Ticket selection preview</p>
-            <h1 id="preview-event-title">Sunset Rooftop Sessions</h1>
-            <p>Hosted by good company</p>
-          </header>
-          <dl className="public-event__facts">
-            <div><dt>Date</dt><dd>Sat Sep 19 · 7:00 PM</dd></div>
-            <div><dt>Venue</dt><dd>Lakeview Rooftop</dd></div>
-            <div><dt>Location</dt><dd>Oakland, CA</dd></div>
-          </dl>
-          <section aria-label="Event description" className="public-event__description">
-            <p>Afro house, open-air views, skyline nights.</p>
-          </section>
-          <section aria-labelledby="preview-tickets-title" className="public-event__tickets">
-            <div>
-              <p className="public-event__eyebrow">Tickets</p>
-              <h2 id="preview-tickets-title">Choose your tickets</h2>
-            </div>
-            <TicketTierList
-              maxTotal={MAX_CHECKOUT_QUANTITY}
-              onQuantityChange={(tierId, quantity) => setQuantities((current) => ({ ...current, [tierId]: quantity }))}
-              quantities={quantities}
-              tiers={mockTiers}
-            />
-            <Button disabled={!validCart} onClick={() => undefined}>
-              Get tickets
-            </Button>
-          </section>
-        </div>
-      </article>
-    </main>
-  )
+  const validCart = total > 0 && total <= MAX_CHECKOUT_QUANTITY && Object.values(quantities).every((quantity) => Number.isSafeInteger(quantity) && quantity >= 0 && quantity <= MAX_CHECKOUT_QUANTITY)
+  return <EventPageView title="Sunset Rooftop Sessions" organizer="good company" date="Sat Sep 19 · 7:00 PM" venue="Lakeview Rooftop" location="Oakland, CA" description="Afro house, open-air vibes, skyline views." artwork={artwork} back={back} selection>
+    <section aria-labelledby="preview-tickets-title" className="public-event__tickets">
+      <div className="buyer-section-heading"><h2 id="preview-tickets-title">Tickets</h2><span>From $25</span></div>
+      <TicketTierList maxTotal={MAX_CHECKOUT_QUANTITY} onQuantityChange={(tierId, quantity) => setQuantities((current) => ({ ...current, [tierId]: quantity }))} quantities={quantities} tiers={mockTiers} />
+      <Button disabled={!validCart} onClick={() => onContinue?.(quantities)}>Get tickets</Button>
+    </section>
+  </EventPageView>
 }

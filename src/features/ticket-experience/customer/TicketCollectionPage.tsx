@@ -4,6 +4,7 @@ import { Button } from '../../../components/ui/Button'
 import { AsyncState } from '../../../components/ui/AsyncState'
 import type { TicketCollectionReader, TicketCollectionResult } from '../contracts/ticketCollection'
 import type { WalletProvider } from '../contracts/wallet'
+import { BuyerIcon } from '../../buyer-journey/BuyerPrimitives'
 import { FocusedTicketView } from './FocusedTicketView'
 import { TicketCollectionOverview } from './TicketCollectionOverview'
 import { useTicketDocumentPrivacy } from './useTicketDocumentPrivacy'
@@ -32,7 +33,7 @@ function ticketPath(collectionBearer: string, selector: string | null): string {
 }
 
 function TicketPageState({ children }: { children: React.ReactNode }) {
-  return <main className="ticket-page ticket-page--state">{children}</main>
+  return <main className="buyer-page buyer-state">{children}</main>
 }
 
 export function TicketCollectionPage({ reader, walletProvider, now = () => new Date() }: TicketCollectionPageProps) {
@@ -152,6 +153,9 @@ export function TicketCollectionPage({ reader, walletProvider, now = () => new D
     return (
       <TicketPageState>
         <AsyncState
+          action={readerState.result.kind === 'unavailable'
+            ? <Button onClick={() => setRequestVersion((version) => version + 1)}>Try again</Button>
+            : undefined}
           description="Return to the original event link or ticket email and try again."
           status="error"
           title={readerState.result.kind === 'not_enabled' ? 'Ticket experience not enabled' : 'Tickets unavailable'}
@@ -161,13 +165,12 @@ export function TicketCollectionPage({ reader, walletProvider, now = () => new D
   }
 
   const collection = readerState.result.collection
-  const basePath = ticketPath(collectionBearer, null)
 
-  if (pendingSelection !== null) return <main className="ticket-page" />
+  if (pendingSelection !== null) return <main className="buyer-page" />
 
   if (visibleSelector === null || (selectedIndex < 0 && collection.tickets.length > 1)) {
     return (
-      <main className="ticket-page">
+      <main className="buyer-page">
         <TicketCollectionOverview
           collectionLabel={collection.collectionLabel}
           ticketHref={(selector) => ticketPath(collectionBearer, selector)}
@@ -182,11 +185,9 @@ export function TicketCollectionPage({ reader, walletProvider, now = () => new D
   if (!selectedTicket) return null
 
   return (
-    <main className="ticket-page">
-      {collection.tickets.length > 1
-        ? <Link className="ticket-page__back" to={basePath}>← Back to all tickets</Link>
-        : null}
+    <main className="buyer-page">
       <FocusedTicketView
+        backAction={collection.tickets.length > 1 ? <Link className="buyer-icon-button" aria-label="Back to all tickets" to={ticketPath(collectionBearer, null)}><BuyerIcon name="close" /></Link> : undefined}
         focusHeadingOnMount={focusSelector === selectedTicket.selector}
         key={selectedTicket.selector}
         nextSelector={collection.tickets[focusedIndex + 1]?.selector ?? null}

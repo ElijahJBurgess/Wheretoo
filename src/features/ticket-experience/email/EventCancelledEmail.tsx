@@ -6,6 +6,7 @@ import { emailStyles } from './emailStyles'
 export function EventCancelledEmail(props: EventStateEmailProps) {
   return (
     <EmailFrame
+      brandAssetOrigin={props.brandAssetOrigin}
       eyebrow="Event cancelled"
       preview={`${props.eventName} has been cancelled`}
       recipientLabel={props.recipientLabel}

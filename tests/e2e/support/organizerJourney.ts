@@ -80,12 +80,15 @@ export async function signInThroughUi(page: Page, fixture: OrganizerFixture) {
 }
 
 export async function completeOrganizerSetup(page: Page, fixture: OrganizerFixture) {
-  await expect(page.getByRole('heading', { name: 'Tell us about your organization', level: 1 })).toBeVisible()
-  await page.getByLabel('Public organizer name').fill(fixture.displayName)
+  await expect(page.getByRole('heading', { name: 'Organizer Profile', level: 1 })).toBeVisible()
+  await page.getByLabel('Organizer / business name').fill(fixture.displayName)
   await page.getByLabel('Organizer type').selectOption('Community group')
+  await page.getByText('More about your organization (optional)').click()
   await page.getByLabel('Short description').fill('A disposable organizer used for the Day 1 browser journey.')
   await page.getByLabel('Base city').fill('San Francisco')
-  await page.getByRole('button', { name: 'Save organizer profile' }).click()
+  await page.getByRole('button', { name: 'Continue', exact: true }).click()
+  await expect(page).toHaveURL(/\/organizer\/settings\/payments$/)
+  await page.getByRole('link', { name: 'Do this later' }).click()
   await expect(page).toHaveURL(/\/organizer\/events$/)
 }
 

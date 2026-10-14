@@ -1,3 +1,4 @@
+import { BuyerIcon } from '../buyer-journey/BuyerPrimitives'
 import type { PublicTicketTierTuple } from './ticket.types'
 
 const usdFormatter = new Intl.NumberFormat('en-US', {
@@ -42,6 +43,7 @@ export function TicketTierList({ quantities, maxTotal, tiers, onQuantityChange }
 
           return (
             <div className={`public-ticket-tier${selected ? ' public-ticket-tier--selected' : ''}`} key={tier.id}>
+              <BuyerIcon name="ticket" className="buyer-ticket-icon" />
               <span className="public-ticket-tier__copy">
                 <span className="public-ticket-tier__header">
                   <strong>{tier.name}</strong>

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { admissionCheckerContract, ticketCollectionReaderContract } from '../contracts/contractTests'
 import { createAdmissionChecker } from './admissionChecker'
 import { createTicketCollectionReader } from './ticketCollectionReader'
@@ -65,6 +65,59 @@ admissionCheckerContract('strict Edge', () => createAdmissionChecker(async (_nam
 })
 
 describe('strict ticket collection boundary', () => {
+  afterEach(() => vi.useRealTimers())
+
+  it('bounds a stalled collection read and aborts its transport', async () => {
+    vi.useFakeTimers()
+    const fetch = vi.fn<typeof globalThis.fetch>().mockReturnValue(new Promise(() => {}))
+    let result: unknown
+    void createTicketCollectionReader({ ...env, fetch }).readCollection({ collectionBearer: bearer('a') })
+      .then(value => { result = value })
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(result).toEqual({ kind: 'unavailable' })
+    expect(fetch.mock.calls[0]?.[1]?.signal?.aborted).toBe(true)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('keeps the deadline through a response body that never completes', async () => {
+    vi.useFakeTimers()
+    const response = new Response(null)
+    vi.spyOn(response, 'json').mockReturnValue(new Promise(() => {}))
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(response)
+    let result: unknown
+    void createTicketCollectionReader({ ...env, fetch }).readCollection({ collectionBearer: bearer('a') })
+      .then(value => { result = value })
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(result).toEqual({ kind: 'unavailable' })
+    expect(fetch.mock.calls[0]?.[1]?.signal?.aborted).toBe(true)
+  })
+
+  it('releases deadline and caller listeners when a read completes', async () => {
+    vi.useFakeTimers()
+    const fetch = fetchResponse(ready())
+    const controller = new AbortController()
+    await expect(createTicketCollectionReader({ ...env, fetch })
+      .readCollection({ collectionBearer: bearer('a'), signal: controller.signal })).resolves.toEqual(ready())
+    expect(vi.getTimerCount()).toBe(0)
+    controller.abort()
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(fetch.mock.calls[0]?.[1]?.signal?.aborted).toBe(false)
+  })
+
+  it('propagates caller cancellation immediately and clears its deadline', async () => {
+    vi.useFakeTimers()
+    const fetch = vi.fn<typeof globalThis.fetch>().mockReturnValue(new Promise(() => {}))
+    const controller = new AbortController()
+    let failure: unknown
+    void createTicketCollectionReader({ ...env, fetch }).readCollection({ collectionBearer: bearer('a'), signal: controller.signal })
+      .catch(error => { failure = error })
+    await vi.advanceTimersByTimeAsync(0)
+    controller.abort()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(failure).toMatchObject({ name: 'AbortError' })
+    expect(fetch.mock.calls[0]?.[1]?.signal?.aborted).toBe(true)
+    expect(vi.getTimerCount()).toBe(0)
+  })
   it.each([
     ['extra top-level field', { ...ready(), secret: 'forbidden' }],
     ['missing collection', { kind: 'ready' }],
@@ -114,13 +167,13 @@ describe('strict ticket collection boundary', () => {
       .readCollection({ collectionBearer: bearer('a') })).resolves.toEqual({ kind: 'unavailable' })
   })
 
-  it('sends the bearer only in the Edge body with the actual abort signal and no auth/storage', async () => {
+  it('sends the bearer only in the Edge body with a cancellable signal and no auth/storage', async () => {
     const fetch = fetchResponse(ready())
     const signal = new AbortController().signal
     await createTicketCollectionReader({ ...env, fetch }).readCollection({ collectionBearer: bearer('a'), signal })
     expect(fetch).toHaveBeenCalledWith(env.supabaseUrl + '/functions/v1/ticket-collection', {
       method: 'POST', headers: { apikey: env.supabasePublishableKey, 'content-type': 'application/json' },
-      body: JSON.stringify({ collectionBearer: bearer('a') }), signal, cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer',
+      body: JSON.stringify({ collectionBearer: bearer('a') }), signal: expect.any(AbortSignal), cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer',
     })
   })
 

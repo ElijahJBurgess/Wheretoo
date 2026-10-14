@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -44,6 +44,18 @@ describe('RequireSession', () => {
 
     expect(screen.getByText('sign-in:/organizer/events?view=drafts')).toBeInTheDocument()
     expect(screen.queryByText('protected events')).not.toBeInTheDocument()
+  })
+
+  it('provides a retry action after a session failure without exposing protected content', () => {
+    const retry = vi.fn()
+    useSession.mockReturnValue({ status: 'error', session: null, user: null, retry })
+    renderGuard()
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Your session could not load')
+    expect(screen.queryByText('protected events')).not.toBeInTheDocument()
+    expect(screen.queryByText('sign-in:/organizer/events?view=drafts')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(retry).toHaveBeenCalledOnce()
   })
 
   it('renders the protected outlet only for an authenticated session', () => {

@@ -144,7 +144,8 @@ describe('OrderConfirmationPage', () => {
     renderPage()
     expect(screen.getByRole('heading', { level: 1, name: 'Confirmation is taking longer' })).toBeInTheDocument()
     const button = screen.getByRole('button', { name: 'Check again' })
-    await user.tab()
+    // Navigation precedes the recovery action; it must still be reachable by keyboard.
+    for (let step = 0; step < 8 && document.activeElement !== button; step++) await user.tab()
     expect(button).toHaveFocus()
     await user.keyboard('{Enter}')
     expect(retry).toHaveBeenCalledTimes(1)

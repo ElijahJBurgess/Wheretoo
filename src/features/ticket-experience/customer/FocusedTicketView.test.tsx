@@ -93,11 +93,11 @@ describe('FocusedTicketView', () => {
     expect(screen.queryByTestId('admission-qr')).not.toBeInTheDocument()
   })
 
-  it('renders safe directions and a nonfunctional wallet presentation', () => {
+  it('renders safe directions and omits unsupported wallet actions', () => {
     renderFocused(ticket())
 
     expect(screen.getByRole('link', { name: 'Get directions' })).toHaveAttribute('rel', 'noreferrer')
-    expect(screen.getByRole('button', { name: 'Add to Wallet — Coming later' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: /wallet/i })).not.toBeInTheDocument()
   })
 
   it('omits directions when no URL is available', () => {

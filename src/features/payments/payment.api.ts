@@ -1,4 +1,5 @@
 import { supabase } from '../../lib/supabase/client'
+import { withReadTimeout } from '../../lib/readTimeout'
 import type { ConnectStatus } from './payment.types'
 
 export type ConnectAccountSession = {
@@ -35,8 +36,8 @@ function isConnectStatus(value: unknown): value is ConnectStatus {
     typeof value.last_synced_at === 'string'
 }
 
-async function invokePaymentFunction(name: string): Promise<unknown> {
-  const { data, error } = await supabase.functions.invoke(name, { body: {}, method: 'POST' })
+async function invokePaymentFunction(name: string, signal?: AbortSignal): Promise<unknown> {
+  const { data, error } = await supabase.functions.invoke(name, { body: {}, method: 'POST', ...(signal ? { signal } : {}) })
 
   if (error !== null) {
     throw error
@@ -47,7 +48,7 @@ async function invokePaymentFunction(name: string): Promise<unknown> {
 
 export async function getConnectStatus(): Promise<ConnectStatus> {
   try {
-    const data = await invokePaymentFunction('stripe-connect-status')
+    const data = await withReadTimeout(signal => invokePaymentFunction('stripe-connect-status', signal))
     if (!isConnectStatus(data)) throw new Error('Unsafe status response')
     return data
   } catch {

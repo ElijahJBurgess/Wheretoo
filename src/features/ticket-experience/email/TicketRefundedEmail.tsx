@@ -6,6 +6,7 @@ import { emailStyles } from './emailStyles'
 export function TicketRefundedEmail(props: TicketStateEmailProps) {
   return (
     <EmailFrame
+      brandAssetOrigin={props.brandAssetOrigin}
       eyebrow="Ticket refunded"
       preview={`Your ${props.eventName} ticket was refunded`}
       recipientLabel={props.recipientLabel}

@@ -46,6 +46,8 @@ export default defineConfig(({ command, mode }) => {
       setupFiles: ['./src/test/setup.ts'],
       exclude: [
         ...configDefaults.exclude,
+        '.worktrees/**',
+        '.superpowers/**',
         'supabase/functions/**',
         'tests/integration/**',
         'tests/e2e/**',

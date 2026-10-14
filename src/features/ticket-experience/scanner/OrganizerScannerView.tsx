@@ -1,3 +1,4 @@
+import { WheretooLogo } from '../../../components/brand/WheretooLogo'
 /* eslint-disable react-hooks/refs -- the controller intentionally groups reactive state with an opaque video RefObject */
 import { useEffect, type ReactNode } from 'react'
 import type { AdmissionOutcome } from '../contracts/admission'
@@ -149,7 +150,7 @@ export function OrganizerScannerView({
     <main className={`organizer-scanner organizer-scanner--${state.kind}`}>
       <header className="organizer-scanner__header">
         <div>
-          <p className="organizer-scanner__brand">Whereto</p>
+          <p className="organizer-scanner__brand"><WheretooLogo theme="white" width={110} /></p>
           <p>Guest check-in</p>
         </div>
         <button

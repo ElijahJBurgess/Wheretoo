@@ -56,6 +56,22 @@ emailRendererContract('React Email renderer', () => emailRenderer, {
 })
 
 describe('emailRenderer privacy and content boundaries', () => {
+  it('uses an explicit asset host for linkless email without leaking a ticket bearer into image requests', async () => {
+    const output = await emailRenderer.render({
+      kind: 'event_cancelled',
+      props: { ...eventCancelledProps, viewTicketsUrl: undefined, brandAssetOrigin: 'https://assets.example.invalid/private/path?token=secret' },
+    })
+    expect(output.html).toContain('https://assets.example.invalid/brand/wheretoo-wordmark-white.png')
+    expect(output.html).not.toContain('token=secret')
+    expect(output.html).not.toContain('>View Tickets<')
+  })
+
+  it('rejects linkless email without a public asset host', async () => {
+    // @ts-expect-error Unconfigured external input must also fail safely at runtime.
+    await expect(emailRenderer.render({ kind: 'event_cancelled', props: { ...eventCancelledProps, viewTicketsUrl: undefined } }))
+      .rejects.toThrow('Email branding requires brandAssetOrigin or a ticket URL')
+  })
+
   it.each([
     ['paid', paidTicketsReadyProps],
     ['free RSVP', freeRsvpTicketsReadyProps],
@@ -67,7 +83,12 @@ describe('emailRenderer privacy and content boundaries', () => {
     expect(output.text).toContain(props.admissions[0]?.admissionLabel)
     expect(output.text).toContain(props.viewTicketsUrl)
     expect(output.html).not.toMatch(/admission.?credential|qr.?code|stripe|receipt|reminder|payment/i)
-    expect(output.html).not.toMatch(/@font-face|fonts\.google|<img/i)
+    expect(output.html).not.toMatch(/@font-face|fonts\.google/i)
+    const document = new DOMParser().parseFromString(output.html, 'text/html')
+    const images = document.querySelectorAll('img')
+    expect(images).toHaveLength(1)
+    expect(images[0]?.getAttribute('alt')).toBe('Wheretoo')
+    expect(images[0]?.getAttribute('src')).toBe('https://tickets.example.invalid/brand/wheretoo-wordmark-white.png')
   })
 
   it('renders one factual cancellation link without promising refund behavior', async () => {

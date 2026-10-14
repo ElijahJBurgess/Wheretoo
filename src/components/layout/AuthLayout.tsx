@@ -1,12 +1,8 @@
-import type { PropsWithChildren } from 'react'
+import type { PropsWithChildren, ReactNode } from 'react'
+import { OnboardingLayout } from '../../features/organizer-onboarding/OnboardingLayout'
 
-export function AuthLayout({ children }: PropsWithChildren) {
+export function AuthLayout({ children, hero = false, headerAction }: PropsWithChildren<{ hero?: boolean; headerAction?: ReactNode }>) {
   return (
-    <div className="auth-layout">
-      <header className="auth-layout__header">
-        <span className="product-mark">whereto</span>
-      </header>
-      <main className="auth-layout__main">{children}</main>
-    </div>
+    <OnboardingLayout headerAction={headerAction} hero={hero}>{children}</OnboardingLayout>
   )
 }

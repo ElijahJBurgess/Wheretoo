@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { publicEnv } from '../../../lib/env'
+import { withReadTimeout } from '../../../lib/readTimeout'
 import type { TicketCollectionReader } from '../contracts/ticketCollection'
 
 const uuid = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
@@ -56,20 +57,22 @@ export function createTicketCollectionReader(
       signal?.throwIfAborted()
       if (!bearer.safeParse(collectionBearer).success) return { kind: 'unavailable' }
       try {
-        // This public Edge boundary deliberately never constructs an Auth client.
-        const response = await transport.fetch(transport.supabaseUrl + '/functions/v1/ticket-collection', {
-          method: 'POST',
-          headers: { apikey: transport.supabasePublishableKey, 'content-type': 'application/json' },
-          body: JSON.stringify({ collectionBearer }),
-          signal,
-          cache: 'no-store',
-          credentials: 'omit',
-          referrerPolicy: 'no-referrer',
-        })
-        if (!response.ok) return { kind: 'unavailable' }
-        const parsed = responseSchema.safeParse(await response.json())
-        // Zod constructs a fresh allowlisted DTO; no provider object reaches the shell.
-        return parsed.success ? parsed.data : { kind: 'unavailable' }
+        return await withReadTimeout(async (requestSignal) => {
+          // This public Edge boundary deliberately never constructs an Auth client.
+          const response = await transport.fetch(transport.supabaseUrl + '/functions/v1/ticket-collection', {
+            method: 'POST',
+            headers: { apikey: transport.supabasePublishableKey, 'content-type': 'application/json' },
+            body: JSON.stringify({ collectionBearer }),
+            signal: requestSignal,
+            cache: 'no-store',
+            credentials: 'omit',
+            referrerPolicy: 'no-referrer',
+          })
+          if (!response.ok) return { kind: 'unavailable' } as const
+          const parsed = responseSchema.safeParse(await response.json())
+          // Zod constructs a fresh allowlisted DTO; no provider object reaches the shell.
+          return parsed.success ? parsed.data : { kind: 'unavailable' } as const
+        }, signal)
       } catch {
         signal?.throwIfAborted()
         return { kind: 'unavailable' }

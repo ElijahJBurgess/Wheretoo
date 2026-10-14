@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { createElement, type PropsWithChildren } from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EventFormValues, EventRow } from './event.types'
 
 const {
@@ -122,17 +122,38 @@ function expectSafePayload(payload: Record<string, unknown>) {
     expect(payload).not.toHaveProperty(key)
   }
 }
+const readSignals: AbortSignal[] = []
+function cancellable<T extends object>(query: T) {
+  return Object.assign(query, { abortSignal(signal: AbortSignal) {
+    readSignals.push(signal)
+    return this
+  } })
+}
 
 describe('owned event API', () => {
+  afterEach(() => vi.useRealTimers())
   beforeEach(() => {
     vi.clearAllMocks()
     select.mockReturnValue({ eq: firstEq })
-    firstEq.mockReturnValue({ eq: secondEq, order })
-    secondEq.mockReturnValue({ maybeSingle, select: mutationSelect, eq: secondEq })
+    firstEq.mockReturnValue(cancellable({ eq: secondEq, order }))
+    secondEq.mockReturnValue(cancellable({ maybeSingle, select: mutationSelect, eq: secondEq }))
     insert.mockReturnValue({ select: mutationSelect })
     update.mockReturnValue({ eq: firstEq })
     mutationSelect.mockReturnValue({ single })
     from.mockReturnValue({ select, insert, update })
+  })
+
+  it.each(['list', 'detail'])('bounds a stalled owned event %s read', async (kind) => {
+    vi.useFakeTimers()
+    const response = new Promise(() => {})
+    if (kind === 'list') order.mockReturnValueOnce(response)
+    else maybeSingle.mockReturnValueOnce(response)
+    let failure: unknown
+    const request = kind === 'list' ? listOwnedEvents('organizer-1') : getOwnedEvent('event-1', 'organizer-1')
+    void request.catch(error => { failure = error })
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(failure).toMatchObject({ name: 'TimeoutError' })
+    expect(readSignals.at(-1)?.aborted).toBe(true)
   })
 
   it('lists only the organizer events ordered newest-first', async () => {
@@ -463,7 +484,7 @@ describe('event query cache contracts', () => {
     const { queryClient, wrapper } = setupQueryClient()
     queryClient.setQueryData(eventKeys.detail('organizer-a', 'event-x'), organizerAEvent)
     firstEq.mockReturnValueOnce({ eq: secondEq })
-    secondEq.mockReturnValueOnce({ maybeSingle })
+    secondEq.mockReturnValueOnce(cancellable({ maybeSingle }))
     maybeSingle.mockResolvedValue({ data: null, error: null })
 
     const { result } = renderHook(() => useOwnedEvent('event-x', 'organizer-b'), { wrapper })

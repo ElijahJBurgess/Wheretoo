@@ -1,4 +1,9 @@
-export type TicketsReadyProps = {
+export type EmailBrandProps = {
+  /** Public asset host; defaults to the ticket-link origin. Required for linkless mail. */
+  brandAssetOrigin?: string
+}
+
+export type TicketsReadyProps = EmailBrandProps & {
   recipientLabel: string
   eventName: string
   startsAtLabel: string
@@ -7,13 +12,15 @@ export type TicketsReadyProps = {
   viewTicketsUrl: string
 }
 
-export type EventStateEmailProps = {
+export type EventStateEmailProps = EmailBrandProps & {
   recipientLabel: string
   eventName: string
   startsAtLabel: string
   venueName: string
-  viewTicketsUrl?: string
-}
+} & (
+  | { viewTicketsUrl: string }
+  | { viewTicketsUrl?: undefined; brandAssetOrigin: string }
+)
 
 export type TicketStateEmailProps = EventStateEmailProps & {
   admissionLabel: string

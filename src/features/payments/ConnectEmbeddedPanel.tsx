@@ -40,10 +40,10 @@ class ConnectChunkErrorBoundary extends Component<
     if (this.state.hasError) {
       return (
         <AsyncState
-          action={<Button onClick={this.props.onRetry}>Retry secure setup</Button>}
-          description="Check your connection, then try again."
+          action={<Button onClick={this.props.onRetry}>Try again</Button>}
+          description="Secure Stripe setup could not load. Check your connection, then try again."
           status="error"
-          title="Secure payment setup could not load"
+          title="Something went wrong"
         />
       )
     }
@@ -62,16 +62,16 @@ export function ConnectEmbeddedPanel({ loadEmbedded = loadStripeConnectEmbedded,
 
   return (
     <section aria-label="Stripe payment setup" className="payments-panel__embedded">
-      <ConnectChunkErrorBoundary key={attempt} onRetry={retryLoading}>
-        <Suspense fallback={<AsyncState status="loading" title="Loading secure payment setup" />}>
-          <StripeConnectEmbedded {...props} />
-        </Suspense>
-      </ConnectChunkErrorBoundary>
-      {props.mode === 'management' ? (
-        <div className="payments-panel__embedded-actions">
-          <Button onClick={props.onExit} variant="secondary">Done managing payments</Button>
-        </div>
-      ) : null}
+      <div className="payments-panel__stripe-content">
+        <ConnectChunkErrorBoundary key={attempt} onRetry={retryLoading}>
+          <Suspense fallback={<AsyncState status="loading" title="Loading secure payment setup" />}>
+            <StripeConnectEmbedded {...props} />
+          </Suspense>
+        </ConnectChunkErrorBoundary>
+      </div>
+      <div className="payments-panel__embedded-actions">
+        <Button onClick={props.onExit} variant="secondary">{props.mode === 'management' ? 'Done managing payments' : 'Finish setup later'}</Button>
+      </div>
     </section>
   )
 }

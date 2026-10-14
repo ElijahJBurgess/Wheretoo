@@ -1,4 +1,5 @@
 import { supabase } from '../../lib/supabase/client'
+import { withReadTimeout } from '../../lib/readTimeout'
 import type { EventRow } from '../events/event.types'
 import { ticketTiersInputSchema } from './ticket.schemas'
 import type { TicketTierInput, TicketTierRow, TicketTiersInput } from './ticket.types'
@@ -41,9 +42,11 @@ function serializeTier(tier: TicketTierInput) {
 }
 
 export async function listOwnedTicketTiers(eventId: string): Promise<TicketTierRow[]> {
-  const { data, error } = await supabase.rpc('list_owned_ticket_tiers', { p_event_id: eventId })
-  if (error) throw error
-  return requireRows(data, eventId)
+  return withReadTimeout(async (signal) => {
+    const { data, error } = await supabase.rpc('list_owned_ticket_tiers', { p_event_id: eventId }).abortSignal(signal)
+    if (error) throw error
+    return requireRows(data, eventId)
+  })
 }
 
 export async function saveTicketTiers(eventId: string, values: TicketTiersInput): Promise<TicketTierRow[]> {

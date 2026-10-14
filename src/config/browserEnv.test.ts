@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { selectBrowserEnv } from './browserEnv'
+import { requirePublicMapboxAccessToken, selectBrowserEnv } from './browserEnv'
+
+describe('public map credentials', () => {
+  it('accepts only public Mapbox tokens at the renderer boundary', () => {
+    expect(requirePublicMapboxAccessToken('pk.public-token')).toBe('pk.public-token')
+    for (const value of [undefined, '', 'pk.', 'sk.secret-token', ' pk.public-token']) {
+      expect(() => requirePublicMapboxAccessToken(value)).toThrow('public Mapbox token')
+    }
+  })
+})
 
 describe('selectBrowserEnv', () => {
   it('selects only the exact browser environment allowlist', () => {

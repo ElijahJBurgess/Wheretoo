@@ -37,7 +37,7 @@ function renderTicketRoute(input: RenderTicketRouteInput): ReturnType<typeof ren
           path="/tickets/:collectionBearer/:ticketSelector?"
           element={(
             <TicketCollectionPage
-              now={input.now}
+              now={input.now ?? (() => new Date('2026-09-03T12:00:00Z'))}
               reader={input.reader}
               walletProvider={fixtureWalletProvider}
             />
@@ -133,6 +133,23 @@ describe('TicketCollectionPage recovery', () => {
     expect(second.container).not.toHaveTextContent('second-private-bearer')
   })
 
+  it('can retry an unavailable result returned by the production collection reader', async () => {
+    const user = userEvent.setup()
+    const readCollection = vi
+      .fn<TicketCollectionReader['readCollection']>()
+      .mockResolvedValueOnce({ kind: 'unavailable' })
+      .mockResolvedValueOnce({
+        kind: 'ready',
+        collection: { collectionLabel: 'Tickets', eventId: 'event-a', tickets: [ticket()] },
+      })
+    renderTicketRoute({ reader: { readCollection } })
+
+    expect(await screen.findByText('Tickets unavailable')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Try again' }))
+
+    expect(await screen.findByRole('heading', { name: 'Ticket 1' })).toBeVisible()
+  })
+
   it('links a known empty collection back to its event', async () => {
     renderTicketRoute({
       reader: { async readCollection() { return { kind: 'empty', eventId: 'event-a' } } },
@@ -170,7 +187,7 @@ describe('TicketCollectionPage collection navigation', () => {
     })
     const view = renderTicketRoute({ reader: readerFor(first, second) })
 
-    expect(await screen.findByRole('heading', { name: 'Your tickets' })).toBeVisible()
+    expect(await screen.findByRole('heading', { name: 'Ticket wallet' })).toBeVisible()
     expect(screen.getAllByText('General Admission')).toHaveLength(2)
     expect(screen.getByRole('link', { name: /Ticket 1.*General Admission/i })).toBeVisible()
     expect(screen.getByRole('link', { name: /Ticket 2.*General Admission/i })).toBeVisible()
@@ -197,7 +214,7 @@ describe('TicketCollectionPage collection navigation', () => {
     const second = ticket({ selector: 'ticket-2', position: 2, totalInCollection: 2 })
     renderTicketRoute({ selector: 'unknown', reader: readerFor(first, second) })
 
-    expect(await screen.findByRole('heading', { name: 'Your tickets' })).toBeVisible()
+    expect(await screen.findByRole('heading', { name: 'Ticket wallet' })).toBeVisible()
     expect(screen.queryByTestId('admission-qr')).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: /Ticket 1.*General Admission/i })).toBeVisible()
     expect(screen.getByRole('link', { name: /Ticket 2.*General Admission/i })).toBeVisible()
@@ -243,6 +260,7 @@ describe('TicketCollectionPage collection navigation', () => {
         path: '/tickets/:collectionBearer/:ticketSelector?',
         element: (
           <TicketCollectionPage
+            now={() => new Date('2026-09-03T12:00:00Z')}
             reader={readerFor(first, second)}
             walletProvider={fixtureWalletProvider}
           />
@@ -262,7 +280,7 @@ describe('TicketCollectionPage collection navigation', () => {
     await act(() => router.navigate(1))
     expect(await screen.findByRole('heading', { name: 'Ticket 2' })).toBeVisible()
     await act(() => router.navigate('/tickets/history-test'))
-    expect(await screen.findByRole('heading', { name: 'Your tickets' })).toBeVisible()
+    expect(await screen.findByRole('heading', { name: 'Ticket wallet' })).toBeVisible()
     expect(screen.queryByTestId('admission-qr')).not.toBeInTheDocument()
   })
 

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { OrganizerInput } from './organizer.schemas'
 
 const { from, insert, lookupEq, maybeSingle, mutationSelect, single, update, updateEq } = vi.hoisted(() => ({
@@ -41,10 +41,14 @@ const lookupSelect = vi.fn(() => ({ eq: lookupEq }))
 const lookupBuilder = { select: lookupSelect }
 const insertBuilder = { insert }
 const updateBuilder = { update }
+const readSignals: AbortSignal[] = []
 
 function arrangeLookup(result: { data: Organizer | null; error: unknown }) {
   maybeSingle.mockResolvedValue(result)
-  lookupEq.mockReturnValue({ maybeSingle })
+  lookupEq.mockReturnValue({ maybeSingle, abortSignal(signal: AbortSignal) {
+    readSignals.push(signal)
+    return this
+  } })
 }
 
 function arrangeInsert(result: { data: Organizer | null; error: unknown }) {
@@ -63,10 +67,21 @@ function arrangeUpdate(result: { data: Organizer | null; error: unknown }) {
 }
 
 describe('organizer API', () => {
+  afterEach(() => vi.useRealTimers())
   beforeEach(() => {
     vi.clearAllMocks()
     from.mockReturnValue(lookupBuilder)
     arrangeLookup({ data: organizer, error: null })
+  })
+
+  it('bounds a stalled profile lookup without treating it as a missing organizer', async () => {
+    vi.useFakeTimers()
+    maybeSingle.mockReturnValueOnce(new Promise(() => {}))
+    let failure: unknown
+    void getOrganizer('user-1').catch(error => { failure = error })
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(failure).toMatchObject({ name: 'TimeoutError' })
+    expect(readSignals.at(-1)?.aborted).toBe(true)
   })
 
   it('loads an organizer by the authenticated user ID', async () => {

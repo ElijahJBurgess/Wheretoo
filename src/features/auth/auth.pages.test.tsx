@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { signInOrganizer, signUpOrganizer } = vi.hoisted(() => ({
@@ -25,12 +25,19 @@ function renderSignUp() {
   )
 }
 
-function renderSignIn() {
+function SignInDestination() {
+  const location = useLocation()
+  return <p>Signed-in destination: {location.pathname}{location.search}{location.hash}</p>
+}
+
+function renderSignIn(state?: unknown) {
   return render(
-    <MemoryRouter initialEntries={['/auth/sign-in']}>
+    <MemoryRouter initialEntries={[{ pathname: '/auth/sign-in', state }]}>
       <Routes>
         <Route path="/auth/sign-in" element={<SignInPage />} />
         <Route path="/organizer/events" element={<p>events destination</p>} />
+        <Route path="/organizer/*" element={<SignInDestination />} />
+        <Route path="/moderation/*" element={<SignInDestination />} />
       </Routes>
     </MemoryRouter>,
   )
@@ -52,7 +59,7 @@ describe('organizer auth pages', () => {
     await user.type(screen.getByLabelText('Full name'), 'A')
     await user.type(screen.getByLabelText('Email'), 'invalid')
     await user.type(screen.getByLabelText('Password'), '1234567')
-    await user.click(screen.getByRole('button', { name: 'Create organizer account' }))
+    await user.click(screen.getByRole('button', { name: 'Create account' }))
 
     expect(await screen.findAllByRole('alert')).toHaveLength(4)
     expect(screen.getByText('Check the highlighted fields')).toBeInTheDocument()
@@ -67,7 +74,7 @@ describe('organizer auth pages', () => {
     renderSignUp()
     await fillSignup(user)
 
-    await user.click(screen.getByRole('button', { name: 'Create organizer account' }))
+    await user.click(screen.getByRole('button', { name: 'Create account' }))
 
     expect(await screen.findByText('Email already registered')).toBeInTheDocument()
     expect(screen.getByLabelText('Full name')).toHaveValue('Avery Stone')
@@ -81,7 +88,7 @@ describe('organizer auth pages', () => {
     renderSignUp()
     await fillSignup(user)
 
-    await user.click(screen.getByRole('button', { name: 'Create organizer account' }))
+    await user.click(screen.getByRole('button', { name: 'Create account' }))
     expect(screen.getByRole('button', { name: 'Creating account…' })).toBeDisabled()
 
     resolveSignup({ needsEmailConfirmation: false })
@@ -94,7 +101,7 @@ describe('organizer auth pages', () => {
     renderSignUp()
     await fillSignup(user)
 
-    await user.click(screen.getByRole('button', { name: 'Create organizer account' }))
+    await user.click(screen.getByRole('button', { name: 'Create account' }))
     expect(await screen.findByText('check-email destination')).toBeInTheDocument()
   })
 
@@ -111,6 +118,38 @@ describe('organizer auth pages', () => {
       email: 'organizer@example.com',
       password: 'safe-password',
     })
+    expect(await screen.findByText('events destination')).toBeInTheDocument()
+  })
+
+  it.each([
+    ['/organizer/events/123/check-in', '?gate=north&mode=scan', '#camera'],
+    ['/organizer/events/123/edit', '?step=details', '#event-title'],
+    ['/moderation/events/123', '?queue=pending', '#decision'],
+  ])('resumes protected destination %s with its query and fragment after sign-in', async (pathname, search, hash) => {
+    const user = userEvent.setup()
+    signInOrganizer.mockResolvedValue(undefined)
+    renderSignIn({ from: { pathname, search, hash, key: 'previous-location' } })
+    await user.type(screen.getByLabelText('Email'), 'organizer@example.com')
+    await user.type(screen.getByLabelText('Password'), 'safe-password')
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+    expect(await screen.findByText(`Signed-in destination: ${pathname}${search}${hash}`)).toBeInTheDocument()
+  })
+
+  it.each([
+    { from: { pathname: 'https://untrusted.example/organizer/events', search: '', hash: '' } },
+    { from: { pathname: '//untrusted.example/organizer/events', search: '', hash: '' } },
+    { from: { pathname: '/organizer/../../auth/sign-in', search: '', hash: '' } },
+    { from: { pathname: '/organizer\\untrusted.example', search: '', hash: '' } },
+    { from: { pathname: '/organizer/events/123/edit', search: 'https://untrusted.example', hash: '' } },
+    { from: { pathname: '/auth/sign-in', search: '', hash: '' } },
+    { from: 'https://untrusted.example' },
+  ])('uses the organizer default for an untrusted return location %j', async state => {
+    const user = userEvent.setup()
+    signInOrganizer.mockResolvedValue(undefined)
+    renderSignIn(state)
+    await user.type(screen.getByLabelText('Email'), 'organizer@example.com')
+    await user.type(screen.getByLabelText('Password'), 'safe-password')
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
     expect(await screen.findByText('events destination')).toBeInTheDocument()
   })
 

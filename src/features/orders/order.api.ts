@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { supabase } from '../../lib/supabase/client'
+import { withReadTimeout } from '../../lib/readTimeout'
 import type { OrderConfirmation } from './order.types'
 
 const bearerPattern = /^[A-Za-z0-9_-]{43}$/
@@ -92,12 +93,19 @@ async function safeErrorCode(error: unknown): Promise<OrderApiErrorCode> {
 
 export async function getOrderConfirmation(confirmationToken: string): Promise<OrderConfirmation> {
   if (!isCanonicalBearer(confirmationToken)) throw new OrderApiError('ORDER_NOT_FOUND')
-  const { data, error } = await supabase.functions.invoke('order-confirmation', {
-    body: { confirmationToken },
-    method: 'POST',
-  })
-  if (error !== null) throw new OrderApiError(await safeErrorCode(error))
-  const parsed = confirmationSchema.safeParse(data)
-  if (!parsed.success) throw new OrderApiError('ORDER_UNAVAILABLE')
-  return parsed.data
+  try {
+    return await withReadTimeout(async (signal) => {
+      const { data, error } = await supabase.functions.invoke('order-confirmation', {
+        body: { confirmationToken },
+        method: 'POST',
+        signal,
+      })
+      if (error !== null) throw new OrderApiError(await safeErrorCode(error))
+      const parsed = confirmationSchema.safeParse(data)
+      if (!parsed.success) throw new OrderApiError('ORDER_UNAVAILABLE')
+      return parsed.data
+    })
+  } catch (error) {
+    throw error instanceof OrderApiError ? error : new OrderApiError('ORDER_UNAVAILABLE')
+  }
 }

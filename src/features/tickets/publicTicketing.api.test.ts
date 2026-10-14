@@ -1,8 +1,15 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { createClient, rpc } = vi.hoisted(() => {
+const { createClient, rpc, signals } = vi.hoisted(() => {
   const rpc = vi.fn()
-  return { createClient: vi.fn(() => ({ rpc })), rpc }
+  const signals: AbortSignal[] = []
+  return { createClient: vi.fn(() => ({ rpc: (...args: unknown[]) => {
+    const response = Promise.resolve(rpc(...args))
+    return Object.assign(response, { abortSignal: (signal: AbortSignal) => {
+      signals.push(signal)
+      return response
+    } })
+  } })), rpc, signals }
 })
 
 vi.mock('@supabase/supabase-js', () => ({ createClient }))
@@ -59,6 +66,20 @@ const freeProjection = {
 
 describe('public ticketing API', () => {
   beforeEach(() => rpc.mockClear())
+  afterEach(() => vi.useRealTimers())
+
+  it.each(['paid projection', 'free fallback'])('bounds a stalled %s read with a recoverable error', async (stage) => {
+    vi.useFakeTimers()
+    signals.length = 0
+    if (stage === 'free fallback') rpc.mockResolvedValueOnce({ data: [], error: null })
+    rpc.mockReturnValueOnce(new Promise(() => {}))
+    let failure: unknown
+    void getPublicEventTicketing(eventId).catch(error => { failure = error })
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(failure).toMatchObject({ code: 'RETRYABLE', message: 'Public event details are unavailable' })
+    expect(signals.at(-1)?.aborted).toBe(true)
+    expect(vi.getTimerCount()).toBe(0)
+  })
 
   it('uses an isolated nonpersistent anonymous auth client to avoid sharing GoTrue storage', () => {
     expect(createClient).toHaveBeenCalledWith(

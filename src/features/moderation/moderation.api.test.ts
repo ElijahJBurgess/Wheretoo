@@ -1,7 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { functionsInvoke, rpc } = vi.hoisted(() => ({ functionsInvoke: vi.fn(), rpc: vi.fn() }))
-vi.mock('../../lib/supabase/client', () => ({ supabase: { functions: { invoke: functionsInvoke }, rpc } }))
+const { functionsInvoke, rpc, abortSignal } = vi.hoisted(() => ({ functionsInvoke: vi.fn(), rpc: vi.fn(), abortSignal: vi.fn() }))
+vi.mock('../../lib/supabase/client', () => ({
+  supabase: {
+    functions: { invoke: functionsInvoke },
+    rpc: (...args: unknown[]) => {
+      const response = Promise.resolve(rpc(...args))
+      return Object.assign(response, {
+        abortSignal: (signal: AbortSignal) => { abortSignal(signal); return response },
+      })
+    },
+  },
+}))
 
 import {
   ModerationApiError,
@@ -53,6 +63,25 @@ const staffCaseRow = {
 
 describe('moderation browser API', () => {
   beforeEach(() => vi.clearAllMocks())
+
+  it.each([
+    ['policy', getRequiredEventPolicies],
+    ['staff role', getMyStaffRole],
+  ] as const)('bounds a hanging %s read, aborts its transport, and permits recovery', async (kind, read) => {
+    vi.useFakeTimers()
+    rpc.mockReturnValueOnce(new Promise(() => {}))
+    const rejected = vi.fn()
+    void read().catch(rejected)
+    try {
+      await vi.advanceTimersByTimeAsync(10000)
+      expect(rejected).toHaveBeenCalledWith(new ModerationApiError('UNAVAILABLE'))
+      expect(abortSignal.mock.calls[0][0].aborted).toBe(true)
+      rpc.mockResolvedValueOnce({ data: kind === 'policy' ? requiredPolicyRows : 'moderator', error: null })
+      if (kind === 'policy') await expect(read()).resolves.toHaveLength(2)
+      else await expect(read()).resolves.toBe('moderator')
+      expect(abortSignal.mock.calls[1][0].aborted).toBe(false)
+    } finally { vi.useRealTimers() }
+  })
 
   it('uses owner RPCs, parses their narrow result, and returns safe not-found', async () => {
     rpc.mockResolvedValueOnce({ data: [requirementsRow], error: null })

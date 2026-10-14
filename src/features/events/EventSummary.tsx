@@ -1,3 +1,4 @@
+import { WheretooLogo } from '../../components/brand/WheretooLogo'
 import type { Organizer } from '../organizers/organizer.api'
 import type { EventRow } from './event.types'
 
@@ -65,7 +66,7 @@ export function EventSummary({ event, organizer }: EventSummaryProps) {
   return (
     <article className="event-summary">
       <div aria-label="Whereto event artwork placeholder" className="event-summary__artwork" role="img">
-        <span>Whereto presents</span>
+        <span><WheretooLogo theme="white" width={100} alt="" /> presents</span>
         <strong>{title}</strong>
         <small>Event artwork coming soon</small>
       </div>

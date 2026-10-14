@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { publicEventSchema } from '../events/event.schemas'
 import { supabase } from '../../lib/supabase/client'
+import { withReadTimeout } from '../../lib/readTimeout'
 import type { Database } from '../../lib/supabase/database.types'
 import {
   agreementStatusSchema,
@@ -75,6 +76,15 @@ export class ModerationApiError extends Error {
   constructor(readonly code: ModerationApiErrorCode) {
     super(code === 'NOT_FOUND' ? 'This event is no longer available.' : 'Moderation is temporarily unavailable.')
     this.name = 'ModerationApiError'
+  }
+}
+
+async function readModeration<T>(read: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  try {
+    return await withReadTimeout(read)
+  } catch (error) {
+    if (error instanceof ModerationApiError) throw error
+    throw new ModerationApiError('UNAVAILABLE')
   }
 }
 
@@ -161,20 +171,24 @@ function moderationCaseFromRpc(row: z.infer<typeof moderationCaseRpcRowSchema>):
 }
 
 export async function getRequiredEventPolicies(): Promise<RequiredPolicy[]> {
-  const { data, error } = await supabase.rpc('get_required_event_policies')
-  if (error) throw safeError(error)
-  const rows = parseContract(z.array(requiredPolicyRpcRowSchema), data)
-  return parseContract(z.array(requiredPolicySchema), rows.map(requiredPolicyFromRpc))
+  return readModeration(async (signal) => {
+    const { data, error } = await supabase.rpc('get_required_event_policies').abortSignal(signal)
+    if (error) throw safeError(error)
+    const rows = parseContract(z.array(requiredPolicyRpcRowSchema), data)
+    return parseContract(z.array(requiredPolicySchema), rows.map(requiredPolicyFromRpc))
+  })
 }
 
 export async function getOwnedEventRequirements(eventId: string): Promise<EventRequirements | null> {
-  const { data, error } = await supabase.rpc('get_owned_event_requirements', { p_event_id: eventId })
-  if (error) {
-    if (safeError(error).code === 'NOT_FOUND') return null
-    throw safeError(error)
-  }
-  const row = parseOne(requirementsRpcRowSchema, data)
-  return row === null ? null : requirementsFromRpc(row)
+  return readModeration(async (signal) => {
+    const { data, error } = await supabase.rpc('get_owned_event_requirements', { p_event_id: eventId }).abortSignal(signal)
+    if (error) {
+      if (safeError(error).code === 'NOT_FOUND') return null
+      throw safeError(error)
+    }
+    const row = parseOne(requirementsRpcRowSchema, data)
+    return row === null ? null : requirementsFromRpc(row)
+  })
 }
 
 export async function saveEventRequirements(eventId: string, input: EventRequirementsInput): Promise<EventRequirementsInput> {
@@ -210,12 +224,14 @@ export async function requestEventReview(eventId: string, organizerNote: string)
 }
 
 export async function getCurrentEventReviewRequest(eventId: string): Promise<CurrentReviewRequest | null> {
-  const { data, error } = await supabase.rpc('get_current_event_review_request', { p_event_id: eventId })
-  if (error) throw safeError(error)
-  const row = parseOne(currentReviewRequestRpcRowSchema, data)
-  if (row === null) return null
-  return parseContract(currentReviewRequestSchema, {
-    id: row.id, status: row.status, createdAt: row.created_at, resolvedAt: row.resolved_at,
+  return readModeration(async (signal) => {
+    const { data, error } = await supabase.rpc('get_current_event_review_request', { p_event_id: eventId }).abortSignal(signal)
+    if (error) throw safeError(error)
+    const row = parseOne(currentReviewRequestRpcRowSchema, data)
+    if (row === null) return null
+    return parseContract(currentReviewRequestSchema, {
+      id: row.id, status: row.status, createdAt: row.created_at, resolvedAt: row.resolved_at,
+    })
   })
 }
 
@@ -228,39 +244,45 @@ export async function withdrawEventReview(eventId: string): Promise<string> {
 }
 
 export async function getMyStaffRole(): Promise<StaffRole | null> {
-  const { data, error } = await supabase.rpc('get_my_staff_role')
-  if (error) {
-    if (error.message === 'STAFF_ROLE_REQUIRED') return null
-    throw safeError(error)
-  }
-  const parsed = staffRoleSchema.safeParse(data)
-  if (!parsed.success) throw new ModerationApiError('UNAVAILABLE')
-  return parsed.data
+  return readModeration(async (signal) => {
+    const { data, error } = await supabase.rpc('get_my_staff_role').abortSignal(signal)
+    if (error) {
+      if (error.message === 'STAFF_ROLE_REQUIRED') return null
+      throw safeError(error)
+    }
+    const parsed = staffRoleSchema.safeParse(data)
+    if (!parsed.success) throw new ModerationApiError('UNAVAILABLE')
+    return parsed.data
+  })
 }
 
 export async function listModerationQueue(limit: number): Promise<ModerationQueueItem[]> {
-  const { data, error } = await supabase.rpc('list_moderation_queue', { p_limit: limit })
-  if (error) throw safeError(error)
-  const rows = parseContract(z.array(moderationQueueRpcRowSchema), data ?? [])
-  return rows.map((row) => {
-    return parseContract(moderationQueueItemSchema, {
-    eventId: row.event_id, organizerId: row.organizer_id, moderationStatus: row.moderation_status, contentRevision: row.content_revision,
-    inputSha256: row.input_sha256, moderationVersion: row.moderation_version,
-    publicHistoryStatus: row.public_history_status, currentOpenReviewRequest: row.current_open_review_request,
-    currentReportCount: row.current_report_count, queuedEvaluationCount: row.queued_evaluation_count,
-    oldestQueuedAt: row.oldest_queued_at,
+  return readModeration(async (signal) => {
+    const { data, error } = await supabase.rpc('list_moderation_queue', { p_limit: limit }).abortSignal(signal)
+    if (error) throw safeError(error)
+    const rows = parseContract(z.array(moderationQueueRpcRowSchema), data ?? [])
+    return rows.map((row) => {
+      return parseContract(moderationQueueItemSchema, {
+      eventId: row.event_id, organizerId: row.organizer_id, moderationStatus: row.moderation_status, contentRevision: row.content_revision,
+      inputSha256: row.input_sha256, moderationVersion: row.moderation_version,
+      publicHistoryStatus: row.public_history_status, currentOpenReviewRequest: row.current_open_review_request,
+      currentReportCount: row.current_report_count, queuedEvaluationCount: row.queued_evaluation_count,
+      oldestQueuedAt: row.oldest_queued_at,
+      })
     })
   })
 }
 
 export async function getModerationCase(eventId: string): Promise<ModerationCase | null> {
-  const { data, error } = await supabase.rpc('get_moderation_case', { p_event_id: eventId })
-  if (error) {
-    if (safeError(error).code === 'NOT_FOUND') return null
-    throw safeError(error)
-  }
-  const row = parseOne(moderationCaseRpcRowSchema, data)
-  return row === null ? null : moderationCaseFromRpc(row)
+  return readModeration(async (signal) => {
+    const { data, error } = await supabase.rpc('get_moderation_case', { p_event_id: eventId }).abortSignal(signal)
+    if (error) {
+      if (safeError(error).code === 'NOT_FOUND') return null
+      throw safeError(error)
+    }
+    const row = parseOne(moderationCaseRpcRowSchema, data)
+    return row === null ? null : moderationCaseFromRpc(row)
+  })
 }
 
 export async function submitModerationAction(input: ModerationActionInput): Promise<string> {
@@ -312,16 +334,18 @@ const publicEventRpcSchema = z.strictObject({
 })
 
 export async function getPublicEvent(eventId: string) {
-  const { data, error } = await supabase.rpc('get_public_event', { p_event_id: eventId })
-  if (error) throw new ModerationApiError('UNAVAILABLE')
-  const row = parseOne(publicEventRpcSchema, data)
-  if (row === null) return null
-  return parseContract(publicEventSchema, {
-    id: row.id, title: row.title, description: row.description, category: row.category, startsAt: row.starts_at, endsAt: row.ends_at,
-    timezone: row.timezone, venueName: row.venue_name, addressLine1: row.address_line1, addressLine2: row.address_line2,
-    city: row.city, region: row.region, postalCode: row.postal_code, countryCode: row.country_code, latitude: row.latitude, longitude: row.longitude,
-    artworkPath: row.artwork_path, animationPreset: row.animation_preset, admissionType: row.admission_type,
-    minimumAge: row.minimum_age, advisories: row.advisories, organizer: { id: row.organizer.id, displayName: row.organizer.display_name },
+  return readModeration(async (signal) => {
+    const { data, error } = await supabase.rpc('get_public_event', { p_event_id: eventId }).abortSignal(signal)
+    if (error) throw new ModerationApiError('UNAVAILABLE')
+    const row = parseOne(publicEventRpcSchema, data)
+    if (row === null) return null
+    return parseContract(publicEventSchema, {
+      id: row.id, title: row.title, description: row.description, category: row.category, startsAt: row.starts_at, endsAt: row.ends_at,
+      timezone: row.timezone, venueName: row.venue_name, addressLine1: row.address_line1, addressLine2: row.address_line2,
+      city: row.city, region: row.region, postalCode: row.postal_code, countryCode: row.country_code, latitude: row.latitude, longitude: row.longitude,
+      artworkPath: row.artwork_path, animationPreset: row.animation_preset, admissionType: row.admission_type,
+      minimumAge: row.minimum_age, advisories: row.advisories, organizer: { id: row.organizer.id, displayName: row.organizer.display_name },
+    })
   })
 }
 

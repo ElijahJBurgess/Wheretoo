@@ -1,10 +1,13 @@
+import { buyerScreens } from './buyerScreens'
+import { DevWorld } from './DevWorld'
 import { BrowserRouter, Link, Route, Routes, useParams } from 'react-router-dom'
-import { TicketSelectionPreviewPage } from '../features/tickets/TicketSelectionPreviewPage'
+import { BuyerJourneyPreview, BuyerPreviewProvider } from './BuyerJourneyPreview'
 import { EventPolicyPage } from '../features/moderation/EventPolicyPage'
 import { OrganizerTermsPage } from '../features/moderation/OrganizerTermsPage'
 import { previewSections } from './catalog'
 import screens from './screens.json'
 import './preview.css'
+import '../features/organizer-onboarding/onboarding.css'
 
 function PreviewHub() {
   return (
@@ -13,8 +16,10 @@ function PreviewHub() {
         <p className="organizer-eyebrow">Development preview only</p>
         <h1>Wheretoo screen hub</h1>
         <p>One place to inspect the current frontend and track the buyer journey.</p>
-        <p>Local sample data. Screen captures are read-only: forms, links, publishing and payments are inactive.</p>
+        <p>The buyer journey uses isolated sample data. Its controls never create payments or change ticket records.</p>
+        <p><a className="ui-button ui-button--primary" href="/">Open platform home</a> <a className="ui-button ui-button--secondary" href="/map">Explore the live map</a></p>
       </header>
+      {import.meta.env.DEV ? <DevWorld /> : null}
       {previewSections.map((section, index) => (
         <section aria-labelledby={`preview-section-${index}`} key={section.title}>
           <h2 id={`preview-section-${index}`}>{section.title}</h2>
@@ -26,7 +31,7 @@ function PreviewHub() {
                   {screen.route ? <code>{screen.route}</code> : null}
                   {screen.note ? <small>{screen.note}</small> : null}
                 </div>
-                <span className="preview-hub__status">{screen.status ?? 'Open preview'}</span>
+                <span className="preview-hub__status">{screen.status ?? 'Preview'}</span>
               </li>
             ))}
           </ul>
@@ -39,6 +44,7 @@ function PreviewHub() {
 function PreviewScreen() {
   const { slug = '' } = useParams()
   const screen = previewSections.flatMap((section) => section.screens).find((entry) => entry.slug === slug)
+  const buyerIndex = buyerScreens.findIndex(entry => entry.slug === slug)
   const html = Object.hasOwn(screens, slug) ? screens[slug as keyof typeof screens] : undefined
   return (
     <>
@@ -47,7 +53,7 @@ function PreviewScreen() {
         <p><strong>Development preview only</strong> · {screen?.label ?? 'Screen not found'}</p>
         <span>Local sample data · No live transactions</span>
       </header>
-      {slug === 'ticket-selection' ? <TicketSelectionPreviewPage />
+      {buyerIndex >= 0 ? <><nav className="preview-journey-nav" aria-label="Buyer preview screens">{buyerScreens.map((item, index) => <Link key={item.slug} aria-current={index === buyerIndex ? 'page' : undefined} to={`/preview/${item.slug}`}>{index + 1}. {item.label}</Link>)}</nav><BuyerJourneyPreview key={slug} slug={slug} /></>
         : slug === 'organizer-terms' ? <OrganizerTermsPage />
           : slug === 'event-policy' ? <EventPolicyPage />
             : html ? (
@@ -64,12 +70,12 @@ function PreviewScreen() {
 
 export function PreviewApp() {
   return (
-    <BrowserRouter>
+    <BrowserRouter><BuyerPreviewProvider>
       <Routes>
         <Route path="/preview" element={<PreviewHub />} />
         <Route path="/preview/:slug" element={<PreviewScreen />} />
         <Route path="*" element={<PreviewScreen />} />
       </Routes>
-    </BrowserRouter>
+    </BuyerPreviewProvider></BrowserRouter>
   )
 }

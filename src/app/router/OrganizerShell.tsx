@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Outlet, useNavigate } from 'react-router-dom'
+import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { OrganizerLayout } from '../../components/layout/OrganizerLayout'
 import { FormErrorSummary } from '../../components/ui/FormErrorSummary'
 import { signOut } from '../../features/auth/auth.api'
@@ -8,6 +8,7 @@ import { useStaffRole } from '../../features/moderation/moderation.queries'
 
 export function OrganizerShell() {
   const navigate = useNavigate()
+  const { pathname } = useLocation()
   const sessionState = useSession()
   const staffUserId = sessionState.status === 'authenticated' ? sessionState.user.id : ''
   const staffRoleQuery = useStaffRole(staffUserId)
@@ -22,6 +23,10 @@ export function OrganizerShell() {
     } catch (error) {
       setSignOutError(error instanceof Error ? error.message : 'Sign out failed. Try again.')
     }
+  }
+
+  if (pathname === '/organizer/setup' || pathname === '/organizer/settings/payments') {
+    return <Outlet />
   }
 
   return (

@@ -354,15 +354,6 @@ h3 {
   text-decoration: none;
 }
 
-.product-mark::after {
-  align-self: flex-end;
-  margin: 0 0 0.75rem 0.3rem;
-  content: '⌁';
-  color: var(--color-violet);
-  font-size: 0.9rem;
-  letter-spacing: 0;
-}
-
 .organizer-layout {
   display: grid;
   grid-template-rows: auto 1fr;

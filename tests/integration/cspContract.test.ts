@@ -10,14 +10,19 @@ describe('application Content Security Policy', () => {
 
     expect(content).toBeDefined()
     expect(content).toContain("default-src 'self'")
-    expect(content).toContain("script-src 'self' https://connect-js.stripe.com https://js.stripe.com")
+    expect(content).toContain("script-src 'self' 'wasm-unsafe-eval' https://connect-js.stripe.com https://js.stripe.com")
     expect(content).toContain("frame-src https://connect-js.stripe.com https://js.stripe.com https://checkout.stripe.com https://link.com https://*.link.com")
-    expect(content).toContain("connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.mapbox.com https://events.mapbox.com https://api.stripe.com https://connect-js.stripe.com https://link.com https://*.link.com")
-    expect(content).toContain("img-src 'self' data: https://*.stripe.com https://*.link.com")
+    expect(content).toContain("connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.mapbox.com https://*.tiles.mapbox.com https://events.mapbox.com https://api.stripe.com https://connect-js.stripe.com https://link.com https://*.link.com")
+    expect(content).toContain("img-src 'self' data: blob: https://*.stripe.com https://*.link.com https://*.supabase.co")
     expect(content).toContain("font-src 'self' data:")
     expect(content).not.toContain("script-src *")
     expect(content).not.toContain("'unsafe-eval'")
-    expect(content).not.toContain("'unsafe-inline'")
+    expect(content).toContain("worker-src 'self' blob:")
+    expect(content).toContain("style-src-attr 'unsafe-inline'")
+    const scripts = content?.split(';').find(directive => directive.trim().startsWith('script-src '))
+    const styles = content?.split(';').find(directive => directive.trim().startsWith('style-src '))
+    expect(scripts).not.toContain("'unsafe-inline'")
+    expect(styles).not.toContain("'unsafe-inline'")
   })
 
   it('keeps local Vite CSS usable while Playwright verifies the production policy', () => {

@@ -1,7 +1,7 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { getSession, onAuthStateChange, unsubscribe } = vi.hoisted(() => ({
   getSession: vi.fn(),
@@ -25,14 +25,19 @@ const session = {
 
 function SessionProbe() {
   const state = useSession()
-  return <p>{state.status === 'authenticated' ? `${state.status}:${state.user.id}` : state.status}</p>
+  return <>
+    <p>{state.status === 'authenticated' ? `${state.status}:${state.user.id}` : state.status}</p>
+    {state.status === 'error' ? <button onClick={state.retry}>Try again</button> : null}
+  </>
 }
 
 describe('SessionProvider', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    vi.resetAllMocks()
     onAuthStateChange.mockReturnValue({ data: { subscription: { unsubscribe } } })
   })
+
+  afterEach(() => vi.useRealTimers())
 
   it('moves from loading to authenticated after resolving the initial session', async () => {
     let resolveSession!: (value: { data: { session: Session }; error: null }) => void
@@ -88,13 +93,55 @@ describe('SessionProvider', () => {
     expect(screen.getByText('authenticated:user-1')).toBeInTheDocument()
   })
 
-  it('becomes anonymous when the active initial session lookup rejects', async () => {
+  it('shows a recoverable error when the active initial session lookup rejects', async () => {
     getSession.mockRejectedValue(new Error('Session storage unavailable'))
 
     render(<SessionProvider><SessionProbe /></SessionProvider>)
 
     expect(screen.getByText('loading')).toBeInTheDocument()
-    expect(await screen.findByText('anonymous')).toBeInTheDocument()
+    expect(await screen.findByText('error')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeEnabled()
+  })
+
+  it('stops an unresolved session spinner and lets the user retry', async () => {
+    vi.useFakeTimers()
+    getSession.mockReturnValueOnce(new Promise(() => {}))
+    getSession.mockResolvedValueOnce({ data: { session }, error: null })
+
+    render(<SessionProvider><SessionProbe /></SessionProvider>)
+    expect(screen.getByText('loading')).toBeInTheDocument()
+
+    await act(() => vi.advanceTimersByTimeAsync(10_000))
+    expect(screen.getByText('error')).toBeInTheDocument()
+
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Try again' })))
+    expect(screen.getByText('authenticated:user-1')).toBeInTheDocument()
+  })
+
+  it('does not mistake a returned session lookup error for a signed-out user', async () => {
+    getSession.mockResolvedValue({ data: { session: null }, error: new Error('Auth temporarily unavailable') })
+
+    render(<SessionProvider><SessionProbe /></SessionProvider>)
+
+    expect(await screen.findByText('error')).toBeInTheDocument()
+    expect(screen.queryByText('anonymous')).not.toBeInTheDocument()
+  })
+
+  it('accepts a valid auth event after the initial session lookup times out', async () => {
+    vi.useFakeTimers()
+    getSession.mockReturnValue(new Promise(() => {}))
+    let authListener: ((event: AuthChangeEvent, nextSession: Session | null) => void) | undefined
+    onAuthStateChange.mockImplementation((listener) => {
+      authListener = listener
+      return { data: { subscription: { unsubscribe } } }
+    })
+
+    render(<SessionProvider><SessionProbe /></SessionProvider>)
+    await act(() => vi.advanceTimersByTimeAsync(10_000))
+    expect(screen.getByText('error')).toBeInTheDocument()
+
+    act(() => authListener?.('SIGNED_IN', session))
+    expect(screen.getByText('authenticated:user-1')).toBeInTheDocument()
   })
 
   it('does not let a late initial rejection overwrite a newer auth event', async () => {

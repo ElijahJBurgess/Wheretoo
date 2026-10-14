@@ -30,6 +30,7 @@ const admissionLabelStyle = {
 export function TicketsReadyEmail(props: TicketsReadyProps) {
   return (
     <EmailFrame
+      brandAssetOrigin={props.brandAssetOrigin}
       eyebrow="Tickets ready"
       preview={`${props.eventName} tickets are ready`}
       recipientLabel={props.recipientLabel}

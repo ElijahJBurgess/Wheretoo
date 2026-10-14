@@ -6,6 +6,7 @@ import { evictPrivateIdentityQueries } from './privateQueryCache'
 
 export type SessionState =
   | { status: 'loading'; session: null; user: null }
+  | { status: 'error'; session: null; user: null; retry: () => void }
   | { status: 'anonymous'; session: null; user: null }
   | { status: 'authenticated'; session: Session; user: User }
 
@@ -23,18 +24,32 @@ type SessionProviderProps = PropsWithChildren<{ queryClient?: QueryClient }>
 
 export function SessionProvider({ children, queryClient }: SessionProviderProps) {
   const [state, setState] = useState<SessionState>(loadingState)
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     let active = true
     let authEventReceived = false
     let activeUserId: string | null = null
+    const retry = () => {
+      setState(loadingState)
+      setAttempt((previous) => previous + 1)
+    }
+    const failSession = () => {
+      window.clearTimeout(timeout)
+      if (active && !authEventReceived) {
+        setState({ status: 'error', session: null, user: null, retry })
+      }
+    }
+    const timeout = window.setTimeout(failSession, 10_000)
     const applySession = (session: Session | null) => {
+      if (!active) return
+      window.clearTimeout(timeout)
       const nextUserId = session?.user.id ?? null
       if (nextUserId !== activeUserId) {
         if (queryClient) evictPrivateIdentityQueries(queryClient)
         activeUserId = nextUserId
       }
-      if (active) setState(stateFromSession(session))
+      setState(stateFromSession(session))
     }
     const { data } = supabase.auth.onAuthStateChange((_event, session) => {
       authEventReceived = true
@@ -43,22 +58,20 @@ export function SessionProvider({ children, queryClient }: SessionProviderProps)
 
     void supabase.auth
       .getSession()
-      .then(({ data: sessionData }) => {
+      .then(({ data: sessionData, error }) => {
         if (active && !authEventReceived) {
-          applySession(sessionData.session)
+          if (error) failSession()
+          else applySession(sessionData.session)
         }
       })
-      .catch(() => {
-        if (active && !authEventReceived) {
-          applySession(null)
-        }
-      })
+      .catch(failSession)
 
     return () => {
       active = false
+      window.clearTimeout(timeout)
       data.subscription.unsubscribe()
     }
-  }, [queryClient])
+  }, [attempt, queryClient])
 
   return <SessionContext.Provider value={state}>{children}</SessionContext.Provider>
 }

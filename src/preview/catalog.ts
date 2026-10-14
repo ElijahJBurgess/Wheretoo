@@ -2,19 +2,20 @@ export type PreviewScreen = {
   label: string
   slug?: string
   route?: string
-  status?: 'Preview not available' | 'Runtime data required'
+  status?: 'Preview not available' | 'Runtime data required' | 'Not built yet'
   note?: string
 }
 export const previewSections: { title: string; screens: PreviewScreen[] }[] = [
   { title: 'Buyer Journey', screens: [
-    { label: 'Ticket Selection', slug: 'ticket-selection', note: 'Approved redesign' },
-    { label: 'Checkout', slug: 'checkout', note: 'Current frontend' },
-    { label: 'Confirmation', slug: 'confirmation', note: 'Current frontend' },
-    { label: 'Ticket Wallet', status: 'Preview not available' },
-    { label: 'QR Ticket', status: 'Preview not available' },
-    { label: 'Used / Already Scanned Ticket', status: 'Preview not available' },
-    { label: 'Refunded Ticket', status: 'Preview not available' },
-    { label: 'Cancelled Ticket', status: 'Preview not available' },
+    { label: 'Event Page', slug: 'event-page', route: '/events/:eventId' },
+    { label: 'Ticket Selection', slug: 'ticket-selection', route: '/events/:eventId/tickets' },
+    { label: 'Checkout', slug: 'checkout', route: '/events/:eventId/checkout', note: 'Continues to Stripe-hosted Checkout in the real flow' },
+    { label: 'Confirmation', slug: 'confirmation', route: '/orders/:confirmationToken' },
+    { label: 'Ticket Wallet', slug: 'ticket-wallet', route: '/tickets/:collectionBearer' },
+    { label: 'QR Ticket', slug: 'qr-ticket', route: '/tickets/:collectionBearer/:ticketSelector' },
+    { label: 'Used', slug: 'used-ticket' },
+    { label: 'Refunded', slug: 'refunded-ticket' },
+    { label: 'Cancelled', slug: 'cancelled-ticket' },
   ] },
   { title: 'Public / Customer Screens Already In Repo', screens: [
     { label: 'Public Event / Ticket Selection', slug: 'public-event', route: '/events/:eventId' },

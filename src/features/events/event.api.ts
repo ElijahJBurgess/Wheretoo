@@ -1,4 +1,5 @@
 import { supabase } from '../../lib/supabase/client'
+import { withReadTimeout } from '../../lib/readTimeout'
 import type { Database } from '../../lib/supabase/database.types'
 import { instantToLosAngelesWallTime, losAngelesWallTimeToIso } from './event.time'
 import { eventCategories } from './event.types'
@@ -109,11 +110,12 @@ function draftPayload(values: EventFormValues): EventDraftPayload {
 }
 
 export async function listOwnedEvents(organizerId: string): Promise<EventRow[]> {
-  const { data, error } = await supabase
+  const { data, error } = await withReadTimeout((signal) => supabase
     .from('events')
     .select('*')
     .eq('organizer_id', organizerId)
-    .order('created_at', { ascending: false })
+    .abortSignal(signal)
+    .order('created_at', { ascending: false }))
 
   if (error) {
     throw error
@@ -126,12 +128,13 @@ export async function getOwnedEvent(
   eventId: string,
   organizerId: string,
 ): Promise<EventRow | null> {
-  const { data, error } = await supabase
+  const { data, error } = await withReadTimeout((signal) => supabase
     .from('events')
     .select('*')
     .eq('id', eventId)
     .eq('organizer_id', organizerId)
-    .maybeSingle()
+    .abortSignal(signal)
+    .maybeSingle())
 
   if (error && error.code !== 'PGRST116') {
     throw error

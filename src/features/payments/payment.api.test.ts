@@ -22,7 +22,19 @@ describe('payment API', () => {
 
     await expect(getConnectStatus()).resolves.toEqual(status)
 
-    expect(invoke).toHaveBeenCalledWith('stripe-connect-status', { body: {}, method: 'POST' })
+    expect(invoke).toHaveBeenCalledWith('stripe-connect-status', { body: {}, method: 'POST', signal: expect.any(AbortSignal) })
+  })
+
+  it('returns a recoverable error when payment status never responds', async () => {
+    vi.useFakeTimers()
+    try {
+      invoke.mockReturnValue(new Promise(() => {}))
+      const result = expect(getConnectStatus()).rejects.toThrow('Payment setup could not be loaded')
+      await vi.advanceTimersByTimeAsync(10_000)
+      await result
+      const options = invoke.mock.calls[0][1] as { signal: AbortSignal }
+      expect(options.signal.aborted).toBe(true)
+    } finally { vi.useRealTimers() }
   })
 
   it('creates an Account Session only through the authenticated session function', async () => {

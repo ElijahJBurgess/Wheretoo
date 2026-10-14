@@ -71,6 +71,8 @@ describe('ticket experience router composition', () => {
 
   it.each([
     '/',
+    '/map',
+    '/discover',
     '/events/event-a',
     '/events/event-a/checkout',
     '/orders/confirmation-bearer',
@@ -80,7 +82,22 @@ describe('ticket experience router composition', () => {
     '/auth/check-email',
     '/auth/sign-in',
   ])('retains the public route %s outside session composition', (path) => {
+    const router = createAppRouter(runtime)
+    const match = matchRoutes(router.routes, path)?.at(-1)?.route
+    expect(match).toBeDefined()
+    expect(match?.path).not.toBe('*')
     expect(matchedIds(path)).not.toContain('session-shell')
+  })
+
+  it('opens discovery at home instead of redirecting visitors to sign-in', () => {
+    const route = matchRoutes(createAppRouter(runtime).routes, '/')?.at(-1)?.route
+    expect(route?.lazy).toBeTypeOf('function')
+  })
+
+  it('provides a recoverable page for unmatched addresses and route failures', () => {
+    const router = createAppRouter(runtime)
+    expect(matchRoutes(router.routes, '/missing-page')?.at(-1)?.route.path).toBe('*')
+    expect(router.routes.every(route => Boolean(route.errorElement))).toBe(true)
   })
 
   it.each([

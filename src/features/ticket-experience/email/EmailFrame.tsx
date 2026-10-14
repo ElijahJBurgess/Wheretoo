@@ -1,3 +1,4 @@
+import { brandAssets, emailLogoUrl } from '../../../components/brand/brandAssets'
 import {
   Body,
   Button,
@@ -6,6 +7,7 @@ import {
   Heading,
   Hr,
   Html,
+  Img,
   Preview,
   Section,
   Text,
@@ -14,6 +16,7 @@ import type { ReactNode } from 'react'
 import { emailStyles } from './emailStyles'
 
 type EmailFrameProps = {
+  brandAssetOrigin?: string
   preview: string
   eyebrow: string
   title: string
@@ -23,6 +26,7 @@ type EmailFrameProps = {
 }
 
 export function EmailFrame({
+  brandAssetOrigin,
   preview,
   eyebrow,
   title,
@@ -30,13 +34,18 @@ export function EmailFrame({
   children,
   viewTicketsUrl,
 }: EmailFrameProps) {
+  const assetOrigin = brandAssetOrigin ?? viewTicketsUrl
+  if (!assetOrigin) throw new Error('Email branding requires brandAssetOrigin or a ticket URL')
+  const logo = brandAssets.wordmark.white
   return (
     <Html lang="en">
       <Head />
       <Preview>{preview}</Preview>
       <Body style={emailStyles.body}>
         <Container style={emailStyles.container}>
-          <Text style={emailStyles.brand}>whereto</Text>
+          <Section style={emailStyles.brand}>
+            <Img alt="Wheretoo" src={emailLogoUrl(assetOrigin)} width={140} height={140 * logo.height / logo.width} style={{ display: 'block', maxWidth: '100%', height: 'auto' }} />
+          </Section>
           <Section style={emailStyles.content}>
             <Text style={emailStyles.eyebrow}>{eyebrow}</Text>
             <Heading as="h1" style={emailStyles.heading}>{title}</Heading>

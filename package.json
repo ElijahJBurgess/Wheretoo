@@ -26,7 +26,9 @@
     "test:ticket-shells": "vitest run src/features/ticket-experience scripts/send-ticket-ready-test.test.ts",
     "test:ticket-shells:production": "vitest run src/app/router/router.test.tsx && pnpm build && tsx --tsconfig tsconfig.scripts.json scripts/verify-ticket-shell-production.ts",
     "test:functions:moderation": "deno test --allow-env supabase/functions/report-event/index.test.ts supabase/functions/moderate-event-queue/index.test.ts",
-    "typecheck:functions": "deno task check"
+    "typecheck:functions": "deno task check",
+    "dev:seed": "tsx --tsconfig tsconfig.scripts.json scripts/dev-world/run.ts seed",
+    "dev:reset": "tsx --tsconfig tsconfig.scripts.json scripts/dev-world/run.ts reset"
   },
   "keywords": [],
   "author": "",
@@ -50,6 +52,7 @@
     "@supabase/supabase-js": "^2.112.3",
     "@tanstack/react-query": "^5.102.2",
     "@zxing/browser": "0.2.1",
+    "mapbox-gl": "3.29.0",
     "qrcode.react": "4.2.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",

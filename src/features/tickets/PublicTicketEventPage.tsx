@@ -1,5 +1,7 @@
 import { useState, type ReactNode } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import { BuyerHeader, BuyerIcon } from '../buyer-journey/BuyerPrimitives'
+import { EventPageView } from '../buyer-journey/EventPageView'
 import { AsyncState } from '../../components/ui/AsyncState'
 import { Button } from '../../components/ui/Button'
 import { ReportEventDialog } from '../moderation/ReportEventDialog'
@@ -22,17 +24,6 @@ const timeFormatter = new Intl.DateTimeFormat('en-US', {
   hour: 'numeric',
   minute: '2-digit',
 })
-
-const categoryLabels: Record<string, string> = {
-  food_drink: 'Food & drink',
-  music: 'Music',
-  fitness: 'Fitness',
-  art_culture: 'Art & culture',
-  shopping: 'Shopping',
-  community: 'Community',
-  nightlife: 'Nightlife',
-  other: 'Other',
-}
 
 function formatDateAndTime(startsAt: string, endsAt: string): { date: string; time: string } {
   const start = new Date(startsAt)
@@ -76,7 +67,8 @@ type PublicEventStateProps = {
 
 function PublicEventState({ action, description, status, title }: PublicEventStateProps) {
   return (
-    <main className="public-event-layout">
+    <main className="buyer-page buyer-state">
+      <BuyerHeader />
       <h1 className="public-event-state__title">{title}</h1>
       <AsyncState action={action} description={description} status={status} title={title} />
     </main>
@@ -148,7 +140,7 @@ function PublicTicketPurchase({ eventId, tiers }: PublicTicketPurchaseProps) {
   )
 }
 
-export function PublicTicketEventPage() {
+export function PublicTicketEventPage({ selection = false }: { selection?: boolean }) {
   const { eventId = '' } = useParams()
   const eventQuery = usePublicTicketingEvent(eventId)
   const hasRetryableStaleEvent = eventQuery.isError
@@ -176,58 +168,28 @@ export function PublicTicketEventPage() {
   const artwork = getRenderableArtwork(event.artwork_path)
 
   return (
-    <main className="public-event-layout">
+    <>
       {hasRetryableStaleEvent ? (
         <div className="public-event-refresh" role="status">
           <p>Showing the last event details we received. We could not check current availability.</p>
-          <Button onClick={() => void eventQuery.refetch()} variant="secondary">Check again</Button>
+          <Button onClick={() => void eventQuery.refetch()}>Check again</Button>
         </div>
       ) : null}
-      <article aria-labelledby="public-event-title" className="public-event">
-        <div
-          aria-label={artwork ? `${event.title} event artwork` : 'Whereto event artwork placeholder'}
-          className="public-event__artwork"
-          role="img"
-          style={artwork ? { backgroundImage: `url("${artwork}")` } : undefined}
-        >
-          <div className="public-event__artwork-shade" />
-          <div className="public-event__artwork-copy">
-            <span>Whereto presents</span>
-            <strong>{event.title}</strong>
-            <small>{categoryLabels[event.category]}</small>
-          </div>
-        </div>
-        <div className="public-event__content">
-          <header className="public-event__header">
-            <p className="public-event__eyebrow">Public event</p>
-            <h1 id="public-event-title">{event.title}</h1>
-            <p>Hosted by {event.organizer.display_name}</p>
-          </header>
-          <dl className="public-event__facts">
-            <div><dt>Date</dt><dd>{dateAndTime.date}</dd></div>
-            <div><dt>Time</dt><dd>{dateAndTime.time}</dd></div>
-            <div><dt>Venue</dt><dd>{event.venue_name ?? 'Venue to be announced'}</dd></div>
-            <div><dt>Location</dt><dd>{formatAddress(event)}</dd></div>
-          </dl>
-          <section aria-labelledby="public-event-about" className="public-event__description">
-            <h2 id="public-event-about">About this event</h2>
-            <p>{event.description}</p>
-          </section>
-          {paidPublicEvent !== null ? (
-            <PublicTicketPurchase
-              eventId={event.id}
-              tiers={paidPublicEvent.tiers}
-            />
-          ) : (
-            <section aria-labelledby="public-event-admission" className="public-event__tickets">
-              <p className="public-event__eyebrow">Admission</p>
-              <h2 id="public-event-admission">Free event</h2>
-              <p>No ticket purchase is required.</p>
-            </section>
-          )}
-          {!hasRetryableStaleEvent ? <ReportEventDialog eventId={event.id} /> : null}
-        </div>
-      </article>
-    </main>
+      <EventPageView title={event.title} organizer={event.organizer.display_name}
+        date={dateAndTime.date} time={dateAndTime.time} venue={event.venue_name ?? 'Venue to be announced'}
+        location={formatAddress(event)} description={event.description} artwork={artwork} selection={selection}
+        back={selection ? <Link className="buyer-icon-button" aria-label="Return to event" to={`/events/${event.id}`}><BuyerIcon name="back" /></Link> : undefined}
+        action={!selection && paidPublicEvent ? <Link className="ui-button buyer-primary" to={`/events/${event.id}/tickets`}>Get tickets<BuyerIcon name="arrow" /></Link> : undefined}
+      >
+        {paidPublicEvent !== null ? <PublicTicketPurchase eventId={event.id} tiers={paidPublicEvent.tiers} /> : (
+          <section className="public-event__tickets"><h2>Free event</h2><p>No ticket purchase is required.</p></section>
+        )}
+        {!hasRetryableStaleEvent ? <ReportEventDialog eventId={event.id} /> : null}
+      </EventPageView>
+    </>
   )
+}
+
+export function PublicTicketSelectionPage() {
+  return <PublicTicketEventPage selection />
 }

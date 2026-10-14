@@ -1,3 +1,4 @@
+import { productionTicketExperienceRuntime } from './production'
 /* eslint-disable react-refresh/only-export-components */
 import { useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
@@ -6,7 +7,6 @@ import type { AdmissionChecker, AdmissionCheckResult } from '../contracts/admiss
 import type { TicketCollectionReader } from '../contracts/ticketCollection'
 import { DevelopmentQrLabPage } from '../customer/DevelopmentQrLabPage'
 import { TicketCollectionPage } from '../customer/TicketCollectionPage'
-import { useTicketDocumentPrivacy } from '../customer/useTicketDocumentPrivacy'
 import { EventDashboardPage } from '../dashboard/EventDashboardPage'
 import { EmailPreviewPage } from '../email/EmailPreviewPage'
 import { emailPreviewScenarios } from '../email/emailPreviewScenarios'
@@ -72,21 +72,17 @@ function DevelopmentTicketCollectionRoute() {
   }
 
   if (!hasOwnScenario(ticketCollectionScenarios, collectionBearer)) {
-    return <DevelopmentUnavailableTicketRoute />
+    const RealCollection = productionTicketExperienceRuntime.TicketCollectionRoute
+    return <RealCollection />
   }
 
   return (
     <TicketCollectionPage
+      now={() => new Date('2026-09-03T12:00:00Z')}
       reader={fixtureTicketCollectionReader}
       walletProvider={fixtureWalletProvider}
     />
   )
-}
-
-function DevelopmentUnavailableTicketRoute() {
-  useTicketDocumentPrivacy()
-
-  return <AsyncState status="error" title="Development scenario unavailable" />
 }
 
 function DevelopmentDashboardContent() {
@@ -125,6 +121,13 @@ function DevelopmentScannerRoute() {
       cameraDecoder={developmentCameraDecoder}
     />
   )
+}
+
+function DevelopmentOrganizerScannerRoute() {
+  const { eventId } = useParams()
+  if (hasOwnScenario(dashboardScenarios, eventId)) return <DevelopmentScannerRoute />
+  const RealScanner = productionTicketExperienceRuntime.OrganizerScannerRoute
+  return <RealScanner />
 }
 
 function DevelopmentHeldInitializingScannerRoute() {
@@ -209,7 +212,7 @@ function DevelopmentEmailRoute() {
 
 export const developmentTicketExperienceRuntime: TicketExperienceRuntime = {
   TicketCollectionRoute: DevelopmentTicketCollectionRoute,
-  OrganizerScannerRoute: DevelopmentScannerRoute,
+  OrganizerScannerRoute: DevelopmentOrganizerScannerRoute,
   OrganizerDashboardRoute: DevelopmentDashboardContent,
   developmentRoutes: [
     {

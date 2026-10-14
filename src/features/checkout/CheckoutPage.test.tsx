@@ -158,6 +158,16 @@ describe('CheckoutPage', () => {
     expect(screen.getByRole('status')).toBeInTheDocument()
   })
 
+  it('shows a recoverable unavailable state for an invalid checkout event URL', () => {
+    useCheckoutPublicEvent.mockReturnValue({ data: undefined, isPending: true, isError: false, refetch })
+    renderCheckout('/events/not-an-event/checkout')
+
+    expect(screen.queryByRole('heading', { name: 'Loading checkout' })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1, name: 'Checkout unavailable' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Browse events' })).toHaveAttribute('href', '/')
+    expect(screen.queryByRole('button', { name: 'Continue to secure payment' })).not.toBeInTheDocument()
+  })
+
   it('gives the standalone load error one semantic heading, alert role, and return control', () => {
     useCheckoutPublicEvent.mockReturnValue({ data: undefined, isPending: false, isError: true, refetch })
     renderCheckout()

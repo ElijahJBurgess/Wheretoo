@@ -40,7 +40,9 @@ export function EmailPreviewPage({ input }: { input: EmailTemplateInput }) {
 
   useEffect(() => {
     let active = true
-    emailRenderer.render(input).then(
+    const previewInput = structuredClone(input)
+    previewInput.props.brandAssetOrigin = window.location.origin
+    emailRenderer.render(previewInput).then(
       ({ html }) => {
         if (active) setState({ kind: 'ready', html, input })
       },

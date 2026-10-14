@@ -1,0 +1,3 @@
+.route-fallback { display: flex; min-height: 100dvh; flex-direction: column; align-items: center; justify-content: center; gap: 1.25rem; padding: 2rem; text-align: center; }
+.route-fallback h1, .route-fallback p { margin: 0; }
+.route-fallback p { max-width: 28rem; color: var(--color-muted); line-height: 1.6; }

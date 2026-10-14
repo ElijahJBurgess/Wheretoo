@@ -1,8 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { rpc } = vi.hoisted(() => ({ rpc: vi.fn() }))
+const { rpc, abortSignal } = vi.hoisted(() => ({ rpc: vi.fn(), abortSignal: vi.fn() }))
 
-vi.mock('../../lib/supabase/client', () => ({ supabase: { rpc } }))
+vi.mock('../../lib/supabase/client', () => ({
+  supabase: {
+    rpc: (...args: unknown[]) => {
+      const response = Promise.resolve(rpc(...args))
+      return Object.assign(response, {
+        abortSignal: (signal: AbortSignal) => { abortSignal(signal); return response },
+      })
+    },
+  },
+}))
 
 import { activatePaidSales, listOwnedTicketTiers, saveTicketTiers, usdToMinor } from './ticket.api'
 
@@ -15,6 +24,21 @@ const tier = {
 
 describe('owned ticket tier API', () => {
   beforeEach(() => vi.clearAllMocks())
+
+  it('times out a stalled tier read and permits a successful retry', async () => {
+    vi.useFakeTimers()
+    rpc.mockReturnValueOnce(new Promise(() => {}))
+    const rejected = vi.fn()
+    void listOwnedTicketTiers(eventId).catch(rejected)
+    try {
+      await vi.advanceTimersByTimeAsync(10000)
+      expect(rejected).toHaveBeenCalledWith(expect.objectContaining({ name: 'TimeoutError' }))
+      expect(abortSignal.mock.calls[0][0].aborted).toBe(true)
+      rpc.mockResolvedValueOnce({ data: [tier], error: null })
+      await expect(listOwnedTicketTiers(eventId)).resolves.toEqual([tier])
+      expect(abortSignal.mock.calls[1][0].aborted).toBe(false)
+    } finally { vi.useRealTimers() }
+  })
 
   it('uses only the owner-safe tier RPC and returns its active rows', async () => {
     rpc.mockResolvedValue({ data: [tier], error: null })

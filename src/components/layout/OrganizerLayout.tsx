@@ -1,3 +1,4 @@
+import { WheretooLogo } from '../brand/WheretooLogo'
 import type { PropsWithChildren } from 'react'
 import type { StaffRole } from '../../features/moderation/moderation.types'
 
@@ -11,10 +12,11 @@ export function OrganizerLayout({ children, onSignOut, staffRole = null }: Organ
     <div className="organizer-layout">
       <header className="organizer-layout__header">
         <a className="product-mark" href="/organizer/events">
-          whereto
+          <WheretooLogo width={124} />
         </a>
         <nav aria-label="Organizer">
           <div className="organizer-layout__nav">
+            <a href="/map">Explore map</a>
             <a href="/organizer/events">Events</a>
             <a href="/organizer/settings/payments">Payments</a>
             {staffRole ? <a href="/moderation">Moderation</a> : null}

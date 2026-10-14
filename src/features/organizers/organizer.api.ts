@@ -1,4 +1,5 @@
 import { supabase } from '../../lib/supabase/client'
+import { withReadTimeout } from '../../lib/readTimeout'
 import type { Database } from '../../lib/supabase/database.types'
 import type { OrganizerInput } from './organizer.schemas'
 
@@ -23,7 +24,8 @@ function optionalText(value: string | undefined): string | null {
 }
 
 export async function getOrganizer(userId: string): Promise<Organizer | null> {
-  const { data, error } = await supabase.from('organizers').select('*').eq('id', userId).maybeSingle()
+  const { data, error } = await withReadTimeout((signal) => supabase
+    .from('organizers').select('*').eq('id', userId).abortSignal(signal).maybeSingle())
 
   if (error && error.code !== 'PGRST116') {
     throw error

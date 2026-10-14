@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { render, cleanup } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
-import type { ReactNode } from 'react'
+import type { PropsWithChildren, ReactNode } from 'react'
 import { expect, it, vi } from 'vitest'
 import { confirmation, event, eventId, moderationCase, organizer, organizerId, publicEvent, requirements, tier } from './fixtures'
 import { encodeCheckoutCart } from '../features/checkout/checkout.cart'
@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
   blocked: vi.fn(() => { throw new Error('Preview attempted a side effect') }),
 }))
 vi.mock('../lib/supabase/client', () => ({ supabase: new Proxy({}, { get: mocks.blocked }) }))
-vi.mock('../features/auth/SessionProvider', () => ({ useSession: mocks.session }))
+vi.mock('../features/auth/SessionProvider', () => ({ useSession: mocks.session, SessionProvider: ({ children }: PropsWithChildren) => children }))
 vi.mock('../features/moderation/staffContext', () => ({ useStaffContext: () => ({ role: 'moderator', staffUserId: organizerId }) }))
 vi.mock('../features/auth/auth.api', () => ({ signInOrganizer: mocks.blocked, signUpOrganizer: mocks.blocked }))
 vi.mock('../features/events/event.queries', () => ({
@@ -110,11 +110,13 @@ it('keeps visual fixtures current with the real screens, without calling service
   try {
     capture('sign-in', '/auth/sign-in', <SignInPage />)
     capture('sign-up', '/auth/sign-up', <SignUpPage />)
+    mocks.session.mockReturnValue({ status: 'anonymous', session: null, user: null })
     capture('check-email', '/auth/check-email', <CheckEmailPage />)
+    mocks.session.mockReturnValue({ status: 'authenticated', session: {}, user: { id: organizerId, user_metadata: {} } })
     capture('public-event', `/events/${eventId}`, <PublicTicketEventPage />)
     capture('checkout', `/events/${eventId}/checkout?${encodeCheckoutCart([{ tierId: tier.id, quantity: 1 }])}`, <CheckoutPage />)
     capture('confirmation', '/orders/preview-token', <OrderConfirmationPage />)
-    capture('organizer-setup', '/organizer/setup', <OrganizerSetupPage />, true)
+    capture('organizer-setup', '/organizer/setup', <OrganizerSetupPage />)
     capture('organizer-events', '/organizer/events', <OrganizerEventsPage />, true)
     capture('create-event', '/organizer/events/new', <EventEditorPage />, true)
     capture('edit-event', `/organizer/events/${eventId}/edit`, <EventEditorPage />, true)

@@ -24,7 +24,8 @@ describe('production ticket experience composition', () => {
     const Route = runtime.OrganizerScannerRoute
     const view = render(<Route />)
     expect(screen.getByText('Loading scanner')).toBeVisible()
-    await waitFor(() => expect(mocks.scanner).toHaveBeenCalled())
+    // Wait for the lazy route to commit before testing a subsequent render.
+    await waitFor(() => expect(screen.queryByText('Loading scanner')).not.toBeInTheDocument())
     const first = mocks.scanner.mock.calls[0]![0]
     view.rerender(<Route />)
     expect(mocks.scanner.mock.calls[1]![0].admissionChecker).toBe(first.admissionChecker)

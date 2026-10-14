@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { CheckoutReview } from '../buyer-journey/CheckoutReview'
+import { BuyerHeader, BuyerIcon } from '../buyer-journey/BuyerPrimitives'
 import { AsyncState } from '../../components/ui/AsyncState'
 import { Button } from '../../components/ui/Button'
 import { Field } from '../../components/ui/Field'
@@ -45,10 +47,6 @@ function shouldRefreshAvailability(error: unknown): boolean {
     code === 'CONNECT_ACTION_REQUIRED' || code === 'RATE_LIMITED' || code === 'CHECKOUT_EXPIRED'
 }
 
-function formatMinorUsd(minor: number): string {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(minor / 100)
-}
-
 function publicEventPath(eventId: string): string {
   return `/events/${eventId}`
 }
@@ -71,7 +69,8 @@ type CheckoutStateProps = {
 
 export function CheckoutState({ action, description, status, title }: CheckoutStateProps) {
   return (
-    <main className="checkout-layout">
+    <main className="buyer-page buyer-state">
+      <BuyerHeader />
       <h1 className="checkout-state__title">{title}</h1>
       <AsyncState
         action={action}
@@ -239,7 +238,10 @@ export function CheckoutPage({ assignCheckout = assignHostedCheckout }: Checkout
   if (cancelToken !== null) {
     return <CheckoutState action={<Link className="ui-button ui-button--secondary" to={eventId ? publicEventPath(eventId) : '/'}>Return to event</Link>} status="loading" title="Cancelling checkout" />
   }
-  if (!eventIdResult.success || (eventQuery.isPending || eventQuery.data === undefined) && !eventQuery.isError) {
+  if (!eventIdResult.success) {
+    return <CheckoutState action={<Link className="ui-button ui-button--secondary" to="/">Browse events</Link>} description="This checkout link is invalid. Choose an event to continue." status="empty" title="Checkout unavailable" />
+  }
+  if ((eventQuery.isPending || eventQuery.data === undefined) && !eventQuery.isError) {
     return <CheckoutState action={<Link className="ui-button ui-button--secondary" to={eventId ? publicEventPath(eventId) : '/'}>Return to event</Link>} status="loading" title="Loading checkout" />
   }
   if (eventQuery.isError || eventQuery.data === null) {
@@ -262,36 +264,28 @@ export function CheckoutPage({ assignCheckout = assignHostedCheckout }: Checkout
   const disabled = isSubmitting
 
   return (
-    <main className="checkout-layout">
-      <section aria-labelledby="checkout-title" className="checkout-page">
-        <header className="checkout-page__header">
-          <p className="public-event__eyebrow">Guest checkout</p>
-          <h1 id="checkout-title">Review your tickets</h1>
-          <p>Secure payment is completed with Stripe.</p>
-        </header>
-        <section aria-label="Ticket summary" className="checkout-summary">
-          <p className="checkout-summary__event">{eventQuery.data.event.title}</p>
-          <ul className="checkout-summary__items">
-            {selectedLines.map((line) => (
-              <li key={line.tier.id}>
-                <span>{line.tier.name}</span>
-                <span>{line.quantity} {line.quantity === 1 ? 'ticket' : 'tickets'}</span>
-              </li>
-            ))}
-          </ul>
-          <dl><div><dt>Total</dt><dd>{formatMinorUsd(totalMinor)}</dd></div></dl>
-        </section>
-        <form className="checkout-form" noValidate onSubmit={(event) => void submit(event)}>
+    <CheckoutReview
+      event={eventQuery.data.event}
+      lines={selectedLines.map((line) => ({ name: line.tier.name, quantity: line.quantity, unitAmountMinor: line.tier.unit_amount_minor }))}
+      totalMinor={totalMinor}
+      back={<Link className="buyer-icon-button" aria-label="Return to event" to={publicEventPath(eventId)}><BuyerIcon name="back" /></Link>}
+      editSelection={<Link to={publicEventPath(eventId) + '#public-event-tickets'}>Edit selection</Link>}
+    >
+      <form className="buyer-checkout-form" noValidate onSubmit={(event) => void submit(event)}>
+        <section className="buyer-details" aria-labelledby="buyer-details-heading">
+          <h2 id="buyer-details-heading">Buyer details</h2>
           <FormErrorSummary errors={errors} title="Check your details" />
-          <Field error={fieldErrors.buyerName} label="Your name" name="buyer-name">
-            <input autoComplete="name" disabled={disabled} onChange={(event) => setBuyerName(event.target.value)} ref={buyerNameRef} value={buyerName} />
-          </Field>
-          <Field error={fieldErrors.buyerEmail} label="Email address" name="buyer-email">
-            <input autoComplete="email" disabled={disabled} inputMode="email" onChange={(event) => setBuyerEmail(event.target.value)} ref={buyerEmailRef} type="email" value={buyerEmail} />
-          </Field>
-          <Button disabled={disabled} type="submit">{disabled ? 'Opening secure payment…' : 'Continue to secure payment'}</Button>
-        </form>
-      </section>
-    </main>
+          <div className="buyer-details__fields">
+            <Field error={fieldErrors.buyerName} label="Your name" name="buyer-name">
+              <input autoComplete="name" disabled={disabled} onChange={(event) => setBuyerName(event.target.value)} ref={buyerNameRef} value={buyerName} />
+            </Field>
+            <Field error={fieldErrors.buyerEmail} label="Email address" name="buyer-email">
+              <input autoComplete="email" disabled={disabled} inputMode="email" onChange={(event) => setBuyerEmail(event.target.value)} ref={buyerEmailRef} type="email" value={buyerEmail} />
+            </Field>
+          </div>
+        </section>
+        <Button disabled={disabled} type="submit">{disabled ? 'Opening secure payment…' : 'Continue to secure payment'}</Button>
+      </form>
+    </CheckoutReview>
   )
 }

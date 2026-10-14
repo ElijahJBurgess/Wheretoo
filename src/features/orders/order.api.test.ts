@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
 vi.mock('../../lib/supabase/client', () => ({ supabase: { functions: { invoke } } }))
@@ -30,6 +30,18 @@ const confirmation = {
 
 describe('order confirmation API', () => {
   beforeEach(() => vi.clearAllMocks())
+  afterEach(() => vi.useRealTimers())
+
+  it('turns a stalled confirmation read into a recoverable error', async () => {
+    vi.useFakeTimers()
+    invoke.mockReturnValue(new Promise(() => {}))
+    let failure: unknown
+    void getOrderConfirmation(token).catch(error => { failure = error })
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(failure).toEqual(new OrderApiError('ORDER_UNAVAILABLE'))
+    expect(invoke.mock.calls[0]?.[1].signal.aborted).toBe(true)
+    expect(vi.getTimerCount()).toBe(0)
+  })
 
   it('creates a constant-form Web Crypto fingerprint without retaining the clear bearer', async () => {
     await expect(fingerprintConfirmationToken(token)).resolves.toBe(
@@ -45,6 +57,7 @@ describe('order confirmation API', () => {
     expect(invoke).toHaveBeenCalledWith('order-confirmation', {
       body: { confirmationToken: token },
       method: 'POST',
+      signal: expect.any(AbortSignal),
     })
   })
 

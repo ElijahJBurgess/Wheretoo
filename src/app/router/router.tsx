@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react'
 import { Navigate, createBrowserRouter, type RouteObject } from 'react-router-dom'
 import type { TicketExperienceRuntime } from '../../features/ticket-experience/runtime/runtime.types'
+import { RouteErrorFallback, RouteLoadingFallback, UnmatchedRouteFallback } from './RouteFallback'
 
 const lazyComponent = <T extends Record<K, ComponentType>, K extends keyof T>(
   load: () => Promise<T>,
@@ -9,10 +10,16 @@ const lazyComponent = <T extends Record<K, ComponentType>, K extends keyof T>(
 
 export function createAppRouter(runtime: TicketExperienceRuntime) {
   const routes: RouteObject[] = [
-    { path: '/', element: <Navigate replace to="/auth/sign-in" /> },
+    { path: '/', lazy: lazyComponent(() => import('../../features/home/HomePage'), 'HomePage') },
+    { path: '/discover', element: <Navigate replace to="/" /> },
+    { path: '/map', lazy: lazyComponent(() => import('../../map/LivingMapPage'), 'Component') },
     {
       path: '/events/:eventId',
       lazy: lazyComponent(() => import('../../features/tickets/PublicTicketEventPage'), 'PublicTicketEventPage'),
+    },
+    {
+      path: '/events/:eventId/tickets',
+      lazy: lazyComponent(() => import('../../features/tickets/PublicTicketEventPage'), 'PublicTicketSelectionPage'),
     },
     {
       path: '/events/:eventId/checkout',
@@ -141,7 +148,12 @@ export function createAppRouter(runtime: TicketExperienceRuntime) {
       ],
     },
     ...runtime.developmentRoutes,
+    { path: '*', Component: UnmatchedRouteFallback },
   ]
 
-  return createBrowserRouter(routes)
+  return createBrowserRouter(routes.map(route => ({
+    ...route,
+    errorElement: <RouteErrorFallback />,
+    hydrateFallbackElement: <RouteLoadingFallback />,
+  })))
 }

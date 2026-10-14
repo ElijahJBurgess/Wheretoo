@@ -111,7 +111,13 @@ export async function runTicketReadyCli(input: {
     renderer: input.renderer,
     createClient: input.createClient,
   })
-  return harness.sendTicketsReady({ recipient: options.recipient, props: freeRsvpTicketsReadyScenario })
+  return harness.sendTicketsReady({
+    recipient: options.recipient,
+    props: {
+      ...freeRsvpTicketsReadyScenario,
+      ...(input.env.WHERETOO_BRAND_ASSET_ORIGIN ? { brandAssetOrigin: input.env.WHERETOO_BRAND_ASSET_ORIGIN } : {}),
+    },
+  })
 }
 
 function createResendClient(apiKey: string): SafeResendClient {

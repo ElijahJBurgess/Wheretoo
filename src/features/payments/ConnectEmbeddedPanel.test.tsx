@@ -37,14 +37,34 @@ describe('ConnectEmbeddedPanel', () => {
         />,
       )
 
-      expect(await screen.findByRole('alert')).toHaveTextContent('Secure payment setup could not load')
+      expect(await screen.findByRole('alert')).toHaveTextContent('Something went wrong')
       chunkIsAvailable = true
-      await user.click(screen.getByRole('button', { name: 'Retry secure setup' }))
+      await user.click(screen.getByRole('button', { name: 'Try again' }))
       expect(await screen.findByText('Embedded setup loaded')).toBeInTheDocument()
       expect(loadEmbedded.mock.calls.length).toBeGreaterThanOrEqual(2)
     } finally {
       expectedConsoleError.mockRestore()
     }
+  })
+
+  it('recovers from an embedded initialization exception and allows postponing setup', async () => {
+    const user = userEvent.setup()
+    const expectedConsoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    let initializationFails = true
+    function Embedded() {
+      if (initializationFails) throw new Error('Initialization failed')
+      return <p>Secure Stripe component</p>
+    }
+    const onExit = vi.fn()
+    try {
+      render(<ConnectEmbeddedPanel initialSession={session} mode="onboarding" onExit={onExit} onLoadError={vi.fn()} refreshAccountSession={vi.fn()} loadEmbedded={() => Promise.resolve({ default: Embedded })} />)
+      expect(await screen.findByRole('alert')).toHaveTextContent('Something went wrong')
+      initializationFails = false
+      await user.click(screen.getByRole('button', { name: 'Try again' }))
+      expect(await screen.findByText('Secure Stripe component')).toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: 'Finish setup later' }))
+      expect(onExit).toHaveBeenCalledOnce()
+    } finally { expectedConsoleError.mockRestore() }
   })
 
   it('provides an explicit exit from account management so the payment page can recover focus', async () => {
