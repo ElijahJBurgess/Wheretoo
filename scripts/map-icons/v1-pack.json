@@ -1,0 +1,455 @@
+{
+  "asset_count": 9,
+  "runtime_format": "PNG, 8-bit RGBA, straight alpha, sRGB",
+  "source_archive": {
+    "filename": "Wheretoo V1 icons.zip",
+    "sha256": "87396fa78bb713823cc658a6ff53e031cc40c751392846e7dd9a82bc7029b61e"
+  },
+  "coordinate_system": {
+    "units": "final-image pixels",
+    "origin": "top-left; [0, 0] is the center of the top-left pixel",
+    "axes": "x increases rightward; y increases downward",
+    "ground_contact_point_status": "Visually selected recommendations for developer review, not application configuration.",
+    "method": "Contacts use physical bases or the midpoint between physical support contacts, excluding cast-shadow extent. The original-image choices were transformed through the recorded crop, padding, and resampling."
+  },
+  "icons": [
+    {
+      "filename": "wheretoo-flag.png",
+      "width": 1023,
+      "height": 986,
+      "size_bytes": 593845,
+      "sha256": "bdfce04f7c2a3057a8f3bd70460828175990b852ab22ff4261bbf4ba250c34fe",
+      "ground_contact_point": [
+        206.0,
+        953.0
+      ],
+      "ground_contact_note": "Bottom center of the gold flagpole base; not the flag cloth or its image bounding box.",
+      "source_filename": "Wheretoo Flag Event.png",
+      "source_width": 1254,
+      "source_height": 1254,
+      "source_sha256": "71a33ff1983c8d35dc39e80993db9930202d02d4b276d2e6411f44e593169091",
+      "processing": {
+        "crop_box_original_ltrb": [
+          178,
+          183,
+          1143,
+          1113
+        ],
+        "crop_box_convention": "left and top inclusive, right and bottom exclusive",
+        "transparent_padding_before_resize_xy": [
+          29,
+          28
+        ],
+        "padded_size_before_resize": [
+          1023,
+          986
+        ],
+        "removed_near_transparent_pixel_count": 6788,
+        "maximum_removed_alpha_out_of_255": 1,
+        "ground_contact_point_before_crop": [
+          355,
+          1108
+        ],
+        "resampled": false,
+        "extra_dimension_reduction_for_byte_limit": false,
+        "final_visible_alpha_bbox_ltrb": [
+          29,
+          28,
+          994,
+          958
+        ]
+      }
+    },
+    {
+      "filename": "markets-popups.png",
+      "width": 941,
+      "height": 1012,
+      "size_bytes": 979895,
+      "sha256": "91e56b170677cc2265093915b9706ea72c71d7db4cb432e272ef836f38d4f141",
+      "ground_contact_point": [
+        394.5,
+        887.0
+      ],
+      "ground_contact_note": "Midpoint between the two front support-foot contacts in perspective; excludes the cast shadow.",
+      "source_filename": "Markets:Popups Icon.png",
+      "source_width": 1254,
+      "source_height": 1254,
+      "source_sha256": "bd0e3ee81c89ec31dcb8649e3ef62c8a42d7aee1e064b0909543730d421908e2",
+      "processing": {
+        "crop_box_original_ltrb": [
+          207,
+          193,
+          1094,
+          1147
+        ],
+        "crop_box_convention": "left and top inclusive, right and bottom exclusive",
+        "transparent_padding_before_resize_xy": [
+          27,
+          29
+        ],
+        "padded_size_before_resize": [
+          941,
+          1012
+        ],
+        "removed_near_transparent_pixel_count": 9360,
+        "maximum_removed_alpha_out_of_255": 2,
+        "ground_contact_point_before_crop": [
+          574.5,
+          1051.0
+        ],
+        "resampled": false,
+        "extra_dimension_reduction_for_byte_limit": false,
+        "final_visible_alpha_bbox_ltrb": [
+          27,
+          29,
+          914,
+          983
+        ]
+      }
+    },
+    {
+      "filename": "food-beverage.png",
+      "width": 1024,
+      "height": 989,
+      "size_bytes": 767298,
+      "sha256": "ce13313f904c2d99cbdc33aae4c3b0621b77dba42c4ec06fb3e6111dc1221aed",
+      "ground_contact_point": [
+        512.5,
+        921.9
+      ],
+      "ground_contact_note": "Bottom center of the chef hat's physical lower rim, above the soft shadow.",
+      "source_filename": "Food and Bev Icon.png",
+      "source_width": 1254,
+      "source_height": 1254,
+      "source_sha256": "938d1085588347ff0babefaa0ce28952bd01bd735f19c898f3589ab8b2d74f3c",
+      "processing": {
+        "crop_box_original_ltrb": [
+          133,
+          159,
+          1126,
+          1118
+        ],
+        "crop_box_convention": "left and top inclusive, right and bottom exclusive",
+        "transparent_padding_before_resize_xy": [
+          30,
+          29
+        ],
+        "padded_size_before_resize": [
+          1053,
+          1017
+        ],
+        "removed_near_transparent_pixel_count": 6557,
+        "maximum_removed_alpha_out_of_255": 2,
+        "ground_contact_point_before_crop": [
+          630,
+          1078
+        ],
+        "resampled": true,
+        "extra_dimension_reduction_for_byte_limit": false,
+        "final_visible_alpha_bbox_ltrb": [
+          29,
+          28,
+          995,
+          961
+        ]
+      }
+    },
+    {
+      "filename": "dj-music.png",
+      "width": 905,
+      "height": 899,
+      "size_bytes": 1023869,
+      "sha256": "3c9a61e711c938a8bc667366f4ac43e08274d1c9da85a51697cb8d826acf5cd2",
+      "ground_contact_point": [
+        555.7,
+        818.4
+      ],
+      "ground_contact_note": "Center of the speaker cabinet's projected front bottom edge, above the cast shadow.",
+      "source_filename": "DJ:Music Icon.png",
+      "source_width": 1254,
+      "source_height": 1254,
+      "source_sha256": "59adc1e02c4783313ff2447016dc0f18e2f8e6ad5156377b8b9e933d81b52a15",
+      "processing": {
+        "crop_box_original_ltrb": [
+          146,
+          159,
+          1120,
+          1126
+        ],
+        "crop_box_convention": "left and top inclusive, right and bottom exclusive",
+        "transparent_padding_before_resize_xy": [
+          30,
+          30
+        ],
+        "padded_size_before_resize": [
+          1034,
+          1027
+        ],
+        "removed_near_transparent_pixel_count": 19285,
+        "maximum_removed_alpha_out_of_255": 2,
+        "ground_contact_point_before_crop": [
+          751,
+          1064
+        ],
+        "resampled": true,
+        "extra_dimension_reduction_for_byte_limit": true,
+        "final_visible_alpha_bbox_ltrb": [
+          26,
+          26,
+          879,
+          873
+        ]
+      }
+    },
+    {
+      "filename": "live-performance.png",
+      "width": 814,
+      "height": 1024,
+      "size_bytes": 727537,
+      "sha256": "f883e8714156b90db933fe938e8e88726fb3aa348f07d229878f1855f36e1415",
+      "ground_contact_point": [
+        176.6,
+        962.7
+      ],
+      "ground_contact_note": "Lowest rounded end of the tilted microphone handle, where it meets the ground; excludes the shadow.",
+      "source_filename": "Live Perfomance Icon.png",
+      "source_width": 1254,
+      "source_height": 1254,
+      "source_sha256": "dce009e565f3f910546cd39205bce7532f5d4ded12a30cd25f7bdc3b6138acfe",
+      "processing": {
+        "crop_box_original_ltrb": [
+          197,
+          97,
+          1062,
+          1185
+        ],
+        "crop_box_convention": "left and top inclusive, right and bottom exclusive",
+        "transparent_padding_before_resize_xy": [
+          26,
+          33
+        ],
+        "padded_size_before_resize": [
+          917,
+          1154
+        ],
+        "removed_near_transparent_pixel_count": 9236,
+        "maximum_removed_alpha_out_of_255": 2,
+        "ground_contact_point_before_crop": [
+          370,
+          1149
+        ],
+        "resampled": true,
+        "extra_dimension_reduction_for_byte_limit": false,
+        "final_visible_alpha_bbox_ltrb": [
+          23,
+          29,
+          791,
+          995
+        ]
+      }
+    },
+    {
+      "filename": "party-nightlife.png",
+      "width": 791,
+      "height": 1024,
+      "size_bytes": 877229,
+      "sha256": "6741ecaa149c32116ba39bc05dbae4ae32141c8267832e7862c8d039961cc3f4",
+      "ground_contact_point": [
+        394.5,
+        937.9
+      ],
+      "ground_contact_note": "Bottom of the mirrored sphere itself; excludes the shadow below it.",
+      "source_filename": "Party:Nightlife Icon.png",
+      "source_width": 1254,
+      "source_height": 1254,
+      "source_sha256": "9af1194522daf0a16c57446fefe69ffa260c13fb8a61495bd84361568e854819",
+      "processing": {
+        "crop_box_original_ltrb": [
+          217,
+          96,
+          1031,
+          1151
+        ],
+        "crop_box_convention": "left and top inclusive, right and bottom exclusive",
+        "transparent_padding_before_resize_xy": [
+          25,
+          32
+        ],
+        "padded_size_before_resize": [
+          864,
+          1119
+        ],
+        "removed_near_transparent_pixel_count": 18220,
+        "maximum_removed_alpha_out_of_255": 2,
+        "ground_contact_point_before_crop": [
+          623,
+          1089
+        ],
+        "resampled": true,
+        "extra_dimension_reduction_for_byte_limit": false,
+        "final_visible_alpha_bbox_ltrb": [
+          23,
+          29,
+          768,
+          995
+        ]
+      }
+    },
+    {
+      "filename": "fitness.png",
+      "width": 1024,
+      "height": 760,
+      "size_bytes": 775753,
+      "sha256": "24092bf733ec04356493577cf211fada25b94cd39d022513d910753c3057f995",
+      "ground_contact_point": [
+        238.2,
+        728.1
+      ],
+      "ground_contact_note": "Lowest tangent of the nearer weight plate in the supplied tilted pose. The source does not depict a separate cast shadow.",
+      "source_filename": "Fitness Icon.png",
+      "source_width": 1254,
+      "source_height": 1254,
+      "source_sha256": "45489cf3ebff8d986da34b6a27c4a2a809cf28948c4c9008d29b53a26c73a9bf",
+      "processing": {
+        "crop_box_original_ltrb": [
+          129,
+          265,
+          1159,
+          1030
+        ],
+        "crop_box_convention": "left and top inclusive, right and bottom exclusive",
+        "transparent_padding_before_resize_xy": [
+          31,
+          23
+        ],
+        "padded_size_before_resize": [
+          1092,
+          811
+        ],
+        "removed_near_transparent_pixel_count": 2159,
+        "maximum_removed_alpha_out_of_255": 1,
+        "ground_contact_point_before_crop": [
+          352,
+          1019
+        ],
+        "resampled": true,
+        "extra_dimension_reduction_for_byte_limit": false,
+        "final_visible_alpha_bbox_ltrb": [
+          29,
+          21,
+          995,
+          739
+        ]
+      }
+    },
+    {
+      "filename": "art-creative.png",
+      "width": 887,
+      "height": 889,
+      "size_bytes": 1023321,
+      "sha256": "0d4b1a4c17f0e0a3be2a210fc2895e24c6a2b81abb7ec2ab42dfec5a73ecb9d2",
+      "ground_contact_point": [
+        432.4,
+        835.1
+      ],
+      "ground_contact_note": "Bottom center of the wooden palette, immediately above its soft shadow.",
+      "source_filename": "Art:Creative Icon.png",
+      "source_width": 1254,
+      "source_height": 1254,
+      "source_sha256": "4509a410ca17787f996ce34989624d2b044f669fad9161195132e23f1f9bbad3",
+      "processing": {
+        "crop_box_original_ltrb": [
+          166,
+          173,
+          1113,
+          1122
+        ],
+        "crop_box_convention": "left and top inclusive, right and bottom exclusive",
+        "transparent_padding_before_resize_xy": [
+          29,
+          29
+        ],
+        "padded_size_before_resize": [
+          1005,
+          1007
+        ],
+        "removed_near_transparent_pixel_count": 9966,
+        "maximum_removed_alpha_out_of_255": 2,
+        "ground_contact_point_before_crop": [
+          627,
+          1090
+        ],
+        "resampled": true,
+        "extra_dimension_reduction_for_byte_limit": true,
+        "final_visible_alpha_bbox_ltrb": [
+          26,
+          26,
+          862,
+          864
+        ]
+      }
+    },
+    {
+      "filename": "community-festival.png",
+      "width": 983,
+      "height": 1024,
+      "size_bytes": 851908,
+      "sha256": "d5d0f99f0ed698cb8d98f3cdf29eed00eb2938a36e9194c2b8d5b90f5878c123",
+      "ground_contact_point": [
+        487.4,
+        972.2
+      ],
+      "ground_contact_note": "Center between the front left and right curtain-foot contacts; excludes the external cast shadow.",
+      "source_filename": "Community:festival Icon.png",
+      "source_width": 1254,
+      "source_height": 1254,
+      "source_sha256": "48cb2a24b18386e1cd958bd7a186d9092cc66a00d7437ce898003ff75cbce1a1",
+      "processing": {
+        "crop_box_original_ltrb": [
+          116,
+          85,
+          1137,
+          1149
+        ],
+        "crop_box_convention": "left and top inclusive, right and bottom exclusive",
+        "transparent_padding_before_resize_xy": [
+          31,
+          32
+        ],
+        "padded_size_before_resize": [
+          1083,
+          1128
+        ],
+        "removed_near_transparent_pixel_count": 7635,
+        "maximum_removed_alpha_out_of_255": 2,
+        "ground_contact_point_before_crop": [
+          622,
+          1124
+        ],
+        "resampled": true,
+        "extra_dimension_reduction_for_byte_limit": false,
+        "final_visible_alpha_bbox_ltrb": [
+          28,
+          29,
+          955,
+          995
+        ]
+      }
+    }
+  ],
+  "review_sheet": {
+    "filename": "review-sheet.png",
+    "width": 1120,
+    "height": 1404,
+    "sha256": "a51dd1ee7ded1ad7f3792a5fb41f71831db712ab3044afc1b9579fe9daaec16d",
+    "preview_longest_sides_px": [
+      48,
+      96
+    ],
+    "backgrounds": [
+      "synthetic light map-like background",
+      "synthetic dark map-like background"
+    ],
+    "viewing_note": "View at 100%: each preview is exactly 48 or 96 image pixels on its longest side, including transparent padding. All previews are rendered from the final runtime exports."
+  }
+}
