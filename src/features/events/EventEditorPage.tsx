@@ -1,4 +1,5 @@
 import { EventImageManager } from '../event-images/EventImageManager'
+import { MapIconPicker } from '../map-icons/MapIconPicker'
 import { captureIdentityLifetime } from '../auth/identityLifetime'
 import { useQueryClient } from '@tanstack/react-query'
 import { adoptEventChangeCache } from '../event-changes/eventChanges.cache'
@@ -49,7 +50,7 @@ const steps = [
 const emptyEvent: EventFormValues = {
   title: '', description: '', category: '', startsAt: '', endsAt: '',
   timezone: 'America/Los_Angeles', venueName: '', location: null,
-  admissionType: 'free', capacity: null,
+  admissionType: 'free', capacity: null, mapIconVersionId: null,
 }
 
 const emptyRequirements: OrganizerRequirementsFormValues = {
@@ -145,6 +146,8 @@ export function EventEditorPage() {
   const location = useWatch({ control, name: 'location' })
   const title = useWatch({ control, name: 'title' })
   const admissionType = useWatch({ control, name: 'admissionType' })
+  const mapIconVersionId = useWatch({ control, name: 'mapIconVersionId' }) ?? null
+  const draftRequest = useRef<{ key: string; id: string } | null>(null)
   const agreementInvalidatedByEdit = useWatch({ control: requirementsControl, name: 'agreementInvalidatedByEdit' }) ?? false
   const requirementsHydratedEventId = useWatch({ control: requirementsControl, name: 'hydratedEventId' })
   const eventQueryHasSafeIdentity = eventQuery.data === undefined || eventQuery.data === null || isNew
@@ -295,9 +298,13 @@ export function EventEditorPage() {
       return next.event
     }
     const isCurrent = captureEditorIdentity()
-    const saved = await saveDraftMutation.mutateAsync({ eventId: null, organizerId, values: valuesToSave })
+    // Retain the nonce after an ambiguous response, but never across a payload or identity change.
+    const key = JSON.stringify([routeIdentityKey, valuesToSave])
+    if (draftRequest.current?.key !== key) draftRequest.current = { key, id: crypto.randomUUID() }
+    const saved = await saveDraftMutation.mutateAsync({ eventId: null, organizerId, values: valuesToSave, requestId: draftRequest.current.id })
     if (!isCurrent()) throw new EventChangeError('unknown')
     if (saved.organizer_id !== organizerId || !saved.id) throw new Error('Your draft could not be confirmed. Reload and try again.')
+    draftRequest.current = null
     reset(eventRowToFormValues(saved))
     return saved
   }
@@ -658,7 +665,7 @@ export function EventEditorPage() {
             <form noValidate onSubmit={(event) => event.preventDefault()}>
               <fieldset className="event-creation__form" disabled={isBusy}>
                 <FormErrorSummary errors={summaryErrors} title={serverError || agreementError ? 'Changes were not saved' : 'Missing information'} />
-                {activeStep === 1 ? <div className="event-editor__basics"><EventDetailsStep creation errors={errors} register={register} /><EventImageManager eventId={eventId} disabled={isBusy} ensureEventId={ensureArtworkDraft} onBusyChange={setArtworkBusy} onUploadSettled={finishArtworkUpload} onPrepareAi={prepareAiCover} initialAiOpen={routeLocation.state?.openAi === true} /></div> : null}
+                {activeStep === 1 ? <div className="event-editor__basics"><EventDetailsStep creation errors={errors} register={register} /><MapIconPicker organizerId={organizerId} eventId={eventId} value={mapIconVersionId} disabled={isBusy} onChange={value => setValue('mapIconVersionId', value, { shouldDirty: true, shouldValidate: true })} /><EventImageManager eventId={eventId} disabled={isBusy} ensureEventId={ensureArtworkDraft} onBusyChange={setArtworkBusy} onUploadSettled={finishArtworkUpload} onPrepareAi={prepareAiCover} initialAiOpen={routeLocation.state?.openAi === true} /></div> : null}
                 {activeStep === 2 ? <EventScheduleLocationStep control={control} creation errors={errors} location={location} onLocationChange={setLocation} register={register} /> : null}
                 {activeStep === 3 ? <div className="event-step">
                   <header className="event-step__header"><h1>Admission</h1><p>How will people attend?</p></header>
@@ -711,9 +718,9 @@ export function EventEditorPage() {
         <aside className="event-editor__rail"><StepRail current={activeStep} labels={steps} /></aside>
         <form className="event-editor__form" noValidate onSubmit={(event) => event.preventDefault()}>
           <FormErrorSummary errors={summaryErrors} title={serverError || agreementError ? 'Save needs review' : 'Check the highlighted fields'} />
-          {activeStep === 1 ? <div className="event-editor__basics"><EventDetailsStep errors={errors} register={register} />{eventId ? <EventImageManager collapsed key={eventId} eventId={eventId} disabled={isBusy} onBusyChange={setArtworkBusy} onPrepareAi={prepareAiCover} /> : null}</div> : null}
+          {activeStep === 1 ? <div className="event-editor__basics"><EventDetailsStep errors={errors} register={register} /><MapIconPicker organizerId={organizerId} eventId={eventId} value={mapIconVersionId} disabled={isBusy} onChange={value => setValue('mapIconVersionId', value, { shouldDirty: true, shouldValidate: true })} />{eventId ? <EventImageManager collapsed key={eventId} eventId={eventId} disabled={isBusy} onBusyChange={setArtworkBusy} onPrepareAi={prepareAiCover} /> : null}</div> : null}
           {activeStep === 2 ? <EventScheduleLocationStep control={control} errors={errors} location={location} onLocationChange={setLocation} register={register} /> : null}
-          {activeStep === 3 ? <EventReviewStep eventId={isNew ? undefined : eventId} values={getValues()} /> : null}
+          {activeStep === 3 ? <EventReviewStep organizerId={organizerId} eventId={isNew ? undefined : eventId} values={getValues()} /> : null}
           {requirementsInitialState()}
           {activeStep === 4 && requirementsAreHydrated ? (
             <EventRequirementsStep control={requirementsControl} errors={requirementErrors} onRequirementChange={resetDisplayedAgreement} register={registerRequirement} />

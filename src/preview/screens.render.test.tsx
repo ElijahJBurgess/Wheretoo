@@ -17,6 +17,10 @@ const mocks = vi.hoisted(() => ({
 }))
 vi.mock('../features/event-images/eventImages.queries', () => ({ useEventImages: () => loaded([]), useEventCoverState: () => loaded({ revision: 0, images: [], latestGenerationId: null }) }))
 vi.mock('../features/event-images/publicEventImages', () => ({ usePublicEventImages: () => loaded([]) }))
+vi.mock('../features/map-icons/icon.catalog.queries', () => ({
+  useSelectableMapIcons: () => loaded({ pages: [{ selectionEnabled: false, icons: [], nextCursor: null }] }),
+  useOwnedMapIcon: () => loaded(null),
+}))
 vi.mock('../lib/supabase/client', () => ({ supabase: new Proxy({}, { get: mocks.blocked }) }))
 vi.mock('../features/auth/SessionProvider', () => ({ useSession: mocks.session, SessionProvider: ({ children }: PropsWithChildren) => children }))
 vi.mock('../features/moderation/staffContext', () => ({ useStaffContext: () => ({ role: 'moderator', staffUserId: organizerId }) }))

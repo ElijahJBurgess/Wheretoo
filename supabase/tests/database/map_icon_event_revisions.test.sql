@@ -1,0 +1,35 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions;
+select no_plan();
+\ir map_icon_events.inc
+create temporary table before_icon as select private.compute_event_moderation_input(id) input,private.compute_event_input_sha256(id) digest from public.events where id='29000000-0000-4000-8000-000000000050';
+select ok(not (select input from before_icon) ? 'map_icon','null icon preserves legacy shape');
+-- Captured from the pre-icon function before applying the Phase 4 migration.
+select is((select digest from before_icon),'adda0ba90b39468171ddf6734b59859f1bd5940f1c77a58da15aa3f742982f51','legacy null-icon digest remains byte-equivalent');
+set local role authenticated;
+select set_config('request.jwt.claim.sub','29000000-0000-4000-8000-000000000001',true);
+select lives_ok($$select public.save_owned_event_revision('29000000-0000-4000-8000-000000000050',p||'{"map_icon_version_id":"29000000-0000-4000-8000-000000000031","expected_content_revision":1}') from save_input$$,'icon-only published revision accepts both validators');
+select is((select content_revision from public.events where id='29000000-0000-4000-8000-000000000050'),2::bigint,'one icon change creates one revision');
+select is((select moderated_revision from public.events where id='29000000-0000-4000-8000-000000000050'),2::bigint,'curated icon uses deterministic review');
+select is((select publicly_authorized_revision from public.events where id='29000000-0000-4000-8000-000000000050'),null::bigint,'icon revision requires reauthorization');
+select lives_ok($$select public.save_owned_event_revision('29000000-0000-4000-8000-000000000050',p||'{"map_icon_version_id":"29000000-0000-4000-8000-000000000031","expected_content_revision":2}') from save_input$$,'unchanged icon succeeds');
+select is((select content_revision from public.events where id='29000000-0000-4000-8000-000000000050'),2::bigint,'unchanged choice is revision no-op');
+select throws_ok($$select public.save_owned_event_revision('29000000-0000-4000-8000-000000000050',p||'{"map_icon_version_id":null,"expected_content_revision":1}') from save_input$$,'P0001','EVENT_REVISION_CONFLICT','stale icon edit rejects');
+select throws_ok($$select public.save_owned_event_revision('29000000-0000-4000-8000-000000000050',p||'{"map_icon_version_id":null}') from save_input$$,'P0001','EVENT_REVISION_INVALID','icon field requires expected revision');
+select lives_ok($$select public.save_owned_event_revision('29000000-0000-4000-8000-000000000050',p) from save_input$$,'older client omission preserves stored choice');
+select is((select map_icon_version_id::text from public.events where id='29000000-0000-4000-8000-000000000050'),'29000000-0000-4000-8000-000000000031','older payload does not clear icon');
+reset role;
+select isnt(private.compute_event_input_sha256('29000000-0000-4000-8000-000000000050'),(select digest from before_icon),'non-null icon participates in digest');
+create temporary table assigned_digest as select private.compute_event_input_sha256('29000000-0000-4000-8000-000000000050') digest;
+update private.map_icon_versions set state='revoked' where id='29000000-0000-4000-8000-000000000031';
+select is(private.compute_event_input_sha256('29000000-0000-4000-8000-000000000050'),(select digest from assigned_digest),'mutable revocation does not change event digest');
+set local role authenticated;
+select lives_ok($$select public.save_owned_event_revision('29000000-0000-4000-8000-000000000050',p||'{"map_icon_version_id":"29000000-0000-4000-8000-000000000031","expected_content_revision":2}') from save_input$$,'retained revoked assignment remains saveable');
+select lives_ok($$select public.save_owned_event_revision('29000000-0000-4000-8000-000000000050',p||'{"title":"Changed title","map_icon_version_id":null,"expected_content_revision":2}') from save_input$$,'mixed content and Default save succeeds');
+select is((select content_revision from public.events where id='29000000-0000-4000-8000-000000000050'),3::bigint,'mixed changes increment only once');
+select is((select moderation_status from public.events where id='29000000-0000-4000-8000-000000000050'),'under_review','text change keeps strongest full-review path');
+select is((select map_icon_version_id from public.events where id='29000000-0000-4000-8000-000000000050'),null::uuid,'explicit null means Default');
+reset role;
+select * from finish();
+rollback;

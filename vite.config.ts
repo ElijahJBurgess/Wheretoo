@@ -2,6 +2,7 @@ import react from '@vitejs/plugin-react'
 import { loadEnv, type Plugin } from 'vite'
 import { configDefaults, defineConfig } from 'vitest/config'
 import { browserEnvKeys, selectBrowserEnv } from './src/config/browserEnv.js'
+import { withMapIconOrigin } from './src/config/mapIconCsp.js'
 
 function developmentCspBypass(): Plugin {
   return {
@@ -40,7 +41,10 @@ export default defineConfig(({ command, mode }) => {
         process.env.WHERETOO_ENABLE_PREVIEW === '1',
       ),
     },
-    plugins: [developmentCspBypass(), ticketExperienceEntry(command), react()],
+    plugins: [developmentCspBypass(), ticketExperienceEntry(command), react(), {
+      name: 'map-icon-delivery-csp',
+      transformIndexHtml: (html: string) => withMapIconOrigin(html, browserEnv.VITE_SUPABASE_URL),
+    }],
     test: {
       environment: 'jsdom',
       setupFiles: ['./src/test/setup.ts'],

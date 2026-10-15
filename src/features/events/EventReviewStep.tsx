@@ -1,9 +1,10 @@
 import { Link } from 'react-router-dom'
 import type { EventFormValues } from './event.types'
+import { MapIconSummary } from '../map-icons/MapIconSummary'
 
-type EventReviewStepProps = { eventId?: string; values: EventFormValues }
+type EventReviewStepProps = { eventId?: string; organizerId?: string; values: EventFormValues }
 
-export function EventReviewStep({ eventId, values }: EventReviewStepProps) {
+export function EventReviewStep({ eventId, organizerId, values }: EventReviewStepProps) {
   return (
     <div className="event-step">
       <header className="event-step__header">
@@ -15,6 +16,7 @@ export function EventReviewStep({ eventId, values }: EventReviewStepProps) {
         <div><dt>Admission</dt><dd>{values.admissionType === 'free' ? 'Free' : 'Paid'}</dd></div>
         <div><dt>Capacity</dt><dd>{values.capacity === null ? 'No capacity added' : values.capacity}</dd></div>
       </dl>
+      {organizerId ? <MapIconSummary organizerId={organizerId} eventId={eventId} value={values.mapIconVersionId ?? null} /> : null}
       {values.admissionType === 'paid' ? (
         <p className="event-review__notice" role="status">
           Paid events need ticket tiers and payment setup before sales can begin.{' '}

@@ -39,6 +39,7 @@ export function createAppRoutes(runtime: TicketExperienceRuntime) {
     { path: '/rsvp/:collectionBearer', lazy: lazyComponent(() => import('../../features/rsvp/RsvpConfirmationPage'), 'RsvpConfirmationPage') },
     { path: '/', element: <DiscoveryHomeRedirect /> },
     { path: '/discover', lazy: lazyComponent(() => import('../../features/discovery/DiscoveryPage'), 'DiscoveryPage') },
+    { path: '/map', lazy: lazyComponent(() => import('../../map/LivingMapPage'), 'Component') },
     {
       path: '/events/checkout',
       lazy: lazyComponent(() => import('../../features/checkout/CheckoutPage'), 'CheckoutPage'),

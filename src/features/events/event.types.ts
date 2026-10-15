@@ -48,6 +48,8 @@ export type EventFormValues = {
   location: NormalizedLocation | null
   admissionType: 'free' | 'paid'
   capacity: number | null
+  // Omission preserves assignments for legacy callers; the editor always supplies null or a UUID.
+  mapIconVersionId?: string | null
 }
 
 export type PublicEvent = {

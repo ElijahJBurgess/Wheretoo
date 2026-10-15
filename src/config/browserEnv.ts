@@ -40,7 +40,15 @@ export function selectBrowserEnv(source: EnvironmentSource): Partial<Record<Brow
         return parsed.success ? [[key, parsed.data]] : []
       }
 
-      return [[key, key === 'VITE_STRIPE_PUBLISHABLE_KEY' ? requireTestStripePublishableKey(value) : value]]
+      return [[key, key === 'VITE_STRIPE_PUBLISHABLE_KEY' ? requireTestStripePublishableKey(value)
+        : key === 'VITE_MAPBOX_ACCESS_TOKEN' ? requirePublicMapboxAccessToken(value) : value]]
     }),
   ) as Partial<Record<BrowserEnvKey, string>>
+}
+
+export function requirePublicMapboxAccessToken(value: unknown): string {
+  if (typeof value !== 'string' || !value.startsWith('pk.') || value.length <= 3) {
+    throw new Error('Invalid VITE_MAPBOX_ACCESS_TOKEN: use a public Mapbox token')
+  }
+  return value
 }
