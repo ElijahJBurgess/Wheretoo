@@ -173,28 +173,63 @@ describe('WheretooMap', () => {
     expect(fake.map.remove).toHaveBeenCalledOnce()
   })
 
-  it('reports ready only after idle and records supported Standard config readback', () => {
+  it('reports usable after the first rendered base map without waiting for idle or icon downloads', () => {
     const fake = fakeMap()
     vi.mocked(createMapboxMap).mockReturnValue(fake.map as never)
     const onReady = vi.fn()
     const view = render(<WheretooMap visualScene={null} onReady={onReady} onMoveEnd={vi.fn()} onRendererError={vi.fn()} />)
-
-    fake.emit('idle')
+    fake.emit('style.load')
+    expect(onReady).not.toHaveBeenCalled()
+    fake.emit('load')
     expect(onReady).toHaveBeenCalledOnce()
     expect(view.container.querySelector('.living-map__canvas')).toHaveAttribute('data-standard-config')
+    fake.emit('idle')
+    expect(onReady).toHaveBeenCalledOnce()
   })
 
-  it('does not allow idle to overwrite a fatal style error', () => {
+  it('allows a recoverable resource error before load and ignores resource errors after readiness', () => {
     const fake = fakeMap()
     vi.mocked(createMapboxMap).mockReturnValue(fake.map as never)
-    const onReady = vi.fn()
-    const onRendererError = vi.fn()
+    const onReady = vi.fn(), onRendererError = vi.fn()
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
     render(<WheretooMap visualScene={null} onReady={onReady} onMoveEnd={vi.fn()} onRendererError={onRendererError} />)
+    fake.emit('error', { sourceId: 'basemap', error: Object.assign(new Error('tile failed ?access_token=PRIVATE'), { status: 503 }) })
+    expect(onRendererError).not.toHaveBeenCalled()
+    fake.emit('load')
+    expect(onReady).toHaveBeenCalledOnce()
+    fake.emit('error', { error: new Error('icon unavailable') })
+    expect(onRendererError).not.toHaveBeenCalled()
+    expect(JSON.stringify(warning.mock.calls)).not.toContain('PRIVATE')
+    warning.mockRestore()
+  })
 
-    fake.emit('error', { error: new Error('Style document failed') })
-    fake.emit('idle')
+  it('reports a confirmed style failure but still permits a later successful load to recover', () => {
+    const fake = fakeMap()
+    vi.mocked(createMapboxMap).mockReturnValue(fake.map as never)
+    const onReady = vi.fn(), onRendererError = vi.fn()
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const view = render(<WheretooMap visualScene={null} onReady={onReady} onMoveEnd={vi.fn()} onRendererError={onRendererError} />)
+    fake.emit('error', { error: { status: 404, url: 'https://api.mapbox.com/styles/v1/mapbox/standard?access_token=PRIVATE' } })
     expect(onRendererError).toHaveBeenCalledWith(expect.objectContaining({ code: 'STYLE_LOAD_FAILED' }))
-    expect(onReady).not.toHaveBeenCalled()
+    fake.emit('load')
+    expect(onReady).toHaveBeenCalledOnce()
+    const staleLoad = fake.map.on.mock.calls.find(([name]) => name === 'load')?.[1] as Listener
+    view.unmount()
+    staleLoad?.()
+    expect(onReady).toHaveBeenCalledOnce()
+    expect(fake.map.off).toHaveBeenCalledWith('load', expect.any(Function))
+    warning.mockRestore()
+  })
+
+  it('becomes ready while a custom image is still downloading', async () => {
+    const fake = fakeMap(); vi.mocked(createMapboxMap).mockReturnValue(fake.map as never)
+    const onReady = vi.fn()
+    render(<WheretooMap visualScene={null} events={getDevelopmentMapEvents()} onReady={onReady} onMoveEnd={vi.fn()} onRendererError={vi.fn()} />)
+    fake.emit('style.load')
+    await waitFor(() => expect(fake.map.loadImage).toHaveBeenCalledOnce())
+    // Deliberately leave the image callback unresolved.
+    fake.emit('load')
+    expect(onReady).toHaveBeenCalledOnce()
   })
 
   it.each(['before', 'after'])('loads an explicit assignment arriving %s style readiness without recreating the map', async (timing) => {

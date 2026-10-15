@@ -1,3 +1,4 @@
+import { describeStartupError } from './mapStartupErrors'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { GeoJSONSource, MapMouseEvent } from 'mapbox-gl/esm'
@@ -72,15 +73,6 @@ function rendererError(code: MapRendererError['code']): MapRendererError {
     DATA_INVALID: 'The Wheretoo event data is invalid.',
   } as const
   return { code, message: messages[code] }
-}
-
-function isTokenError(event: unknown) {
-  if (!event || typeof event !== 'object' || !('error' in event)) return false
-  const error = event.error
-  if (!error || typeof error !== 'object') return false
-  const status = 'status' in error && typeof error.status === 'number' ? error.status : null
-  const message = 'message' in error && typeof error.message === 'string' ? error.message : ''
-  return status === 401 || /access token|unauthorized|401/i.test(message)
 }
 
 function readClusterFeature(feature: unknown) {
@@ -206,7 +198,8 @@ export function WheretooMap({
     callbacks.current.onCameraControllerReady(cameraController)
 
     let ready = false
-    let failed = false
+    let disposed = false
+    let diagnosticCount = 0
     const iconController = new MapIconController(map)
     icons.current = iconController
     iconController.setEvents(currentEvents.current)
@@ -285,6 +278,7 @@ export function WheretooMap({
       map.getCanvas().style.cursor = features.length > 0 ? 'pointer' : ''
     }
     const handleStyleLoad = () => {
+      if (disposed) return
       guard.advanceSourceRevision()
       const complete = hasCompleteEventLayerInstallation(map)
       if (!complete) {
@@ -297,9 +291,11 @@ export function WheretooMap({
       reconcileIcons()
     }
 
-    const handleIdle = () => {
-      if (!failed) reconcileIcons()
-      if (ready || failed) return
+    const handleIdle = () => { if (!disposed) reconcileIcons() }
+    // Mapbox load follows the first visually complete render; idle also waits
+    // for transitions and background work and is not a startup readiness gate.
+    const handleLoad = () => {
+      if (ready || disposed) return
       const viewport = readViewport(map)
       if (!viewport) return
       const readback = Object.fromEntries(configReadbackKeys.map((key) => [key, map.getConfigProperty('basemap', key)]))
@@ -311,6 +307,7 @@ export function WheretooMap({
       callbacks.current.onReady(viewport)
     }
     const handleMoveEnd = () => {
+      if (disposed) return
       cameraController.settle()
       reconcileIcons()
       const viewport = readViewport(map)
@@ -321,11 +318,13 @@ export function WheretooMap({
     }
     const handleUserGesture = () => { guard.invalidate(); cameraController.interrupt() }
     const handleError = (event: unknown) => {
-      if (ready || failed) return
-      failed = true
-      callbacks.current.onRendererError(rendererError(isTokenError(event) ? 'TOKEN_INVALID' : 'STYLE_LOAD_FAILED'))
+      if (ready || disposed) return
+      const diagnostic = describeStartupError(event)
+      if (diagnosticCount++ < 3) console.warn('[Wheretoo map] Startup resource error', diagnostic)
+      if (diagnostic.fatal) callbacks.current.onRendererError(rendererError(diagnostic.fatal))
     }
     const observer = new ResizeObserver((entries) => {
+      if (disposed) return
       const width = entries[0]?.contentRect.width ?? container.clientWidth
       const nextDensity = width < MOBILE_MAP_BREAKPOINT ? 2 : 3
       const nextMobile = width < MOBILE_MAP_BREAKPOINT
@@ -346,6 +345,7 @@ export function WheretooMap({
     map.on('click', handleMapClick)
     map.on('mousemove', handlePointerMove)
     map.on('idle', handleIdle)
+    map.on('load', handleLoad)
     map.on('zoom', reconcileIcons)
     map.on('moveend', handleMoveEnd)
     map.on('error', handleError)
@@ -354,6 +354,7 @@ export function WheretooMap({
     observer.observe(container)
 
     return () => {
+      disposed = true
       iconController.dispose()
       icons.current = null
       refreshIconViewport.current = null
@@ -362,6 +363,7 @@ export function WheretooMap({
       map.off('click', handleMapClick)
       map.off('mousemove', handlePointerMove)
       map.off('idle', handleIdle)
+      map.off('load', handleLoad)
       map.off('zoom', reconcileIcons)
       map.off('moveend', handleMoveEnd)
       map.off('error', handleError)

@@ -43,7 +43,7 @@ describe('DiscoveryView', () => {
     preview.fail = true
     try {
       renderView(props({ items: [] }))
-      expect(await screen.findByText('Map preview unavailable. Open the full map to try again.')).toBeVisible()
+      expect(await screen.findByText('We couldn’t load the map.')).toBeVisible()
       expect(screen.getByText('No upcoming events here yet.')).toBeVisible()
       expect(screen.getByRole('link', { name: 'Organize' })).toHaveAttribute('href', '/organizer/events')
       await userEvent.click(screen.getByRole('link', { name: /Explore the map/ }))

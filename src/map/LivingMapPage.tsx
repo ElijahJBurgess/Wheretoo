@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { WheretooMap } from './core/WheretooMap'
-import type { MapRendererError, MapViewportSnapshot } from './core/map.types'
+import type { MapViewportSnapshot } from './core/map.types'
 import { usePublicMapEvents } from './data/mapEvents.query'
 import { resolveVisualScene } from './core/visualScenes'
 import type { WheretooMapEvent } from './data/wheretooMapEvents'
@@ -10,14 +10,17 @@ import { EventPreviewCard } from './preview/EventPreviewCard'
 import { usePublicEventImages } from '../features/event-images/publicEventImages'
 import { EventChooser } from './preview/EventChooser'
 import { resolveEventPreviewNavigation, type EventPreviewNavigation } from './preview/eventPreviewNavigation'
+import { MapStartupOverlay } from './MapStartupOverlay'
+import { useMapStartupState } from './useMapStartupState'
 import './living-map.css'
 
 type ChooserContext = { eventIds: string[]; anchor: { longitude: number; latitude: number }; scrollTop: number; visibleCount: number }
 
 export function Component({ embedded = false }: { embedded?: boolean } = {}) {
   const Container = embedded ? 'section' : 'main'
-  const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
-  const [error, setError] = useState<MapRendererError | null>(null)
+  const [attempt, setAttempt] = useState(0)
+  const [state, setState] = useMapStartupState(attempt)
+  const activeAttempt = useRef(0)
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null)
   const [chooser, setChooser] = useState<ChooserContext | null>(null)
   const [interactionError, setInteractionError] = useState<string | null>(null)
@@ -27,7 +30,6 @@ export function Component({ embedded = false }: { embedded?: boolean } = {}) {
   const live = usePublicMapEvents(viewport, null, !fixtureMode)
   const appliedGeneration = useRef(0)
   const [developmentNavigation, setDevelopmentNavigation] = useState<EventPreviewNavigation | null>(null)
-  const fatal = useRef(false)
   const cameraController = useRef<SelectionCameraController | null>(null)
   const preview = useRef<HTMLElement | null>(null)
   const scene = useMemo(() => resolveVisualScene(window.location.search, window.location.hostname), [])
@@ -72,14 +74,23 @@ export function Component({ embedded = false }: { embedded?: boolean } = {}) {
     else cameraController.current?.cancel()
   }, [selectedEvent, chooserAnchor])
   const handleReady = useCallback((initialViewport: MapViewportSnapshot) => {
+    if (activeAttempt.current !== attempt) return
     setViewport(initialViewport)
-    if (!fatal.current) setState('ready')
-  }, [])
-  const handleError = useCallback((nextError: MapRendererError) => {
-    fatal.current = true
-    setError(nextError)
-    setState('error')
-  }, [])
+    setState('ready')
+  }, [attempt, setState])
+  const handleError = useCallback(() => {
+    if (activeAttempt.current !== attempt) return
+    setState(current => current === 'ready' ? current : 'error')
+  }, [attempt, setState])
+  const retryMap = useCallback(() => {
+    activeAttempt.current += 1
+    setAttempt(activeAttempt.current)
+    setViewport(null)
+    setSelectedEventId(null)
+    setChooser(null)
+    setInteractionError(null)
+    setState('loading')
+  }, [setState])
   const handleCameraControllerReady = useCallback((controller: SelectionCameraController | null) => {
     cameraController.current = controller
     if (controller && selectedEvent && preview.current) controller.reveal(selectedEvent, preview.current)
@@ -115,7 +126,9 @@ export function Component({ embedded = false }: { embedded?: boolean } = {}) {
 
   return (
     <Container className={`living-map${embedded ? ' living-map--embedded' : ''}`} aria-label="Explore the Bay Area" data-renderer-state={state} onKeyDown={handleKeyDown}>
+      <div className="living-map__surface" inert={state !== 'ready' || undefined}>
       {events ? <WheretooMap
+        key={`map-${attempt}`}
         visualScene={scene}
         events={events}
         selectedEventId={selectedEvent?.id ?? null}
@@ -127,6 +140,7 @@ export function Component({ embedded = false }: { embedded?: boolean } = {}) {
         onMoveEnd={setViewport}
         onRendererError={handleError}
       /> : null}
+      </div>
       <header className="living-map__masthead"><span className="living-map__wordmark">wheretoo</span></header>
       {!fixtureMode && live.error ? <div className="living-map__interaction-error" role="status"><span>{live.error.message}</span><button type="button" onClick={live.retry}>Retry events</button></div> : null}
       {selectedEvent ? (
@@ -155,13 +169,7 @@ export function Component({ embedded = false }: { embedded?: boolean } = {}) {
         </div>
       ) : null}
       {interactionError ? <div className="living-map__interaction-error" role="status"><span>{interactionError}</span><button type="button" onClick={closePreview}>Dismiss</button></div> : null}
-      {state === 'loading' ? <p className="living-map__status" role="status">Loading the map…</p> : null}
-      {state === 'error' && error ? (
-        <section className="living-map__error" role="alert">
-          <h2>Map unavailable</h2>
-          <p>{error.message} Check your connection and reload this page.</p>
-        </section>
-      ) : null}
+      <MapStartupOverlay key={`startup-${attempt}`} state={state} onRetry={retryMap} />
     </Container>
   )
 }

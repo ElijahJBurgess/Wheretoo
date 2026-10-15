@@ -1,3 +1,4 @@
+import { MapStartupOverlay, MapStartupFallback } from '../../map/MapStartupOverlay'
 import { Component, lazy, Suspense, type ReactNode } from 'react'
 
 const CityMap = lazy(() => import('../../map/LivingMapPage').then(module => ({ default: module.Component })))
@@ -12,14 +13,14 @@ class MapPreviewBoundary extends Component<{ children: ReactNode }, { failed: bo
 
   render() {
     return this.state.failed
-      ? <p className="discovery-map-entry__loading" role="status">Map preview unavailable. Open the full map to try again.</p>
+      ? <div className="discovery-map-entry__startup"><MapStartupOverlay state="error" onRetry={() => window.location.reload()} /></div>
       : this.props.children
   }
 }
 
 export function DiscoveryMapPreview() {
   return <MapPreviewBoundary>
-    <Suspense fallback={<p className="discovery-map-entry__loading" role="status">Loading the city map…</p>}>
+    <Suspense fallback={<div className="discovery-map-entry__startup"><MapStartupFallback /></div>}>
       <CityMap embedded />
     </Suspense>
   </MapPreviewBoundary>

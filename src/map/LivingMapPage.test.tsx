@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useEffect } from 'react'
 import { getDevelopmentMapEvents } from './data/developmentMapEvents'
 const { query, mounted } = vi.hoisted(() => ({ query: vi.fn(), mounted: vi.fn() }))
@@ -16,7 +16,7 @@ vi.mock('./core/WheretooMap', () => ({
     onReady(): void
     onRendererError(error: { code: 'STYLE_LOAD_FAILED'; message: string }): void
   }) => {
-    useEffect(() => { mounted() }, [])
+    useEffect(() => { mounted({ onReady, onRendererError }) }, [onReady, onRendererError])
     return (
     <div aria-label="map test double" data-selected-event-id={selectedEventId ?? ''}>
       <button onClick={onReady}>ready</button>
@@ -69,20 +69,74 @@ describe('LivingMapPage', () => {
     expect(screen.queryByRole('region', { name: 'Day Party' })).not.toBeInTheDocument()
     expect(mounted).toHaveBeenCalledTimes(1)
   })
-  it('shows a concise loading state and removes it when the renderer is ready', async () => {
-    render(<Component />)
-    expect(screen.getByRole('main', { name: 'Explore the Bay Area' })).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('Loading the map')
-    fireEvent.click(await screen.findByRole('button', { name: 'ready' }))
-    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  afterEach(() => { vi.useRealTimers() })
+  it('mounts the renderer under a branded loading status, fades on readiness and never blocks pending events', () => {
+    vi.useFakeTimers()
+    query.mockReturnValue({ events: [], generation: 0, pending: true, error: null, retry: vi.fn() })
+    const view = render(<Component />)
+    expect(screen.getByRole('status', { name: 'Loading map' })).toHaveTextContent('Finding your next move.')
+    expect(screen.getByLabelText('map test double')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'ready' }))
+    expect(screen.queryByRole('status', { name: 'Loading map' })).not.toBeInTheDocument()
+    act(() => vi.advanceTimersByTime(180))
+    expect(view.container.querySelector('.map-startup')).not.toBeInTheDocument()
+    query.mockReturnValue({ events: [], generation: 1, pending: false, error: new Error('offline'), retry: vi.fn() })
+    view.rerender(<Component />)
+    expect(screen.getByRole('button', { name: 'Retry events' })).toBeInTheDocument()
+    expect(view.container.querySelector('.map-startup')).not.toBeInTheDocument()
   })
 
-  it('keeps an actionable fatal error even if readiness arrives later', async () => {
+  it('clears an earlier startup error on successful recovery', () => {
     render(<Component />)
-    fireEvent.click(await screen.findByRole('button', { name: 'fail' }))
+    fireEvent.click(screen.getByRole('button', { name: 'fail' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('We couldn’t load the map.')
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'ready' }))
-    expect(screen.getByRole('alert')).toHaveTextContent('Map unavailable')
-    expect(screen.getByRole('alert')).toHaveTextContent('reload this page')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('offers a slow-start retry after 15 seconds, clears on late success, and resets on retry', () => {
+    vi.useFakeTimers()
+    render(<Component />)
+    act(() => vi.advanceTimersByTime(14999))
+    expect(screen.queryByText('The map is taking longer than expected.')).not.toBeInTheDocument()
+    act(() => vi.advanceTimersByTime(1))
+    expect(screen.getByText('The map is taking longer than expected.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(mounted).toHaveBeenCalledTimes(2)
+    expect(screen.queryByText('The map is taking longer than expected.')).not.toBeInTheDocument()
+    act(() => vi.advanceTimersByTime(15000))
+    fireEvent.click(screen.getByRole('button', { name: 'ready' }))
+    expect(screen.queryByText('The map is taking longer than expected.')).not.toBeInTheDocument()
+    act(() => vi.advanceTimersByTime(180))
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('retries a failed map, clears timers on unmount, and uses no fade delay for reduced motion', () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true })))
+    const view = render(<Component embedded />)
+    fireEvent.click(screen.getByRole('button', { name: 'fail' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(mounted).toHaveBeenCalledTimes(2)
+    fireEvent.click(screen.getByRole('button', { name: 'ready' }))
+    act(() => vi.advanceTimersByTime(0))
+    expect(view.container.querySelector('.map-startup')).not.toBeInTheDocument()
+    view.unmount()
+    expect(vi.getTimerCount()).toBe(0)
+    vi.unstubAllGlobals()
+  })
+
+  it('ignores callbacks from the previous attempt after retry', () => {
+    render(<Component />)
+    const old = mounted.mock.calls[0][0] as { onReady(): void; onRendererError(error: { code: 'STYLE_LOAD_FAILED'; message: string }): void }
+    fireEvent.click(screen.getByRole('button', { name: 'fail' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    act(() => { old.onReady(); old.onRendererError({ code: 'STYLE_LOAD_FAILED', message: 'stale' }) })
+    expect(screen.getByRole('status', { name: 'Loading map' })).toBeInTheDocument()
+    expect(screen.getAllByLabelText('map test double')).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: 'ready' }))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it('owns event selection in application state and keeps the same selection stable', async () => {
