@@ -281,3 +281,12 @@ describe('sanitized route fallbacks', () => {
     expect(document.body).not.toHaveTextContent('token-secret-value')
   })
 })
+
+it.each(['/admin', '/admin/forgot-password', '/admin/reset-password'])('loads %s inside the existing session shell without requiring an organizer', path => {
+  const ids=matchedIds(path)
+  expect(ids).toContain('session-shell')
+  expect(ids).not.toContain('require-session')
+  expect(ids).not.toContain('require-organizer')
+  const routes=matchRoutes(createAppRoutes(runtime),path)
+  expect(routes?.at(-1)?.route.path).toBe(path)
+})

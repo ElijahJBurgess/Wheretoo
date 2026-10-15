@@ -1,0 +1,100 @@
+import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router-dom'
+import { beforeEach, expect, it, vi } from 'vitest'
+const { useSession, useStaffRole, signInOrganizer, signOut, changeAccountPassword, requestPasswordReset, requestPasswordReauthentication, refetch } = vi.hoisted(() => ({ useSession: vi.fn(), useStaffRole: vi.fn(), signInOrganizer: vi.fn(), signOut: vi.fn(), changeAccountPassword: vi.fn(), requestPasswordReset: vi.fn(), requestPasswordReauthentication: vi.fn(), refetch: vi.fn() }))
+vi.mock('../auth/SessionProvider', () => ({ useSession }))
+vi.mock('../moderation/moderation.queries', () => ({ useStaffRole }))
+vi.mock('../auth/auth.api', () => ({ signInOrganizer }))
+vi.mock('../auth/account.api', () => ({ changeAccountPassword, requestPasswordReauthentication, safeAccountError: (e: unknown) => e }))
+vi.mock('./admin.api', () => ({ requestPasswordReset }))
+vi.mock('../auth/SignOutProvider', () => ({ useSignOut: () => ({ signOut, pending: false, error: null, notice: null, dismissNotice: vi.fn() }) }))
+vi.mock('@tanstack/react-query', () => ({ useQueryClient: () => ({}) }))
+vi.mock('../auth/identityLifetime', () => ({ captureIdentityLifetime: () => () => true }))
+import { AdminPage, AdminPasswordResetRequestPage } from './AdminPage'
+function show(resetPassword = false) { render(<MemoryRouter><AdminPage resetPassword={resetPassword} /></MemoryRouter>) }
+beforeEach(() => {
+  vi.clearAllMocks()
+  useSession.mockReturnValue({ status: 'anonymous', user: null, session: null })
+  useStaffRole.mockReturnValue({ isPending: false, isError: false, data: null, refetch })
+  signInOrganizer.mockResolvedValue(undefined)
+})
+it('signs in with existing password auth and clears the transient password', async () => {
+  show(); const user = userEvent.setup()
+  await user.type(screen.getByLabelText('Email'), 'founder@example.test')
+  await user.type(screen.getByLabelText('Password'), 'transient-test-password')
+  await user.click(screen.getByRole('button', { name: 'Sign in' }))
+  expect(signInOrganizer).toHaveBeenCalledWith({ email: 'founder@example.test', password: 'transient-test-password' })
+  expect(screen.getByLabelText('Password')).toHaveValue('')
+  expect(screen.getByRole('link', { name: 'Forgot your password?' })).toHaveAttribute('href', '/admin/forgot-password')
+})
+it.each([null, 'moderator'])('denies an authenticated nonadmin (%s)', role => {
+  useSession.mockReturnValue({ status: 'authenticated', user: { id: 'ordinary' }, session: {} })
+  useStaffRole.mockReturnValue({ isPending: false, isError: false, data: role })
+  show()
+  expect(screen.getByText('Admin access required')).toBeInTheDocument()
+  expect(screen.queryByRole('link', { name: 'Open event moderation' })).not.toBeInTheDocument()
+})
+it('fails closed on an unavailable role and permits retry', async () => {
+  useSession.mockReturnValue({ status: 'authenticated', user: { id: 'founder' }, session: {} })
+  useStaffRole.mockReturnValue({ isPending: false, isError: true, data: 'admin', refetch })
+  show(); expect(screen.queryByText('Custom-icon approvals')).not.toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: 'Try again' })); expect(refetch).toHaveBeenCalledOnce()
+})
+it('shows the existing moderation destination, future placeholder and shared logout', async () => {
+  const session = { user: { id: 'founder' }, access_token: 'test-token' }
+  useSession.mockReturnValue({ status: 'authenticated', user: session.user, session })
+  useStaffRole.mockReturnValue({ isPending: false, isError: false, data: 'admin' })
+  signOut.mockResolvedValue({ localSignedOut: true, isCurrent: () => true })
+  show()
+  expect(screen.getByRole('link', { name: 'Open event moderation' })).toHaveAttribute('href', '/moderation')
+  expect(screen.getByText('Custom-icon approvals')).toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: 'Sign out' })); expect(signOut).toHaveBeenCalledWith(session)
+})
+it('does not offer password update to an anonymous expired recovery session', () => {
+  show(true); expect(screen.queryByLabelText('New password')).not.toBeInTheDocument()
+  expect(screen.getByText('Open the password-reset link from your email.')).toBeInTheDocument()
+})
+it('updates a password only for the authenticated admin using the existing account API', async () => {
+  useSession.mockReturnValue({ status: 'authenticated', user: { id: 'founder' }, session: {} })
+  useStaffRole.mockReturnValue({ isPending: false, isError: false, data: 'admin' })
+  changeAccountPassword.mockResolvedValue(undefined)
+  show(true); const user=userEvent.setup()
+  await user.type(screen.getByLabelText('New password'), 'transient-new-password')
+  await user.type(screen.getByLabelText('Confirm password'), 'transient-new-password')
+  await user.click(screen.getByRole('button', { name: 'Save password' }))
+  expect(changeAccountPassword).toHaveBeenCalledWith('founder', 'transient-new-password', undefined, expect.any(Function))
+  expect(screen.getByLabelText('New password')).toHaveValue('')
+  expect(await screen.findByText('Password updated. You can return to admin.')).toBeInTheDocument()
+})
+it('offers a reset request with a generic non-enumerating response', async () => {
+  requestPasswordReset.mockResolvedValue(undefined)
+  render(<MemoryRouter><AdminPasswordResetRequestPage /></MemoryRouter>)
+  const user=userEvent.setup(); await user.type(screen.getByLabelText('Email'), 'founder@example.test')
+  await user.click(screen.getByRole('button', { name: 'Send reset email' }))
+  expect(requestPasswordReset).toHaveBeenCalledWith('founder@example.test')
+  expect(await screen.findByText('If this account can receive password resets, check your email for a secure link.')).toBeInTheDocument()
+})
+
+it('requests the existing verification code when secure password changes require it', async () => {
+  useSession.mockReturnValue({ status: 'authenticated', user: { id: 'founder' }, session: {} })
+  useStaffRole.mockReturnValue({ isPending: false, isError: false, data: 'admin' })
+  changeAccountPassword.mockRejectedValueOnce({ code: 'reauthentication_required', message: 'Verification required' })
+  requestPasswordReauthentication.mockResolvedValue(undefined)
+  show(true); const user=userEvent.setup()
+  await user.type(screen.getByLabelText('New password'), 'transient-new-password')
+  await user.type(screen.getByLabelText('Confirm password'), 'transient-new-password')
+  await user.click(screen.getByRole('button', { name: 'Save password' }))
+  await user.click(await screen.findByRole('button', { name: 'Send verification code' }))
+  expect(requestPasswordReauthentication).toHaveBeenCalledWith('founder', expect.any(Function))
+})
+it('clears unsubmitted credentials on an identity lifetime change', async () => {
+  const tree = () => <MemoryRouter><AdminPage resetPassword /></MemoryRouter>
+  useSession.mockReturnValue({ status: 'authenticated', user: { id: 'first-admin' }, session: {}, identityVersion: 1 })
+  useStaffRole.mockReturnValue({ isPending: false, isError: false, data: 'admin' })
+  const view=render(tree())
+  await userEvent.type(screen.getByLabelText('New password'), 'private-unsubmitted-value')
+  useSession.mockReturnValue({ status: 'authenticated', user: { id: 'second-admin' }, session: {}, identityVersion: 2 })
+  view.rerender(tree())
+  expect(screen.getByLabelText('New password')).toHaveValue('')
+})

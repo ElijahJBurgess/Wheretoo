@@ -90,6 +90,9 @@ export function createAppRoutes(runtime: TicketExperienceRuntime) {
       id: 'session-shell',
       lazy: lazyComponent(() => import('./SessionShell'), 'SessionShell'),
       children: [
+        { path: '/admin', lazy: lazyComponent(() => import('../../features/admin/AdminPage'), 'AdminPage') },
+        { path: '/admin/forgot-password', lazy: lazyComponent(() => import('../../features/admin/AdminPage'), 'AdminPasswordResetRequestPage') },
+        { path: '/admin/reset-password', lazy: lazyComponent(() => import('../../features/admin/AdminPage'), 'AdminPasswordResetPage') },
         {
           id: 'require-session',
           lazy: lazyComponent(() => import('./RequireSession'), 'RequireSession'),
