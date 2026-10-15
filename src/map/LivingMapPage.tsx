@@ -14,7 +14,8 @@ import './living-map.css'
 
 type ChooserContext = { eventIds: string[]; anchor: { longitude: number; latitude: number }; scrollTop: number; visibleCount: number }
 
-export function Component() {
+export function Component({ embedded = false }: { embedded?: boolean } = {}) {
+  const Container = embedded ? 'section' : 'main'
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [error, setError] = useState<MapRendererError | null>(null)
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null)
@@ -113,7 +114,7 @@ export function Component() {
   }, [chooser, closePreview, interactionError, selectedEventId])
 
   return (
-    <main className="living-map" aria-label="Explore the Bay Area" data-renderer-state={state} onKeyDown={handleKeyDown}>
+    <Container className={`living-map${embedded ? ' living-map--embedded' : ''}`} aria-label="Explore the Bay Area" data-renderer-state={state} onKeyDown={handleKeyDown}>
       {events ? <WheretooMap
         visualScene={scene}
         events={events}
@@ -161,6 +162,6 @@ export function Component() {
           <p>{error.message} Check your connection and reload this page.</p>
         </section>
       ) : null}
-    </main>
+    </Container>
   )
 }
