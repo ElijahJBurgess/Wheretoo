@@ -30,7 +30,9 @@
     "test:spec07:database": "python3 tests/integration/spec07-database.py test",
     "test:spec07:concurrency": "python3 tests/integration/spec07-email-concurrency.py",
     "test:spec07:browser": "playwright test --config playwright.spec07.config.ts",
-    "test:spec07:production": "tsx --tsconfig tsconfig.scripts.json scripts/verify-spec07-production.ts"
+    "test:spec07:production": "tsx --tsconfig tsconfig.scripts.json scripts/verify-spec07-production.ts",
+    "icons:v1:verify": "tsx --tsconfig tsconfig.scripts.json scripts/map-icons/import-v1-pack.ts verify",
+    "icons:v1:import": "tsx --tsconfig tsconfig.scripts.json scripts/map-icons/import-v1-pack.ts import"
   },
   "keywords": [],
   "author": "",
