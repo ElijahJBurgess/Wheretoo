@@ -5,6 +5,12 @@ import { describe, expect, it, vi } from 'vitest'
 import type { DiscoveryFilters, DiscoveryDisplayItem } from './discovery.types'
 import { DiscoveryView, type DiscoveryViewProps } from './DiscoveryView'
 
+const preview = vi.hoisted(() => ({ fail: false }))
+vi.mock('../../map/LivingMapPage', () => ({ Component: () => {
+  if (preview.fail) throw new Error('Map chunk could not load')
+  return <section aria-label="City map preview" />
+} }))
+
 const filters: DiscoveryFilters = { when: 'upcoming', category: null, price: null }
 const item = (overrides: Partial<DiscoveryDisplayItem> = {}): DiscoveryDisplayItem => ({
   id: '00000000-0000-4000-8000-000000000001', title: 'Sunset Rooftop Sessions', category: 'music', admissionType: 'paid',
@@ -25,19 +31,34 @@ function renderView(input: DiscoveryViewProps) {
   const router = createMemoryRouter([
     { path: '/discover', element: <DiscoveryView {...input} /> },
     { path: '/events/:eventId', element: <h1>Public event</h1> },
+    { path: '/map', element: <h1>Full city map</h1> },
     { path: '/organizer/events', element: <h1>Organizer events</h1> },
   ], { initialEntries: ['/discover'] })
   return { router, ...render(<RouterProvider router={router} />) }
 }
 
 describe('DiscoveryView', () => {
-  it('reuses platform branding and reserves a noninteractive map slot beside the feature', () => {
-    const { container } = renderView(props())
-    expect(screen.getByRole('link', { name: 'Wheretoo discovery home' })).toHaveClass('platform-wordmark')
-    const map = screen.getByRole('complementary', { name: 'Map area' })
-    expect(map).toHaveTextContent('Map coming later')
-    expect(map.querySelector('a, button, img')).toBeNull()
-    expect(map.parentElement).toBe(container.querySelector('.discovery-hero')?.parentElement)
+  it('keeps discovery and organizer navigation usable when the map fails', async () => {
+    const logging = vi.spyOn(console, 'error').mockImplementation(() => {})
+    preview.fail = true
+    try {
+      renderView(props({ items: [] }))
+      expect(await screen.findByText('Map preview unavailable. Open the full map to try again.')).toBeVisible()
+      expect(screen.getByText('No upcoming events here yet.')).toBeVisible()
+      expect(screen.getByRole('link', { name: 'Organize' })).toHaveAttribute('href', '/organizer/events')
+      await userEvent.click(screen.getByRole('link', { name: /Explore the map/ }))
+      expect(await screen.findByRole('heading', { name: 'Full city map' })).toBeVisible()
+    } finally {
+      preview.fail = false
+      logging.mockRestore()
+    }
+  })
+
+  it.each(['ready', 'loading', 'error'] as const)('opens the map from discovery when events are %s', async (status) => {
+    renderView(props({ status, items: [] }))
+    expect(screen.getByRole('link', { name: 'Map' })).toHaveAttribute('href', '/map')
+    await userEvent.click(screen.getByRole('link', { name: /Explore the map/ }))
+    expect(await screen.findByRole('heading', { name: 'Full city map' })).toBeVisible()
   })
 
   it('renders one public landmark, all supported filters, and only working navigation', async () => {
