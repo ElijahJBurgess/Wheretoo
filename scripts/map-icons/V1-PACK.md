@@ -20,7 +20,7 @@ Run `pnpm icons:v1:import` with these environment variables supplied through a t
 - `ICON_SERVICE_KEY`: its server-only Storage credential.
 - `ICON_ADMIN_EMAIL`, `ICON_ADMIN_PASSWORD`: an authenticated active staff admin in that stack.
 
-No secret belongs in a browser environment variable, committed file, or shell history. The importer deliberately retains the existing local-only curation boundary and refuses remote origins. Hosted activation requires the reviewed map integration rollout and a separately reviewed hosted operator path; do not bypass this target guard.
+No secret belongs in a browser environment variable, committed file, or shell history. For the explicitly approved staging rollout only, set `ICON_STAGING_PROJECT_REF=oznjmliqnczotunksafx` and `ICON_API_URL=https://oznjmliqnczotunksafx.supabase.co`. The importer refuses every other hosted target, requires both rendering and selection disabled before installation, and leaves activation to the operator after all nine readbacks succeed. Verify the project name is `wheretoo-staging` through the management API before invoking it. Never supply actual production credentials.
 
 The importer validates all assets first, prepares packages with deterministic request IDs, verifies canonical Storage paths, uploads without overwriting, reads back exact bytes, follows validated -> approved -> published transitions, and verifies anonymous public delivery's hash, MIME type, cache headers, and CORS. Interrupted imports can be rerun. Missing/corrupt published objects fail closed and are not silently repaired.
 

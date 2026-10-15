@@ -75,10 +75,16 @@ export function readApprovedPack(archive: string) {
 
 const preparedSchema = z.object({ iconId: z.uuid(), versionId: z.uuid(), state: z.enum(['validated', 'approved', 'published', 'retired', 'revoked']),
   packageHash: z.string().regex(/^[a-f0-9]{64}$/), originalPath: z.string(), cropPath: z.string(), runtimePath: z.string() })
-type ImportInput = { archive: string; url: string; publicKey: string; serviceKey: string; email: string; password: string }
+export function assertIconImportTarget(url: string, stagingProjectRef?: string) {
+  if (stagingProjectRef === undefined) return assertLocalIconTarget(url)
+  if (stagingProjectRef !== 'oznjmliqnczotunksafx' || url !== 'https://oznjmliqnczotunksafx.supabase.co')
+    throw new Error('Unauthorized staging icon import target')
+}
+
+type ImportInput = { stagingProjectRef?: string; archive: string; url: string; publicKey: string; serviceKey: string; email: string; password: string }
 
 export async function importApprovedV1Pack(input: ImportInput) {
-  assertLocalIconTarget(input.url)
+  assertIconImportTarget(input.url, input.stagingProjectRef)
   // Validate ALL nine packages before authenticating or mutating anything.
   const packages = readApprovedPack(input.archive)
   const safeFetch: typeof fetch = (url, init) => {
@@ -88,7 +94,15 @@ export async function importApprovedV1Pack(input: ImportInput) {
   const options = { auth: { persistSession: false, autoRefreshToken: false }, global: { fetch: safeFetch } }
   const admin = createClient(input.url, input.publicKey, options)
   const storage = createClient(input.url, input.serviceKey, options)
-  if ((await admin.auth.signInWithPassword({ email: input.email, password: input.password })).error) throw new Error('Local curator authentication failed')
+  if ((await admin.auth.signInWithPassword({ email: input.email, password: input.password })).error) throw new Error('Curator authentication failed')
+  if (input.stagingProjectRef) {
+    const [rendering, selection] = await Promise.all([
+      createClient(input.url, input.publicKey, options).rpc('get_public_map_icon_versions', { p_ids: [] }),
+      admin.rpc('list_selectable_map_icons'),
+    ])
+    if (rendering.error || selection.error || rendering.data?.renderingEnabled !== false || selection.data?.selectionEnabled !== false)
+      throw new Error('Staging installation requires rendering and selection disabled')
+  }
   const results = []
   for (const { icon, bytes, provenance, metadata } of packages) {
     const slug = icon.filename.slice(0, -4), name = names[slug]
@@ -136,7 +150,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   const required = (key: string) => { const value = process.env[key]; if (!value) throw new Error(`Missing ${key}`); return value }
   try {
     if (process.argv[2] === 'verify') console.log(JSON.stringify(readApprovedPack(required('ICON_PACK_ZIP')).map(p => ({ filename: p.icon.filename, metadata: p.metadata, provenance: p.provenance })), null, 2))
-    else if (process.argv[2] === 'import') console.log(JSON.stringify(await importApprovedV1Pack({ archive: required('ICON_PACK_ZIP'), url: required('ICON_API_URL'),
+    else if (process.argv[2] === 'import') console.log(JSON.stringify(await importApprovedV1Pack({ stagingProjectRef: process.env.ICON_STAGING_PROJECT_REF, archive: required('ICON_PACK_ZIP'), url: required('ICON_API_URL'),
       publicKey: required('ICON_PUBLIC_KEY'), serviceKey: required('ICON_SERVICE_KEY'), email: required('ICON_ADMIN_EMAIL'), password: required('ICON_ADMIN_PASSWORD') }), null, 2))
     else throw new Error('Choose verify or import')
   } catch (error) { console.error(error instanceof Error ? error.message : 'Icon pack import failed'); process.exitCode = 1 }

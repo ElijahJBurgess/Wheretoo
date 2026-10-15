@@ -1,9 +1,21 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import { approvedPack, metadataForIcon, verifyPreparedIcon, iconRequestId } from './import-v1-pack'
+import { approvedPack, metadataForIcon, verifyPreparedIcon, iconRequestId, assertIconImportTarget } from './import-v1-pack'
 import { iconOffset } from '../../src/features/map-icons/icon.schemas'
 
 describe('approved V1 icon pack', () => {
+  it('permits the exact approved staging origin only with its explicit project identity', () => {
+    expect(() => assertIconImportTarget('https://oznjmliqnczotunksafx.supabase.co', 'oznjmliqnczotunksafx')).not.toThrow()
+    expect(() => assertIconImportTarget('http://127.0.0.1:64321')).not.toThrow()
+    expect(() => assertIconImportTarget('https://oznjmliqnczotunksafx.supabase.co')).toThrow()
+  })
+  it.each(['https://elsewhere.supabase.co', 'https://oznjmliqnczotunksafx.supabase.co/path',
+    'https://oznjmliqnczotunksafx.supabase.co@evil.test', 'http://oznjmliqnczotunksafx.supabase.co'])('refuses a mismatched staging origin %s', url => {
+    expect(() => assertIconImportTarget(url, 'oznjmliqnczotunksafx')).toThrow()
+  })
+  it('refuses an unapproved project even when the hostname is staging', () => {
+    expect(() => assertIconImportTarget('https://oznjmliqnczotunksafx.supabase.co', 'another-project')).toThrow()
+  })
   it('anchors each artwork at its supplied ground contact with a bounded 3x display', () => {
     expect(approvedPack.icons).toHaveLength(9)
     for (const icon of approvedPack.icons) {
