@@ -29,6 +29,10 @@ test('loading, initial failure, retained refresh, empty and partial results stay
   await expect(page.getByText('Updating events…')).toBeVisible()
   await expect(page.locator('.living-map__canvas')).toHaveAttribute('data-wheretoo-event-count', '9')
   await expect(page.getByText('No events found in this area.')).toBeVisible()
+  const emptyCopy = await page.locator('.living-map__event-status > span').boundingBox()
+  const broaden = await page.getByRole('button', { name: 'Zoom out to search a wider area', exact: true }).boundingBox()
+  expect(emptyCopy && broaden && emptyCopy.width >= 160 && broaden.y >= emptyCopy.y + emptyCopy.height).toBe(true)
+  await page.screenshot({ path: test.info().outputPath('empty-results.png') })
   mode = 'partial'; delay = 100
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
   await expect(page.getByText('Some events may be missing. Zoom in to narrow this area.')).toBeVisible()

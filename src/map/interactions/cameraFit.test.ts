@@ -96,6 +96,15 @@ describe('selection camera controller', () => {
     expect(map.project).toHaveBeenLastCalledWith([-122.2, 37.8])
   })
 
+  it('remembers a restored selection without refitting its saved camera, then remeasures on resize', () => {
+    const { controller, flushFrames, map, panel } = setupController()
+    controller.reveal({ longitude: -122.1, latitude: 37.8 }, panel, { preserveCamera: true })
+    flushFrames()
+    expect(map.panBy).not.toHaveBeenCalled()
+    controller.remeasure(); flushFrames()
+    expect(map.panBy).toHaveBeenCalledOnce()
+  })
+
   it('removes camera travel when reduced motion is requested', () => {
     const { controller, flushFrames, map, panel } = setupController(true)
     controller.reveal({ longitude: -122.1, latitude: 37.8 }, panel)

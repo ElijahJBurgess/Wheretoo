@@ -260,3 +260,6 @@
 .living-map__choose:disabled { opacity: 0.6; }
 .living-map__choose:focus-visible { outline: 3px solid #b7a5ff; outline-offset: 2px; }
 .living-map .event-preview:focus-visible { outline: 2px solid #b7a5ff; outline-offset: 2px; }
+
+/* Keep the area action on a separate row so feedback can use the card width. */
+.living-map__event-status:has(.living-map__broaden) { flex-direction: column; align-items: stretch; }

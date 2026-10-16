@@ -51,3 +51,7 @@ Scale browser fixtures are response interception only; they never upload invento
 ## Remaining limits
 
 Today/Weekend remain explicitly Bay Area calendar dates; this is not a multi-timezone product expansion. Map results retain the existing PostgREST cap, list pagination and query padding. Freshness remains bounded rather than real-time cancellation push. There is no new background polling system, cache, library, or additional Vercel preview project.
+
+## Hosted verification follow-up
+
+Release checks found two issues: the new mobile empty-state action squeezed the feedback into narrow wrapping, and a restored selected preview could repeat its prior camera-fit pan. Empty feedback/action now stack within the existing status card. Returning to the same normalized viewport remembers the eligible preview without another pan; changed viewports and later resize keep normal fitting. A controller regression verifies the initial no-pan and subsequent resize remeasure, and the browser retains its original strict center/zoom assertions with stable-frame capture. Three consecutive mobile return cases passed locally after the fix. No SQL or Edge changes are needed for this follow-up.

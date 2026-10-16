@@ -67,7 +67,7 @@ type CameraMap = {
 }
 
 export type SelectionCameraController = {
-  reveal(event: { longitude: number; latitude: number }, panel: HTMLElement): void
+  reveal(event: { longitude: number; latitude: number }, panel: HTMLElement, options?: { preserveCamera?: boolean }): void
   remeasure(): void
   interrupt(): void
   settle(): void
@@ -123,11 +123,12 @@ export function createSelectionCameraController(map: CameraMap, container: HTMLE
   }
 
   return {
-    reveal(event, panel) {
+    reveal(event, panel, options) {
       if (transitionActive) map.stop()
       transitionActive = false
       current = { longitude: event.longitude, latitude: event.latitude, panel }
-      schedule()
+      if (!options?.preserveCamera) schedule()
+      else { generation += 1; cancelFrames() }
     },
     remeasure() { if (current) schedule() },
     interrupt() {
