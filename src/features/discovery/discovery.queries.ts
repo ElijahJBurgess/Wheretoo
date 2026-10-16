@@ -1,15 +1,16 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { DiscoveryReadError, getDiscoveryPage } from './discovery.api'
 import { serializeDiscoveryFilters } from './discovery.filters'
 import { nextDiscoveryMidnight } from './discovery.time'
+import type { MapBounds } from '../../map/core/map.types'
 import type { DiscoveryFilters, DiscoveryPageData } from './discovery.types'
 
 type Feed = { pages: DiscoveryPageData[]; receivedAt: number; readId: number }
 type MoreState = { search: string; readId?: number; loading?: boolean; error?: DiscoveryReadError; notice?: string }
 type PendingAppend = { controller: AbortController; readId: number; phase: 'append' | 'restart' }
 let nextReadId = 0
-export const discoveryKeys = { list: (search: string) => ['public-discovery', 'v1', search] as const }
+export const discoveryKeys = { list: (search: string, bounds?: MapBounds | null) => ['public-discovery', 'v1', search, bounds === null ? 'pending-area' : JSON.stringify(bounds ?? null)] as const }
 
 function releaseObsoleteAppend(pending: RefObject<PendingAppend | null>, readId: number | undefined) {
   const request = pending.current
@@ -19,9 +20,9 @@ function releaseObsoleteAppend(pending: RefObject<PendingAppend | null>, readId:
   }
 }
 
-async function readFirstPage(filters: DiscoveryFilters, signal: AbortSignal, received: (time: number) => void, blocked: (until: number) => void): Promise<Feed> {
+async function readFirstPage(filters: DiscoveryFilters, signal: AbortSignal, received: (time: number) => void, blocked: (until: number) => void, bounds?: MapBounds): Promise<Feed> {
   try {
-    const page = await getDiscoveryPage(filters, { signal })
+    const page = await getDiscoveryPage(filters, { signal, bounds })
     const receivedAt = Date.now()
     received(receivedAt)
     // Structural sharing can preserve identical page objects after a refresh.
@@ -37,9 +38,12 @@ async function readFirstPage(filters: DiscoveryFilters, signal: AbortSignal, rec
   }
 }
 
-export function useDiscovery(filters: DiscoveryFilters) {
+export function useDiscovery(filters: DiscoveryFilters, bounds?: MapBounds | null) {
   const client = useQueryClient()
-  const search = serializeDiscoveryFilters(filters)
+  const publicSearch = serializeDiscoveryFilters(filters)
+  const areaKey = bounds === null ? 'pending-area' : JSON.stringify(bounds ?? null)
+  const search = publicSearch + '|' + areaKey
+  const queryKey = useMemo(() => ['public-discovery', 'v1', publicSearch, areaKey] as const, [publicSearch, areaKey])
   const [more, setMore] = useState<MoreState>({ search })
   // Transient requests belong to a visit, unlike the reusable public feed.
   if (more.search !== search) setMore({ search })
@@ -48,8 +52,9 @@ export function useDiscovery(filters: DiscoveryFilters) {
   const append = useRef<PendingAppend | null>(null)
   const blocked = clock < blockedUntil
   const query = useQuery({
-    queryKey: discoveryKeys.list(search),
-    queryFn: ({ signal }) => readFirstPage(filters, signal, setClock, setBlockedUntil),
+    queryKey,
+    queryFn: ({ signal }) => readFirstPage(filters, signal, setClock, setBlockedUntil, bounds ?? undefined),
+    enabled: bounds !== null,
     staleTime: 60_000, gcTime: 600_000, retry: false,
     // A cached chain is replaced by a fresh first page. Never refetch every cursor.
     refetchOnMount: !blocked, refetchOnWindowFocus: !blocked, refetchOnReconnect: !blocked,
@@ -74,7 +79,7 @@ export function useDiscovery(filters: DiscoveryFilters) {
   }, [])
 
   async function refresh() {
-    if (Date.now() < blockedUntil) return
+    if (bounds === null || Date.now() < blockedUntil) return
     append.current?.controller.abort(); append.current = null
     setMore({ search })
     await query.refetch()
@@ -83,7 +88,8 @@ export function useDiscovery(filters: DiscoveryFilters) {
   const feed = query.data
   const first = feed?.pages[0]
   const serverNow = first && feed ? Date.parse(first.serverNow) + Math.max(0, clock - feed.receivedAt) : 0
-  const allItems = feed?.pages.flatMap(page => page.items) ?? []
+  const obsoleteWeekend = filters.when === 'weekend' && Boolean(first && serverNow >= Date.parse(first.window.end))
+  const allItems = obsoleteWeekend ? [] : feed?.pages.flatMap(page => page.items) ?? []
   const seen = new Set<string>()
   const items = allItems.filter(item => {
     if (seen.has(item.id) || Date.parse(item.endsAt) <= serverNow) return false
@@ -98,26 +104,26 @@ export function useDiscovery(filters: DiscoveryFilters) {
       if (midnight <= nearestEnd && Date.now() >= blockedUntil) {
         append.current?.controller.abort(); append.current = null
         setMore({ search })
-        void client.invalidateQueries({ queryKey: discoveryKeys.list(search), exact: true })
+        void client.invalidateQueries({ queryKey, exact: true })
       }
     }, Math.max(1, Math.min(midnight, nearestEnd) - serverNow + 25))
     return () => clearTimeout(timer)
-  }, [client, search, midnight, nearestEnd, serverNow, blockedUntil])
+  }, [client, search, queryKey, midnight, nearestEnd, serverNow, blockedUntil])
 
   async function loadMore() {
     const cursor = feed?.pages.at(-1)?.nextCursor
-    const currentReadId = client.getQueryData<Feed>(discoveryKeys.list(search))?.readId
+    const currentReadId = client.getQueryData<Feed>(queryKey)?.readId
     // A user can activate Load more before the read-change effect has run.
     releaseObsoleteAppend(append, currentReadId)
-    if (!feed || feed.readId !== currentReadId || !cursor || append.current || query.isFetching || Date.now() < blockedUntil) return
+    if (obsoleteWeekend || !feed || feed.readId !== currentReadId || !cursor || append.current || query.isFetching || Date.now() < blockedUntil) return
     const controller = new AbortController()
     const request: PendingAppend = { controller, readId: feed.readId, phase: 'append' }
     append.current = request
     setMore({ search, readId: feed.readId, loading: true })
     try {
-      const page = await getDiscoveryPage(filters, { cursor, signal: controller.signal })
+      const page = await getDiscoveryPage(filters, { cursor, signal: controller.signal, bounds: bounds ?? undefined })
       if (controller.signal.aborted) return
-      const key = discoveryKeys.list(search)
+      const key = queryKey
       const state = client.getQueryState<Feed>(key)
       // A focus refresh can supersede this append without going through refresh().
       if (state?.data?.readId !== feed.readId) return
@@ -149,9 +155,9 @@ export function useDiscovery(filters: DiscoveryFilters) {
     items, status: feed ? 'ready' as const : query.isError ? 'error' as const : 'loading' as const,
     highlightItems: items.filter(item => first?.items.some(candidate => candidate.id === item.id)),
     errorKind: failure?.kind === 'invalid_response' ? 'invalid_response' as const : failure?.kind === 'rate_limited' ? 'rate_limited' as const : 'unavailable' as const,
-    hasMore: Boolean(feed?.pages.at(-1)?.nextCursor), isLoadingMore: Boolean(activeMore.loading), isRefreshing: query.isFetching && Boolean(feed),
+    hasMore: !obsoleteWeekend && Boolean(feed?.pages.at(-1)?.nextCursor), isLoadingMore: Boolean(activeMore.loading), isRefreshing: query.isFetching && Boolean(feed),
     moreError: activeMore.error ? (activeMore.error.kind === 'rate_limited' ? 'Please wait before loading more events.' : 'More events could not load. Try again.') : null,
-    notice: query.isError && feed ? 'Couldn’t refresh events. Showing the last results we received.' : activeMore.notice ?? (query.isFetching && feed ? 'Refreshing events…' : null),
+    notice: query.isError && feed ? obsoleteWeekend ? 'Couldn’t refresh events. Try again.' : 'Couldn’t refresh events. Showing the last results we received.' : activeMore.notice ?? (query.isFetching && feed ? 'Refreshing events…' : null),
     invalidItemCount: feed?.pages.reduce((sum, page) => sum + page.invalidItemCount, 0) ?? 0,
     retryAfterSeconds, refresh, loadMore,
   }

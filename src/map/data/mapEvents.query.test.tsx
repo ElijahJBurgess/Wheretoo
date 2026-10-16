@@ -2,12 +2,12 @@ import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { MapViewportSnapshot } from '../core/map.types'
 import { getDevelopmentMapEvents } from './developmentMapEvents'
-const { fetchEvents } = vi.hoisted(() => ({ fetchEvents: vi.fn() }))
-vi.mock('./mapEvents.api', () => ({ getPublicMapEvents: fetchEvents }))
+const { fetchEvents, filteredEvents } = vi.hoisted(() => ({ fetchEvents: vi.fn(), filteredEvents: vi.fn() }))
+vi.mock('./mapEvents.api', () => ({ getPublicMapEvents: fetchEvents, getFilteredPublicMapEvents: filteredEvents }))
 import { publicMapBounds, usePublicMapEvents } from './mapEvents.query'
 const viewport: MapViewportSnapshot = { bounds: { west: -122.3, east: -122.2, south: 37.7, north: 37.9 }, center: { longitude: -122.26, latitude: 37.8 }, zoom: 14.6 }
 const events = getDevelopmentMapEvents()
-beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-29T00:00:00Z')); fetchEvents.mockReset(); fetchEvents.mockResolvedValue({ events, complete: true }) })
+beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-29T00:00:00Z')); filteredEvents.mockReset(); fetchEvents.mockReset(); fetchEvents.mockResolvedValue({ events, complete: true }) })
 afterEach(() => { vi.useRealTimers() })
 const settle = async (ms = 300) => act(async () => { await vi.advanceTimersByTimeAsync(ms) })
 it('debounces the ready viewport, pads bounds and renews the seven-day window', async () => {
@@ -229,4 +229,27 @@ it('keeps the applied revision stable when unchanged coverage is already display
   expect(result.current.generation).toBe(revision)
   expect(result.current.events).toBe(original)
   expect(fetchEvents).toHaveBeenCalledTimes(1)
+})
+
+it('shares one settled area at 300ms and never retains old-filter matches on failure', async () => {
+  const onArea = vi.fn()
+  filteredEvents.mockResolvedValue({ events, complete: true, serverNow: new Date().toISOString(), window: { start: new Date().toISOString(), end: new Date(Date.now()+86400000).toISOString(), timezone: 'America/Los_Angeles' } })
+  const filters = { when: 'next7', category: null, price: null } as const
+  const { result, rerender } = renderHook(({ selected }) => usePublicMapEvents(viewport, null, true, { discovery: selected, onSettledBounds: onArea }), { initialProps: { selected: filters as import('../../features/discovery/discovery.types').DiscoveryFilters } })
+  await settle(299); expect(onArea).not.toHaveBeenCalled(); expect(filteredEvents).not.toHaveBeenCalled()
+  await settle(1); expect(onArea).toHaveBeenCalledOnce(); expect(result.current.events).toEqual(events)
+  filteredEvents.mockRejectedValueOnce(new Error('offline'))
+  rerender({ selected: { ...filters, category: 'fitness', price: 'paid' } })
+  expect(result.current.events).toEqual([])
+  await settle(); expect(result.current.error).toBeTruthy(); expect(result.current.events).toEqual([])
+})
+it('refreshes at weekend rollover and cannot retain the prior weekend on failure', async () => {
+  vi.setSystemTime(new Date('2026-11-02T07:59:50Z'))
+  const current = [{ ...events[0], startsAt: '2026-11-02T07:00:00Z', endsAt: '2026-11-02T10:00:00Z' }]
+  filteredEvents.mockResolvedValueOnce({ events: current, complete: true, serverNow: new Date().toISOString(), window: { start: '2026-10-30T07:00:00Z', end: '2026-11-02T08:00:00Z', timezone: 'America/Los_Angeles' } }).mockRejectedValue(new Error('offline'))
+  const { result } = renderHook(() => usePublicMapEvents(viewport, null, true, { discovery: { when: 'weekend', category: null, price: null } }))
+  await settle(); expect(result.current.events).toEqual(current)
+  await settle(10000)
+  expect(filteredEvents).toHaveBeenCalledTimes(2)
+  expect(result.current.events).toEqual([])
 })

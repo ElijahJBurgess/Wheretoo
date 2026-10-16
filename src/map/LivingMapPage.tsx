@@ -1,8 +1,13 @@
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate, useNavigationType } from 'react-router-dom'
+import { DiscoveryFilters as FilterControls } from '../features/discovery/DiscoveryFilters'
+import type { DiscoveryFilters } from '../features/discovery/discovery.types'
+import { discoveryBounds } from '../features/discovery/discovery.scope'
+import type { MapCamera, MapBounds } from './core/map.types'
 import { publicReturnState } from '../features/discovery/discovery.navigation'
 import { parseDiscoverySearch, serializeDiscoveryFilters } from '../features/discovery/discovery.filters'
 import { readMapReturn, type MapChooserContext } from './navigation/mapNavigation'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { MAP_MIN_ZOOM } from './core/map.constants'
 import { WheretooMap } from './core/WheretooMap'
 import type { MapViewportSnapshot } from './core/map.types'
 import { usePublicMapEvents } from './data/mapEvents.query'
@@ -20,11 +25,22 @@ import './living-map.css'
 
 type ChooserContext = MapChooserContext
 
-export function Component({ embedded = false }: { embedded?: boolean } = {}) {
+export type DiscoveryMapHandle = { state(): ReturnType<typeof publicReturnState>; broaden(): void }
+export type DiscoveryMapProps = { embedded?: boolean; onAreaChange?(bounds: MapBounds): void; onContextReady?(handle: DiscoveryMapHandle | null): void; onUnavailable?(): void }
+export function Component({ embedded = false, onAreaChange, onContextReady, onUnavailable }: DiscoveryMapProps = {}) {
   const Container = embedded ? 'section' : 'main'
   const location = useLocation()
   const navigate = useNavigate()
-  const origin = location.pathname === '/discover' ? '/discover' + serializeDiscoveryFilters(parseDiscoverySearch(location.search)) : '/map'
+  const navigationType = useNavigationType()
+  const entry = useRef(location.key)
+  const restoreCamera = useRef<((camera: MapCamera) => void) | null>(null)
+  const handleRestoreReady = useCallback((restore: ((camera: MapCamera) => void) | null) => { restoreCamera.current = restore }, [])
+  const filters = parseDiscoverySearch(location.search)
+  const submittedFilters = useRef(filters)
+  const { when, category, price } = filters
+  useLayoutEffect(() => { if (navigationType === 'POP') submittedFilters.current = { when, category, price } }, [navigationType, when, category, price])
+  const search = serializeDiscoveryFilters(filters)
+  const origin = (location.pathname === '/discover' ? '/discover' : '/map') + search
   const [initialReturn] = useState(() => { const saved = readMapReturn(location.state); return saved?.path === origin ? saved : null })
   const pendingReturn = useRef(initialReturn)
   const root = useRef<HTMLElement | null>(null)
@@ -39,10 +55,13 @@ export function Component({ embedded = false }: { embedded?: boolean } = {}) {
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null)
   const [chooser, setChooser] = useState<ChooserContext | null>(null)
   const [interactionError, setInteractionError] = useState<string | null>(null)
-  const [events, setEvents] = useState<WheretooMapEvent[]>([])
+  const [inventory, setEvents] = useState<WheretooMapEvent[]>([])
   const [viewport, setViewport] = useState<MapViewportSnapshot | null>(null)
   const fixtureMode = useMemo(() => import.meta.env.DEV && ['standard', 'dense', 'colocated'].includes(new URLSearchParams(window.location.search).get('mapFixture') ?? ''), [])
-  const live = usePublicMapEvents(viewport, null, !fixtureMode)
+  const live = usePublicMapEvents(viewport, null, !fixtureMode, { discovery: filters, onSettledBounds: onAreaChange })
+  const events = useMemo(() => live.matchesFilters === false ? [] : inventory, [live.matchesFilters, inventory])
+  const broaden = useRef<(() => void) | null>(null)
+  const handleBroadenReady = useCallback((next: (() => void) | null) => { broaden.current = next }, [])
   const appliedGeneration = useRef(0)
   const [developmentNavigation, setDevelopmentNavigation] = useState<EventPreviewNavigation | null>(null)
   const cameraController = useRef<SelectionCameraController | null>(null)
@@ -58,21 +77,37 @@ export function Component({ embedded = false }: { embedded?: boolean } = {}) {
       return eventIds.length > 0 && (current.trigger === 'viewport' || eventIds.length > 1) ? { ...current, eventIds } : null
     })
   }, [])
-  useEffect(() => {
-    if (fixtureMode || live.generation <= appliedGeneration.current) return
+  const restoreEntry = useCallback((saved: NonNullable<ReturnType<typeof readMapReturn>>) => {
+    pendingReturn.current = saved
+    setSelectedEventId(null); setChooser(null)
+    restoreCamera.current?.(saved.camera)
+  }, [])
+  useLayoutEffect(() => {
+    if (entry.current === location.key) return
+    entry.current = location.key
+    const saved = readMapReturn(location.state)
+    // Synchronize the external history entry and mounted WebGL camera before paint.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (navigationType === 'POP' && saved?.path === origin) restoreEntry(saved)
+  }, [location.key, location.state, navigationType, origin, restoreEntry])
+  useLayoutEffect(() => {
+    if (fixtureMode) return
+    if (live.generation > appliedGeneration.current) {
     appliedGeneration.current = live.generation
     commitEvents(live.events)
-    if (pendingReturn.current && !live.error && live.complete !== null) {
+    }
+    const savedAreaReady = !live.bounds || Boolean(viewport && live.bounds.west <= viewport.bounds.west && live.bounds.east >= viewport.bounds.east && live.bounds.south <= viewport.bounds.south && live.bounds.north >= viewport.bounds.north)
+    if (pendingReturn.current && savedAreaReady && live.matchesFilters !== false && !live.pending && !live.error && live.complete !== null) {
       const saved = pendingReturn.current
       pendingReturn.current = null
-      const eligible = new Set(live.events.filter(event => Date.parse(event.endsAt) > Date.now()).map(event => event.id))
+      const eligible = new Set(live.events.filter(event => Date.parse(event.endsAt) > Date.now() + (live.serverOffset ?? 0)).map(event => event.id))
       setSelectedEventId(saved.selectedEventId && eligible.has(saved.selectedEventId) ? saved.selectedEventId : null)
       const ids = saved.chooser?.eventIds.filter(id => eligible.has(id)) ?? []
       setChooser(saved.chooser && ids.length ? { ...saved.chooser, eventIds: ids } : null)
       returnFocus.current = saved.chooser?.trigger ?? 'map'
       setFocusRequest(value => value + 1)
     }
-  }, [fixtureMode, live.events, live.generation, live.complete, live.error, commitEvents])
+  }, [fixtureMode, live.events, live.generation, live.complete, live.error, live.pending, live.matchesFilters, live.serverOffset, live.bounds, viewport, location.key, commitEvents])
   useEffect(() => {
     if (!import.meta.env.DEV || !fixtureMode) return
     void import('./data/developmentMapEvents').then(({ getDevelopmentMapEvents, getDevelopmentEventPreviewNavigation }) => {
@@ -106,7 +141,8 @@ export function Component({ embedded = false }: { embedded?: boolean } = {}) {
   const handleError = useCallback(() => {
     if (activeAttempt.current !== attempt) return
     setState(current => current === 'ready' ? current : 'error')
-  }, [attempt, setState])
+    onUnavailable?.()
+  }, [attempt, setState, onUnavailable])
   const retryMap = useCallback(() => {
     activeAttempt.current += 1
     setAttempt(activeAttempt.current)
@@ -184,12 +220,27 @@ export function Component({ embedded = false }: { embedded?: boolean } = {}) {
   }, [focusSelectionId, chooserKey, chooser?.focusedId, focusRequest])
 
   const navigationState = useCallback(() => {
-    const camera = (readSnapshot.current?.() ?? viewport)?.camera
+    const snapshot = readSnapshot.current?.() ?? viewport
+    const camera = snapshot?.camera
     const currentState = publicReturnState(window.location.pathname === location.pathname ? window.history.state?.usr : location.state)
-    const mapReturn = camera ? readMapReturn({ mapReturn: { version: 1, path: origin, camera, selectedEventId, chooser } }) : null
+    const mapReturn = camera ? readMapReturn({ mapReturn: { version: 1, path: origin, camera, area: snapshot?.bounds ? discoveryBounds(snapshot.bounds) : undefined, selectedEventId, chooser } }) : null
     const state = { ...currentState, ...(location.pathname === '/discover' ? { discoverySearch: serializeDiscoveryFilters(parseDiscoverySearch(location.search)) } : {}), ...(mapReturn ? { mapReturn } : {}) }
     return state
   }, [viewport, location.pathname, location.state, location.search, origin, selectedEventId, chooser])
+  useLayoutEffect(() => {
+    onContextReady?.({ state: navigationState, broaden: () => broaden.current?.() })
+    return () => onContextReady?.(null)
+  }, [onContextReady, navigationState])
+  const changeFilters = (next: DiscoveryFilters) => {
+    if (serializeDiscoveryFilters(next) === search) return
+    pendingReturn.current = null
+    const state = navigationState()
+    window.history.replaceState({ ...window.history.state, usr: state }, '')
+    const nextSearch = serializeDiscoveryFilters(next)
+    const mapReturn = state.mapReturn ? { ...state.mapReturn, path: '/map' + nextSearch } : undefined
+    navigate({ pathname: '/map', search: nextSearch }, { state: { ...state, ...(mapReturn ? { mapReturn } : {}) } })
+  }
+  useEffect(() => { if (pendingReturn.current?.path !== origin) pendingReturn.current = null }, [origin])
   useEffect(() => {
     if (!viewport || pendingReturn.current || window.location.pathname !== location.pathname) return
     const entryKey: unknown = window.history.state?.key
@@ -214,6 +265,8 @@ export function Component({ embedded = false }: { embedded?: boolean } = {}) {
       : live.complete === true && live.events.length === 0 ? 'No events found in this area.' : null)
 
   return (
+    <div className={embedded ? undefined : 'map-discovery-shell'}>
+    {!embedded ? <div className="map-discovery-filters"><FilterControls filters={filters} onChange={changeFilters} /></div> : null}
     <Container ref={root} className={`living-map${embedded ? ' living-map--embedded' : ''}`} aria-label="Explore the Bay Area" data-renderer-state={state} onKeyDown={handleKeyDown}>
       <div className="living-map__surface" inert={state !== 'ready' || undefined}>
       {events ? <WheretooMap
@@ -221,6 +274,8 @@ export function Component({ embedded = false }: { embedded?: boolean } = {}) {
         visualScene={scene}
         initialCamera={initialReturn?.camera}
         onSnapshotReady={handleSnapshotReady}
+        onRestoreReady={handleRestoreReady}
+        onBroadenReady={handleBroadenReady}
         events={events}
         selectedEventId={selectedEvent?.id ?? null}
         onSelectEvent={handleSelectEvent}
@@ -233,7 +288,7 @@ export function Component({ embedded = false }: { embedded?: boolean } = {}) {
       /> : null}
       </div>
       <header className="living-map__masthead"><span className="living-map__wordmark">wheretoo</span>{state === 'ready' ? <button ref={chooserTrigger} className="living-map__choose" type="button" aria-label="Choose an event on the map" disabled={!visibleEvents.length} onClick={openViewportChooser}>Events in view</button> : null}</header>
-      {!fixtureMode && (state === 'ready' || live.error) && (eventFeedback || live.complete === null) ? <div className="living-map__event-status" role="status"><span>{eventFeedback ?? 'Loading events…'}</span>{!live.pending && (live.error || live.complete === false) ? <button type="button" onClick={live.retry}>Retry events</button> : null}</div> : null}
+      {!fixtureMode && (state === 'ready' || live.error) && (eventFeedback || live.complete === null) ? <div className="living-map__event-status" role="status"><span>{eventFeedback ?? 'Loading events…'}</span>{live.complete === true && live.events.length === 0 ? <button type="button" onClick={() => broaden.current?.()} disabled={Boolean(viewport && viewport.zoom <= MAP_MIN_ZOOM)}>Zoom out to search a wider area</button> : null}{!live.pending && (live.error || live.complete === false) ? <button type="button" onClick={live.retry}>Retry events</button> : null}</div> : null}
       {selectedEvent ? (
         <div className="living-map__preview-layer">
           <EventPreviewCard
@@ -263,5 +318,6 @@ export function Component({ embedded = false }: { embedded?: boolean } = {}) {
       {interactionError ? <div className="living-map__interaction-error" role="status"><span>{interactionError}</span><button type="button" onClick={closePreview}>Dismiss</button></div> : null}
       <MapStartupOverlay key={`startup-${attempt}`} state={state} onRetry={retryMap} />
     </Container>
+    </div>
   )
 }

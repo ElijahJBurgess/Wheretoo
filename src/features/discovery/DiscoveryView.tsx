@@ -1,8 +1,7 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { DiscoveryMapPreview } from './DiscoveryMapPreview'
 import { Link } from 'react-router-dom'
-import { eventCategories, type EventCategory } from '../events/event.types'
-import { defaultDiscoveryFilters } from './discovery.filters'
+import { DiscoveryFilters as FilterControls } from './DiscoveryFilters'
 import {
   categoryLabel,
   discoveryAdmissionLabel,
@@ -26,19 +25,17 @@ export type DiscoveryViewProps = {
   moreError?: string | null
   notice?: string | null
   invalidItemCount?: number
-  onFiltersChange(filters: DiscoveryFilters): void
+  onFiltersChange(filters: DiscoveryFilters, field?: keyof DiscoveryFilters): void
   onRefresh(): void
   onLoadMore(): void
   onRetry(): void
   publicSearch: string
+  mapPreview?: ReactNode
+  onBroadenArea?(): void
+  canBroadenArea?: boolean
+  regionFallback?: boolean
   eventHref?(item: DiscoveryDisplayItem): string
 }
-
-const dateFilters = [
-  ['upcoming', 'Upcoming'],
-  ['today', 'Today'],
-  ['weekend', 'This weekend'],
-] as const
 
 const shortcuts = [
   ['This Weekend', 'Make a little room for going out.', '/discover?when=weekend'],
@@ -146,30 +143,6 @@ function EventLink({ item, publicSearch, variant, eventHref }: {
   )
 }
 
-function DiscoveryFiltersView({ filters, onChange }: {
-  filters: DiscoveryFilters
-  onChange(filters: DiscoveryFilters): void
-}) {
-  const filtered = filters.when !== 'upcoming' || filters.category !== null || filters.price !== null
-  return (
-    <section aria-label="Filter events" className="discovery-filters">
-      <div className="discovery-filter-region"><PinMark /><span>SF Bay Area</span></div>
-      <label>Date<select value={filters.when} onChange={(event) => onChange({ ...filters, when: event.target.value as DiscoveryFilters['when'] })}>
-        {dateFilters.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-      </select></label>
-      <label>Category<select value={filters.category ?? ''} onChange={(event) => onChange({ ...filters, category: (event.target.value || null) as EventCategory | null })}>
-        <option value="">All categories</option>
-        {eventCategories.map((category) => <option key={category} value={category}>{categoryLabel(category)}</option>)}
-      </select></label>
-      <label>Admission<select value={filters.price ?? ''} onChange={(event) => onChange({ ...filters, price: (event.target.value || null) as DiscoveryFilters['price'] })}>
-        <option value="">Any price</option><option value="free">Free</option><option value="paid">Paid</option>
-      </select></label>
-      <a className="discovery-explore" href="#discovery-results">Explore events <ArrowMark /></a>
-      {filtered ? <button className="discovery-clear-filters" onClick={() => onChange(defaultDiscoveryFilters)} type="button">Clear filters</button> : null}
-    </section>
-  )
-}
-
 function LoadingResults() {
   return (
     <section aria-busy="true" aria-live="polite" className="discovery-results-state" role="status">
@@ -195,15 +168,15 @@ function ErrorResults({ errorKind, retryAfterSeconds, onRetry }: Pick<DiscoveryV
 
 export function DiscoveryView({
   filters, items, highlightItems, status, errorKind, retryAfterSeconds, hasMore, isLoadingMore,
-  moreError, notice, invalidItemCount = 0, onFiltersChange, onRefresh, onLoadMore, onRetry, publicSearch,
+  mapPreview, onBroadenArea, canBroadenArea = true, regionFallback = false, moreError, notice, invalidItemCount = 0, onFiltersChange, onRefresh, onLoadMore, onRetry, publicSearch,
   eventHref,
 }: DiscoveryViewProps) {
   const highlightCandidate = status === 'ready' ? selectDiscoveryHighlight(highlightItems ?? items) : null
   const highlight = highlightCandidate ? items.find((item) => item.id === highlightCandidate.id) ?? null : null
   const rows = highlight ? items.filter((item) => item.id !== highlight.id) : items
-  const filtered = filters.when !== 'upcoming' || filters.category !== null || filters.price !== null
+  const filtered = filters.when !== 'next7' || filters.category !== null || filters.price !== null
   const retryDelayed = (retryAfterSeconds ?? 0) > 0
-  const windowLabel = filters.when === 'today' ? 'Today' : filters.when === 'weekend' ? 'This weekend' : 'Next 30 days'
+  const windowLabel = filters.when === 'today' ? 'Today' : filters.when === 'weekend' ? 'This weekend' : filters.when === 'upcoming' ? 'Next 30 Days' : 'Next 7 Days'
   const discoverDestination = `/discover${publicSearch}`
 
   return (
@@ -213,7 +186,7 @@ export function DiscoveryView({
           <Link aria-label="Wheretoo discovery home" className="discovery-wordmark platform-wordmark" to="/discover">wheretoo</Link>
           <nav aria-label="Public navigation" className="discovery-nav">
             <Link aria-current="page" to={discoverDestination}><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="m15 9-2 4-4 2 2-4Z" /></svg>Discover</Link>
-            <Link to="/map"><PinMark />Map</Link>
+            <Link to={'/map' + publicSearch}><PinMark />Map</Link>
             <Link to="/organizer/events"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="15" rx="3" /><path d="M8 3v6m8-6v6M4 12h16" /></svg>Organize</Link>
           </nav>
         </header>
@@ -224,25 +197,26 @@ export function DiscoveryView({
           <img className="discovery-intro__media" src={discoveryHero} width="2103" height="748" alt="" fetchPriority="high" />
         </section>
 
-        <DiscoveryFiltersView filters={filters} onChange={onFiltersChange} />
+        <FilterControls filters={filters} onChange={onFiltersChange}><a className="discovery-explore" href="#discovery-results">Explore events <ArrowMark /></a></FilterControls>
 
         <section aria-labelledby="discovery-map-heading" className="discovery-map-entry">
           <div className="discovery-map-entry__heading">
             <div><h2 id="discovery-map-heading">Find your next stop.</h2><p>Explore events around the Bay.</p></div>
-            <Link className="discovery-map-entry__action" to="/map">Explore the map <ArrowMark /></Link>
+            <Link className="discovery-map-entry__action" to={'/map' + publicSearch}>Explore the map <ArrowMark /></Link>
           </div>
           <div className="discovery-map-entry__preview">
-            <DiscoveryMapPreview />
+            {mapPreview ?? <DiscoveryMapPreview />}
           </div>
         </section>
 
+        {regionFallback ? <p className="discovery-notice" role="status">The map is unavailable. Showing Bay Area results.</p> : null}
         <section aria-labelledby="discovery-results-heading" className="discovery-results" id="discovery-results">
           {highlight ? <div className="discovery-feature-row">
             <EventLink eventHref={eventHref} item={highlight} publicSearch={publicSearch} variant="hero" />
           </div> : null}
           <div className="discovery-results__heading">
-            <h2 id="discovery-results-heading">{filters.when === 'today' ? 'Today in the Bay' : filters.when === 'weekend' ? 'This weekend in the Bay' : 'Coming up in the Bay'}</h2>
-            <span>{windowLabel}</span>
+            <h2 id="discovery-results-heading">{regionFallback ? 'Events in the Bay Area' : 'Events in this area'}</h2>
+            <span>{windowLabel}</span>{onBroadenArea ? <button type="button" onClick={onBroadenArea} disabled={!canBroadenArea}>Zoom out to search a wider area</button> : null}
             <button disabled={retryDelayed} onClick={onRefresh} type="button">Refresh</button>
           </div>
           {status === 'ready' ? <p aria-label="Discovery results" aria-live="polite" className="discovery-visually-hidden" role="status">{items.length} {items.length === 1 ? 'event' : 'events'}</p> : null}
@@ -257,9 +231,9 @@ export function DiscoveryView({
           {status === 'error' ? <ErrorResults errorKind={errorKind} retryAfterSeconds={retryAfterSeconds} onRetry={onRetry} /> : null}
           {status === 'ready' && items.length === 0 ? (
             <section aria-live="polite" className="discovery-results-state" role="status">
-              <p className="discovery-state-title">{filtered ? 'No events match these filters.' : 'No upcoming events here yet.'}</p>
-              <p>{filtered ? 'Clear the filters to see everything coming up.' : 'New SF Bay Area events will appear here as they are published.'}</p>
-              {filters.when === 'today' ? <button className="discovery-state-action" onClick={() => onFiltersChange({ ...filters, when: 'upcoming' })} type="button">See upcoming events</button> : null}
+              <p className="discovery-state-title">{filtered ? 'No events match these filters.' : 'No events in this map area yet.'}</p>
+              <p>{filtered ? 'Clear the filters to see everything coming up.' : 'Zoom out to explore more of the Bay Area.'}</p>
+              {filters.when === 'today' ? <button className="discovery-state-action" onClick={() => onFiltersChange({ ...filters, when: 'next7' })} type="button">See Next 7 Days</button> : null}
             </section>
           ) : null}
 

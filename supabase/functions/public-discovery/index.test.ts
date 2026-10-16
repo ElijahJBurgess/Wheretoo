@@ -308,3 +308,12 @@ Deno.test("all invalid rows fail while one invalid row preserves the valid page"
   assertEquals(response.status, 200);
   assertEquals((await response.json()).items, [publicRow, null]);
 });
+
+Deno.test("unified next7 viewport contract accepts bounded queries and rejects unsafe areas", async () => {
+  const bounds = { west: -122.4, south: 37.7, east: -122.1, north: 37.9 };
+  const { handler } = setup();
+  assertEquals((await handler(req({ region: 'sf_bay_area', when: 'next7', bounds }))).status, 200);
+  for (const bad of [null, { ...bounds, west: -180 }, { ...bounds, east: -122.5 }, { ...bounds, token: 'private' }]) {
+    assertEquals((await handler(req({ region: 'sf_bay_area', when: 'next7', bounds: bad }))).status, 400);
+  }
+});

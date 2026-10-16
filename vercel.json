@@ -29,7 +29,8 @@
     "deploymentEnabled": {
       "codex/smart-event-loading": false,
       "codex/discovery-query-optimization": false,
-      "codex/map-event-journey": false
+      "codex/map-event-journey": false,
+      "codex/unified-discovery-filters": false
     }
   }
 }

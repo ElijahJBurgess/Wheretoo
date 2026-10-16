@@ -61,7 +61,7 @@ function fakeMap({ initialZoom = 14.6 } = {}) {
     off: vi.fn((name: string, layerOrListener: string | Listener, maybeListener?: Listener) => {
       listeners.get(listenerKey(name, layerOrListener))?.delete(maybeListener ?? layerOrListener as Listener); return map
     }),
-    remove: vi.fn(), addControl: vi.fn(), removeControl: vi.fn(), resize: vi.fn(), stop: vi.fn(), easeTo: vi.fn(),
+    jumpTo: vi.fn(), zoomOut: vi.fn(), remove: vi.fn(), addControl: vi.fn(), removeControl: vi.fn(), resize: vi.fn(), stop: vi.fn(), easeTo: vi.fn(),
     project: vi.fn(() => ({ x: 720, y: 450 })), panBy: vi.fn(),
     addSource: vi.fn((id: string) => { sources.set(id, id === EVENT_SOURCE_ID ? clusterSource : { setData: vi.fn() }) }),
     getSource: vi.fn((id: string) => sources.get(id)),
@@ -113,6 +113,17 @@ describe('WheretooMap', () => {
     vi.stubGlobal('ResizeObserver', FakeResizeObserver)
     vi.mocked(isMapboxSupported).mockReturnValue(true)
     vi.mocked(createNavigationControl).mockReturnValue({} as never)
+  })
+
+  it('broadens through the existing camera and releases the control without recreating the map', async () => {
+    const fake = fakeMap(); vi.mocked(createMapboxMap).mockReturnValue(fake.map as never)
+    const broadener = vi.fn()
+    const view = render(<WheretooMap visualScene={null} onBroadenReady={broadener} onReady={vi.fn()} onMoveEnd={vi.fn()} onRendererError={vi.fn()} />)
+    await waitFor(() => expect(broadener).toHaveBeenCalled())
+    broadener.mock.calls[0][0]()
+    expect(fake.map.zoomOut).toHaveBeenCalledOnce()
+    expect(createMapboxMap).toHaveBeenCalledOnce()
+    view.unmount(); expect(broadener).toHaveBeenLastCalledWith(null)
   })
 
   it('initializes the saved camera once and releases its read-only navigation snapshot on cleanup', async () => {

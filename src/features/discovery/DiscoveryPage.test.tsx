@@ -1,4 +1,12 @@
 vi.mock('../event-images/publicEventImages', () => ({ usePublicEventImages: () => ({ data: [{eventId: 'first', position: 2, url: 'https://example.invalid/secondary.png'}, {eventId: 'first', position: 1, url: 'https://example.invalid/flyer.png'}], isError: false, isPending: false }) }))
+import { useEffect } from 'react'
+import type { DiscoveryMapProps } from '../../map/LivingMapPage'
+const mockContext = vi.hoisted(() => ({ value: null as unknown }))
+vi.mock('./DiscoveryMapPreview', () => ({ DiscoveryMapPreview: ({ onAreaChange, onContextReady }: DiscoveryMapProps) => {
+  useEffect(() => { onAreaChange?.({ west: -122.5, south: 37.7, east: -122.1, north: 37.9 }) }, [onAreaChange])
+  useEffect(() => { if (mockContext.value) onContextReady?.({ state: () => mockContext.value as ReturnType<import('../../map/LivingMapPage').DiscoveryMapHandle['state']>, broaden: () => {} }) }, [onContextReady])
+  return <section aria-label="Test map" />
+} }))
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -11,7 +19,7 @@ vi.mock('./discovery.api', async importOriginal => ({ ...await importOriginal<ty
 function page(id: string, nextCursor: string | null = null): DiscoveryPageData {
   return { items: [{ id, title: `Event ${id}`, category: 'music', admissionType: 'paid', startsAt: '2026-09-14T03:00:00Z', endsAt: '2026-09-14T06:00:00Z', timezone: 'America/Los_Angeles', venueName: null, city: 'Oakland', artworkReference: null, admission: { state: 'unknown', minimumBuyerAmountMinor: null, currency: null } }], nextCursor, serverNow: '2026-09-13T12:00:00Z', window: { start: '2026-09-13T12:00:00Z', end: '2026-10-13T07:00:00Z', timezone: 'America/Los_Angeles' }, invalidItemCount: 0 }
 }
-afterEach(() => { vi.restoreAllMocks(); read.mockReset() })
+afterEach(() => { vi.restoreAllMocks(); read.mockReset(); mockContext.value = null })
 it.each(['Clear filters', 'Wheretoo discovery home'])('starts a new first page on explicit filter return via %s, retaining cached pages only for POP', async control => {
   vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
   Element.prototype.scrollIntoView = vi.fn()
@@ -34,4 +42,20 @@ it.each(['Clear filters', 'Wheretoo discovery home'])('starts a new first page o
   await act(() => router.navigate(-1))
   await screen.findByText('Event music')
   expect(read).toHaveBeenCalledTimes(4)
+})
+it('does not restore captured scroll when a same-page filter read finishes', async () => {
+  const scroll = vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
+  Element.prototype.scrollTo = vi.fn()
+  const mapReturn = { version: 1, path: '/discover', camera: { center: [-122.263, 37.804], zoom: 14.8, pitch: 12, bearing: 0 }, area: { west: -122.5, south: 37.7, east: -122.1, north: 37.9 }, selectedEventId: null, chooser: null }
+  mockContext.value = { mapReturn, discoverySearch: '', discoveryScroll: 0, discoveryCardScroll: 0 }
+  let finish!: (data: DiscoveryPageData) => void
+  read.mockResolvedValueOnce(page('first')).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  const router = createMemoryRouter([{ path: '/discover', element: <DiscoveryPage /> }], { initialEntries: [{ pathname: '/discover', state: { mapReturn } }] })
+  render(<QueryClientProvider client={new QueryClient()}><RouterProvider router={router} /></QueryClientProvider>)
+  await screen.findByText('Event first'); scroll.mockClear()
+  await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Category' }), 'music')
+  await waitFor(() => expect(read).toHaveBeenCalledTimes(2))
+  await act(async () => finish(page('music')))
+  await screen.findByText('Event music')
+  expect(scroll).not.toHaveBeenCalled()
 })
