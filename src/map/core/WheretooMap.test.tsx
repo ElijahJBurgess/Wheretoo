@@ -135,6 +135,41 @@ describe('WheretooMap', () => {
     }
   })
 
+  it('coalesces paired foreground descriptor refreshes', async () => {
+    vi.useFakeTimers()
+    const fake = fakeMap(); vi.mocked(createMapboxMap).mockReturnValue(fake.map as never)
+    vi.mocked(fetchMapIconDescriptors).mockImplementation(async () => {
+      await new Promise(resolve => setTimeout(resolve, 100))
+      return [descriptor]
+    })
+    const view = render(<WheretooMap visualScene={null} events={getDevelopmentMapEvents()} onReady={vi.fn()} onMoveEnd={vi.fn()} onRendererError={vi.fn()} />)
+    try {
+      act(() => { window.dispatchEvent(new Event('focus')); document.dispatchEvent(new Event('visibilitychange')) })
+      expect(fetchMapIconDescriptors).toHaveBeenCalledTimes(1)
+      await act(async () => { await vi.advanceTimersByTimeAsync(101) })
+      act(() => { window.dispatchEvent(new Event('focus')); document.dispatchEvent(new Event('visibilitychange')) })
+      expect(fetchMapIconDescriptors).toHaveBeenCalledTimes(2)
+    } finally {
+      view.unmount(); vi.useRealTimers(); vi.mocked(fetchMapIconDescriptors).mockResolvedValue([descriptor])
+    }
+  })
+
+  it('does not let a hidden notification suppress renewal on return to visibility', async () => {
+    vi.useFakeTimers()
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    const fake = fakeMap(); vi.mocked(createMapboxMap).mockReturnValue(fake.map as never)
+    const view = render(<WheretooMap visualScene={null} events={getDevelopmentMapEvents()} onReady={vi.fn()} onMoveEnd={vi.fn()} onRendererError={vi.fn()} />)
+    try {
+      await act(async () => { await vi.advanceTimersByTimeAsync(101) })
+      visibility.mockReturnValue('hidden')
+      act(() => document.dispatchEvent(new Event('visibilitychange')))
+      visibility.mockReturnValue('visible')
+      act(() => document.dispatchEvent(new Event('visibilitychange')))
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      expect(fetchMapIconDescriptors).toHaveBeenCalledTimes(2)
+    } finally { view.unmount(); visibility.mockRestore(); vi.useRealTimers() }
+  })
+
   it('reports a missing or malformed public token through the renderer error boundary', () => {
     requirePublicMapboxAccessToken.mockImplementation(() => { throw new Error('Missing token') })
     const onRendererError = vi.fn()

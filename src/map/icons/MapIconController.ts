@@ -29,19 +29,22 @@ export class MapIconController {
   private disposed = false
   private lease = 0
   private ready: string[] = []
+  private rankedIds: string[] | null = null
   private applied = ''
   private timers = new Set<ReturnType<typeof setTimeout>>()
   private leaseTimer?: ReturnType<typeof setTimeout>
   private pending = new Set<() => void>()
   constructor(private map: Renderer, private requestImage: IconImageRequest = loadIconImage) {}
 
-  setEvents(events: readonly WheretooMapEvent[]) { this.events = events; this.applied = ''; this.reconcile() }
-  setSelection(id: string | null) { this.selected = id; this.applied = ''; this.reconcile() }
+  setEvents(events: readonly WheretooMapEvent[]) { if (events === this.events) return; this.events = events; this.rankedIds = null; this.applied = ''; this.reconcile() }
+  setSelection(id: string | null) { if (id === this.selected) return; this.selected = id; this.rankedIds = null; this.reconcile() }
   setViewport(viewport: Viewport) {
     if (viewport.mobile !== this.viewport.mobile) {
       this.hideFallbackFirst()
       for (const entry of this.entries.values()) { this.removeLayers(entry); if (entry.image) entry.state = 'decoded' }
     }
+    if (viewport.mobile !== this.viewport.mobile || viewport.longitude !== this.viewport.longitude || viewport.latitude !== this.viewport.latitude
+      || viewport.visibleIds.size !== this.viewport.visibleIds.size || [...viewport.visibleIds].some(id => !this.viewport.visibleIds.has(id))) this.rankedIds = null
     this.viewport = viewport; this.reconcile()
   }
   setDescriptors(descriptors: readonly IconDescriptor[], expiresAt: number) {
@@ -52,6 +55,7 @@ export class MapIconController {
         }
       }
     }
+    this.rankedIds = null
     this.descriptors = new Map(descriptors.map(d => [d.versionId, d])); this.lease = expiresAt
     if (this.leaseTimer) { clearTimeout(this.leaseTimer); this.timers.delete(this.leaseTimer) }
     this.leaseTimer = this.schedule(() => this.reconcile(), Math.max(0, expiresAt - Date.now()))
@@ -81,15 +85,27 @@ export class MapIconController {
   }
   private desired() {
     if (Date.now() >= this.lease) return []
+    if (this.rankedIds) return this.rankedIds
     const { longitude, latitude, visibleIds } = this.viewport
-    const ranked = this.events.filter(e => e.mapIconVersionId && this.descriptors.has(e.mapIconVersionId))
-      .sort((a, b) => Number(b.id === this.selected) - Number(a.id === this.selected)
-        || Number(visibleIds.has(b.id)) - Number(visibleIds.has(a.id))
-        || Math.hypot(a.longitude - longitude, a.latitude - latitude) - Math.hypot(b.longitude - longitude, b.latitude - latitude)
-        || Number(this.entries.has(b.mapIconVersionId!)) - Number(this.entries.has(a.mapIconVersionId!)) || a.id.localeCompare(b.id))
-    const ids = [...new Set(ranked.filter(e => e.id === this.selected || visibleIds.has(e.id) || this.entries.has(e.mapIconVersionId!)).map(e => e.mapIconVersionId!))]
-    return ids.slice(0, this.viewport.mobile ? 8 : 16)
+    type Candidate = { id: string; version: string; selected: number; visible: number; resident: number; distance: number }
+    const compare = (a: Candidate, b: Candidate) => a.selected - b.selected || a.visible - b.visible
+      || a.resident - b.resident || a.distance - b.distance || a.id.localeCompare(b.id)
+    const best = new Map<string, Candidate>()
+    for (const event of this.events) {
+      const version = event.mapIconVersionId
+      if (!version || !this.descriptors.has(version)) continue
+      const visible = visibleIds.has(event.id), resident = this.entries.has(version), selected = event.id === this.selected
+      if (!selected && !visible && !resident) continue
+      const candidate = { id: event.id, version, selected: selected ? 0 : 1, visible: visible ? 0 : 1,
+        // Keep visible residents stable under small pans; selection and newly visible icons still take priority.
+        resident: resident ? 0 : 1, distance: (event.longitude - longitude) ** 2 + (event.latitude - latitude) ** 2 }
+      const previous = best.get(version)
+      if (!previous || compare(candidate, previous) < 0) best.set(version, candidate)
+    }
+    this.rankedIds = [...best.values()].sort(compare).slice(0, this.viewport.mobile ? 8 : 16).map(candidate => candidate.version)
+    return this.rankedIds
   }
+
   reconcile() {
     if (this.disposed || !this.styleReady) return
     const desired = new Set(this.desired())

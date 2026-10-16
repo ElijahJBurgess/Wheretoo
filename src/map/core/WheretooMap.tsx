@@ -113,12 +113,13 @@ export function WheretooMap({
   }, [onReady, onMoveEnd, onRendererError, onSelectEvent, onChooseEvents, onClusterError, onCameraControllerReady])
 
   useEffect(() => {
-    let disposed = false, generation = 0
+    let disposed = false, generation = 0, inFlight = false, lastForeground = -Infinity
     const refresh = async () => {
-      if (document.visibilityState === 'hidden') return
+      if (document.visibilityState === 'hidden' || inFlight) return
+      inFlight = true
       const token = ++generation
       const started = Date.now()
-      const descriptors = await fetchMapIconDescriptors(JSON.parse(iconIdsKey) as string[]).catch(() => [])
+      const descriptors = await fetchMapIconDescriptors(JSON.parse(iconIdsKey) as string[]).catch(() => []).finally(() => { inFlight = false })
       if (disposed || token !== generation) return
       manifest.current = { descriptors, expiresAt: started + 60000 }
       icons.current?.setDescriptors(descriptors, manifest.current.expiresAt)
@@ -126,7 +127,10 @@ export function WheretooMap({
     void refresh()
     // Renew ahead of the hard lease deadline; a failed renewal still expires at 60s.
     const timer = setInterval(() => { void refresh() }, 45000)
-    const foreground = () => { void refresh() }
+    const foreground = () => {
+      if (document.visibilityState !== 'visible' || inFlight || Date.now() - lastForeground < 250) return
+      lastForeground = Date.now(); void refresh()
+    }
     window.addEventListener('focus', foreground)
     window.addEventListener('online', foreground)
     document.addEventListener('visibilitychange', foreground)
