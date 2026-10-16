@@ -1,3 +1,4 @@
+import { readMapReturn } from '../../map/navigation/mapNavigation'
 import { parseDiscoverySearch, serializeDiscoveryFilters } from './discovery.filters'
 
 export function discoveryReturnPath(state: unknown): string {
@@ -14,4 +15,18 @@ export function discoveryScrollPosition(state: unknown): number {
 export function discoveryCardScrollPosition(state: unknown): number {
   const scroll = typeof state === 'object' && state !== null && 'discoveryCardScroll' in state ? state.discoveryCardScroll : null
   return typeof scroll === 'number' && Number.isFinite(scroll) && scroll >= 0 && scroll <= 1_000_000 ? scroll : 0
+}
+
+// Carry only public, bounded return hints through event and quantity routes.
+export function publicReturnState(state: unknown) {
+  const mapReturn = readMapReturn(state)
+  return {
+    discoverySearch: discoveryReturnPath(state).slice('/discover'.length),
+    discoveryScroll: discoveryScrollPosition(state),
+    discoveryCardScroll: discoveryCardScrollPosition(state),
+    ...(mapReturn ? { mapReturn } : {}),
+  }
+}
+export function publicReturnPath(state: unknown): string {
+  return readMapReturn(state)?.path ?? discoveryReturnPath(state)
 }

@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { publicReturnState } from '../discovery/discovery.navigation'
+import { Link, useLocation } from 'react-router-dom'
 import { type FreeRsvpEvent, rsvpApi } from './rsvp.api'
 export function FreeRsvpEntry({ eventId }: { eventId: string }) {
+  const location = useLocation()
   const [value, setValue] = useState<{ eventId: string; data: FreeRsvpEvent | null } | null>(null)
   const [error, setError] = useState(false)
   const [version, setVersion] = useState(0)
@@ -40,7 +42,7 @@ export function FreeRsvpEntry({ eventId }: { eventId: string }) {
     )
   }
   return (
-    <Link className='ui-button buyer-primary' to={'/events/' + eventId + '/rsvp'}>
+    <Link className='ui-button buyer-primary' to={'/events/' + eventId + '/rsvp'} state={publicReturnState(location.state)}>
       RSVP for free
     </Link>
   )

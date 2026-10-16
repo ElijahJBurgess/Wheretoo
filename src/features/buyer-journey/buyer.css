@@ -162,6 +162,8 @@ html:has(.buyer-page), body:has(.buyer-page) { background: #080a0b; }
 .buyer-event-hero__image { display: block; width: min(360px, calc(100% - 36px)); height: auto; aspect-ratio: var(--event-flyer-ratio); object-fit: contain; margin: 0 auto; border: 1px solid var(--color-border); border-radius: 12px; background: var(--event-flyer-mat); }
 .buyer-event-hero__copy { padding: 24px 18px; display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 16px; overflow-wrap: anywhere; }
 .buyer-event h1 { font-size: clamp(34px, 5vw, 52px); max-width: 18ch; min-width: 0; overflow-wrap: anywhere; line-height: 1.06; }
+/* Route-entry focus announces the heading without framing it as a control. */
+.buyer-event h1[tabindex="-1"]:focus { outline: none; }
 .buyer-event__organizer { color: #e4dfeb; font-size: 14px; }
 .buyer-event-facts { display: grid; gap: 12px; margin: 0; }
 .buyer-event-facts > div { display: flex; gap: 10px; align-items: flex-start; }

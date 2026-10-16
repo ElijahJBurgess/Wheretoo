@@ -14,10 +14,12 @@ import { EVENT_LAYER_IDS, EVENT_SOURCE_ID } from '../style/eventLayers'
 import { hasCompleteEventLayerInstallation, installEventLayers, updateEventCollection, updateEventMarkerSizing, updateEventSelection } from './eventLayerController'
 import { MAP_MAX_ZOOM, MAP_MIN_ZOOM, MOBILE_MAP_BREAKPOINT, SERVICE_BOUNDS } from './map.constants'
 import { createMapboxMap, createMapOptions, createNavigationControl, isMapboxSupported } from './mapbox.factory'
-import type { MapRendererError, MapViewportSnapshot } from './map.types'
+import type { MapCamera, MapRendererError, MapViewportSnapshot } from './map.types'
 import type { VisualScene } from './visualScenes'
 
 export type WheretooMapProps = {
+  initialCamera?: MapCamera | null
+  onSnapshotReady?(read: (() => MapViewportSnapshot | null) | null): void
   visualScene: VisualScene | null
   events?: readonly WheretooMapEvent[]
   selectedEventId?: string | null
@@ -61,6 +63,7 @@ function readViewport(map: ReturnType<typeof createMapboxMap>): MapViewportSnaps
       latitude: clamp(center.lat, SERVICE_BOUNDS[0][1], SERVICE_BOUNDS[1][1]),
     },
     zoom: clamp(map.getZoom(), MAP_MIN_ZOOM, MAP_MAX_ZOOM),
+    camera: { center: [center.lng, center.lat], zoom: map.getZoom(), pitch: map.getPitch(), bearing: map.getBearing() },
   }
 }
 
@@ -92,10 +95,11 @@ function readClusterFeature(feature: unknown) {
 export function WheretooMap({
   visualScene, events = EMPTY_EVENTS, selectedEventId = null, onSelectEvent = () => undefined, onCameraControllerReady = () => undefined,
   onChooseEvents = () => undefined, onClusterError = () => undefined,
-  onReady, onMoveEnd, onRendererError,
+  onReady, onMoveEnd, onRendererError, initialCamera, onSnapshotReady,
 }: WheretooMapProps) {
   const [container, setContainer] = useState<HTMLDivElement | null>(null)
   const initialScene = useRef(visualScene)
+  const navigationCamera = useRef(initialCamera)
   const currentEvents = useRef(events)
   const mapRef = useRef<ReturnType<typeof createMapboxMap> | null>(null)
   const layersInstalled = useRef(false)
@@ -105,12 +109,12 @@ export function WheretooMap({
   const iconIdsKey = JSON.stringify([...new Set(events.flatMap(e => e.mapIconVersionId ? [e.mapIconVersionId] : []))].sort())
   const selection = useRef(selectedEventId)
   const interactionGuard = useRef(new ClusterInteractionGuard())
-  const callbacks = useRef({ onReady, onMoveEnd, onRendererError, onSelectEvent, onChooseEvents, onClusterError, onCameraControllerReady })
+  const callbacks = useRef({ onReady, onMoveEnd, onRendererError, onSelectEvent, onChooseEvents, onClusterError, onCameraControllerReady, onSnapshotReady })
   const containerRef = useCallback((node: HTMLDivElement | null) => setContainer(node), [])
 
   useEffect(() => {
-    callbacks.current = { onReady, onMoveEnd, onRendererError, onSelectEvent, onChooseEvents, onClusterError, onCameraControllerReady }
-  }, [onReady, onMoveEnd, onRendererError, onSelectEvent, onChooseEvents, onClusterError, onCameraControllerReady])
+    callbacks.current = { onReady, onMoveEnd, onRendererError, onSelectEvent, onChooseEvents, onClusterError, onCameraControllerReady, onSnapshotReady }
+  }, [onReady, onMoveEnd, onRendererError, onSelectEvent, onChooseEvents, onClusterError, onCameraControllerReady, onSnapshotReady])
 
   useEffect(() => {
     let disposed = false, generation = 0, inFlight = false, lastForeground = -Infinity
@@ -188,6 +192,8 @@ export function WheretooMap({
       Object.assign(options, { center: scene.center, zoom: scene.zoom, pitch: scene.pitch, bearing: scene.bearing })
     }
 
+    if (navigationCamera.current) Object.assign(options, navigationCamera.current)
+
     let map: ReturnType<typeof createMapboxMap>
     try {
       map = createMapboxMap(options)
@@ -198,6 +204,7 @@ export function WheretooMap({
       return
     }
     mapRef.current = map
+    callbacks.current.onSnapshotReady?.(() => readViewport(map))
     const cameraController = createSelectionCameraController(map, container)
     callbacks.current.onCameraControllerReady(cameraController)
 
@@ -378,6 +385,7 @@ export function WheretooMap({
       callbacks.current.onCameraControllerReady(null)
       map.removeControl(navigation)
       map.remove()
+      callbacks.current.onSnapshotReady?.(null)
       mapRef.current = null
       layersInstalled.current = false
     }

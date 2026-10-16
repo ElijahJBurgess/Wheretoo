@@ -1,7 +1,8 @@
 import { usePublicEventImages } from '../event-images/publicEventImages'
 import { ReadState } from '../../components/ui/ReadState'
 import { useEffect, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { publicReturnState } from '../discovery/discovery.navigation'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { BuyerEventSummary, BuyerHeader, BuyerIcon } from '../buyer-journey/BuyerPrimitives'
 import { formatBuyerSchedule } from '../buyer-journey/format'
 import { type FreeAttemptResult, normalizeFreeSubmission } from './rsvp.contract'
@@ -33,6 +34,7 @@ export function RsvpProgress({ step }: { step: 1 | 2 | 3 }) {
 }
 export function RsvpPage() {
   const { eventId = '' } = useParams()
+  const location = useLocation()
   const images = usePublicEventImages([eventId])
   const navigate = useNavigate()
   const [event, setEvent] = useState<FreeRsvpEvent | null>()
@@ -216,6 +218,7 @@ export function RsvpPage() {
             className='buyer-icon-button'
             aria-label='Return to event'
             to={'/events/' + eventId}
+            state={publicReturnState(location.state)}
           >
             <BuyerIcon name='back' />
           </Link>

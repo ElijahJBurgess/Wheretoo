@@ -24,10 +24,10 @@ export const EventChooser = forwardRef<HTMLElement, EventChooserProps>(function 
   useLayoutEffect(() => setVisibleCount(initialVisibleCount), [chooserIdentity, initialVisibleCount])
   useLayoutEffect(() => { if (scroll.current) scroll.current.scrollTop = initialScrollTop }, [initialScrollTop])
   return (
-    <section ref={ref} className="event-preview event-chooser" role="region" aria-labelledby={titleId}>
+    <section ref={ref} className="event-preview event-chooser" tabIndex={-1} role="region" aria-labelledby={titleId}>
       <div ref={scroll} className="event-preview__scroll event-chooser__scroll" onScroll={(event) => onScrollTop(event.currentTarget.scrollTop)}>
         <div className="event-preview__topline">
-          <div><p className="event-preview__eyebrow">wheretoo events</p><h2 id={titleId}>{events.length} events here</h2></div>
+          <div><p className="event-preview__eyebrow">wheretoo events</p><h2 id={titleId}>{events.length} {events.length === 1 ? 'event' : 'events'} here</h2></div>
           <button className="event-preview__close" type="button" aria-label="Close event chooser" onClick={onClose}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" /></svg>
           </button>
@@ -36,7 +36,7 @@ export const EventChooser = forwardRef<HTMLElement, EventChooserProps>(function 
           {sorted.slice(0, visibleCount).map((event) => {
             const schedule = formatEventDateTime(event)
             return (
-              <button key={event.id} className="event-chooser__row" type="button" aria-label={`Open ${event.title} event preview`} onClick={() => onSelect(event.id)}>
+              <button key={event.id} data-event-id={event.id} className="event-chooser__row" type="button" aria-label={`Open ${event.title} event preview`} onClick={() => onSelect(event.id)}>
                 <span className="event-chooser__row-copy"><strong>{event.title}</strong><span>{schedule.date} · {schedule.time}</span><span>{event.venueLabel} · {formatEventPrice(event)}</span></span>
                 <span className="event-chooser__chevron" aria-hidden="true">›</span>
               </button>

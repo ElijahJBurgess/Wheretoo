@@ -22,7 +22,7 @@ const { mutateAsync, resetReport, useReportPublicEvent } = vi.hoisted(() => ({
 }))
 vi.mock('../moderation/moderation.queries', () => ({ useReportPublicEvent }))
 
-import { PublicTicketEventPage } from './PublicTicketEventPage'
+import { PublicTicketEventPage, PublicTicketSelectionPage } from './PublicTicketEventPage'
 import { PublicTicketingError } from './publicTicketing.errors'
 
 const eventId = 'eb0fd9d5-d7d5-45dd-a99f-0c8a191bdc6f'
@@ -89,6 +89,8 @@ describe('PublicTicketEventPage', () => {
   })
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
+    HTMLElement.prototype.scrollIntoView = vi.fn()
     startTransition.mockImplementation((callback: () => void) => callback())
     usePublicTicketingEvent.mockReturnValue({ data: publicEvent, isPending: false, isError: false, refetch: vi.fn() })
     useReportPublicEvent.mockReturnValue({ isPending: false, mutateAsync, reset: resetReport })
@@ -413,4 +415,27 @@ it('removing an unavailable line does not silently accept another selected line 
   expect(screen.getByRole('button', { name: 'Continue to checkout' })).toBeDisabled()
   await user.click(screen.getByRole('button', { name: 'Confirm updated selection' }))
   expect(screen.getByRole('button', { name: 'Continue to checkout' })).toBeEnabled()
+})
+
+it('preserves public map/filter context and quantity draft through ticket navigation', async () => {
+  vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
+  HTMLElement.prototype.scrollIntoView = vi.fn()
+  usePublicTicketingEvent.mockReturnValue({ data: publicEvent, isPending: false, isError: false, refetch: vi.fn() })
+  const state = { discoverySearch: '?category=music', mapReturn: { version: 1, path: '/map', camera: { center: [-122.264, 37.803], zoom: 16.25, pitch: 25, bearing: 0 }, selectedEventId: eventId, chooser: null } }
+  const router = createMemoryRouter([
+    { path: '/events/:eventId', element: <PublicTicketEventPage /> },
+    { path: '/events/:eventId/tickets', element: <PublicTicketSelectionPage /> },
+  ], { initialEntries: [{ pathname: `/events/${eventId}`, state }] })
+  render(<RouterProvider router={router} />)
+  expect(screen.getByRole('link', { name: 'Return to map' })).toHaveAttribute('href', '/map')
+  fireEvent.change(screen.getByLabelText('General admission quantity'), { target: { value: '2' } })
+  expect(router.state.location.state.mapReturn).toEqual(state.mapReturn)
+  await userEvent.click(screen.getByRole('link', { name: /Get tickets/ }))
+  expect(router.state.location.pathname).toBe(`/events/${eventId}/tickets`)
+  expect(screen.getByLabelText('General admission quantity')).toHaveValue(2)
+  expect(screen.getByLabelText('General admission quantity')).toHaveFocus()
+  expect(screen.queryByText(publicEvent.event.description)).not.toBeInTheDocument()
+  expect(router.state.location.state.discoverySearch).toBe('?category=music')
+  await userEvent.click(screen.getByRole('link', { name: 'Return to event' }))
+  expect(screen.getByRole('link', { name: 'Return to map' })).toHaveAttribute('href', '/map')
 })
