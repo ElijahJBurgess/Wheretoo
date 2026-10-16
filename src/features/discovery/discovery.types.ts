@@ -1,9 +1,10 @@
+import type { MapBounds } from '../../map/core/map.types'
 import type { EventCategory } from '../events/event.types'
 
-export type DiscoveryWhen = 'upcoming' | 'today' | 'weekend'
+export type DiscoveryWhen = 'next7' | 'upcoming' | 'today' | 'weekend'
 export type DiscoveryFilters = { when: DiscoveryWhen; category: EventCategory | null; price: 'free' | 'paid' | null }
 export type DiscoveryRequest = {
-  region: 'sf_bay_area'; when: DiscoveryWhen; category?: EventCategory; admissionType?: 'free' | 'paid'; limit?: number; cursor?: string
+  region: 'sf_bay_area'; when: DiscoveryWhen; category?: EventCategory; admissionType?: 'free' | 'paid'; limit?: number; cursor?: string; bounds?: MapBounds
 }
 export type DiscoveryItem = {
   id: string; title: string; category: EventCategory; admissionType: 'free' | 'paid'

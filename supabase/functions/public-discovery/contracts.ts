@@ -11,10 +11,14 @@ export const categories = [
 ] as const;
 export const discoveryRequestSchema = z.object({
   region: z.literal("sf_bay_area"),
-  when: z.enum(["upcoming", "today", "weekend"]),
+  when: z.enum(["next7", "upcoming", "today", "weekend"]),
   category: z.enum(categories).optional(),
   admissionType: z.enum(["free", "paid"]).optional(),
   limit: z.number().int().min(1).max(50).optional(),
+  bounds: z.object({
+    west: z.number().finite().min(-123.6).max(-121), south: z.number().finite().min(36.8).max(38.9),
+    east: z.number().finite().min(-123.6).max(-121), north: z.number().finite().min(36.8).max(38.9),
+  }).strict().refine(b => b.west < b.east && b.south < b.north).optional(),
   cursor: z.string().min(1).max(1024).regex(/^[A-Za-z0-9_-]+$/).optional(),
 }).strict();
 const instant = z.string().datetime({ offset: true }).max(40);

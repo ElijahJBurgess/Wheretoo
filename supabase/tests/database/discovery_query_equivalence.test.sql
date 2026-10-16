@@ -78,6 +78,12 @@ begin
   select jsonb_agg(to_jsonb(m)) into old_rows from pg_temp.baseline_map((req->>'west')::float8,(req->>'south')::float8,(req->>'east')::float8,(req->>'north')::float8,now(),now()+interval '7 days',case when req ? 'category' then array(select jsonb_array_elements_text(req->'category')) else null end) with ordinality m;
   select jsonb_agg(to_jsonb(m)) into new_rows from public.get_public_map_events((req->>'west')::float8,(req->>'south')::float8,(req->>'east')::float8,(req->>'north')::float8,now(),now()+interval '7 days',case when req ? 'category' then array(select jsonb_array_elements_text(req->'category')) else null end) with ordinality m;
   if old_rows is distinct from new_rows then raise exception 'ordered all-field map mismatch: % %',label,req;end if;checks:=checks+1;
+  -- Task4's additive filter projection preserves the same eligibility and all
+  -- event fields for equivalent dates/area; both APIs remain covered below.
+  select jsonb_agg(to_jsonb(m)) into old_rows from pg_temp.baseline_map((req->>'west')::float8,(req->>'south')::float8,(req->>'east')::float8,(req->>'north')::float8,statement_timestamp(),statement_timestamp()+interval '168 hours',case when req ? 'category' then array(select jsonb_array_elements_text(req->'category')) else null end) with ordinality m;
+  select jsonb_agg(to_jsonb(m)) into new_rows from public.get_public_filtered_map_events((req->>'west')::float8,(req->>'south')::float8,(req->>'east')::float8,(req->>'north')::float8,'next7',case when req ? 'category' then array(select jsonb_array_elements_text(req->'category')) else null end,null) with ordinality m;
+  if old_rows is distinct from new_rows then raise exception 'filtered map eligibility/projection mismatch: % %',label,req;end if;checks:=checks+1;
+
  end loop;
  if expected_map is not null and exists(select 1 from public.get_public_map_events(-122.4,37.7,-122.1,37.9,now(),now()+interval '7 days',null) m where m.event_id=target) is distinct from expected_map then raise exception 'expected target map membership mismatch in %',label;end if;
  for req in select * from jsonb_array_elements('[{"when":"upcoming","limit":7},{"when":"today","limit":7},{"when":"weekend","limit":7},{"when":"upcoming","category":"music","admissionType":"paid","limit":7},{"when":"upcoming","admissionType":"free","limit":7}]'::jsonb) loop

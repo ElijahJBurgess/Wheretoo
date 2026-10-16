@@ -39,3 +39,12 @@ it('recognizes an exact empty response as complete', async () => {
   transport.mockResolvedValue(new Response('[]', { headers: { 'content-range': '*/0' } }))
   expect(await getPublicMapEvents(query)).toEqual({ events: [], complete: true })
 })
+
+it('uses server presets and authoritative timing even for an empty filtered map', async () => {
+  const { getFilteredPublicMapEvents } = await import('./mapEvents.api')
+  const metadata = { window: { start: '2026-11-01T07:00:00Z', end: '2026-11-02T08:00:00Z', timezone: 'America/Los_Angeles' }, serverNow: '2026-11-01T12:00:00Z' }
+  transport.mockResolvedValue(new Response('[]', { headers: { 'content-range': '*/0', 'X-Wheretoo-Discovery': JSON.stringify(metadata) } }))
+  expect(await getFilteredPublicMapEvents(query.bounds, { when: 'today', category: 'music', price: 'free' })).toEqual({ events: [], complete: true, ...metadata })
+  expect(transport.mock.calls[0][0]).toContain('/get_public_filtered_map_events')
+  expect(JSON.parse(transport.mock.calls[0][1].body)).toMatchObject({ p_when: 'today', p_categories: ['music'], p_admission_type: 'free' })
+})

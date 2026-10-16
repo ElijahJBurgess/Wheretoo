@@ -1,10 +1,12 @@
 import { expect, test } from '@playwright/test'
+import { discoveryRows, fulfillMap } from './support/discoveryFixtures'
 import { mapReference, darkReady } from './support/combinedMapObservations'
 
 test.beforeEach(async ({ page }) => {
   // Anonymous read-only acceptance; no auth, publication or transaction actions.
-  await page.route('**/rest/v1/**', route => ['get_public_map_events', 'get_public_map_icon_versions', 'list_event_images']
+  await page.route('**/rest/v1/**', route => ['get_public_map_icon_versions', 'list_event_images']
     .some(name => new URL(route.request().url()).pathname.endsWith(`/${name}`)) ? route.continue() : route.abort())
+  await page.route('**/rest/v1/rpc/get_public_filtered_map_events', route => fulfillMap(route, discoveryRows()))
 })
 
 test('nine approved icons retain dark map, mobile fallback selection and cluster expansion', async ({ page }, info) => {
@@ -28,8 +30,9 @@ test('nine approved icons retain dark map, mobile fallback selection and cluster
     return { id: String(feature.properties?.eventId), version: String(feature.properties?.mapIconVersionId), x: point.x, y: point.y }
   }, mobile)
   await page.screenshot({ path: info.outputPath('ready-nine-icons.png') })
-  if (mobile) await page.touchscreen.tap(candidate.x, candidate.y)
-  else await page.mouse.click(candidate.x, candidate.y)
+  const canvasBox = (await page.locator('.mapboxgl-canvas').boundingBox())!
+  if (mobile) await page.touchscreen.tap(candidate.x + canvasBox.x, candidate.y + canvasBox.y)
+  else await page.mouse.click(candidate.x + canvasBox.x, candidate.y + canvasBox.y)
   await expect(page.locator('.living-map__canvas')).toHaveAttribute('data-selected-event-id', candidate.id)
   await page.waitForFunction(version => window.__phase4Map.listImages().some(id => id.startsWith(`wheretoo-icon-${version}-`)), candidate.version)
   expect(await page.evaluate(() => window.__phase4Map.listImages().filter(id => id.startsWith('wheretoo-icon-')).length)).toBe(mobile ? 8 : 9)
@@ -43,8 +46,8 @@ test('nine approved icons retain dark map, mobile fallback selection and cluster
     const point = map.project(feature.geometry.coordinates as [number, number])
     return { x: point.x, y: point.y, zoom: map.getZoom() }
   })
-  if (mobile) await page.touchscreen.tap(cluster.x, cluster.y)
-  else await page.mouse.click(cluster.x, cluster.y)
+  if (mobile) await page.touchscreen.tap(cluster.x + canvasBox.x, cluster.y + canvasBox.y)
+  else await page.mouse.click(cluster.x + canvasBox.x, cluster.y + canvasBox.y)
   await expect.poll(() => page.evaluate(() => window.__phase4Map.getZoom())).toBeGreaterThan(cluster.zoom)
   expect(await canvas?.evaluate(node => node.isConnected)).toBe(true)
   await expect(page.locator('.mapboxgl-canvas')).toHaveCount(1)
@@ -56,7 +59,7 @@ test('failed foreground refresh keeps markers and retry restores a complete resp
   await mapReference(page)
   await expect(page.locator('.living-map__canvas')).toHaveAttribute('data-wheretoo-event-count', '9')
   let fail = true, requests = 0
-  await page.route('**/rest/v1/rpc/get_public_map_events', route => { requests++; return fail ? route.abort() : route.continue() })
+  await page.route('**/rest/v1/rpc/get_public_filtered_map_events', route => { requests++; return fail ? route.abort() : fulfillMap(route, discoveryRows()) })
   await page.evaluate(() => { window.dispatchEvent(new Event('focus')); document.dispatchEvent(new Event('visibilitychange')) })
   await expect(page.getByRole('button', { name: 'Retry events', exact: true })).toBeVisible()
   expect(requests).toBe(1)

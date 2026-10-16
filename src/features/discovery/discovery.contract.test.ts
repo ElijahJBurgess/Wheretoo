@@ -14,7 +14,7 @@ const page = { items: [item], nextCursor: null, window: { start: '2026-09-13T07:
 describe('public discovery URL state', () => {
   it('drops unknown fields and values without carrying credentials or return destinations', () => {
     const filters = parseDiscoverySearch('?when=invalid&category=private&price=zero&email=private@example.test&return=https://elsewhere.test&token=secret')
-    expect(filters).toEqual({ when: 'upcoming', category: null, price: null })
+    expect(filters).toEqual({ when: 'next7', category: null, price: null })
     expect(serializeDiscoveryFilters(filters)).toBe('')
   })
   it('retains all canonical categories, combines dimensions, and normalizes duplicate parameters', () => {

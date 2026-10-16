@@ -14,10 +14,10 @@ async function fixtures(page: Page, admission: 'paid' | 'free' = 'paid') {
   await page.route('**/rest/v1/rpc/**', async route => {
     const rpc = new URL(route.request().url()).pathname.split('/').pop()
     const e = event(admission)
-    if (rpc === 'get_public_map_events') {
+    if (rpc === 'get_public_filtered_map_events') {
       state.mapReads++
       const rows = !state.available ? [] : [id, second].map((event_id, i) => ({ event_id, title: i ? 'Second community gathering' : title, category: e.category, starts_at: state.expired ? new Date(Date.now() - 7200000).toISOString() : e.starts_at, ends_at: state.expired ? new Date(Date.now() - 1000).toISOString() : e.ends_at, timezone: e.timezone, latitude: e.latitude, longitude: e.longitude, animation_preset: e.animation_preset, venue_label: e.venue_name, admission_type: admission, minimum_price_minor: admission === 'paid' ? 1200 : null, minimum_age: e.minimum_age, advisories: [], artwork_reference: null, map_icon_version_id: null }))
-      return route.fulfill({ json: rows, headers: { 'access-control-expose-headers': 'content-range', 'content-range': rows.length ? '0-1/2' : '*/0' } })
+      return route.fulfill({ json: rows, headers: { 'access-control-expose-headers': 'content-range, X-Wheretoo-Discovery', 'X-Wheretoo-Discovery': JSON.stringify({ serverNow: new Date().toISOString(), window: { start: new Date().toISOString(), end: new Date(Date.now() + 168 * 3600000).toISOString(), timezone: 'America/Los_Angeles' } }), 'content-range': rows.length ? '0-1/2' : '*/0' } })
     }
     if (rpc === 'get_public_event_ticketing') return route.fulfill({ json: state.available ? [{ event: e, tiers: admission === 'free' ? [] : [{ id: tier, name: 'General admission', description: null, unit_amount_minor: 1200, currency: 'usd', availability_status: state.soldOut ? 'sold_out' : 'available' }] }] : [] })
     if (rpc === 'get_public_event') return route.fulfill({ json: state.available ? [e] : [] })

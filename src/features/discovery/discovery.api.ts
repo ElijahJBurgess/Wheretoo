@@ -1,3 +1,4 @@
+import type { MapBounds } from '../../map/core/map.types'
 import { publicEnv } from '../../lib/env'
 import { discoveryRequest } from './discovery.filters'
 import { parseDiscoveryPage } from './discovery.schemas'
@@ -10,13 +11,13 @@ export class DiscoveryReadError extends Error {
   }
 }
 
-export async function getDiscoveryPage(filters: DiscoveryFilters, options: { cursor?: string; signal?: AbortSignal } = {}): Promise<DiscoveryPageData> {
+export async function getDiscoveryPage(filters: DiscoveryFilters, options: { cursor?: string; signal?: AbortSignal; bounds?: MapBounds } = {}): Promise<DiscoveryPageData> {
   let response: Response
   try {
     response = await fetch(`${publicEnv.supabaseUrl}/functions/v1/public-discovery`, {
       method: 'POST', credentials: 'omit', signal: options.signal,
       headers: { 'content-type': 'application/json', apikey: publicEnv.supabasePublishableKey },
-      body: JSON.stringify(discoveryRequest(filters, options.cursor)),
+      body: JSON.stringify(discoveryRequest(filters, options.cursor, options.bounds)),
     })
   } catch (error) {
     if (options.signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) throw error

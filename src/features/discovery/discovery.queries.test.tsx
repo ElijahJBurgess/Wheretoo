@@ -174,3 +174,29 @@ it('can load more after an automatic refresh before the obsolete append settles'
   expect(view.result.current.items.map(item => item.id)).toEqual(['first', 'current'])
   expect(view.result.current.isLoadingMore).toBe(false)
 })
+
+it('waits for the map area and isolates pagination/cache when the viewport changes', async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  function Wrapper({ children }: PropsWithChildren) { return <QueryClientProvider client={client}>{children}</QueryClientProvider> }
+  read.mockResolvedValueOnce(page(['a'], 'next')).mockResolvedValueOnce(page(['b']))
+  const area = { west: -122.4, south: 37.7, east: -122.1, north: 37.9 }
+  const view = renderHook(({ bounds }) => useDiscovery(filters, bounds), { initialProps: { bounds: null as import('../../map/core/map.types').MapBounds | null }, wrapper: Wrapper })
+  expect(read).not.toHaveBeenCalled()
+  view.rerender({ bounds: area }); await waitFor(() => expect(view.result.current.items[0]?.id).toBe('a'))
+  expect(read.mock.calls[0][1].bounds).toEqual(area)
+  view.rerender({ bounds: { ...area, west: -122.3 } }); await waitFor(() => expect(view.result.current.items[0]?.id).toBe('b'))
+  expect(view.result.current.hasMore).toBe(false)
+})
+it('does not present an ongoing prior-weekend event as next-weekend after a failed midnight read', async () => {
+  vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-02T07:59:50Z'))
+  const first = page(['weekend'])
+  first.items[0] = { ...first.items[0], startsAt: '2026-11-02T07:00:00Z', endsAt: '2026-11-02T10:00:00Z' }
+  first.serverNow = new Date().toISOString(); first.window = { start: '2026-10-30T07:00:00Z', end: '2026-11-02T08:00:00Z', timezone: 'America/Los_Angeles' }
+  read.mockResolvedValueOnce(first).mockRejectedValue(new DiscoveryReadError('unavailable'))
+  const view = setup({ when: 'weekend', category: null, price: null })
+  await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+  expect(view.result.current.items).toHaveLength(1)
+  await act(async () => { await vi.advanceTimersByTimeAsync(10025) })
+  expect(read).toHaveBeenCalledTimes(2)
+  expect(view.result.current.items).toEqual([])
+})

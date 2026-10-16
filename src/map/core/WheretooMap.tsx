@@ -18,7 +18,9 @@ import type { MapCamera, MapRendererError, MapViewportSnapshot } from './map.typ
 import type { VisualScene } from './visualScenes'
 
 export type WheretooMapProps = {
+  onBroadenReady?(broaden: (() => void) | null): void
   initialCamera?: MapCamera | null
+  onRestoreReady?(restore: ((camera: MapCamera) => void) | null): void
   onSnapshotReady?(read: (() => MapViewportSnapshot | null) | null): void
   visualScene: VisualScene | null
   events?: readonly WheretooMapEvent[]
@@ -95,7 +97,7 @@ function readClusterFeature(feature: unknown) {
 export function WheretooMap({
   visualScene, events = EMPTY_EVENTS, selectedEventId = null, onSelectEvent = () => undefined, onCameraControllerReady = () => undefined,
   onChooseEvents = () => undefined, onClusterError = () => undefined,
-  onReady, onMoveEnd, onRendererError, initialCamera, onSnapshotReady,
+  onReady, onMoveEnd, onRendererError, initialCamera, onSnapshotReady, onBroadenReady, onRestoreReady,
 }: WheretooMapProps) {
   const [container, setContainer] = useState<HTMLDivElement | null>(null)
   const initialScene = useRef(visualScene)
@@ -109,12 +111,12 @@ export function WheretooMap({
   const iconIdsKey = JSON.stringify([...new Set(events.flatMap(e => e.mapIconVersionId ? [e.mapIconVersionId] : []))].sort())
   const selection = useRef(selectedEventId)
   const interactionGuard = useRef(new ClusterInteractionGuard())
-  const callbacks = useRef({ onReady, onMoveEnd, onRendererError, onSelectEvent, onChooseEvents, onClusterError, onCameraControllerReady, onSnapshotReady })
+  const callbacks = useRef({ onReady, onMoveEnd, onRendererError, onSelectEvent, onChooseEvents, onClusterError, onCameraControllerReady, onSnapshotReady, onBroadenReady, onRestoreReady })
   const containerRef = useCallback((node: HTMLDivElement | null) => setContainer(node), [])
 
   useEffect(() => {
-    callbacks.current = { onReady, onMoveEnd, onRendererError, onSelectEvent, onChooseEvents, onClusterError, onCameraControllerReady, onSnapshotReady }
-  }, [onReady, onMoveEnd, onRendererError, onSelectEvent, onChooseEvents, onClusterError, onCameraControllerReady, onSnapshotReady])
+    callbacks.current = { onReady, onMoveEnd, onRendererError, onSelectEvent, onChooseEvents, onClusterError, onCameraControllerReady, onSnapshotReady, onBroadenReady, onRestoreReady }
+  }, [onReady, onMoveEnd, onRendererError, onSelectEvent, onChooseEvents, onClusterError, onCameraControllerReady, onSnapshotReady, onBroadenReady, onRestoreReady])
 
   useEffect(() => {
     let disposed = false, generation = 0, inFlight = false, lastForeground = -Infinity
@@ -204,7 +206,9 @@ export function WheretooMap({
       return
     }
     mapRef.current = map
+    callbacks.current.onBroadenReady?.(() => { map.zoomOut({ duration: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 0 : 300 }) })
     callbacks.current.onSnapshotReady?.(() => readViewport(map))
+    callbacks.current.onRestoreReady?.(camera => { map.stop(); map.jumpTo(camera) })
     const cameraController = createSelectionCameraController(map, container)
     callbacks.current.onCameraControllerReady(cameraController)
 
@@ -386,6 +390,8 @@ export function WheretooMap({
       map.removeControl(navigation)
       map.remove()
       callbacks.current.onSnapshotReady?.(null)
+      callbacks.current.onRestoreReady?.(null)
+      callbacks.current.onBroadenReady?.(null)
       mapRef.current = null
       layersInstalled.current = false
     }

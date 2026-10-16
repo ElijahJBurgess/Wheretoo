@@ -11,7 +11,7 @@ vi.mock('../../map/LivingMapPage', () => ({ Component: () => {
   return <section aria-label="City map preview" />
 } }))
 
-const filters: DiscoveryFilters = { when: 'upcoming', category: null, price: null }
+const filters: DiscoveryFilters = { when: 'next7', category: null, price: null }
 const item = (overrides: Partial<DiscoveryDisplayItem> = {}): DiscoveryDisplayItem => ({
   id: '00000000-0000-4000-8000-000000000001', title: 'Sunset Rooftop Sessions', category: 'music', admissionType: 'paid',
   startsAt: '2026-09-13T23:00:00Z', endsAt: '2026-09-14T03:00:00Z', timezone: 'America/Los_Angeles',
@@ -44,7 +44,7 @@ describe('DiscoveryView', () => {
     try {
       renderView(props({ items: [] }))
       expect(await screen.findByText('We couldn’t load the map.')).toBeVisible()
-      expect(screen.getByText('No upcoming events here yet.')).toBeVisible()
+      expect(screen.getByText('No events in this map area yet.')).toBeVisible()
       expect(screen.getByRole('link', { name: 'Organize' })).toHaveAttribute('href', '/organizer/events')
       await userEvent.click(screen.getByRole('link', { name: /Explore the map/ }))
       expect(await screen.findByRole('heading', { name: 'Full city map' })).toBeVisible()
@@ -67,7 +67,7 @@ describe('DiscoveryView', () => {
 
     expect(screen.getByRole('heading', { level: 1, name: 'Find somewhere worth going.' })).toBeVisible()
     expect(screen.getByText('SF Bay Area')).toBeVisible()
-    expect(screen.getByRole('combobox', { name: 'Date' })).toHaveValue('upcoming')
+    expect(screen.getByRole('combobox', { name: 'Date' })).toHaveValue('next7')
     expect(screen.getByRole('combobox', { name: 'Category' })).toHaveValue('')
     expect(screen.getByRole('option', { name: 'Fitness' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /This Weekend/ })).toHaveAttribute('href', '/discover?when=weekend')
@@ -78,12 +78,12 @@ describe('DiscoveryView', () => {
     expect(screen.queryByRole('link', { name: 'Tickets' })).toBeNull()
 
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Category' }), 'music')
-    expect(onFiltersChange).toHaveBeenCalledWith({ when: 'upcoming', category: 'music', price: null })
+    expect(onFiltersChange).toHaveBeenCalledWith({ when: 'next7', category: 'music', price: null }, 'category')
   })
 
   it('surfaces an active non-shortcut category and always offers Clear filters for nondefault state', async () => {
     const onFiltersChange = vi.fn()
-    renderView(props({ filters: { when: 'upcoming', category: 'fitness', price: null }, onFiltersChange }))
+    renderView(props({ filters: { when: 'next7', category: 'fitness', price: null }, onFiltersChange }))
     expect(screen.getByRole('combobox', { name: 'Category' })).toHaveValue('fitness')
     await userEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
     expect(onFiltersChange).toHaveBeenCalledWith(filters)
@@ -132,13 +132,13 @@ describe('DiscoveryView', () => {
   it('offers a deliberate Upcoming transition for an empty Today filter and announces result count', async () => {
     const onFiltersChange = vi.fn()
     const empty = renderView(props({ filters: { when: 'today', category: null, price: null }, items: [], onFiltersChange }))
-    await userEvent.click(screen.getByRole('button', { name: 'See upcoming events' }))
+    await userEvent.click(screen.getByRole('button', { name: 'See Next 7 Days' }))
     expect(onFiltersChange).toHaveBeenCalledWith(filters)
     empty.unmount()
 
     renderView(props({ items: [item(), item({ id: '00000000-0000-4000-8000-000000000002' })] }))
     expect(screen.getByRole('status', { name: 'Discovery results' })).toHaveTextContent('2 events')
-    expect(screen.getByText('Next 30 days')).toBeVisible()
+    expect(document.querySelector('.discovery-results__heading')).toHaveTextContent('Next 7 Days')
   })
 
   it('selects a hero only from the supplied stable first-page candidates', () => {

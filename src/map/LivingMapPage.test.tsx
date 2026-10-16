@@ -62,7 +62,7 @@ describe('LivingMapPage', () => {
     const view = render(<Component />)
     fireEvent.click(await screen.findByRole('button', { name: 'select day party' }))
     expect(screen.getByRole('region', { name: 'Day Party' })).toBeInTheDocument()
-    expect(query).toHaveBeenCalledWith(null, null, true)
+    expect(query).toHaveBeenCalledWith(null, null, true, expect.objectContaining({ discovery: { when: 'next7', category: null, price: null } }))
     query.mockReturnValue({ events: [], generation: 1, pending: false, error: new Error('offline'), retry: vi.fn() })
     view.rerender(<Component />)
     expect(screen.getByRole('region', { name: 'Day Party' })).toBeInTheDocument()
@@ -159,7 +159,7 @@ describe('LivingMapPage', () => {
     expect(screen.getByRole('region', { name: 'Vinyl Night' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Close event preview' }))
     expect(map).toHaveAttribute('data-selected-event-id', '')
-    expect(screen.queryByRole('region')).not.toBeInTheDocument()
+    expect(document.querySelector('.living-map__preview-layer')).not.toBeInTheDocument()
   })
 
   it('clears an unknown selection without showing stale preview content', async () => {
@@ -167,7 +167,7 @@ describe('LivingMapPage', () => {
     const map = await screen.findByLabelText('map test double')
     fireEvent.click(screen.getByRole('button', { name: 'select missing event' }))
     expect(map).toHaveAttribute('data-selected-event-id', '')
-    expect(screen.queryByRole('region')).not.toBeInTheDocument()
+    expect(document.querySelector('.living-map__preview-layer')).not.toBeInTheDocument()
   })
 
   it('lets Escape dismiss a preview while focus is within the map experience', async () => {
@@ -189,6 +189,26 @@ describe('LivingMapPage', () => {
     else expect(map).toHaveAttribute('data-selected-event-id', '')
   })
 
+  it('does not present a previous-filter selection while its replacement is pending', () => {
+    const view = render(<Component />)
+    fireEvent.click(screen.getByRole('button', { name: 'select day party' }))
+    expect(screen.getByRole('region', { name: 'Day Party' })).toBeInTheDocument()
+    query.mockReturnValue({ events: [], generation: 1, pending: true, complete: null, error: null, matchesFilters: false, retry: vi.fn() })
+    view.rerender(<Component />)
+    expect(screen.queryByRole('region', { name: 'Day Party' })).not.toBeInTheDocument()
+  })
+
+  it('shares standalone URL filters without remounting or scrolling when changed', async () => {
+    const scroll = vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
+    const router = createMemoryRouter([{ path: '/map', element: <Component /> }], { initialEntries: ['/map?when=weekend&category=music&price=paid'] })
+    rtlRender(<RouterProvider router={router} />)
+    fireEvent.change(screen.getByRole('combobox', { name: 'Admission' }), { target: { value: 'free' } })
+    expect(router.state.location.search).toBe('?when=weekend&category=music&price=free')
+    expect(query).toHaveBeenLastCalledWith(null, null, true, expect.objectContaining({ discovery: { when: 'weekend', category: 'music', price: 'free' } }))
+    expect(mounted).toHaveBeenCalledOnce(); expect(scroll).not.toHaveBeenCalled()
+    scroll.mockRestore()
+  })
+
   it('offers the bounded chooser to keyboard users and retains focus through preview, Back and Escape', async () => {
     render(<Component />)
     fireEvent.click(screen.getByRole('button', { name: 'ready' }))
@@ -201,7 +221,7 @@ describe('LivingMapPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Back to events' }))
     expect(screen.getByRole('button', { name: 'Open Vinyl Night event preview' })).toHaveFocus()
     fireEvent.keyDown(document.activeElement!, { key: 'Escape' })
-    expect(screen.queryByRole('region')).not.toBeInTheDocument()
+    expect(document.querySelector('.living-map__preview-layer')).not.toBeInTheDocument()
     expect(trigger).toHaveFocus()
   })
 
@@ -224,7 +244,7 @@ describe('LivingMapPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Back to events' }))
     expect(screen.getByRole('region', { name: '2 events here' })).toBeInTheDocument()
     fireEvent.keyDown(screen.getByRole('region', { name: '2 events here' }), { key: 'Escape' })
-    expect(screen.queryByRole('region')).not.toBeInTheDocument()
+    expect(document.querySelector('.living-map__preview-layer')).not.toBeInTheDocument()
   })
 })
 

@@ -26,7 +26,7 @@ export async function shot(page: Page, info: TestInfo, name: string) {
 }
 
 export async function mapReference(page: Page) {
-  await expect(page.locator('main')).toHaveAttribute('data-renderer-state', 'ready', { timeout: 60000 })
+  await expect(page.locator('.living-map')).toHaveAttribute('data-renderer-state', 'ready', { timeout: 60000 })
   await page.evaluate(() => {
     // Read-only test instrumentation: no production debug globals or map instance.
     type Hook = { memoizedState?: { current?: unknown }; next?: Hook }

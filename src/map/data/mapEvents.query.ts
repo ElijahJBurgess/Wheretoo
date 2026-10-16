@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { EventCategory } from '../../features/events/event.types'
 import type { MapBounds, MapViewportSnapshot } from '../core/map.types'
-import { getPublicMapEvents } from './mapEvents.api'
+import type { DiscoveryFilters } from '../../features/discovery/discovery.types'
+import { discoveryBounds } from '../../features/discovery/discovery.scope'
+import { nextDiscoveryMidnight } from '../../features/discovery/discovery.time'
+import { getFilteredPublicMapEvents, getPublicMapEvents } from './mapEvents.api'
 import type { WheretooMapEvent } from './wheretooMapEvents'
 
 export function publicMapBounds(bounds: MapBounds): MapBounds {
@@ -19,7 +22,7 @@ export function publicMapBounds(bounds: MapBounds): MapBounds {
   return { west: west < -180 || east > 180 ? -180 : west, east: west < -180 || east > 180 ? 180 : east, south, north }
 }
 
-type Result = { events: WheretooMapEvent[]; generation: number; pending: boolean; error: Error | null; complete: boolean | null }
+type Result = { events: WheretooMapEvent[]; generation: number; pending: boolean; error: Error | null; complete: boolean | null; identity?: string; serverOffset?: number; windowEnd?: number; bounds?: MapBounds }
 const FRESH_MS = 60000
 
 function sameEvents(previous: readonly WheretooMapEvent[], next: readonly WheretooMapEvent[]) {
@@ -30,7 +33,7 @@ function sameEvents(previous: readonly WheretooMapEvent[], next: readonly Wheret
       : event[key] === candidate[key])
   })
 }
-type Coverage = { bounds: MapBounds; filters: string; expiresAt: number; events: WheretooMapEvent[] }
+type Coverage = { bounds: MapBounds; filters: string; expiresAt: number; events: WheretooMapEvent[]; serverOffset?: number; windowEnd?: number }
 function inside(bounds: MapBounds, event: WheretooMapEvent) {
   return event.longitude >= bounds.west && event.longitude <= bounds.east && event.latitude >= bounds.south && event.latitude <= bounds.north
 }
@@ -44,38 +47,43 @@ function agrees(previous: Coverage, bounds: MapBounds, events: WheretooMapEvent[
     return next ? sameEvents([event], [next]) : !inside(bounds, event)
   }) && events.every(event => !inside(previous.bounds, event) || oldById.has(event.id))
 }
-function unexpired(events: WheretooMapEvent[]) {
-  const next = events.filter(event => Date.parse(event.endsAt) > Date.now())
+function unexpired(events: WheretooMapEvent[], asOf = Date.now()) {
+  const next = events.filter(event => Date.parse(event.endsAt) > asOf)
   return next.length === events.length ? events : next
 }
 function covers(outer: MapBounds, inner: MapBounds) {
   return outer.west <= inner.west && outer.east >= inner.east && outer.south <= inner.south && outer.north >= inner.north
 }
 
-export function usePublicMapEvents(viewport: MapViewportSnapshot | null, filters: readonly EventCategory[] | null, enabled: boolean) {
+export function usePublicMapEvents(viewport: MapViewportSnapshot | null, filters: readonly EventCategory[] | null, enabled: boolean, options?: { discovery: DiscoveryFilters; onSettledBounds?(bounds: MapBounds): void }) {
   const [result, setResult] = useState<Result>({ events: [], generation: 0, pending: false, error: null, complete: null })
+  const observer = useRef(options?.onSettledBounds)
+  useLayoutEffect(() => { observer.current = options?.onSettledBounds }, [options?.onSettledBounds])
   const generation = useRef(0)
   const refresh = useRef<() => void>(() => {})
   const cache = useRef<Coverage[]>([])
   useEffect(() => {
     if (!enabled || !result.events.length) return
-    const nextEnd = Math.min(...result.events.map(event => Date.parse(event.endsAt)))
+    const nextEnd = Math.min(result.windowEnd ?? Infinity, ...result.events.map(event => Date.parse(event.endsAt)))
     const timer = setTimeout(() => {
       setResult(previous => {
-        const events = unexpired(previous.events)
+        const events = previous.windowEnd && Date.now() + (previous.serverOffset ?? 0) >= previous.windowEnd ? [] : unexpired(previous.events, Date.now() + (previous.serverOffset ?? 0))
         return events === previous.events ? previous : { ...previous, events, generation: previous.generation + 1 }
       })
-    }, Math.min(2147483647, Math.max(0, nextEnd - Date.now())))
+    }, Math.min(2147483647, Math.max(0, nextEnd - Date.now() - (result.serverOffset ?? 0))))
     return () => clearTimeout(timer)
-  }, [enabled, result.events])
+  }, [enabled, result.events, result.serverOffset, result.windowEnd])
   const normalizedFilters = filters?.length ? [...new Set(filters)].sort() : null
-  const key = JSON.stringify({ bounds: viewport?.bounds ?? null, filters: normalizedFilters })
+  const key = JSON.stringify({ bounds: viewport?.bounds ?? null, filters: normalizedFilters, discovery: options?.discovery ?? null })
+  const identity = JSON.stringify({ categories: normalizedFilters, discovery: options?.discovery ?? null })
+  if (options?.discovery && result.identity !== identity) setResult({ events: [], generation: result.generation + 1, pending: Boolean(viewport), complete: null, error: null, identity, serverOffset: result.serverOffset })
   useLayoutEffect(() => {
     ++generation.current
     if (!enabled) return
-    const input = JSON.parse(key) as { bounds: MapBounds | null; filters: EventCategory[] | null }
+    const input = JSON.parse(key) as { bounds: MapBounds | null; filters: EventCategory[] | null; discovery: DiscoveryFilters | null }
     if (!input.bounds) return
-    const bounds = input.bounds, filterKey = JSON.stringify(input.filters)
+    const bounds = input.bounds, filterKey = JSON.stringify({ categories: input.filters, discovery: input.discovery })
+    const areaTimer = setTimeout(() => { observer.current?.(discoveryBounds(bounds)) }, 300)
     if (cache.current.some(snapshot => snapshot.filters !== filterKey)) cache.current = []
     let disposed = false, inFlight = false, lastForeground = -Infinity
     let controller: AbortController | null = null
@@ -88,28 +96,36 @@ export function usePublicMapEvents(viewport: MapViewportSnapshot | null, filters
       if (!retainPrevious) cache.current = []
       controller = new AbortController()
       const request = ++generation.current, signal = controller.signal, now = Date.now()
+      let nextRefreshAt = now + FRESH_MS
       setResult(previous => ({ ...previous, pending: true, error: null }))
       try {
-        const queryBounds = publicMapBounds(bounds)
-        const snapshot = await getPublicMapEvents({ bounds: queryBounds, startsAt: new Date(now).toISOString(), endsAt: new Date(now + 7 * 86400000).toISOString(), categories: input.filters }, signal)
+        const queryBounds = input.discovery ? discoveryBounds(publicMapBounds(bounds)) : publicMapBounds(bounds)
+        const snapshot = input.discovery
+          ? await getFilteredPublicMapEvents(queryBounds, input.discovery, signal)
+          : await getPublicMapEvents({ bounds: queryBounds, startsAt: new Date(now).toISOString(), endsAt: new Date(now + 7 * 86400000).toISOString(), categories: input.filters }, signal)
         if (disposed || signal.aborted || request !== generation.current) return
-        const events = unexpired(snapshot.events)
+        const serverNow = 'serverNow' in snapshot ? Date.parse(String(snapshot.serverNow)) : Date.now()
+        const serverOffset = serverNow - Date.now()
+        const events = unexpired(snapshot.events, serverNow)
+        const expiresAt = Math.min(now + FRESH_MS, input.discovery ? Date.now() + nextDiscoveryMidnight(serverNow) - serverNow : Infinity)
+        nextRefreshAt = expiresAt
+        const windowEnd = input.discovery && ['today', 'weekend'].includes(input.discovery.when) && 'window' in snapshot ? Date.parse((snapshot.window as { end: string }).end) : undefined
         const previousCoverage = cache.current.filter(previous => previous.expiresAt > Date.now() && agrees(previous, queryBounds, events)).slice(0, 1)
         cache.current = snapshot.complete === true
-          ? [{ bounds: queryBounds, filters: filterKey, expiresAt: now + FRESH_MS, events }, ...previousCoverage]
+          ? [{ bounds: queryBounds, filters: filterKey, expiresAt, events, serverOffset, windowEnd }, ...previousCoverage]
           : []
-        setResult(previous => ({ events: sameEvents(previous.events, events) ? previous.events : events, generation: previous.generation + 1, pending: false, error: null, complete: snapshot.complete === true }))
+        setResult(previous => ({ events: sameEvents(previous.events, events) ? previous.events : events, generation: previous.generation + 1, pending: false, error: null, complete: snapshot.complete === true, identity: filterKey, serverOffset, windowEnd, bounds: queryBounds }))
       } catch {
         if (!disposed && !signal.aborted && request === generation.current) {
           cache.current = []
           setResult(previous => {
-            const events = unexpired(previous.events)
+            const events = previous.windowEnd && Date.now() + (previous.serverOffset ?? 0) >= previous.windowEnd ? [] : unexpired(previous.events, Date.now() + (previous.serverOffset ?? 0))
             return { ...previous, events, generation: previous.generation + (events === previous.events ? 0 : 1), pending: false, error: new Error(previous.complete === null ? 'Events couldn’t load. Try again.' : 'Events couldn’t refresh. Try again.') }
           })
         }
       } finally {
         inFlight = false
-        if (!disposed) schedule(Math.max(0, now + FRESH_MS - Date.now()))
+        if (!disposed) schedule(Math.max(0, nextRefreshAt - Date.now()))
       }
     }
     const foreground = () => {
@@ -119,11 +135,11 @@ export function usePublicMapEvents(viewport: MapViewportSnapshot | null, filters
     const cached = cache.current.find(snapshot => snapshot.filters === filterKey && snapshot.expiresAt > Date.now() && covers(snapshot.bounds, bounds))
     if (cached) {
       cache.current = [cached, ...cache.current.filter(snapshot => snapshot !== cached)]
-      const events = unexpired(cached.events)
+      const events = unexpired(cached.events, Date.now() + (cached.serverOffset ?? 0))
       setResult(previous => {
         const unchanged = sameEvents(previous.events, events)
         if (unchanged && !previous.pending && !previous.error && previous.complete === true) return previous
-        return { ...previous, events: unchanged ? previous.events : events, generation: previous.generation + (unchanged ? 0 : 1), pending: false, error: null, complete: true }
+        return { ...previous, events: unchanged ? previous.events : events, generation: previous.generation + (unchanged ? 0 : 1), pending: false, error: null, complete: true, identity: filterKey, serverOffset: cached.serverOffset, windowEnd: cached.windowEnd, bounds: cached.bounds }
       })
       schedule(cached.expiresAt - Date.now())
     } else schedule(300, true)
@@ -131,12 +147,13 @@ export function usePublicMapEvents(viewport: MapViewportSnapshot | null, filters
     window.addEventListener('focus', foreground)
     document.addEventListener('visibilitychange', foreground)
     return () => {
-      disposed = true; controller?.abort(); clearTimeout(timer)
+      disposed = true; controller?.abort(); clearTimeout(timer); clearTimeout(areaTimer)
       window.removeEventListener('focus', foreground)
       document.removeEventListener('visibilitychange', foreground)
       refresh.current = () => {}
     }
   }, [key, enabled])
   const retry = useCallback(() => refresh.current(), [])
-  return { ...result, retry }
+  const matchesFilters = !options?.discovery || result.identity === identity
+  return { ...result, ...(matchesFilters ? {} : { events: [], complete: null, error: null, pending: Boolean(viewport) }), matchesFilters, retry }
 }

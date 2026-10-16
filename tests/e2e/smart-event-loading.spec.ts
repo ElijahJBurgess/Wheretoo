@@ -1,18 +1,19 @@
 import { expect, test } from '@playwright/test'
+import { discoveryRows, fulfillMap } from './support/discoveryFixtures'
 import { mapReference } from './support/combinedMapObservations'
 
 test('loading, initial failure, retained refresh, empty and partial results stay interactive', async ({ page }) => {
   let mode: 'failure' | 'rows' | 'empty' | 'partial' = 'failure'
   let delay = 0
   let seed: Array<Record<string, unknown>> = []
-  await page.route('**/rest/v1/rpc/get_public_map_events', async route => {
-    if (!seed.length) seed = await (await route.fetch()).json() as Array<Record<string, unknown>>
+  await page.route('**/rest/v1/rpc/get_public_filtered_map_events', async route => {
+    if (!seed.length) seed = discoveryRows()
     const current = mode
     await new Promise(resolve => setTimeout(resolve, delay))
     if (current === 'failure') return route.abort()
     const rows = current === 'empty' ? [] : current === 'partial'
       ? Array.from({ length: 1000 }, (_, i) => ({ ...seed[i % seed.length], event_id: `39000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}` })) : seed
-    await route.fulfill({ json: rows, headers: { 'access-control-allow-origin': '*', 'access-control-expose-headers': 'content-range', 'content-range': rows.length ? `0-${rows.length - 1}/${current === 'partial' ? 2000 : rows.length}` : '*/0' } })
+    await fulfillMap(route, rows, current === 'partial' ? 2000 : rows.length)
   })
   await page.goto('/map')
   await mapReference(page)
@@ -48,11 +49,11 @@ test('loading, initial failure, retained refresh, empty and partial results stay
 test('A to B to A reuses previous coverage and rapid camera movement stays coalesced', async ({ page }) => {
   let requests = 0
   let seed: Array<Record<string, unknown>> = []
-  await page.route('**/rest/v1/rpc/get_public_map_events', async route => {
+  await page.route('**/rest/v1/rpc/get_public_filtered_map_events', async route => {
     requests++
-    if (!seed.length) seed = await (await route.fetch()).json() as Array<Record<string, unknown>>
+    if (!seed.length) seed = discoveryRows()
     const rows = seed.map(row => ({ ...row, longitude: -122.263, latitude: 37.804 }))
-    await route.fulfill({ json: rows, headers: { 'access-control-allow-origin': '*', 'access-control-expose-headers': 'content-range', 'content-range': `0-${rows.length - 1}/${rows.length}` } })
+    await fulfillMap(route, rows)
   })
   await page.goto('/map'); await mapReference(page)
   await expect(page.locator('.living-map__canvas')).toHaveAttribute('data-wheretoo-event-count', '9')
