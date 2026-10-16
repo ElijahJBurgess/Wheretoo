@@ -24,6 +24,11 @@ test('loading, initial failure, retained refresh, empty and partial results stay
   await expect(page.locator('.living-map__surface')).not.toHaveAttribute('inert')
   await expect(page.locator('.living-map__canvas')).toHaveAttribute('data-wheretoo-event-count', '9')
   await expect(page.getByText('Loading events…')).toHaveCount(0)
+  await page.waitForFunction(() => {
+    const map = window.__phase4Map
+    const layers = map.getStyle().layers?.filter(layer => 'source' in layer && layer.source === 'wheretoo-events' && !layer.id.includes('hit-area')).map(layer => layer.id) ?? []
+    return layers.length > 0 && map.queryRenderedFeatures({ layers }).length > 0
+  })
   mode = 'empty'
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
   await expect(page.getByText('Updating events…')).toBeVisible()
@@ -38,6 +43,7 @@ test('loading, initial failure, retained refresh, empty and partial results stay
     const map = window.__phase4Map
     const source = map.getSource('wheretoo-events') as unknown as { serialize(): { data: { features: unknown[] } } }
     const layers = map.getStyle().layers?.filter(layer => 'source' in layer && layer.source === 'wheretoo-events' && !layer.id.includes('hit-area')).map(layer => layer.id) ?? []
+    if (!layers.length) throw new Error('Event rendering layers are unavailable')
     return { serialized: source.serialize().data.features.length, rendered: map.queryRenderedFeatures({ layers }).length }
   }), { timeout: 5000 }).toEqual({ serialized: 0, rendered: 0 })
   await page.screenshot({ path: test.info().outputPath('empty-results.png') })
