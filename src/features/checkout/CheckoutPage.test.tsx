@@ -115,7 +115,7 @@ const publicEvent: PublicTicketingEvent = {
 }
 
 function renderCheckout(
-  initialEntry = `/events/${eventId}/checkout?item=${tierId}%3A2&item=${otherTierId}%3A1`,
+  initialEntry: string | { pathname: string; search: string; state: Record<string, unknown> } = `/events/${eventId}/checkout?item=${tierId}%3A2&item=${otherTierId}%3A1`,
   assignCheckout?: (url: string) => void,
   strict = false,
 ) {
@@ -143,6 +143,14 @@ describe('CheckoutPage', () => {
     getOrCreateCheckoutAttempt.mockImplementation(attempts.getOrCreateCheckoutAttempt)
     clearCheckoutAttemptForConfirmation.mockImplementation(attempts.clearCheckoutAttemptForConfirmation)
     invoke.mockResolvedValue({ data: null, error: new Error('unknown') })
+  })
+
+  it('keeps public return context when editing the ticket selection', async () => {
+    const state = { discoverySearch: '?when=today', mapReturn: { version: 1, path: '/map', camera: { center: [-122.264, 37.803], zoom: 16.25, pitch: 25, bearing: 0 }, selectedEventId: eventId, chooser: null } }
+    const { router } = renderCheckout({ pathname: `/events/${eventId}/checkout`, search: `?item=${tierId}%3A1`, state })
+    await userEvent.click(screen.getByRole('link', { name: 'Edit selection' }))
+    expect(router.state.location.state.mapReturn).toEqual(state.mapReturn)
+    expect(router.state.location.state.discoverySearch).toBe('?when=today')
   })
 
   it('reviews multiple canonical cart lines and derives one public-data total', () => {

@@ -173,6 +173,9 @@
   top: max(1rem, env(safe-area-inset-top));
   left: max(1rem, env(safe-area-inset-left));
   pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
 }
 .living-map__wordmark {
   color: #f4f3fa;
@@ -240,3 +243,20 @@
   .living-map .event-preview { top: max(4.5rem, env(safe-area-inset-top)); max-height: none; }
   .living-map .event-preview__scroll { gap: 0.6rem; }
 }
+
+.living-map__choose {
+  pointer-events: auto;
+  display: block;
+  min-height: 44px;
+  padding: 0.5rem 0.8rem;
+  border: 1px solid rgb(220 224 240 / 25%);
+  border-radius: 0.75rem;
+  color: #f4f3fa;
+  background: #20232b;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 750;
+}
+.living-map__choose:disabled { opacity: 0.6; }
+.living-map__choose:focus-visible { outline: 3px solid #b7a5ff; outline-offset: 2px; }
+.living-map .event-preview:focus-visible { outline: 2px solid #b7a5ff; outline-offset: 2px; }

@@ -7,6 +7,7 @@ import type { EventPreviewNavigation } from './eventPreviewNavigation'
 type EventPreviewCardProps = {
   event: WheretooMapEvent
   navigation: EventPreviewNavigation
+  onOpenEvent?(to: string): void
   onClose(): void
   onBack?(): void
   /** URL from the canonical public event-image resolver; null means no public cover. */
@@ -25,7 +26,7 @@ function ArtworkFallback() {
 }
 
 export const EventPreviewCard = forwardRef<HTMLElement, EventPreviewCardProps>(function EventPreviewCard(
-  { event, navigation, onClose, onBack, publicArtworkUrl }, ref,
+  { event, navigation, onClose, onBack, publicArtworkUrl, onOpenEvent }, ref,
 ) {
   const titleId = useId()
   const explanationId = useId()
@@ -34,7 +35,7 @@ export const EventPreviewCard = forwardRef<HTMLElement, EventPreviewCardProps>(f
   const schedule = formatEventDateTime(event)
 
   return (
-    <article ref={ref} className="event-preview" role="region" aria-labelledby={titleId} aria-live="polite">
+    <article ref={ref} className="event-preview" tabIndex={-1} role="region" aria-labelledby={titleId} aria-live="polite">
       <div className="event-preview__scroll">
         <div className="event-preview__topline">
           <p className="event-preview__eyebrow">wheretoo event</p>
@@ -60,7 +61,9 @@ export const EventPreviewCard = forwardRef<HTMLElement, EventPreviewCardProps>(f
       <div className="event-preview__footer">
         {onBack ? <button className="event-preview__back" type="button" onClick={onBack}>Back to events</button> : null}
         {navigation.kind === 'enabled' ? (
-          <Link className="event-preview__action" to={navigation.to}>View event</Link>
+          <Link className="event-preview__action" to={navigation.to} onClick={event => {
+            if (onOpenEvent && event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); onOpenEvent(navigation.to) }
+          }}>View event</Link>
         ) : (
           <button
             className="event-preview__action"

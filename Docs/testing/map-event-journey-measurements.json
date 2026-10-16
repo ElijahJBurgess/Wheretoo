@@ -1,0 +1,144 @@
+{
+  "baselineCommit": "5ddfb1a71ad3459e585825c8d957fea5e0f8db0a",
+  "method": "Headed Chrome 1280x800 and touch-emulated 390x844. Click capture to two animation frames after preview DOM update. Observational bounds, not input-to-photon or an SLA. Baseline audit, contemporary unchanged-staging control, and local implementation use the same nine public staging events. Native Chrome updated from 155.0.8059.41 to .80; dev versus hosted/network variance prevents attributing small latency differences to this change.",
+  "originalAudit": {
+    "desktop": {
+      "samples": 5,
+      "previewPaintBoundMedianMs": 58.1,
+      "previewPaintBoundRangeMs": [
+        48.1,
+        79.6
+      ],
+      "eventToRsvpReadyMs": 1433
+    },
+    "mobile": {
+      "samples": 5,
+      "previewPaintBoundMedianMs": 38.8,
+      "previewPaintBoundRangeMs": [
+        33.6,
+        61.8
+      ],
+      "eventToRsvpReadyMs": 990
+    }
+  },
+  "contemporaryStagingControl": {
+    "desktop": {
+      "samples": 5,
+      "previewPaintBoundMedianMs": 95.1,
+      "previewPaintBoundRangeMs": [
+        54.2,
+        138.1
+      ],
+      "eventToRsvpReadyMs": 1317,
+      "cameraBefore": {
+        "center": [
+          -122.26300000000003,
+          37.804
+        ],
+        "zoom": 14.6
+      },
+      "cameraAfter": {
+        "center": [
+          -122.26300000000003,
+          37.804
+        ],
+        "zoom": 14.6
+      },
+      "selectionRestored": false,
+      "returnHref": "/discover"
+    },
+    "mobile": {
+      "samples": 4,
+      "previewPaintBoundMedianMs": 47.9,
+      "previewPaintBoundRangeMs": [
+        40.3,
+        62.6
+      ],
+      "eventToRsvpReadyMs": 578,
+      "cameraBefore": {
+        "center": [
+          -122.26299999999995,
+          37.8008943473849
+        ],
+        "zoom": 14.8
+      },
+      "cameraAfter": {
+        "center": [
+          -122.26299999999995,
+          37.804
+        ],
+        "zoom": 14.8
+      },
+      "selectionRestored": false,
+      "returnHref": "/discover"
+    }
+  },
+  "localImplementation": {
+    "desktop": {
+      "samples": 5,
+      "previewPaintBoundMedianMs": 59,
+      "previewPaintBoundRangeMs": [
+        53.6,
+        151.9
+      ],
+      "eventToRsvpReadyMs": 981,
+      "cameraBefore": {
+        "center": [
+          -122.26300000000003,
+          37.804
+        ],
+        "zoom": 14.6
+      },
+      "cameraAfter": {
+        "center": [
+          -122.26300000000003,
+          37.804
+        ],
+        "zoom": 14.6
+      },
+      "selectionRestored": true,
+      "returnHref": "/map"
+    },
+    "mobile": {
+      "samples": 6,
+      "previewPaintBoundMedianMs": 45.0,
+      "previewPaintBoundRangeMs": [
+        43,
+        54.2
+      ],
+      "eventToRsvpReadyMs": 1268,
+      "cameraBefore": {
+        "center": [
+          -122.26299999999995,
+          37.800894347384855
+        ],
+        "zoom": 14.8
+      },
+      "cameraAfter": {
+        "center": [
+          -122.26299999999995,
+          37.800894347384855
+        ],
+        "zoom": 14.8
+      },
+      "selectionRestored": true,
+      "returnHref": "/map"
+    }
+  },
+  "longCopyFixture": {
+    "desktop": {
+      "getTicketsYBefore": 939,
+      "getTicketsYAfter": 408.5,
+      "ticketQuantityYBefore": -89,
+      "ticketQuantityYAfter": 227.3
+    },
+    "mobile": {
+      "getTicketsYBefore": 1281,
+      "getTicketsYAfter": 398.4,
+      "ticketQuantityYAfter": 473.4,
+      "brokenCoverHeightBefore": 440,
+      "brokenCoverHeightAfter": 0
+    }
+  },
+  "evidenceRoot": "/tmp/wheretoo-task3-implementation"
+}

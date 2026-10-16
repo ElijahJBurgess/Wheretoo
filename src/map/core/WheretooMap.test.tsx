@@ -115,6 +115,21 @@ describe('WheretooMap', () => {
     vi.mocked(createNavigationControl).mockReturnValue({} as never)
   })
 
+  it('initializes the saved camera once and releases its read-only navigation snapshot on cleanup', async () => {
+    const fake = fakeMap(); vi.mocked(createMapboxMap).mockReturnValue(fake.map as never)
+    const snapshot = vi.fn()
+    const camera = { center: [-122.264, 37.803] as [number, number], zoom: 16.25, pitch: 12, bearing: 0 }
+    const props = { visualScene: null, initialCamera: camera, onSnapshotReady: snapshot, onReady: vi.fn(), onMoveEnd: vi.fn(), onRendererError: vi.fn() }
+    const view = render(<WheretooMap {...props} />)
+    await waitFor(() => expect(createMapboxMap).toHaveBeenCalledOnce())
+    expect(vi.mocked(createMapboxMap).mock.calls[0][0]).toEqual(expect.objectContaining(camera))
+    expect(snapshot.mock.calls[0][0]()).toEqual(expect.objectContaining({ camera: expect.objectContaining({ zoom: 14.6 }) }))
+    view.rerender(<WheretooMap {...props} initialCamera={{ ...camera, zoom: 15 }} />)
+    expect(createMapboxMap).toHaveBeenCalledOnce()
+    view.unmount()
+    expect(snapshot).toHaveBeenLastCalledWith(null)
+  })
+
   it('renews availability before lease expiry without flashing fallback or reloading images', async () => {
     vi.useFakeTimers()
     const fake = fakeMap(); vi.mocked(createMapboxMap).mockReturnValue(fake.map as never)

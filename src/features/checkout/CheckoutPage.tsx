@@ -1,3 +1,4 @@
+import { publicReturnState } from '../discovery/discovery.navigation'
 import { usePublicEventImages } from '../event-images/publicEventImages'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
@@ -47,6 +48,7 @@ export function CheckoutPage(props: CheckoutPageProps) {
 function CheckoutRoute({ assignCheckout = assignHostedCheckout }: CheckoutPageProps) {
   const navigate = useNavigate()
   const location = useLocation()
+  const returnState = publicReturnState(location.state)
   const { eventId: routeEventId = '' } = useParams()
   const eventIdResult = lowercaseRfcUuidSchema.safeParse(routeEventId)
   const eventId = eventIdResult.success ? eventIdResult.data : ''
@@ -142,7 +144,7 @@ function CheckoutRoute({ assignCheckout = assignHostedCheckout }: CheckoutPagePr
   }
 
   const retryStatus = recovery?.bearer ? <Button disabled={busy} onClick={() => void run(() => checkCheckoutAttempt(recovery.bearer!))} type="button">{busy ? 'Checking status…' : 'Check status'}</Button> : null
-  const returnAction = eventPath ? <Link className="ui-button ui-button--secondary" to={eventPath}>Return to event</Link> : null
+  const returnAction = eventPath ? <Link className="ui-button ui-button--secondary" to={eventPath} state={returnState}>Return to event</Link> : null
   if (cancelToken !== null && recovery === null) return <BuyerRecoveryView title="Cancelling checkout" description="Please wait while we confirm the result. Your checkout is still being checked." busy />
   if (recovery && !enterOriginal) {
     if (recovery.kind === 'order') {
@@ -154,9 +156,9 @@ function CheckoutRoute({ assignCheckout = assignHostedCheckout }: CheckoutPagePr
         }}
         onCancel={() => void run(() => cancelCheckoutAttempt(recovery.bearer))} />
     }
-    if (recovery.kind === 'cancelled') return <BuyerRecoveryView tone="neutral" title="Checkout cancelled" description="Cancellation is confirmed. You can review availability and choose tickets again." action={selectionPath ? <Link className="ui-button" to={selectionPath}>Choose tickets</Link> : returnAction} secondaryAction={selectionPath ? returnAction : null} />
+    if (recovery.kind === 'cancelled') return <BuyerRecoveryView tone="neutral" title="Checkout cancelled" description="Cancellation is confirmed. You can review availability and choose tickets again." action={selectionPath ? <Link className="ui-button" to={selectionPath} state={returnState}>Choose tickets</Link> : returnAction} secondaryAction={selectionPath ? returnAction : null} />
     if (recovery.kind === 'stock' || recovery.kind === 'unavailable') return <BuyerRecoveryView tone={recovery.kind === 'stock' ? 'failure' : 'unknown'} title={recovery.kind === 'stock' ? 'Tickets no longer available' : 'Tickets unavailable'} description="Your selection could not be reserved. Review availability before changing your tickets." action={selectionPath ? <Button disabled={busy} onClick={() => {
-      if (releaseRejectedCheckoutAttempt(recovery.bearer)) navigate(selectionPath)
+      if (releaseRejectedCheckoutAttempt(recovery.bearer)) navigate(selectionPath, { state: returnState })
       else setServerError('Unable to release this checkout. Keep your original checkout link.')
     }} type="button">Edit selection</Button> : null}>
       {items ? <ul className="buyer-recovery__selection" aria-label="Your selected tickets">{items.map((item) => <li key={item.tierId}>{eventQuery.data?.tiers.find((tier) => tier.id === item.tierId)?.name ?? 'Unavailable ticket'} × {item.quantity}</li>)}</ul> : null}
@@ -169,15 +171,15 @@ function CheckoutRoute({ assignCheckout = assignHostedCheckout }: CheckoutPagePr
   const publicData = eventQuery.data
   const selected = items?.map((item) => ({ ...item, tier: publicData.tiers.find((tier) => tier.id === item.tierId) })) ?? []
   const snapshot = recovery?.kind === 'order' ? recovery.order : null
-  if (!items || (!snapshot && selected.some((line) => !line.tier || line.tier.availability_status !== 'available'))) return <BuyerRecoveryView title="Review your selection" description="Availability changed. Your full selection is kept here so you can review it before making changes." action={selectionPath ? <Link className="ui-button" to={selectionPath}>Edit selection</Link> : returnAction}>
+  if (!items || (!snapshot && selected.some((line) => !line.tier || line.tier.availability_status !== 'available'))) return <BuyerRecoveryView title="Review your selection" description="Availability changed. Your full selection is kept here so you can review it before making changes." action={selectionPath ? <Link className="ui-button" to={selectionPath} state={returnState}>Edit selection</Link> : returnAction}>
     <ul className="buyer-recovery__selection">{selected.map((line) => <li key={line.tierId}>{line.tier?.name ?? 'Unavailable ticket'} × {line.quantity}</li>)}</ul>
   </BuyerRecoveryView>
   const lines = snapshot ? snapshot.items.map((item) => ({ name: item.tierName, quantity: item.quantity, unitAmountMinor: item.unitAmountMinor })) : selected.map((line) => ({ name: line.tier!.name, quantity: line.quantity, unitAmountMinor: line.tier!.unit_amount_minor }))
   const total = snapshot?.totalMinor ?? lines.reduce((sum, line) => sum + line.quantity * line.unitAmountMinor, 0)
   const errors = [fieldErrors.buyerName, fieldErrors.buyerEmail, serverError].filter((value): value is string => Boolean(value))
   return <CheckoutReview artwork={images.data?.find(image => image.position === 1)?.url ?? null} event={eventQuery.data.event} lines={lines} totalMinor={total}
-    back={returnAction ? <Link className="buyer-icon-button" aria-label="Return to event" to={eventPath!}><BuyerIcon name="back" /></Link> : null}
-    editSelection={!recovery && selectionPath ? <Link to={selectionPath}>Edit selection</Link> : null}>
+    back={returnAction ? <Link className="buyer-icon-button" aria-label="Return to event" to={eventPath!} state={returnState}><BuyerIcon name="back" /></Link> : null}
+    editSelection={!recovery && selectionPath ? <Link to={selectionPath} state={returnState}>Edit selection</Link> : null}>
     <form className="buyer-checkout-form" noValidate onSubmit={(event) => void submit(event)}>
       <section className="buyer-details" aria-labelledby="buyer-details-heading"><h2 id="buyer-details-heading">{enterOriginal ? 'Re-enter the original buyer details' : 'Buyer details'}</h2>
         <FormErrorSummary errors={errors} title="Check your details" /><div className="buyer-details__fields">

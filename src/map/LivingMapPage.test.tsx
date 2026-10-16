@@ -1,6 +1,8 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render as rtlRender, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { useEffect } from 'react'
+import { useEffect, type ReactElement } from 'react'
+import { MemoryRouter, createMemoryRouter, RouterProvider } from 'react-router-dom'
+const render = (ui: ReactElement) => rtlRender(ui, { wrapper: MemoryRouter })
 import { getDevelopmentMapEvents } from './data/developmentMapEvents'
 const { query, mounted } = vi.hoisted(() => ({ query: vi.fn(), mounted: vi.fn() }))
 const { images } = vi.hoisted(() => ({ images: vi.fn() }))
@@ -19,6 +21,7 @@ vi.mock('./core/WheretooMap', () => ({
     useEffect(() => { mounted({ onReady, onRendererError }) }, [onReady, onRendererError])
     return (
     <div aria-label="map test double" data-selected-event-id={selectedEventId ?? ''}>
+      <canvas className="mapboxgl-canvas" aria-label="test map canvas" tabIndex={0} />
       <button onClick={onReady}>ready</button>
       <button onClick={() => onRendererError({ code: 'STYLE_LOAD_FAILED', message: 'The map style could not load.' })}>fail</button>
       <button onClick={() => onSelectEvent('oakland-day-party')}>select day party</button>
@@ -108,7 +111,8 @@ describe('LivingMapPage', () => {
     act(() => vi.advanceTimersByTime(15000))
     fireEvent.click(screen.getByRole('button', { name: 'ready' }))
     expect(screen.queryByText('The map is taking longer than expected.')).not.toBeInTheDocument()
-    act(() => vi.advanceTimersByTime(180))
+    // The separate navigation snapshot debounce also settles without leaving timers.
+    act(() => vi.advanceTimersByTime(400))
     expect(vi.getTimerCount()).toBe(0)
   })
 
@@ -172,6 +176,42 @@ describe('LivingMapPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'select day party' }))
     fireEvent.keyDown(screen.getByRole('region', { name: 'Day Party' }), { key: 'Escape' })
     expect(map).toHaveAttribute('data-selected-event-id', '')
+  })
+
+  it.each(['available', 'expired', 'removed', 'offline'])('restores only a current eligible selection on %s return', async status => {
+    const id = '3d000000-0000-4000-8000-000000000001'
+    const events = [{ ...getDevelopmentMapEvents()[0], id, endsAt: status === 'expired' ? '2020-01-01T00:00:00Z' : '2027-07-01T00:00:00Z' }]
+    query.mockReturnValue({ events: status === 'removed' ? [] : events, complete: status === 'offline' ? null : true, generation: 1, pending: false, error: status === 'offline' ? new Error('offline') : null, retry: vi.fn() })
+    const router = createMemoryRouter([{ path: '/map', element: <Component /> }], { initialEntries: [{ pathname: '/map', state: { mapReturn: { version: 1, path: '/map', camera: { center: [-122.264, 37.803], zoom: 16.25, pitch: 25, bearing: 0 }, selectedEventId: id, chooser: null } } }] })
+    rtlRender(<RouterProvider router={router} />)
+    const map = await screen.findByLabelText('map test double')
+    if (status === 'available') expect(map).toHaveAttribute('data-selected-event-id', id)
+    else expect(map).toHaveAttribute('data-selected-event-id', '')
+  })
+
+  it('offers the bounded chooser to keyboard users and retains focus through preview, Back and Escape', async () => {
+    render(<Component />)
+    fireEvent.click(screen.getByRole('button', { name: 'ready' }))
+    const trigger = screen.getByRole('button', { name: 'Choose an event on the map' })
+    trigger.focus()
+    fireEvent.click(trigger)
+    expect(screen.getByRole('region', { name: /events here/ })).toHaveFocus()
+    fireEvent.click(screen.getByRole('button', { name: 'Open Vinyl Night event preview' }))
+    expect(screen.getByRole('region', { name: 'Vinyl Night' })).toHaveFocus()
+    fireEvent.click(screen.getByRole('button', { name: 'Back to events' }))
+    expect(screen.getByRole('button', { name: 'Open Vinyl Night event preview' })).toHaveFocus()
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' })
+    expect(screen.queryByRole('region')).not.toBeInTheDocument()
+    expect(trigger).toHaveFocus()
+  })
+
+  it('returns focus to the map if refreshed inventory disables the chooser trigger', () => {
+    const view = render(<Component />)
+    fireEvent.click(screen.getByRole('button', { name: 'ready' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Choose an event on the map' }))
+    query.mockReturnValue({ events: [], complete: true, generation: 2, pending: false, error: null, retry: vi.fn() })
+    view.rerender(<Component />)
+    expect(screen.getByLabelText('test map canvas')).toHaveFocus()
   })
 
   it('moves from chooser to exact preview and Back restores the chooser', async () => {

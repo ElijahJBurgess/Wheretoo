@@ -2,9 +2,9 @@ import { useWaitlistCapability } from '../waitlist/waitlist.queries'
 import { WaitlistJoinForm } from '../waitlist/WaitlistJoinForm'
 import { usePublicEventImages } from '../event-images/publicEventImages'
 import '../buyer-journey/buyer-availability.css'
-import { discoveryReturnPath } from '../discovery/discovery.navigation'
+import { publicReturnPath, publicReturnState } from '../discovery/discovery.navigation'
 import { FreeRsvpEntry } from '../rsvp/FreeRsvpEntry'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { BuyerHeader, BuyerIcon } from '../buyer-journey/BuyerPrimitives'
 import { EventPageView } from '../buyer-journey/EventPageView'
@@ -60,6 +60,8 @@ function formatAddress(event: {
 }
 
 type PublicEventStateProps = {
+  returnPath?: string
+  returnState?: ReturnType<typeof publicReturnState>
   paused?: boolean
   action?: ReactNode
   description?: string
@@ -67,10 +69,10 @@ type PublicEventStateProps = {
   title: string
 }
 
-function PublicEventState({ action, description, status, title, paused }: PublicEventStateProps) {
+function PublicEventState({ action, description, status, title, paused, returnPath = '/discover', returnState }: PublicEventStateProps) {
   return (
     <main className="buyer-page buyer-state">
-      <BuyerHeader back={<Link className="buyer-icon-button" aria-label="Browse events" to="/discover"><BuyerIcon name="back" /></Link>} />
+      <BuyerHeader back={<Link className="buyer-icon-button" aria-label={returnPath === '/map' ? 'Return to map' : 'Browse events'} to={returnPath} state={returnState}><BuyerIcon name="back" /></Link>} />
       <ReadState paused={paused} headingAs="h1" skeleton="detail-fields" action={action} description={description} status={status} title={title} />
     </main>
   )
@@ -81,10 +83,20 @@ type PublicTicketPurchaseProps = {
   tiers: PublicTicketTierTuple
   availabilityKnown: boolean
   startsAt: string
+  selection: boolean
   refresh: () => Promise<unknown>
 }
 
-function PublicTicketPurchase({ eventId, tiers, availabilityKnown, startsAt, refresh }: PublicTicketPurchaseProps) {
+function PublicTicketPurchase({ eventId, tiers, availabilityKnown, startsAt, refresh, selection }: PublicTicketPurchaseProps) {
+  const section = useRef<HTMLElement | null>(null)
+  const landed = useRef(false)
+  useLayoutEffect(() => {
+    if (!selection || landed.current || !section.current) return
+    landed.current = true
+    section.current.scrollIntoView?.({ block: 'start', behavior: 'instant' })
+    const target = section.current.querySelector<HTMLElement>('input:not(:disabled)') ?? section.current
+    target.focus({ preventScroll: true })
+  }, [selection])
   const capability=useWaitlistCapability(eventId)
   const [joinTier,setJoinTier]=useState<string|null>(null)
   const [waitlistNotice,setWaitlistNotice]=useState('')
@@ -136,12 +148,12 @@ function PublicTicketPurchase({ eventId, tiers, availabilityKnown, startsAt, ref
     const selected = Object.entries(next).filter(([, quantity]) => quantity > 0).map(([tierId, quantity]) => ({ tierId, quantity }))
     if (Object.values(next).every(q => Number.isSafeInteger(q) && q >= 0 && q <= MAX_CHECKOUT_QUANTITY)
       && selected.reduce((sum, item) => sum + item.quantity, 0) <= MAX_CHECKOUT_QUANTITY) {
-      navigate({ pathname: location.pathname, search: selected.length ? `?${encodeCheckoutCart(selected)}` : '' }, { replace: true })
+      navigate({ pathname: location.pathname, search: selected.length ? `?${encodeCheckoutCart(selected)}` : '' }, { replace: true, state: publicReturnState(location.state) })
     }
   }
 
   return (
-    <section aria-labelledby="public-event-tickets" className="public-event__tickets">
+    <section ref={section} tabIndex={-1} aria-labelledby="public-event-tickets" className="public-event__tickets">
       <div>
         <p className="public-event__eyebrow">Tickets</p>
         <h2 id="public-event-tickets">{allSoldOut ? 'This event is sold out' : !hasAvailableTier ? 'Tickets unavailable' : 'Choose your tickets'}</h2>
@@ -163,7 +175,7 @@ function PublicTicketPurchase({ eventId, tiers, availabilityKnown, startsAt, ref
         <Button disabled={!availabilityKnown} onClick={() => { setNeedsReview(false); setPriceReviewIds([]) }}>Confirm updated selection</Button>
       </div> : null}
       <Button disabled={!canContinue} onClick={() => {
-        if (canContinue) navigate({ pathname: `/events/${eventId}/checkout`, search: `?${encodeCheckoutCart(items)}` })
+        if (canContinue) navigate({ pathname: `/events/${eventId}/checkout`, search: `?${encodeCheckoutCart(items)}` }, { state: publicReturnState(location.state) })
       }}>{allSoldOut ? 'Sold out' : !hasAvailableTier ? 'Tickets unavailable' : 'Continue to checkout'}</Button>
     </section>
   )
@@ -172,23 +184,30 @@ function PublicTicketPurchase({ eventId, tiers, availabilityKnown, startsAt, ref
 export function PublicTicketEventPage({ selection = false }: { selection?: boolean }) {
   const { eventId = '' } = useParams()
   const location = useLocation()
-  const discoveryPath = discoveryReturnPath(location.state)
-  const publicReturnState = { discoverySearch: discoveryPath.slice('/discover'.length) }
+  const returnPath = publicReturnPath(location.state)
+  const returnState = publicReturnState(location.state)
   const eventQuery = usePublicTicketingEvent(eventId)
   const images = usePublicEventImages(eventQuery.data ? [eventId] : [])
+  const landedEvent = useRef<string | null>(null)
+  useLayoutEffect(() => {
+    if (selection || !eventQuery.data || landedEvent.current === eventId) return
+    landedEvent.current = eventId
+    window.scrollTo({ top: 0, behavior: 'instant' })
+    document.getElementById('public-event-title')?.focus({ preventScroll: true })
+  }, [selection, eventId, eventQuery.data])
   const hasRetryableStaleEvent = eventQuery.isError
     && eventQuery.data !== undefined
     && eventQuery.data !== null
     && isRetryablePublicTicketingError(eventQuery.error)
 
   if ((eventQuery.isPending || eventQuery.data === undefined) && !eventQuery.isError) {
-    return <PublicEventState paused={eventQuery.fetchStatus === 'paused'} status="loading" title="Loading event" />
+    return <PublicEventState returnPath={returnPath} returnState={returnState} paused={eventQuery.fetchStatus === 'paused'} status="loading" title="Loading event" />
   }
   if (eventQuery.isError && !hasRetryableStaleEvent) {
-    return <PublicEventState action={<Button onClick={() => void eventQuery.refetch()}>Try again</Button>} description="Check your connection, then try again." status="error" title="Event could not load" />
+    return <PublicEventState returnPath={returnPath} returnState={returnState} action={<Button onClick={() => void eventQuery.refetch()}>Try again</Button>} description="Check your connection, then try again." status="error" title="Event could not load" />
   }
   if (eventQuery.data === null) {
-    return <PublicEventState description="This event may no longer be available." status="not-found" title="Event not found" />
+    return <PublicEventState returnPath={returnPath} returnState={returnState} description="This event may no longer be available." status="not-found" title="Event not found" />
   }
 
   const publicEvent = eventQuery.data
@@ -198,6 +217,8 @@ export function PublicTicketEventPage({ selection = false }: { selection?: boole
     : null
   const dateAndTime = formatDateAndTime(event.starts_at, event.ends_at)
 
+  const cart = parseCheckoutCart(location.search)
+  const ticketSearch = cart?.length ? `?${encodeCheckoutCart(cart)}` : ''
   const artwork = images.data?.find(image => image.position === 1)?.url ?? null
   const paidAvailable = !hasRetryableStaleEvent && paidPublicEvent?.tiers.some(tier => tier.availability_status === 'available')
   const compactAvailability = paidPublicEvent !== null && !paidAvailable
@@ -213,13 +234,11 @@ export function PublicTicketEventPage({ selection = false }: { selection?: boole
       <EventPageView title={event.title} organizer={event.organizer.display_name}
         date={dateAndTime.date} time={dateAndTime.time} venue={event.venue_name ?? 'Venue to be announced'}
         location={formatAddress(event)} description={event.description} artwork={artwork} selection={selection}
-        back={<Link className="buyer-icon-button" aria-label={selection ? 'Return to event' : 'Browse events'} to={selection ? `/events/${event.id}` : discoveryPath} state={selection ? publicReturnState : undefined}><BuyerIcon name="back" /></Link>}
+        back={<Link className="buyer-icon-button" aria-label={selection ? 'Return to event' : returnPath === '/map' ? 'Return to map' : 'Browse events'} to={selection ? `/events/${event.id}` : returnPath} state={returnState}><BuyerIcon name="back" /></Link>}
         badge={event.admission_type==='free'?'Free RSVP':undefined}
-        action={!selection && paidAvailable ? <Link className="ui-button buyer-primary" to={`/events/${event.id}/tickets`} state={publicReturnState}>Get tickets<BuyerIcon name="arrow" /></Link> : undefined}
+        action={event.admission_type === 'free' ? <section className="public-event__tickets"><h2>Free RSVP</h2><p>No payment required.</p><FreeRsvpEntry eventId={event.id}/></section> : !selection && paidAvailable ? <Link className="ui-button buyer-primary" to={{ pathname: `/events/${event.id}/tickets`, search: ticketSearch }} state={returnState}>Get tickets<BuyerIcon name="arrow" /></Link> : undefined}
       >
-        {paidPublicEvent !== null ? <PublicTicketPurchase key={event.id} eventId={event.id} startsAt={event.starts_at} refresh={()=>eventQuery.refetch()} tiers={paidPublicEvent.tiers} availabilityKnown={!hasRetryableStaleEvent} /> : (
-          <section className="public-event__tickets"><h2>Free RSVP</h2><p>No payment required.</p><FreeRsvpEntry eventId={event.id}/></section>
-        )}
+        {paidPublicEvent !== null ? <PublicTicketPurchase key={event.id} selection={selection} eventId={event.id} startsAt={event.starts_at} refresh={()=>eventQuery.refetch()} tiers={paidPublicEvent.tiers} availabilityKnown={!hasRetryableStaleEvent} /> : null}
         {!hasRetryableStaleEvent ? <ReportEventDialog eventId={event.id} /> : null}
       </EventPageView>
     </div>

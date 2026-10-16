@@ -1,0 +1,77 @@
+{
+  "baseline": "5ddfb1a71ad3459e585825c8d957fea5e0f8db0a",
+  "deployment": "dpl_3Q5WgGGUq4hN1Y4vfxhasoxbtwTJ",
+  "target": "https://wheretoo-staging.vercel.app",
+  "method": "Headed desktop Chrome; mobile uses touch/viewport emulation, not physical phone. Preview bound is click capture to two requestAnimationFrames after DOM update; not hardware input-to-photon.",
+  "measurements": {
+    "desktop": {
+      "samples": 5,
+      "previewPaintBoundMedianMs": 58.1,
+      "previewPaintBoundRangeMs": [
+        48.1,
+        79.6
+      ],
+      "eventToRsvpReadyMs": 1433
+    },
+    "mobile": {
+      "samples": 5,
+      "previewPaintBoundMedianMs": 38.8,
+      "previewPaintBoundRangeMs": [
+        33.6,
+        61.8
+      ],
+      "eventToRsvpReadyMs": 990
+    }
+  },
+  "context": [
+    {
+      "label": "desktop",
+      "before": {
+        "center": [
+          -122.26399999999998,
+          37.803
+        ],
+        "zoom": 16.25,
+        "selected": "ed693a59-51fb-48e8-a4a5-a71f97480175",
+        "active": "CANVAS"
+      },
+      "after": {
+        "center": [
+          -122.26300000000003,
+          37.804
+        ],
+        "zoom": 14.6,
+        "selected": ""
+      },
+      "uiBack": "/discover",
+      "chooserSelectedFocus": "BODY",
+      "escapeAfterChooser": 1,
+      "afterBackFocus": "BODY"
+    },
+    {
+      "label": "mobile",
+      "before": {
+        "center": [
+          -122.26395489080113,
+          37.803
+        ],
+        "zoom": 16.25,
+        "selected": "3b532512-e621-434d-a3d9-036023ddd104",
+        "active": "CANVAS"
+      },
+      "after": {
+        "center": [
+          -122.26299999999995,
+          37.804
+        ],
+        "zoom": 14.8,
+        "selected": ""
+      },
+      "uiBack": "/discover",
+      "chooserSelectedFocus": "BODY",
+      "escapeAfterChooser": 1,
+      "afterBackFocus": "BODY"
+    }
+  ],
+  "evidenceRoot": "/tmp/wheretoo-task3-audit"
+}

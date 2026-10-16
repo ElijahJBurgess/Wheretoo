@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useLocation, useNavigate, useNavigationType } from 'react-router-dom'
 import { DiscoveryView } from './DiscoveryView'
 import { parseDiscoverySearch, serializeDiscoveryFilters } from './discovery.filters'
-import { discoveryScrollPosition, discoveryCardScrollPosition } from './discovery.navigation'
+import { publicReturnPath, discoveryScrollPosition, discoveryCardScrollPosition } from './discovery.navigation'
 import { discoveryKeys, useDiscovery } from './discovery.queries'
 import type { DiscoveryFilters } from './discovery.types'
 
@@ -37,11 +37,11 @@ export function DiscoveryPage() {
   useLayoutEffect(() => {
     if (discovery.status === 'loading' || restored.current === location.key) return
     restored.current = location.key
-    if (navigationType === 'POP') {
+    if (navigationType === 'POP' || (location.state?.mapReturn && publicReturnPath(location.state) === '/discover' + search)) {
       window.scrollTo({ top: discoveryScrollPosition(location.state), behavior: 'instant' })
       document.querySelector('.discovery-event-list')?.scrollTo({ left: discoveryCardScrollPosition(location.state), behavior: 'instant' })
     }
-  }, [discovery.status, location.key, location.state, navigationType])
+  }, [discovery.status, location.key, location.state, navigationType, search])
 
   function changeFilters(next: DiscoveryFilters) {
     const nextSearch = serializeDiscoveryFilters(next)
