@@ -27,7 +27,8 @@
   ],
   "git": {
     "deploymentEnabled": {
-      "codex/smart-event-loading": false
+      "codex/smart-event-loading": false,
+      "codex/discovery-query-optimization": false
     }
   }
 }

@@ -1,0 +1,10 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions;
+select no_plan();
+select has_function('private','current_publicly_eligible_event_ids',array[]::text[],'eligibility set is available to the discovery planner');
+select ok(not exists(select 1 from pg_proc where oid=to_regprocedure('private.current_publicly_eligible_event_ids()') and (prosecdef or proconfig is not null or provolatile<>'s')),'set helper permits inlining inside existing security boundaries');
+select ok(not has_function_privilege(r,coalesce(to_regprocedure('private.current_publicly_eligible_event_ids()'),0::oid),'execute'),'API role cannot invoke eligibility set: '||r) from unnest(array['anon','authenticated','service_role'])r;
+select ok(prosecdef and proconfig=array['search_path=""']::text[] and provolatile='s','existing point helper keeps stable definer boundary') from pg_proc where oid='private.event_has_current_public_eligibility(uuid)'::regprocedure;
+select * from finish();
+rollback;
