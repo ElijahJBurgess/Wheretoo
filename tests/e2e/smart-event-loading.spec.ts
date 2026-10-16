@@ -32,6 +32,14 @@ test('loading, initial failure, retained refresh, empty and partial results stay
   const emptyCopy = await page.locator('.living-map__event-status > span').boundingBox()
   const broaden = await page.getByRole('button', { name: 'Zoom out to search a wider area', exact: true }).boundingBox()
   expect(emptyCopy && broaden && emptyCopy.width >= 160 && broaden.y >= emptyCopy.y + emptyCopy.height).toBe(true)
+  // Read actual rendered event layers, rather than the React inventory count.
+  // A cleared source must not leave old event markers visible as matches.
+  await expect.poll(() => page.evaluate(() => {
+    const map = window.__phase4Map
+    const source = map.getSource('wheretoo-events') as unknown as { serialize(): { data: { features: unknown[] } } }
+    const layers = map.getStyle().layers?.filter(layer => 'source' in layer && layer.source === 'wheretoo-events' && !layer.id.includes('hit-area')).map(layer => layer.id) ?? []
+    return { serialized: source.serialize().data.features.length, rendered: map.queryRenderedFeatures({ layers }).length }
+  }), { timeout: 5000 }).toEqual({ serialized: 0, rendered: 0 })
   await page.screenshot({ path: test.info().outputPath('empty-results.png') })
   mode = 'partial'; delay = 100
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))

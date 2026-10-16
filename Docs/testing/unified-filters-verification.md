@@ -1,5 +1,7 @@
 # Discovery V1 Task 4 — unified filters verification
 
+> **Release blocked.** PR #22 merged as `7dd5086`; the staging frontend alias was restored to Task3 deployment `dpl_6eWc4vgo5AWs7QyUJNbJVQVgYy7e` (`dd9c0bf`). The additive, backward-compatible SQL migration and discovery Edge version6 remain applied. PR #23 stays unmerged. Do not deploy main or start Task5 until the rendered-marker blocker below is resolved.
+
 Baseline: `dd9c0bf8aa752f6b2185f29fdd967240627bda70` (PR #21). Scope is Discovery, embedded/standalone map, and viewport list. No Task 5 work, event inventory writes to staging, or transaction changes.
 
 ## Contract and implementation
@@ -55,3 +57,11 @@ Today/Weekend remain explicitly Bay Area calendar dates; this is not a multi-tim
 ## Hosted verification follow-up
 
 Release checks found two issues: the new mobile empty-state action squeezed the feedback into narrow wrapping, and a restored selected preview could repeat its prior camera-fit pan. Empty feedback/action now stack within the existing status card. Returning to the same normalized viewport remembers the eligible preview without another pan; changed viewports and later resize keep normal fitting. A controller regression verifies the initial no-pan and subsequent resize remeasure, and the browser retains its original strict center/zoom assertions with stable-frame capture. Three consecutive mobile return cases passed locally after the fix. No SQL or Edge changes are needed for this follow-up.
+
+## Release blocker — rendered markers survive empty inventory
+
+A stronger browser assertion found an accuracy failure missed by the earlier React-count/source-input assertions: after an authoritative empty response, the source reports serialized `features: []`, while old event features remain visible and queryable in the rendered inventory layers. Diagnostic capture measured `loaded: true, serialized: 0, queried: 30, rendered: 36` (the latter includes transparent hit layers). A 90-second wait for the source to clear did not resolve it. The retained markers also appear in a screenshot after the empty-state feedback is visible.
+
+The open branch now contains a deliberately failing regression against **actual rendered event layers**, excluding hit-only layers. This must be fixed without removing clustering, weakening result accuracy, or bypassing eligibility/resource protections. It is not yet established whether the renderer defect predates Task4. No further implementation/deployment was attempted after identifying this release-blocking accuracy issue.
+
+The final application run passed260files/2,097tests, all433Edge tests and171SQL assertions passed, and the camera/mobile follow-up passed240focused tests and the earlier26browser cases. These passes do not override the newly failing rendered-marker regression. Local SQL fixture counts were zero and the disposable database/REST container were removed. Public production was untouched. Main still contains PR22; any later main deployment would reintroduce its frontend until a fix or revert is merged.
