@@ -187,3 +187,28 @@ describe('LivingMapPage', () => {
     expect(screen.queryByRole('region')).not.toBeInTheDocument()
   })
 })
+
+describe('event result feedback', () => {
+  beforeEach(() => { images.mockReturnValue({ data: [] }); mounted.mockClear() })
+  it.each([
+    { complete: null, events: [], pending: true, text: 'Loading events…' },
+    { complete: true, events: [], pending: false, text: 'No events found in this area.' },
+    { complete: false, events: getDevelopmentMapEvents(), pending: false, text: 'Some events may be missing. Zoom in to narrow this area.' },
+  ])('shows non-blocking feedback: $text', data => {
+    query.mockReturnValue({ ...data, generation: 1, error: null, retry: vi.fn() })
+    render(<Component />)
+    fireEvent.click(screen.getByRole('button', { name: 'ready' }))
+    expect(screen.getByText(data.text)).toBeInTheDocument()
+    expect(screen.getByLabelText('map test double').closest('[inert]')).toBeNull()
+  })
+  it('applies expiry cleanup and clears selection even when the refresh has failed', () => {
+    const events = getDevelopmentMapEvents()
+    query.mockReturnValue({ events, complete: true, generation: 1, pending: false, error: null, retry: vi.fn() })
+    const view = render(<Component />)
+    fireEvent.click(screen.getByRole('button', { name: 'select day party' }))
+    query.mockReturnValue({ events: events.slice(1), complete: true, generation: 2, pending: false, error: new Error('offline'), retry: vi.fn() })
+    view.rerender(<Component />)
+    expect(screen.queryByRole('region', { name: 'Day Party' })).not.toBeInTheDocument()
+    expect(mounted).toHaveBeenCalledTimes(1)
+  })
+})

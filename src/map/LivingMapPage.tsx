@@ -44,10 +44,10 @@ export function Component({ embedded = false }: { embedded?: boolean } = {}) {
     })
   }, [])
   useEffect(() => {
-    if (fixtureMode || live.error || live.pending || live.generation <= appliedGeneration.current) return
+    if (fixtureMode || live.generation <= appliedGeneration.current) return
     appliedGeneration.current = live.generation
     commitEvents(live.events)
-  }, [fixtureMode, live.events, live.generation, live.error, live.pending, commitEvents])
+  }, [fixtureMode, live.events, live.generation, commitEvents])
   useEffect(() => {
     if (!import.meta.env.DEV || !fixtureMode) return
     void import('./data/developmentMapEvents').then(({ getDevelopmentMapEvents, getDevelopmentEventPreviewNavigation }) => {
@@ -124,6 +124,11 @@ export function Component({ embedded = false }: { embedded?: boolean } = {}) {
     closePreview()
   }, [chooser, closePreview, interactionError, selectedEventId])
 
+  const eventFeedback = live.error?.message ?? (live.pending
+    ? live.complete === null ? 'Loading events…' : 'Updating events…'
+    : live.complete === false ? 'Some events may be missing. Zoom in to narrow this area.'
+      : live.complete === true && live.events.length === 0 ? 'No events found in this area.' : null)
+
   return (
     <Container className={`living-map${embedded ? ' living-map--embedded' : ''}`} aria-label="Explore the Bay Area" data-renderer-state={state} onKeyDown={handleKeyDown}>
       <div className="living-map__surface" inert={state !== 'ready' || undefined}>
@@ -142,7 +147,7 @@ export function Component({ embedded = false }: { embedded?: boolean } = {}) {
       /> : null}
       </div>
       <header className="living-map__masthead"><span className="living-map__wordmark">wheretoo</span></header>
-      {!fixtureMode && live.error ? <div className="living-map__interaction-error" role="status"><span>{live.error.message}</span><button type="button" onClick={live.retry}>Retry events</button></div> : null}
+      {!fixtureMode && (state === 'ready' || live.error) && (eventFeedback || live.complete === null) ? <div className="living-map__event-status" role="status"><span>{eventFeedback ?? 'Loading events…'}</span>{!live.pending && (live.error || live.complete === false) ? <button type="button" onClick={live.retry}>Retry events</button> : null}</div> : null}
       {selectedEvent ? (
         <div className="living-map__preview-layer">
           <EventPreviewCard
