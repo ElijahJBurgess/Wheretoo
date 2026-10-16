@@ -45,9 +45,9 @@ select results_eq(
     )
   $$,
   $$ values (
-    'TABLE(event_id uuid, title text, category text, starts_at timestamp with time zone, ends_at timestamp with time zone, timezone text, latitude double precision, longitude double precision, animation_preset text, venue_label text, admission_type text, minimum_price_minor bigint, minimum_age text, advisories text[], artwork_reference text)'::text
+    'TABLE(event_id uuid, title text, category text, starts_at timestamp with time zone, ends_at timestamp with time zone, timezone text, latitude double precision, longitude double precision, animation_preset text, venue_label text, admission_type text, minimum_price_minor bigint, minimum_age text, advisories text[], artwork_reference text, map_icon_version_id uuid)'::text
   ) $$,
-  'map-safe projection exposes exactly the approved Build 3 dependency contract'
+  'map-safe projection preserves the approved icon-aware response contract'
 );
 
 select results_eq(

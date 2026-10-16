@@ -1,0 +1,955 @@
+[
+  {
+    "file": "ai_cover_generation.test.sql",
+    "passed_assertions": 17,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "ai_event_cover.test.sql",
+    "passed_assertions": 15,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "checkout_boundaries.test.sql",
+    "passed_assertions": 22,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "checkout_integrity_confirmation.test.sql",
+    "passed_assertions": 4,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  EVENT_TIME_INVALID"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "checkout_integrity_contract_cleanup.test.sql",
+    "passed_assertions": 37,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table order_items"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "checkout_integrity_expiry.test.sql",
+    "passed_assertions": 7,
+    "failed_assertions": [
+      "not ok 1 - the linked database owns checkout-reservation expiry scheduling        +",
+      "not ok 2 - one exact database-owned expiry job remains inaccessible to browser and service roles                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 +"
+    ],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "checkout_integrity_fixture_lifecycle.test.sql",
+    "passed_assertions": 3,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table ticket_tiers"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "checkout_integrity_fixture_moderation.test.sql",
+    "passed_assertions": 12,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "checkout_integrity_fulfillment.test.sql",
+    "passed_assertions": 5,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "checkout_integrity_refunds.test.sql",
+    "passed_assertions": 8,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "checkout_integrity_reservation.test.sql",
+    "passed_assertions": 33,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table ticket_tiers"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "checkout_integrity_schema.test.sql",
+    "passed_assertions": 24,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "connect_refresh_sequence.test.sql",
+    "passed_assertions": 17,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table organizer_stripe_accounts"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "contextual_moderation_testing_override.test.sql",
+    "passed_assertions": 38,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "core_ticket_truth_lite_collection.test.sql",
+    "passed_assertions": 7,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "core_ticket_truth_lite_fulfillment.test.sql",
+    "passed_assertions": 0,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "core_ticket_truth_lite_lifecycle.test.sql",
+    "passed_assertions": 0,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "core_ticket_truth_lite_redemption.test.sql",
+    "passed_assertions": 8,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "core_ticket_truth_lite_schema.test.sql",
+    "passed_assertions": 4,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "draft_without_publication_policy.test.sql",
+    "passed_assertions": 15,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "duplicate_event.test.sql",
+    "passed_assertions": 22,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "duplicate_event_history.test.sql",
+    "passed_assertions": 14,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "event_import_authorization.test.sql",
+    "passed_assertions": 17,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "event_import_schema.test.sql",
+    "passed_assertions": 6,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "free_registration_behavior.test.sql",
+    "passed_assertions": 31,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "free_registration_integrity.test.sql",
+    "passed_assertions": 35,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "free_registration_lifecycle.test.sql",
+    "passed_assertions": 13,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "free_registration_schema.test.sql",
+    "passed_assertions": 9,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "free_registration_security.test.sql",
+    "passed_assertions": 32,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "inventory_reservations.test.sql",
+    "passed_assertions": 69,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "map_icon_change_history.test.sql",
+    "passed_assertions": 28,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "map_icon_event_revisions.test.sql",
+    "passed_assertions": 19,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "map_icon_event_saves.test.sql",
+    "passed_assertions": 39,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "map_icon_public_projection.test.sql",
+    "passed_assertions": 12,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "map_icons.test.sql",
+    "passed_assertions": 51,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "map_route_handle.test.sql",
+    "passed_assertions": 4,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "moderation_evaluations.test.sql",
+    "passed_assertions": 9,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table events"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "moderation_incomplete_contract.test.sql",
+    "passed_assertions": 0,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "moderation_incomplete_enqueue.test.sql",
+    "passed_assertions": 4,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "moderation_legacy_migration.test.sql",
+    "passed_assertions": 48,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "moderation_policy_acceptance.test.sql",
+    "passed_assertions": 86,
+    "failed_assertions": [
+      "not ok 27 - the acceptance boundary has no client authority beyond event identity        +"
+    ],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "moderation_publish_eligibility.test.sql",
+    "passed_assertions": 87,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "moderation_published_edits.test.sql",
+    "passed_assertions": 73,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "moderation_retention_schedule.test.sql",
+    "passed_assertions": 4,
+    "failed_assertions": [
+      "not ok 1 - the linked database owns the daily moderation-retention scheduler        +",
+      "not ok 2 - the exact database-owned job and extension ACL are gated from application roles by zero cron schema usage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           +"
+    ],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "moderation_reviews_reports.test.sql",
+    "passed_assertions": 36,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "moderation_schema.test.sql",
+    "passed_assertions": 152,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "moderation_staff_actions.test.sql",
+    "passed_assertions": 61,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "order_confirmation.test.sql",
+    "passed_assertions": 6,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  EVENT_TIME_INVALID"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "organizer_csv_export.test.sql",
+    "passed_assertions": 5,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "organizer_csv_export_equivalence.test.sql",
+    "passed_assertions": 0,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "organizer_csv_export_lifecycle.test.sql",
+    "passed_assertions": 0,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "organizer_event_metrics.test.sql",
+    "passed_assertions": 1,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "organizer_manual_admission.test.sql",
+    "passed_assertions": 0,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "organizer_onboarding_update.test.sql",
+    "passed_assertions": 6,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "organizer_order_reads.test.sql",
+    "passed_assertions": 0,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "organizer_refund_context.test.sql",
+    "passed_assertions": 0,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "organizer_setup.test.sql",
+    "passed_assertions": 18,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "organizers_events_rls.test.sql",
+    "passed_assertions": 38,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "organizers_events_schema.test.sql",
+    "passed_assertions": 18,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "paid_sales.test.sql",
+    "passed_assertions": 35,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "payment_fulfillment.test.sql",
+    "passed_assertions": 6,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table stripe_webhook_events"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "public_availability_publish.test.sql",
+    "passed_assertions": 20,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "public_eligibility_projections.test.sql",
+    "passed_assertions": 34,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "publish_event.test.sql",
+    "passed_assertions": 25,
+    "failed_assertions": [
+      "not ok 3 - another organizer event is rejected        +"
+    ],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "refunds_disputes.test.sql",
+    "passed_assertions": 7,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec04_organizer_reads.test.sql",
+    "passed_assertions": 4,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec05_admission_search.test.sql",
+    "passed_assertions": 1,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec07_email_access_limits.test.sql",
+    "passed_assertions": 29,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec07_email_behavior.test.sql",
+    "passed_assertions": 29,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec07_email_dispatch.test.sql",
+    "passed_assertions": 15,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec07_email_dispatch_block.test.sql",
+    "passed_assertions": 15,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec07_email_eligibility.test.sql",
+    "passed_assertions": 14,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec07_email_expiry.test.sql",
+    "passed_assertions": 8,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec07_email_initial_status.test.sql",
+    "passed_assertions": 0,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec07_email_preparation_resume.test.sql",
+    "passed_assertions": 0,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec07_email_recipient_policy.test.sql",
+    "passed_assertions": 0,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec07_email_recovery.test.sql",
+    "passed_assertions": 20,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec07_email_retention.test.sql",
+    "passed_assertions": 8,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec07_email_schema.test.sql",
+    "passed_assertions": 10,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec08_checkout_expiry.test.sql",
+    "passed_assertions": 7,
+    "failed_assertions": [
+      "not ok 1 - the linked database owns checkout-reservation expiry scheduling        +",
+      "not ok 2 - one exact database-owned expiry job remains inaccessible to browser and service roles                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        +"
+    ],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec08_preflight_cardinality.test.sql",
+    "passed_assertions": 21,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec08_spec09_integration.test.sql",
+    "passed_assertions": 0,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec08_spec09_notice_failure.test.sql",
+    "passed_assertions": 0,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec09_refund_lifecycle.test.sql",
+    "passed_assertions": 0,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec09_refund_notice_access.test.sql",
+    "passed_assertions": 0,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec09_refund_notice_schema.test.sql",
+    "passed_assertions": 6,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec09_refund_operations.test.sql",
+    "passed_assertions": 2,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec10_cancellation_summary.test.sql",
+    "passed_assertions": 0,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec10_change_notice_revisions.test.sql",
+    "passed_assertions": 19,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec10_event_change_history.test.sql",
+    "passed_assertions": 82,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec10_event_change_history_contract.test.sql",
+    "passed_assertions": 6,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec10_event_change_history_review.test.sql",
+    "passed_assertions": 6,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec10_event_notices.test.sql",
+    "passed_assertions": 0,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec10_late_payment_read.test.sql",
+    "passed_assertions": 0,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec10_notice_access_and_lifecycle.test.sql",
+    "passed_assertions": 0,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec10_private_collection_facts.test.sql",
+    "passed_assertions": 0,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec10_refund_summary_states.test.sql",
+    "passed_assertions": 0,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec10_spec11_integration.test.sql",
+    "passed_assertions": 16,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec10_status_access_security.test.sql",
+    "passed_assertions": 9,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec10_used_notice_audience.test.sql",
+    "passed_assertions": 0,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec11_profile_revision.test.sql",
+    "passed_assertions": 0,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec11_settings.test.sql",
+    "passed_assertions": 20,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec13_discovery_pagination.test.sql",
+    "passed_assertions": 15,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec13_discovery_rate_limit.test.sql",
+    "passed_assertions": 10,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec13_discovery_read.test.sql",
+    "passed_assertions": 21,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec13_discovery_security.test.sql",
+    "passed_assertions": 11,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec13_discovery_windows.test.sql",
+    "passed_assertions": 9,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec14_assembly_contracts.test.sql",
+    "passed_assertions": 0,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  function plan(integer) does not exist"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "spec15_event_images.test.sql",
+    "passed_assertions": 17,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "storefront_attribution.test.sql",
+    "passed_assertions": 0,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "storefront_editor.test.sql",
+    "passed_assertions": 16,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "storefront_identity.test.sql",
+    "passed_assertions": 21,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "storefront_merch.test.sql",
+    "passed_assertions": 7,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "storefront_read.test.sql",
+    "passed_assertions": 12,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "storefront_transactions.test.sql",
+    "passed_assertions": 0,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "ticketing_rls.test.sql",
+    "passed_assertions": 33,
+    "failed_assertions": [],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "ticketing_schema.test.sql",
+    "passed_assertions": 82,
+    "failed_assertions": [
+      "not ok 14 - ticket columns are exact        +",
+      "not ok 22 - ticket column types are exact                                                                                                                                                                                                                                                                                                                                          +",
+      "not ok 34 - financial foreign keys are exact                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           +",
+      "not ok 57 - Stripe IDs and Day 2 domain keys are uniquely constrained                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        +",
+      "not ok 59 - all financial foreign keys use ON DELETE RESTRICT                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            +"
+    ],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "unattached_checkout_forward.test.sql",
+    "passed_assertions": 45,
+    "failed_assertions": [
+      "not ok 19 - existing fulfillment enqueues initial email exactly once        +"
+    ],
+    "execution_error": [],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "webhook_reconciliation.test.sql",
+    "passed_assertions": 13,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table stripe_webhook_events"
+    ],
+    "identical_on_baseline": true
+  },
+  {
+    "file": "webhook_review_safety.test.sql",
+    "passed_assertions": 28,
+    "failed_assertions": [],
+    "execution_error": [
+      "ERROR:  permission denied for table orders"
+    ],
+    "identical_on_baseline": true
+  }
+]

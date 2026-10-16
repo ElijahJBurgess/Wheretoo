@@ -1,0 +1,98 @@
+{
+  "9-map-old": {
+    "samples_ms": [
+      40.343,
+      17.349,
+      17.251
+    ],
+    "median_ms": 17.349
+  },
+  "9-map-optimized": {
+    "samples_ms": [
+      9.571,
+      7.667,
+      7.001
+    ],
+    "median_ms": 7.667
+  },
+  "9-list-old": {
+    "samples_ms": [
+      20.818,
+      17.085,
+      17.333
+    ],
+    "median_ms": 17.333
+  },
+  "9-list-optimized": {
+    "samples_ms": [
+      7.484,
+      5.813,
+      5.753
+    ],
+    "median_ms": 5.813
+  },
+  "500-map-old": {
+    "samples_ms": [
+      972.088,
+      1081.38,
+      1047.08
+    ],
+    "median_ms": 1047.08
+  },
+  "500-map-optimized": {
+    "samples_ms": [
+      24.979,
+      28.429,
+      17.173
+    ],
+    "median_ms": 24.979
+  },
+  "500-list-old": {
+    "samples_ms": [
+      56.151,
+      57.167,
+      44.451
+    ],
+    "median_ms": 56.151
+  },
+  "500-list-optimized": {
+    "samples_ms": [
+      27.993,
+      19.722,
+      14.444
+    ],
+    "median_ms": 19.722
+  },
+  "2000-map-old": {
+    "samples_ms": [
+      4226.391,
+      3733.67,
+      4465.99
+    ],
+    "median_ms": 4226.391
+  },
+  "2000-map-optimized": {
+    "samples_ms": [
+      97.103,
+      174.439,
+      205.09
+    ],
+    "median_ms": 174.439
+  },
+  "2000-list-old": {
+    "samples_ms": [
+      45.285,
+      117.624,
+      98.157
+    ],
+    "median_ms": 98.157
+  },
+  "2000-list-optimized": {
+    "samples_ms": [
+      52.06,
+      69.839,
+      53.762
+    ],
+    "median_ms": 53.762
+  }
+}
