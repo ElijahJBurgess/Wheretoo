@@ -181,7 +181,8 @@
   font-weight: 750;
   letter-spacing: -0.06em;
 }
-.living-map__interaction-error {
+.living-map__interaction-error,
+.living-map__event-status {
   position: absolute;
   z-index: 4;
   right: 1rem;
@@ -198,7 +199,9 @@
   box-shadow: 0 0.75rem 2rem rgb(0 0 0 / 35%);
   font-size: 0.8rem;
 }
-.living-map__interaction-error button { min-height: 2.75rem; color: #c5b5ff; border: 0; background: transparent; font: inherit; font-weight: 800; cursor: pointer; }
+.living-map__event-status { top: 4rem; bottom: auto; left: 1rem; right: auto; max-width: min(28rem, calc(100% - 5.5rem)); }
+.living-map__event-status button { flex-shrink: 0; white-space: nowrap; }
+.living-map__interaction-error button, .living-map__event-status button { min-height: 2.75rem; color: #c5b5ff; border: 0; background: transparent; font: inherit; font-weight: 800; cursor: pointer; }
 .living-map .mapboxgl-ctrl-group { background: #252933; border: 1px solid #515865; }
 .living-map .mapboxgl-ctrl-group button + button { border-top-color: #515865; }
 .living-map .mapboxgl-ctrl-group button:hover { background-color: #383e4b; }
