@@ -15,7 +15,7 @@ const eventSchema = z.object({
   map_icon_version_id: z.unknown().optional(),
 }).refine(row => Date.parse(row.starts_at) < Date.parse(row.ends_at))
 
-export async function getPublicMapEvents(query: PublicMapQuery, signal?: AbortSignal): Promise<WheretooMapEvent[]> {
+export async function getPublicMapEvents(query: PublicMapQuery, signal?: AbortSignal): Promise<{ events: WheretooMapEvent[]; complete: boolean }> {
   const origin = new URL(import.meta.env.VITE_SUPABASE_URL)
   const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
   if (!key || origin.username || origin.password || origin.pathname !== '/' || origin.search || origin.hash
@@ -23,14 +23,14 @@ export async function getPublicMapEvents(query: PublicMapQuery, signal?: AbortSi
   const { west, south, east, north } = query.bounds
   const response = await fetch(`${origin.origin}/rest/v1/rpc/get_public_map_events`, {
     method: 'POST', credentials: 'omit', redirect: 'error', cache: 'no-store',
-    headers: { apikey: key, 'Content-Type': 'application/json' },
+    headers: { apikey: key, 'Content-Type': 'application/json', Prefer: 'count=exact' },
     body: JSON.stringify({ p_west: west, p_south: south, p_east: east, p_north: north, p_starts_at: query.startsAt, p_ends_at: query.endsAt, p_categories: query.categories }),
     signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000),
   })
   if (!response.ok) throw new Error('Public map events could not load')
   const rows = z.array(eventSchema).parse(await response.json())
   if (new Set(rows.map(row => row.event_id)).size !== rows.length) throw new Error('Duplicate public map event')
-  return rows.map(row => {
+  const events = rows.map(row => {
     const icon = z.uuid().safeParse(row.map_icon_version_id)
     return {
       id: row.event_id, title: row.title, category: row.category,
@@ -41,4 +41,10 @@ export async function getPublicMapEvents(query: PublicMapQuery, signal?: AbortSi
       minimumAge: row.minimum_age, advisories: row.advisories, artworkReference: row.artwork_reference,
     }
   })
+  // Coverage is reusable only when PostgREST proves that no rows were truncated.
+  const range = response.headers?.get('content-range') ?? ''
+  const match = /^0-(\d+)\/(\d+)$/.exec(range)
+  const complete = rows.length === 0 ? range === '*/0'
+    : Boolean(match && Number(match[1]) === rows.length - 1 && Number(match[2]) === rows.length)
+  return { events, complete }
 }

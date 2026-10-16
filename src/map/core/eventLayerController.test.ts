@@ -86,3 +86,25 @@ describe('event layer controller', () => {
     expect(map.addLayer).not.toHaveBeenCalled()
   })
 })
+
+it('skips equal GeoJSON snapshots but publishes changed geometry and cleared selection', () => {
+  const map = rendererDouble(), inventory = { setData: vi.fn() }, selected = { setData: vi.fn() }
+  map.getSource.mockImplementation(id => id === EVENT_SOURCE_ID ? inventory : selected)
+  const events = getDevelopmentMapEvents()
+  updateEventCollection(map, events); updateEventSelection(map, events[0])
+  updateEventCollection(map, events.map(e => ({ ...e }))); updateEventSelection(map, { ...events[0] })
+  expect(inventory.setData).toHaveBeenCalledTimes(1)
+  expect(selected.setData).toHaveBeenCalledTimes(1)
+  updateEventCollection(map, [{ ...events[0], longitude: -122.4 }]); updateEventSelection(map, null)
+  expect(inventory.setData).toHaveBeenCalledTimes(2)
+  expect(selected.setData).toHaveBeenCalledTimes(2)
+  expect(selected.setData.mock.lastCall?.[0].features).toEqual([])
+})
+it('updates a replacement source even if its payload matches a removed source', () => {
+  const map = rendererDouble(), first = { setData: vi.fn() }, replacement = { setData: vi.fn() }
+  map.getSource.mockReturnValue(first)
+  updateEventCollection(map, getDevelopmentMapEvents())
+  map.getSource.mockReturnValue(replacement)
+  updateEventCollection(map, getDevelopmentMapEvents())
+  expect(replacement.setData).toHaveBeenCalledOnce()
+})

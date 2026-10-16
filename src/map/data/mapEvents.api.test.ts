@@ -8,18 +8,18 @@ beforeEach(() => { vi.stubEnv('VITE_SUPABASE_URL', 'http://127.0.0.1:56321'); vi
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.clearAllMocks() })
 describe('canonical public map event adapter', () => {
   it('uses only the anonymous RPC and maps nullable domain fields', async () => {
-    const [event] = await getPublicMapEvents(query)
+    const { events: [event] } = await getPublicMapEvents(query)
     expect(event).toMatchObject({ id: row.event_id, mapIconVersionId: null, minimumPriceMinor: null, artworkReference: null, venueLabel: '', startsAt: row.starts_at })
     expect(transport).toHaveBeenCalledOnce()
     const [url, options] = transport.mock.calls[0]
     expect(url).toBe('http://127.0.0.1:56321/rest/v1/rpc/get_public_map_events')
     expect(options.credentials).toBe('omit')
-    expect(options.headers).toEqual({ apikey: 'public-test', 'Content-Type': 'application/json' })
+    expect(options.headers).toEqual({ apikey: 'public-test', 'Content-Type': 'application/json', Prefer: 'count=exact' })
     expect(JSON.parse(options.body)).toEqual({ p_west: -123, p_south: 37, p_east: -122, p_north: 38, p_starts_at: query.startsAt, p_ends_at: query.endsAt, p_categories: null })
   })
   it('keeps an otherwise valid event when its icon reference is malformed', async () => {
     transport.mockResolvedValue({ ok: true, json: async () => [{ ...row, map_icon_version_id: 'bad' }] })
-    expect((await getPublicMapEvents(query))[0].mapIconVersionId).toBeNull()
+    expect((await getPublicMapEvents(query)).events[0].mapIconVersionId).toBeNull()
   })
   it.each([{ latitude: 91 }, { longitude: Infinity }, { category: 'unknown' }, { ends_at: 'not-date' }, { starts_at: '2026-10-01T00:00:00Z' }, { minimum_price_minor: -1 }])('rejects invalid event data %j', async bad => {
     transport.mockResolvedValue({ ok: true, json: async () => [{ ...row, ...bad }] })
@@ -29,4 +29,13 @@ describe('canonical public map event adapter', () => {
     transport.mockResolvedValue({ ok: false, status: 503 })
     await expect(getPublicMapEvents(query)).rejects.toThrow('Public map events could not load')
   })
+})
+
+it.each([['0-0/1', true], ['0-0/10', false], ['0-0/*', false], [null, false], ['bad', false]])('requires exact complete response range %s', async (range, complete) => {
+  transport.mockResolvedValue(new Response(JSON.stringify([row]), { headers: range ? { 'content-range': range } : {} }))
+  expect((await getPublicMapEvents(query)).complete).toBe(complete)
+})
+it('recognizes an exact empty response as complete', async () => {
+  transport.mockResolvedValue(new Response('[]', { headers: { 'content-range': '*/0' } }))
+  expect(await getPublicMapEvents(query)).toEqual({ events: [], complete: true })
 })

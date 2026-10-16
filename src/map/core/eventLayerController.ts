@@ -13,6 +13,15 @@ type EventLayerRenderer = {
   setPaintProperty(layerId: string, name: string, value: unknown): unknown; setLayoutProperty(layerId: string, name: string, value: unknown): unknown
 }
 
+const sourceSnapshots = new WeakMap<GeoJsonDataSource, string>()
+function setSourceData(target: GeoJsonDataSource | undefined, data: ReturnType<typeof toEventFeatureCollection>) {
+  if (!target) return
+  const snapshot = JSON.stringify(data)
+  if (sourceSnapshots.get(target) === snapshot) return
+  target.setData(data)
+  sourceSnapshots.set(target, snapshot)
+}
+
 const emptyCollection = toEventFeatureCollection([])
 
 export function installEventLayers(map: EventLayerRenderer, events: readonly WheretooMapEvent[], mobile: boolean, selectedEvent: WheretooMapEvent | null) {
@@ -20,10 +29,12 @@ export function installEventLayers(map: EventLayerRenderer, events: readonly Whe
   const selectedCollection = selectedEvent ? toEventFeatureCollection([selectedEvent]) : emptyCollection
   const inventorySource = source(map, EVENT_SOURCE_ID)
   const selectedSource = source(map, SELECTED_EVENT_SOURCE_ID)
-  if (inventorySource) inventorySource.setData(eventCollection)
+  if (inventorySource) setSourceData(inventorySource, eventCollection)
   else map.addSource(EVENT_SOURCE_ID, { type: 'geojson', data: eventCollection, cluster: true, clusterRadius: 50, clusterMaxZoom: 14, clusterMinPoints: 2 })
-  if (selectedSource) selectedSource.setData(selectedCollection)
+  if (selectedSource) setSourceData(selectedSource, selectedCollection)
   else map.addSource(SELECTED_EVENT_SOURCE_ID, { type: 'geojson', data: selectedCollection, cluster: false })
+  if (!inventorySource) { const installed = source(map, EVENT_SOURCE_ID); if (installed) sourceSnapshots.set(installed, JSON.stringify(eventCollection)) }
+  if (!selectedSource) { const installed = source(map, SELECTED_EVENT_SOURCE_ID); if (installed) sourceSnapshots.set(installed, JSON.stringify(selectedCollection)) }
   const layers = createEventLayers({ mobile, selectedEventId: selectedEvent?.id ?? null })
   for (const [index, layer] of layers.entries()) {
     if (map.getLayer(layer.id)) continue
@@ -42,7 +53,7 @@ export function hasCompleteEventLayerInstallation(map: EventLayerRenderer) {
 function source(map: EventLayerRenderer, id: string) { return map.getSource(id) as GeoJsonDataSource | undefined }
 
 export function updateEventCollection(map: EventLayerRenderer, events: readonly WheretooMapEvent[]) {
-  source(map, EVENT_SOURCE_ID)?.setData(toEventFeatureCollection(events))
+  setSourceData(source(map, EVENT_SOURCE_ID), toEventFeatureCollection(events))
 }
 
 // The selected source is a bounded 0/1 presentation overlay; inventory remains canonical and clustered.
@@ -57,7 +68,7 @@ export function updateEventSelection(map: EventLayerRenderer, selectedEvent: Whe
   for (const layerId of [EVENT_LAYER_IDS.selectedTail, EVENT_LAYER_IDS.selectedCircle, EVENT_LAYER_IDS.selectedGlyph]) {
     map.setFilter(layerId, selectedFilter)
   }
-  source(map, SELECTED_EVENT_SOURCE_ID)?.setData(selectedEvent ? toEventFeatureCollection([selectedEvent]) : emptyCollection)
+  setSourceData(source(map, SELECTED_EVENT_SOURCE_ID), selectedEvent ? toEventFeatureCollection([selectedEvent]) : emptyCollection)
 }
 
 export function updateEventMarkerSizing(map: EventLayerRenderer, mobile: boolean, selectedEventId: string | null) {

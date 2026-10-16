@@ -20,44 +20,74 @@ export function publicMapBounds(bounds: MapBounds): MapBounds {
 }
 
 type Result = { events: WheretooMapEvent[]; generation: number; pending: boolean; error: Error | null }
+const FRESH_MS = 60000
+
+function sameEvents(previous: readonly WheretooMapEvent[], next: readonly WheretooMapEvent[]) {
+  return previous.length === next.length && previous.every((event, i) => {
+    const candidate = next[i]
+    return (Object.keys(event) as Array<keyof WheretooMapEvent>).every(key => key === 'advisories'
+      ? event.advisories.length === candidate.advisories.length && event.advisories.every((value, j) => value === candidate.advisories[j])
+      : event[key] === candidate[key])
+  })
+}
+function covers(outer: MapBounds, inner: MapBounds) {
+  return outer.west <= inner.west && outer.east >= inner.east && outer.south <= inner.south && outer.north >= inner.north
+}
+
 export function usePublicMapEvents(viewport: MapViewportSnapshot | null, filters: readonly EventCategory[] | null, enabled: boolean) {
   const [result, setResult] = useState<Result>({ events: [], generation: 0, pending: false, error: null })
   const generation = useRef(0)
   const refresh = useRef<() => void>(() => {})
-  const key = JSON.stringify({ viewport, filters })
+  const cache = useRef<{ bounds: MapBounds; filters: string; expiresAt: number; complete: boolean } | null>(null)
+  const normalizedFilters = filters?.length ? [...new Set(filters)].sort() : null
+  const key = JSON.stringify({ bounds: viewport?.bounds ?? null, filters: normalizedFilters })
   useLayoutEffect(() => {
-    // Cleanup invalidates immediately on a new viewport, not after debounce.
     ++generation.current
     if (!enabled) return
-    const input = JSON.parse(key) as { viewport: MapViewportSnapshot | null; filters: EventCategory[] | null }
-    if (!input.viewport) return
+    const input = JSON.parse(key) as { bounds: MapBounds | null; filters: EventCategory[] | null }
+    if (!input.bounds) return
+    const bounds = input.bounds, filterKey = JSON.stringify(input.filters)
+    let disposed = false, inFlight = false, lastForeground = -Infinity
     let controller: AbortController | null = null
-    const run = () => {
-      controller?.abort()
+    let timer: ReturnType<typeof setTimeout>
+    const schedule = (delay: number) => { clearTimeout(timer); timer = setTimeout(() => { void run() }, delay) }
+    const run = async () => {
+      if (disposed || inFlight) return
+      if (document.visibilityState === 'hidden') { schedule(FRESH_MS); return }
+      inFlight = true
       controller = new AbortController()
-      const request = ++generation.current
-      const signal = controller.signal
+      const request = ++generation.current, signal = controller.signal, now = Date.now()
       setResult(previous => ({ ...previous, pending: true, error: null }))
-      void (async () => {
-        try {
-          const now = Date.now()
-          const events = await getPublicMapEvents({ bounds: publicMapBounds(input.viewport!.bounds), startsAt: new Date(now).toISOString(), endsAt: new Date(now + 7 * 86400000).toISOString(), categories: input.filters }, signal)
-          if (request === generation.current && !signal.aborted) setResult({ events, generation: request, pending: false, error: null })
-        } catch {
-          if (request === generation.current && !signal.aborted) setResult(previous => ({ ...previous, pending: false, error: new Error('Events couldn’t refresh. Your last map results are still shown.') }))
+      try {
+        const queryBounds = publicMapBounds(bounds)
+        const snapshot = await getPublicMapEvents({ bounds: queryBounds, startsAt: new Date(now).toISOString(), endsAt: new Date(now + 7 * 86400000).toISOString(), categories: input.filters }, signal)
+        if (disposed || signal.aborted || request !== generation.current) return
+        cache.current = { bounds: queryBounds, filters: filterKey, expiresAt: now + FRESH_MS, complete: snapshot.complete === true }
+        setResult(previous => ({ events: sameEvents(previous.events, snapshot.events) ? previous.events : snapshot.events, generation: request, pending: false, error: null }))
+      } catch {
+        if (!disposed && !signal.aborted && request === generation.current) {
+          cache.current = null
+          setResult(previous => ({ ...previous, pending: false, error: new Error('Events couldn’t refresh. Your last map results are still shown.') }))
         }
-      })()
+      } finally {
+        inFlight = false
+        if (!disposed) schedule(Math.max(0, now + FRESH_MS - Date.now()))
+      }
     }
-    const foreground = () => { if (document.visibilityState === 'visible') run() }
-    const timer = window.setTimeout(run, 300)
-    const interval = window.setInterval(foreground, 60000)
-    refresh.current = run
+    const foreground = () => {
+      if (document.visibilityState !== 'visible' || Date.now() - lastForeground < 250) return
+      lastForeground = Date.now(); void run()
+    }
+    const cached = cache.current
+    if (cached?.complete && cached.filters === filterKey && cached.expiresAt > Date.now() && covers(cached.bounds, bounds)) {
+      setResult(previous => previous.pending ? { ...previous, pending: false } : previous)
+      schedule(cached.expiresAt - Date.now())
+    } else schedule(300)
+    refresh.current = () => { void run() }
     window.addEventListener('focus', foreground)
     document.addEventListener('visibilitychange', foreground)
     return () => {
-      controller?.abort()
-      window.clearTimeout(timer)
-      window.clearInterval(interval)
+      disposed = true; controller?.abort(); clearTimeout(timer)
       window.removeEventListener('focus', foreground)
       document.removeEventListener('visibilitychange', foreground)
       refresh.current = () => {}
