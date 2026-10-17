@@ -1,7 +1,7 @@
 import type { WheretooMapEvent } from '../data/wheretooMapEvents'
 
-const dateFormatter = (timeZone: string) => new Intl.DateTimeFormat('en-US', {
-  weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone,
+const dateFormatter = (timeZone: string, withYear = false) => new Intl.DateTimeFormat('en-US', {
+  weekday: 'short', month: 'short', day: 'numeric', ...(withYear ? { year: 'numeric' as const } : {}), timeZone,
 })
 
 const timeFormatter = (timeZone: string, withZone: boolean) => new Intl.DateTimeFormat('en-US', {
@@ -15,11 +15,16 @@ export function formatEventDateTime(event: WheretooMapEvent) {
   if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime())) {
     return { date: 'Date unavailable', time: 'Time unavailable' }
   }
-  const dates = dateFormatter(event.timezone)
+  const years = new Intl.DateTimeFormat('en-US', { year: 'numeric', timeZone: event.timezone })
+  const withYear = years.format(startsAt) !== years.format(endsAt)
+  const dates = dateFormatter(event.timezone, withYear)
+  const range = new Intl.DateTimeFormat('en-US', {
+    month: 'short', day: 'numeric', ...(withYear ? { year: 'numeric' as const } : {}), timeZone: event.timezone,
+  })
   const startDate = dates.format(startsAt)
   const endDate = dates.format(endsAt)
   return {
-    date: startDate === endDate ? startDate : `${startDate} – ${endDate}`,
+    date: startDate === endDate ? startDate : range.formatRange(startsAt, endsAt).replace(/\s+/g, ' '),
     time: `${timeFormatter(event.timezone, false).format(startsAt)} – ${timeFormatter(event.timezone, true).format(endsAt)}`,
   }
 }

@@ -61,7 +61,7 @@ it('replaces stale preview price with current available tiers, sold out, unknown
   const event = { ...getDevelopmentMapEvents()[0], id: eventId, minimumPriceMinor: 1000 }
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(<QueryClientProvider client={client}><MemoryRouter><EventPreviewCard event={event} navigation={{ kind: 'enabled', to: '/events/' + eventId }} onClose={() => {}} /></MemoryRouter></QueryClientProvider>)
-  expect(screen.getByText('Availability unknown')).toBeInTheDocument()
+  expect(screen.getByText('Checking availability…')).toBeInTheDocument()
   await act(async () => { await vi.advanceTimersByTimeAsync(10) })
   expect(screen.getByText('From $30')).toBeInTheDocument()
   expect(screen.queryByText('From $10')).not.toBeInTheDocument()
@@ -77,5 +77,23 @@ it('replaces stale preview price with current available tiers, sold out, unknown
   expect(screen.getByText('Currently unavailable')).toBeInTheDocument()
   expect(screen.getByRole('link', { name: 'View event' })).toHaveAttribute('href', '/events/' + eventId)
   fireEvent.click(screen.getByRole('button', { name: 'Close event preview' }))
+  client.clear()
+})
+
+it('withdraws the displayed price while a visible refetch checks current inventory', async () => {
+  vi.useFakeTimers()
+  read.mockResolvedValue({ ...publicEvent, tiers: [publicEvent.tiers[0]] })
+  const event = { ...getDevelopmentMapEvents()[0], id: eventId }
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<QueryClientProvider client={client}><MemoryRouter><EventPreviewCard event={event} navigation={{ kind: 'enabled', to: '/events/' + eventId }} onClose={() => {}} /></MemoryRouter></QueryClientProvider>)
+  await act(async () => { await vi.advanceTimersByTimeAsync(10) })
+  expect(screen.getByText('From $25')).toBeInTheDocument()
+  let resolve!: (value: typeof publicEvent) => void
+  read.mockImplementationOnce(() => new Promise(done => { resolve = done }))
+  await act(async () => { await vi.advanceTimersByTimeAsync(15000) })
+  expect(screen.getByText('Checking availability…')).toBeInTheDocument()
+  expect(screen.queryByText('From $25')).not.toBeInTheDocument()
+  await act(async () => { resolve({ ...publicEvent, tiers: [{ ...publicEvent.tiers[0], availability_status: 'sold_out' }] }); await vi.advanceTimersByTimeAsync(10) })
+  expect(screen.getByText('Sold out')).toBeInTheDocument()
   client.clear()
 })

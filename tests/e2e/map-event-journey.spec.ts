@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { expect, test, type Page } from '@playwright/test'
 import { mapReference } from './support/combinedMapObservations'
 const id = '3e000000-0000-4000-8000-000000000001'
@@ -10,16 +11,20 @@ function event(admission: 'paid' | 'free') {
   return { id, title, description, category: 'music', starts_at: new Date(Date.now() + 3600000).toISOString(), ends_at: new Date(Date.now() + 7200000).toISOString(), timezone: 'America/Los_Angeles', venue_name: 'Community hall', address_line1: '123 Broadway', address_line2: null, city: 'Oakland', region: 'CA', postal_code: '94612', country_code: 'US', latitude: 37.804, longitude: -122.263, artwork_path: null, animation_preset: 'generic', minimum_age: 'all_ages', advisories: [], organizer: { id: second, display_name: 'Community organizer' }, admission_type: admission }
 }
 async function fixtures(page: Page, admission: 'paid' | 'free' = 'paid', previewTitle = title) {
-  const state = { available: true, expired: false, brokenImage: false, hasImage: false, soldOut: false, mapReads: 0 }
+  const state = { available: true, expired: false, brokenImage: false, hasImage: false, soldOut: false, mapReads: 0, ticketReads: 0, overnight: false }
   await page.route('**/rest/v1/rpc/**', async route => {
     const rpc = new URL(route.request().url()).pathname.split('/').pop()
     const e = event(admission)
+    if (state.overnight) {
+      const start = new Date(); start.setUTCDate(start.getUTCDate() + 1); start.setUTCHours(6, 0, 0, 0)
+      e.starts_at = start.toISOString(); e.ends_at = new Date(start.getTime() + 2 * 3600000).toISOString()
+    }
     if (rpc === 'get_public_filtered_map_events') {
       state.mapReads++
       const rows = !state.available ? [] : [id, second].map((event_id, i) => ({ event_id, title: i ? 'Second community gathering' : previewTitle, category: e.category, starts_at: state.expired ? new Date(Date.now() - 7200000).toISOString() : e.starts_at, ends_at: state.expired ? new Date(Date.now() - 1000).toISOString() : e.ends_at, timezone: e.timezone, latitude: e.latitude, longitude: e.longitude, animation_preset: e.animation_preset, venue_label: e.venue_name, admission_type: admission, minimum_price_minor: admission === 'paid' ? 1200 : null, minimum_age: e.minimum_age, advisories: [], artwork_reference: null, map_icon_version_id: null }))
       return route.fulfill({ json: rows, headers: { 'access-control-expose-headers': 'content-range, X-Wheretoo-Discovery', 'X-Wheretoo-Discovery': JSON.stringify({ serverNow: new Date().toISOString(), window: { start: new Date().toISOString(), end: new Date(Date.now() + 168 * 3600000).toISOString(), timezone: 'America/Los_Angeles' } }), 'content-range': rows.length ? '0-1/2' : '*/0' } })
     }
-    if (rpc === 'get_public_event_ticketing') return route.fulfill({ json: state.available ? [{ event: e, tiers: admission === 'free' ? [] : [{ id: tier, name: 'General admission', description: null, unit_amount_minor: 1200, currency: 'usd', availability_status: state.soldOut ? 'sold_out' : 'available' }] }] : [] })
+    if (rpc === 'get_public_event_ticketing') { state.ticketReads++; return route.fulfill({ json: state.available ? [{ event: e, tiers: admission === 'free' ? [] : [{ id: tier, name: 'General admission', description: null, unit_amount_minor: 1200, currency: 'usd', availability_status: state.soldOut ? 'sold_out' : 'available' }] }] : [] }) }
     if (rpc === 'get_public_event') return route.fulfill({ json: state.available ? [e] : [] })
     if (rpc === 'get_public_free_rsvp') return route.fulfill({ json: { event: e, availability: { status: 'available', remaining: 20, maxQuantity: 10 } } })
     if (rpc === 'list_event_images') return route.fulfill({ json: state.brokenImage || state.hasImage ? [{ id: image, eventId: id, path: id + '/missing.png', position: 1, owned: null }] : [] })
@@ -255,9 +260,9 @@ test('selected mobile overlays adapt to dynamic height and reduced motion withou
   const readable = await page.locator('.event-preview h2').evaluate(async node => {
     node.scrollIntoView({ block: 'start', behavior: 'instant' })
     const scroll = node.closest('.event-preview__scroll')!
-    if (node.closest('.living-map')!.getBoundingClientRect().height >= 124) {
-      scroll.scrollTop -= node.closest('.event-preview')!.querySelector('.event-preview__topline')!.getBoundingClientRect().height + 8
-    }
+    // Close now has a dedicated fixed corner; title reserves its horizontal
+    // space, so scrolling no longer needs to subtract an eyebrow header.
+    scroll.scrollTop = Math.max(0, scroll.scrollTop - 8)
     await new Promise(requestAnimationFrame)
     const text = node.firstChild!
     const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 5)
@@ -290,4 +295,137 @@ test('short landscape event artwork keeps RSVP entry and quantity controls reach
   await action.tap()
   await expect(page.getByRole('button', { name: 'Increase quantity', exact: true })).toBeInViewport({ ratio: 1 })
   await expect(page.getByRole('heading', { name: 'Choose your RSVP', exact: true })).toBeFocused()
+})
+
+test('compact preview exposes essential facts, contains artwork and leaves landscape map context', async ({ page }, info) => {
+  const state = await fixtures(page, 'paid', 'Rooftop Jazz at Golden Hour')
+  state.hasImage = true; state.overnight = true
+  await page.route('**/functions/v1/event-images?*', route => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="500"><rect width="400" height="500" fill="#30264f"/><rect width="400" height="24" fill="#c5b5ff"/><rect y="476" width="400" height="24" fill="#6d4aff"/></svg>' }))
+  for (const path of ['/map', '/discover']) {
+    await page.goto(path); await ready(page)
+    await page.locator('.living-map').scrollIntoViewIfNeeded()
+    const canvas = await page.locator('.mapboxgl-canvas').elementHandle()
+    const ticketReads = state.ticketReads
+    await page.getByRole('button', { name: 'Choose an event on the map' }).click()
+    await page.getByRole('button', { name: 'Open Rooftop Jazz at Golden Hour event preview', exact: true }).click()
+    await expect(page.getByText('From $12', { exact: true })).toBeVisible()
+    const panel = page.locator('.event-preview')
+    const geometry = await panel.evaluate(node => {
+      const bounds = (el: Element) => el.getBoundingClientRect()
+      const scroll = node.querySelector('.event-preview__scroll')!, pane = bounds(scroll)
+      const facts = [node.querySelector('h2')!, ...node.querySelectorAll('.event-preview__details, .event-preview__admission')]
+      const map = bounds(node.closest('.living-map')!), card = bounds(node)
+      return {
+        factsVisible: facts.every(el => { const r = bounds(el); return r.top >= pane.top && r.bottom <= pane.bottom }),
+        contained: card.top >= map.top && card.bottom <= map.bottom && card.left >= map.left && card.right <= map.right,
+        covered: card.width * card.height / (map.width * map.height),
+        viewport: [innerWidth, innerHeight],
+        fit: getComputedStyle(node.querySelector('img')!).objectFit,
+      }
+    })
+    if (geometry.viewport[1] >= 568) expect(geometry.factsVisible, `${path}: normal portrait must expose title/date/venue/admission`).toBe(true)
+    expect(geometry.contained).toBe(true)
+    expect(state.ticketReads - ticketReads, 'only the selected paid event requests authoritative tiers').toBe(1)
+    expect(await canvas!.evaluate(node => node === document.querySelector('.mapboxgl-canvas'))).toBe(true)
+    await info.attach(`preview-geometry-${path.slice(1)}`, { body: JSON.stringify({ ...geometry, ticketReads: state.ticketReads - ticketReads }), contentType: 'application/json' })
+    expect(geometry.fit).toBe('contain')
+    if (geometry.viewport[0] > geometry.viewport[1]) expect(geometry.covered, 'short landscape retains most of its map').toBeLessThan(0.55)
+    await expectTouchHit(page, '.event-preview__close')
+    await expectTouchHit(page, '.event-preview__action')
+    await expectTouchHit(page, '.event-preview__back')
+    await page.screenshot({ path: info.outputPath(`compact-${path.slice(1)}.png`) })
+  }
+})
+
+test('landscape artwork remains uncropped in the portrait-aware preview', async ({ page }, info) => {
+  const state = await fixtures(page); state.hasImage = true
+  await page.route('**/functions/v1/event-images?*', route => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="400"><rect width="800" height="400" fill="#30264f"/><rect width="24" height="400" fill="#c5b5ff"/><rect x="776" width="24" height="400" fill="#6d4aff"/></svg>' }))
+  await page.goto('/map'); await ready(page); await select(page)
+  const image = page.getByRole('img', { name: title + ' artwork' })
+  await expect.poll(() => image.evaluate(node => (node as HTMLImageElement).naturalWidth)).toBe(800)
+  expect(await image.evaluate(node => getComputedStyle(node).objectFit)).toBe('contain')
+  await expectTouchHit(page, '.event-preview__close')
+  await expectTouchHit(page, '.event-preview__action')
+  await page.screenshot({ path: info.outputPath('landscape-artwork-contained.png') })
+})
+
+test('tiny demo preview keeps disabled actions and explanation readable', async ({ page, baseURL }, info) => {
+  test.skip(baseURL !== 'http://127.0.0.1:3114', 'Development-only fixture is intentionally absent from hosted builds')
+  await fixtures(page)
+  await page.setViewportSize({ width: 844, height: 224 })
+  await page.goto('/map?mapFixture=standard'); await mapReference(page)
+  await page.getByRole('button', { name: 'Choose an event on the map' }).click()
+  await page.getByRole('button', { name: 'Open Outdoor Cinema event preview', exact: true }).click()
+  const action = page.getByRole('button', { name: 'View event', exact: true })
+  await expect(action).toBeDisabled()
+  const back = page.getByRole('button', { name: 'Back to events', exact: true })
+  for (const control of [action, back]) {
+    const size = await control.boundingBox()
+    expect(size!.width, 'Explanation must not squeeze controls').toBeGreaterThanOrEqual(44)
+    expect(size!.height).toBeGreaterThanOrEqual(44)
+  }
+  const explanation = page.getByText('Demo event — full event page not connected yet.', { exact: true })
+  await explanation.scrollIntoViewIfNeeded()
+  expect(await explanation.evaluate(node => {
+    const r = node.getBoundingClientRect(), panel = node.closest('.event-preview')!.getBoundingClientRect()
+    return r.top >= panel.top && r.bottom <= panel.bottom
+  })).toBe(true)
+  await page.screenshot({ path: info.outputPath('tiny-demo-explanation.png') })
+  await back.click()
+  await expect(page.getByRole('region', { name: /events? here$/ })).toBeVisible()
+})
+
+test('preview availability checks, recovers and never promotes a cached tier price', async ({ page }) => {
+  const state = await fixtures(page); state.brokenImage = true
+  const brokenCover = page.waitForEvent('requestfailed', request => request.url().includes('event-images?id='))
+  let mode: 'checking' | 'available' | 'mixed' | 'sold_out' | 'unknown' | 'unavailable' = 'checking'
+  let release!: () => void
+  const initialRead = new Promise<void>(resolve => { release = resolve })
+  let reads = 0
+  await page.route('**/rest/v1/rpc/get_public_event_ticketing', async route => {
+    reads++
+    if (mode === 'checking') await initialRead
+    if (mode === 'unknown') return route.abort()
+    if (mode === 'unavailable') return route.fulfill({ json: [] })
+    const tiers = [{ id: tier, name: 'Early bird', description: null, unit_amount_minor: 1200, currency: 'usd', availability_status: mode === 'mixed' || mode === 'sold_out' ? 'sold_out' : 'available' }]
+    if (mode === 'mixed') tiers.push({ ...tiers[0], id: second, name: 'General admission', unit_amount_minor: 2800, availability_status: 'available' })
+    return route.fulfill({ json: [{ event: event('paid'), tiers }] })
+  })
+  await page.route('**/rest/v1/rpc/get_public_event', route => route.fulfill({ json: mode === 'unavailable' ? [] : [event('paid')] }))
+  await page.goto('/map'); await ready(page)
+  const canvas = await page.locator('.mapboxgl-canvas').elementHandle()
+  await select(page)
+  await expect(page.getByRole('group', { name: 'Admission', exact: true })).toHaveText('Checking availability…')
+  await brokenCover
+  await expect(page.locator('.event-preview__artwork-fallback')).toBeVisible()
+  mode = 'available'; release()
+  const admission = page.getByRole('group', { name: 'Admission', exact: true })
+  await expect(admission).toHaveText('From $12')
+  for (const [next, label] of [['mixed', 'From $28'], ['sold_out', 'Sold out'], ['unknown', 'Availability unknown'], ['unavailable', 'Currently unavailable'], ['available', 'From $12']] as const) {
+    mode = next
+    await page.getByRole('button', { name: 'Back to events', exact: true }).click()
+    await page.getByRole('button', { name: `Open ${title} event preview`, exact: true }).click()
+    await expect(admission).toHaveText(label)
+    expect(await canvas!.evaluate(node => node === document.querySelector('.mapboxgl-canvas'))).toBe(true)
+  }
+  expect(reads, 'one bounded read per explicit selection; no per-marker reads').toBe(6)
+})
+
+
+test('photo previews stay compact across embedded and standalone maps', async ({ page }, info) => {
+  const state = await fixtures(page, 'paid', 'Rooftop Jazz at Golden Hour'); state.hasImage = true
+  await page.route('**/functions/v1/event-images?*', route => route.fulfill({ contentType: 'image/png', body: readFileSync('src/preview/assets/rooftop-reference.png') }))
+  for (const path of ['/map', '/discover']) {
+    await page.goto(path); await ready(page)
+    await page.locator('.living-map').scrollIntoViewIfNeeded()
+    await page.getByRole('button', { name: 'Choose an event on the map' }).click()
+    await page.getByRole('button', { name: 'Open Rooftop Jazz at Golden Hour event preview', exact: true }).click()
+    await expect(page.getByRole('group', { name: 'Admission', exact: true })).toHaveText('From $12')
+    const image = page.locator('.event-preview__artwork')
+    await expect.poll(() => image.evaluate(node => (node as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+    expect(await image.evaluate(node => getComputedStyle(node).objectFit)).toBe('contain')
+    await expectTouchHit(page, '.event-preview__close')
+    await expectTouchHit(page, '.event-preview__action')
+    await page.screenshot({ path: info.outputPath(`photo-${path.slice(1)}.png`) })
+  }
 })
