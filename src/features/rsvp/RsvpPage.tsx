@@ -1,6 +1,6 @@
 import { usePublicEventImages } from '../event-images/publicEventImages'
 import { ReadState } from '../../components/ui/ReadState'
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { publicReturnState } from '../discovery/discovery.navigation'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { BuyerEventSummary, BuyerHeader, BuyerIcon } from '../buyer-journey/BuyerPrimitives'
@@ -48,6 +48,15 @@ export function RsvpPage() {
   const [error, setError] = useState('')
   const [blocked, setBlocked] = useState(false)
   const [newIntent, setNewIntent] = useState(false)
+  const quantityHeading = useRef<HTMLHeadingElement | null>(null)
+  const landedQuantity = useRef<string | null>(null)
+  useLayoutEffect(() => {
+    const heading = quantityHeading.current
+    if (!heading || landedQuantity.current === eventId) return
+    landedQuantity.current = eventId
+    heading.focus({ preventScroll: true })
+    heading.scrollIntoView?.({ block: 'start', behavior: 'instant' })
+  }, [eventId, event, step])
   async function loadEvent() {
     setEventError(false)
     try {
@@ -313,7 +322,7 @@ export function RsvpPage() {
             : step === 1
             ? (
               <section>
-                <h1>Choose your RSVP</h1>
+                <h1 ref={quantityHeading} tabIndex={-1}>Choose your RSVP</h1>
                 <div className='rsvp-quantity'>
                   <BuyerIcon name='ticket' />
                   <div>

@@ -291,3 +291,24 @@ html:has(.buyer-page), body:has(.buyer-page) { background: #080a0b; }
   .buyer-focused__credential { padding-block: 32px; }
   .buyer-state { padding: 48px 24px; }
 }
+
+.buyer-event__action > .buyer-primary { width: 100%; }
+
+/* Keep the existing RSVP action alongside the title on short touch screens. */
+@media (max-height: 31rem) and (orientation: landscape) and (pointer: coarse) {
+  .buyer-event .buyer-header { margin-bottom: 12px; }
+  .buyer-event .buyer-event-hero { display: grid; grid-template-columns: minmax(0, 0.3fr) minmax(0, 1fr); gap: 16px; }
+  .buyer-event .buyer-event-hero--no-artwork { grid-template-columns: minmax(0, 1fr); }
+  .buyer-event-hero__copy:has(.buyer-event__action) {
+    grid-template-columns: minmax(0, 1fr) minmax(8rem, auto);
+    grid-template-areas: 'badge badge' 'title action' 'organizer action' 'facts facts' 'description description';
+    gap: 8px 16px;
+    padding-block: 8px;
+  }
+  .buyer-event-hero__copy:has(.buyer-event__action) > .rsvp-badge { grid-area: badge; }
+  .buyer-event-hero__copy:has(.buyer-event__action) > h1 { grid-area: title; }
+  .buyer-event-hero__copy:has(.buyer-event__action) > .buyer-event__organizer { grid-area: organizer; }
+  .buyer-event__action { grid-area: action; align-self: start; }
+  .buyer-event-hero__copy:has(.buyer-event__action) > .buyer-event-facts { grid-area: facts; }
+  .buyer-event-hero__copy:has(.buyer-event__action) > .buyer-event__description { grid-area: description; }
+}

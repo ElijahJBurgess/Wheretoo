@@ -7,7 +7,7 @@ vi.mock('./DiscoveryMapPreview', () => ({ DiscoveryMapPreview: ({ onAreaChange, 
   useEffect(() => { if (mockContext.value) onContextReady?.({ state: () => mockContext.value as ReturnType<import('../../map/LivingMapPage').DiscoveryMapHandle['state']>, broaden: () => {} }) }, [onContextReady])
   return <section aria-label="Test map" />
 } }))
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
@@ -57,5 +57,20 @@ it('does not restore captured scroll when a same-page filter read finishes', asy
   await waitFor(() => expect(read).toHaveBeenCalledTimes(2))
   await act(async () => finish(page('music')))
   await screen.findByText('Event music')
+  expect(scroll).not.toHaveBeenCalled()
+})
+
+it('does not pull the buyer back to saved scroll after interaction during a pending return read', async () => {
+  const scroll = vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
+  Element.prototype.scrollTo = vi.fn()
+  let finish!: (data: DiscoveryPageData) => void
+  read.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  const mapReturn = { version: 1, path: '/discover', camera: { center: [-122.263, 37.804], zoom: 14.8, pitch: 12, bearing: 0 }, selectedEventId: null, chooser: null }
+  const router = createMemoryRouter([{ path: '/discover', element: <DiscoveryPage /> }], { initialEntries: [{ pathname: '/discover', state: { mapReturn, discoveryScroll: 800 } }] })
+  render(<QueryClientProvider client={new QueryClient()}><RouterProvider router={router} /></QueryClientProvider>)
+  await waitFor(() => expect(read).toHaveBeenCalledTimes(1))
+  fireEvent.wheel(window, { deltaY: 120 })
+  await act(async () => finish(page('returned')))
+  await screen.findByText('Event returned')
   expect(scroll).not.toHaveBeenCalled()
 })

@@ -30,3 +30,12 @@ export function publicReturnState(state: unknown) {
 export function publicReturnPath(state: unknown): string {
   return readMapReturn(state)?.path ?? discoveryReturnPath(state)
 }
+
+// Take this at navigation time: map previews own their links and bypass list capture.
+export function captureDiscoveryScroll(state: unknown) {
+  return {
+    ...publicReturnState(state),
+    discoveryScroll: Math.min(1_000_000, Math.max(0, window.scrollY)),
+    discoveryCardScroll: Math.min(1_000_000, Math.max(0, document.querySelector('.discovery-event-list')?.scrollLeft ?? 0)),
+  }
+}

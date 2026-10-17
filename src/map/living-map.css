@@ -5,6 +5,7 @@
   min-height: 100dvh;
   overflow: hidden;
   background: #17191f;
+  container: map-overlays / size;
 }
 
 .living-map__surface { position: absolute; inset: 0; }
@@ -20,9 +21,10 @@
   display: flex;
   flex-direction: column;
   left: calc(1rem + env(safe-area-inset-left));
-  bottom: calc(3.25rem + env(safe-area-inset-bottom));
+  bottom: var(--map-preview-bottom, calc(3.25rem + env(safe-area-inset-bottom)));
+  height: var(--map-preview-height, auto);
   width: min(23.75rem, calc(100% - 2rem));
-  max-height: calc(100dvh - 7.5rem);
+  max-height: min(calc(100dvh - 7.5rem), calc(100cqh - var(--map-preview-clearance, 7.5rem)));
   overflow: hidden;
   pointer-events: auto;
   color: #f4f3fa;
@@ -219,19 +221,19 @@
 @media (max-width: 47.999rem) {
   .living-map .mapboxgl-ctrl-group button { width: 44px; height: 44px; }
   .living-map .event-preview {
+    gap: 0;
     right: calc(0.75rem + env(safe-area-inset-right));
-    bottom: calc(3.5rem + env(safe-area-inset-bottom));
+    bottom: var(--map-preview-bottom, calc(3.5rem + env(safe-area-inset-bottom)));
     left: calc(0.75rem + env(safe-area-inset-left));
     width: auto;
-    height: min(18.75rem, 45dvh);
-    max-height: 45dvh;
+    height: var(--map-preview-height, min(18.75rem, 45dvh, calc(100cqh - 10.25rem - env(safe-area-inset-top) - env(safe-area-inset-bottom))));
+    max-height: calc(100cqh - var(--map-preview-clearance, calc(10.25rem + env(safe-area-inset-top) + env(safe-area-inset-bottom))));
   }
-  .living-map .event-chooser { height: min(23rem, 50dvh); max-height: 50dvh; }
+  .living-map .event-chooser { height: min(23rem, 50dvh, calc(100cqh - 10.25rem - env(safe-area-inset-top) - env(safe-area-inset-bottom))); }
   .living-map .event-chooser__row { min-height: 3.5rem; padding: 0.45rem 0.75rem; }
   .living-map .event-preview__scroll { gap: 0.5rem; padding: 0.75rem 1rem; }
   .living-map .event-preview__footer { gap: 0.5rem; padding: 0 1rem 0.75rem; }
-  .living-map .event-preview__topline { min-height: 0.875rem; padding-right: 3rem; }
-  .living-map .event-preview__close { position: absolute; top: 0.75rem; right: 1rem; }
+  .living-map .event-preview__topline { min-height: 2.75rem; }
   .living-map .event-preview__identity { gap: 0.75rem; }
   .living-map .event-preview__artwork,
   .living-map .event-preview__artwork-fallback { width: 3rem; height: 3rem; flex-basis: 3rem; border-radius: 0.8rem; }
@@ -239,12 +241,7 @@
   .living-map .event-preview__details { gap: 0.35rem; }
 }
 
-@media (max-height: 31rem) and (orientation: landscape) {
-  .living-map .event-preview { top: max(4.5rem, env(safe-area-inset-top)); max-height: none; }
-  .living-map .event-preview__scroll { gap: 0.6rem; }
-}
-
-.living-map__choose {
+.living-map .living-map__choose {
   pointer-events: auto;
   display: block;
   min-height: 44px;
@@ -263,3 +260,66 @@
 
 /* Keep the area action on a separate row so feedback can use the card width. */
 .living-map__event-status:has(.living-map__broaden) { flex-direction: column; align-items: stretch; }
+
+/* Embedded overlays belong to the map, even when the page viewport is tall. */
+.living-map--embedded {
+  --map-preview-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  --map-preview-clearance: calc(5.25rem + env(safe-area-inset-top) + env(safe-area-inset-bottom));
+  --map-preview-height: min(18.75rem, calc(100cqh - var(--map-preview-clearance)));
+}
+.living-map .event-preview__topline { position: sticky; top: 0; z-index: 1; background: #20232b; }
+
+@media (max-width: 47.999rem) {
+  .living-map--embedded { --map-preview-clearance: calc(7.5rem + env(safe-area-inset-top) + env(safe-area-inset-bottom)); }
+}
+
+@media (max-width: 22rem) {
+  .living-map__wordmark { font-size: 1rem; }
+  .living-map__masthead { gap: 0.5rem; }
+}
+@media (pointer: coarse) {
+  .living-map .mapboxgl-ctrl-group button { width: 44px; height: 44px; }
+}
+
+@container map-overlays (max-height: 22rem) {
+  .living-map .event-preview {
+    gap: 0;
+    bottom: max(0.75rem, env(safe-area-inset-bottom));
+    height: min(18.75rem, 45dvh, calc(100cqh - 7.5rem - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
+    max-height: calc(100cqh - 7.5rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  }
+  .living-map .event-chooser { height: min(23rem, 50dvh, calc(100cqh - 7.5rem - env(safe-area-inset-top) - env(safe-area-inset-bottom))); }
+  .living-map .event-preview__footer:has(.event-preview__back) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .living-map .event-preview__action { padding-inline: 0.5rem; }
+  .living-map .event-preview__explanation { grid-column: 1 / -1; }
+}
+
+/* Short maps need width for their action rail rather than a clipped tall card. */
+@container map-overlays (max-height: 22rem) and (min-width: 26rem) {
+  .living-map .event-preview {
+    top: auto;
+    right: calc(4.5rem + env(safe-area-inset-right));
+    bottom: max(0.75rem, env(safe-area-inset-bottom));
+    left: max(0.75rem, env(safe-area-inset-left));
+    width: auto;
+    height: calc(100cqh - 1.5rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    max-height: calc(100cqh - 1.5rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  }
+  .living-map .event-preview:not(.event-chooser) { display: grid; grid-template-columns: minmax(0, 1fr) minmax(8rem, 0.55fr); }
+  .living-map .event-preview__scroll { gap: 0.5rem; padding: 0.5rem 0.75rem; }
+  .living-map .event-preview__footer { min-width: 0; align-content: center; gap: 0.5rem; padding: 0.5rem; }
+  .living-map .event-preview__topline { min-height: 2.75rem; }
+  .living-map .event-preview__footer:has(.event-preview__back) { grid-template-columns: minmax(0, 1fr); }
+}
+
+@container map-overlays (max-height: 10rem) and (min-width: 26rem) {
+  .living-map .event-preview { right: calc(7rem + env(safe-area-inset-right)); }
+  .living-map .event-preview__topline { position: static; }
+  .living-map .event-preview__scroll { scroll-padding-block: 0.5rem; }
+  .living-map .event-preview__footer { padding: 0.25rem; }
+  .living-map .mapboxgl-ctrl-group { display: flex; }
+  .living-map .mapboxgl-ctrl-group button + button { border-top: 0; border-left: 1px solid #515865; }
+  .living-map__event-status { top: 0.5rem; max-width: calc(100% - 8rem); max-height: calc(100cqh - 1rem); overflow-y: auto; }
+  .living-map .event-preview:not(.event-chooser) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .living-map .event-preview__footer:has(.event-preview__back) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

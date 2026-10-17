@@ -66,7 +66,7 @@
 }
 
 
-.map-discovery-shell { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100svh; background: #080b10; }
+.map-discovery-shell { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100svh; height: 100dvh; background: #080b10; }
 .map-discovery-shell > .living-map { height: 100%; min-height: 0; }
 .map-discovery-filters .discovery-filters { grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0; padding: 10px 16px; gap: 10px; }
 .map-discovery-filters .discovery-clear-filters { grid-column: auto; min-height: 44px; }

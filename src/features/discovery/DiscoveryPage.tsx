@@ -10,7 +10,7 @@ import { BAY_AREA_BOUNDS, discoveryBounds } from './discovery.scope'
 import { DiscoveryMapPreview } from './DiscoveryMapPreview'
 import { DiscoveryView } from './DiscoveryView'
 import { parseDiscoverySearch, serializeDiscoveryFilters } from './discovery.filters'
-import { publicReturnPath, publicReturnState, discoveryScrollPosition, discoveryCardScrollPosition } from './discovery.navigation'
+import { publicReturnPath, publicReturnState, captureDiscoveryScroll, discoveryScrollPosition, discoveryCardScrollPosition } from './discovery.navigation'
 import { useDiscovery } from './discovery.queries'
 import type { DiscoveryFilters } from './discovery.types'
 
@@ -61,6 +61,14 @@ export function DiscoveryPage() {
   }, [location.search, location.hash, location.state, navigate, search])
 
   useLayoutEffect(() => {
+    // A delayed return read must not undo the buyer's next gesture or key press.
+    const cancelRestore = () => { restored.current = location.key }
+    const inputs = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const
+    for (const input of inputs) window.addEventListener(input, cancelRestore, { passive: true })
+    return () => { for (const input of inputs) window.removeEventListener(input, cancelRestore) }
+  }, [location.key])
+
+  useLayoutEffect(() => {
     if (discovery.status === 'loading' || restored.current === location.key) return
     restored.current = location.key
     if (navigationType === 'POP' || (mountedEntry.current === location.key && location.state?.mapReturn && publicReturnPath(location.state) === '/discover' + search)) {
@@ -71,7 +79,7 @@ export function DiscoveryPage() {
 
   function captureState() {
     const saved = mapHandle.current?.state() ?? publicReturnState(window.history.state?.usr ?? location.state)
-    return { ...saved, discoverySearch: search, discoveryScroll: Math.min(1_000_000, Math.max(0, window.scrollY)), discoveryCardScroll: Math.min(1_000_000, Math.max(0, document.querySelector('.discovery-event-list')?.scrollLeft ?? 0)) }
+    return { ...captureDiscoveryScroll(saved), discoverySearch: search }
   }
   function changeFilters(requested: DiscoveryFilters, field?: keyof DiscoveryFilters) {
     const next = field ? { ...submittedFilters.current, [field]: requested[field] } : requested

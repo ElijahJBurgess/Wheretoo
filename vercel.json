@@ -31,7 +31,8 @@
       "codex/discovery-query-optimization": false,
       "codex/map-event-journey": false,
       "codex/unified-discovery-filters": false,
-      "codex/unified-filters-verification-fix": false
+      "codex/unified-filters-verification-fix": false,
+      "codex/mobile-discovery-ux": false
     }
   }
 }

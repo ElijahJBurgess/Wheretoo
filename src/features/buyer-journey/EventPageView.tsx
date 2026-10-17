@@ -18,7 +18,7 @@ export function EventPageView({ title, organizer, date, time, venue, location, d
             <div><dt><BuyerIcon name="calendar" /><span className="buyer-visually-hidden">When</span></dt><dd><span>{date}</span>{time ? <span>{time}</span> : null}</dd></div>
             <div><dt><BuyerIcon name="pin" /><span className="buyer-visually-hidden">Where</span></dt><dd><span>{venue}</span><span>{location}</span></dd></div>
           </dl>
-          {action}
+          {action ? <div className="buyer-event__action">{action}</div> : null}
           {!selection ? <p className="buyer-event__description">{description}</p> : null}
         </div>
       </div>
