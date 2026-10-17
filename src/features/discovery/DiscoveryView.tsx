@@ -3,6 +3,7 @@ import type { DiscoveryMode } from './discovery.location'
 import { DiscoveryMapPreview } from './DiscoveryMapPreview'
 import { Link } from 'react-router-dom'
 import { DiscoveryFilters as FilterControls } from './DiscoveryFilters'
+import { defaultDiscoveryFilters } from './discovery.filters'
 import {
   categoryLabel,
   discoveryAdmissionLabel,
@@ -25,6 +26,8 @@ export type DiscoveryViewProps = {
   retryAfterSeconds?: number
   hasMore: boolean
   isLoadingMore: boolean
+  isRefreshing?: boolean
+  isRefreshError?: boolean
   moreError?: string | null
   notice?: string | null
   invalidItemCount?: number
@@ -146,10 +149,10 @@ function EventLink({ item, publicSearch, variant, eventHref }: {
   )
 }
 
-function LoadingResults() {
+function LoadingResults({ refreshing = false }: { refreshing?: boolean }) {
   return (
     <section aria-busy="true" aria-live="polite" className="discovery-results-state" role="status">
-      <p className="discovery-state-title">Loading events</p>
+      <p className="discovery-state-title">{refreshing ? 'Checking for events…' : 'Loading events'}</p>
       <div aria-hidden="true" className="discovery-skeletons">
         {Array.from({ length: 4 }, (_, index) => <span key={index}><i /><b /><b /></span>)}
       </div>
@@ -172,13 +175,23 @@ function ErrorResults({ errorKind, retryAfterSeconds, onRetry }: Pick<DiscoveryV
 export function DiscoveryView({
   filters, items, highlightItems, status, errorKind, retryAfterSeconds, hasMore, isLoadingMore,
   mapPreview, onBroadenArea, canBroadenArea = true, regionFallback = false, moreError, notice, invalidItemCount = 0, onFiltersChange, onRefresh, onLoadMore, onRetry, publicSearch,
-  eventHref, mode = 'map', onModeChange,
+  eventHref, mode = 'map', onModeChange, isRefreshing = false, isRefreshError = false,
 }: DiscoveryViewProps) {
   const modeButtons = useRef<Partial<Record<DiscoveryMode, HTMLButtonElement>>>({})
+  const resultsHeading = useRef<HTMLHeadingElement>(null)
   const highlightCandidate = status === 'ready' ? selectDiscoveryHighlight(highlightItems ?? items) : null
   const highlight = highlightCandidate ? items.find((item) => item.id === highlightCandidate.id) ?? null : null
   const rows = highlight ? items.filter((item) => item.id !== highlight.id) : items
-  const filtered = filters.when !== 'next7' || filters.category !== null || filters.price !== null
+  const nondefaultFilters = filters.when !== 'next7' || filters.category !== null || filters.price !== null
+  // A legacy 30-day window is wider than the default, not a restriction.
+  const filtered = filters.when === 'today' || filters.when === 'weekend' || filters.category !== null || filters.price !== null
+  const feedback = status === 'loading' || (!items.length && isRefreshing) ? 'checking'
+    : status === 'error' || (!items.length && isRefreshError) ? 'error'
+      : !items.length ? hasMore || invalidItemCount > 0 || moreError ? 'partial' : 'empty' : null
+  const changeEmptyFilters = (next: DiscoveryFilters) => {
+    resultsHeading.current?.focus({ preventScroll: true })
+    onFiltersChange(next)
+  }
   const retryDelayed = (retryAfterSeconds ?? 0) > 0
   const windowLabel = filters.when === 'today' ? 'Today' : filters.when === 'weekend' ? 'This weekend' : filters.when === 'upcoming' ? 'Next 30 Days' : 'Next 7 Days'
   const discoverDestination = `/discover${publicSearch}`
@@ -236,25 +249,32 @@ export function DiscoveryView({
             <EventLink eventHref={eventHref} item={highlight} publicSearch={publicSearch} variant="hero" />
           </div> : null}
           <div className="discovery-results__heading">
-            <h2 id="discovery-results-heading">{regionFallback ? 'Events in the Bay Area' : 'Events in this area'}</h2>
+            <h2 ref={resultsHeading} tabIndex={-1} id="discovery-results-heading">{regionFallback ? 'Events in the Bay Area' : 'Events in this area'}</h2>
             <span>{windowLabel}</span>{onBroadenArea ? <button type="button" onClick={onBroadenArea} disabled={!canBroadenArea}>Zoom out to search a wider area</button> : null}
             <button disabled={retryDelayed} onClick={onRefresh} type="button">Refresh</button>
           </div>
-          {status === 'ready' ? <p aria-label="Discovery results" aria-live="polite" className="discovery-visually-hidden" role="status">{items.length} {items.length === 1 ? 'event' : 'events'}</p> : null}
-          {notice ? <p aria-live="polite" className="discovery-notice" role="status">{notice}</p> : null}
-          {invalidItemCount > 0 ? (
+          {status === 'ready' && feedback !== 'checking' && feedback !== 'error' ? <p aria-label="Discovery results" aria-live="polite" className="discovery-visually-hidden" role="status">{items.length} {items.length === 1 ? 'event' : 'events'}</p> : null}
+          {notice && feedback !== 'checking' && feedback !== 'error' ? <p aria-live="polite" className="discovery-notice" role="status">{notice}</p> : null}
+          {invalidItemCount > 0 && feedback !== 'checking' && feedback !== 'error' ? (
             <p aria-live="polite" className="discovery-notice">
-              {invalidItemCount} {invalidItemCount === 1 ? 'event could' : 'events could'} not be shown.
+              {invalidItemCount} {invalidItemCount === 1 ? 'event could' : 'events could'} not be shown. More events may be available.
             </p>
           ) : null}
 
-          {status === 'loading' ? <LoadingResults /> : null}
-          {status === 'error' ? <ErrorResults errorKind={errorKind} retryAfterSeconds={retryAfterSeconds} onRetry={onRetry} /> : null}
-          {status === 'ready' && items.length === 0 ? (
+          {feedback === 'checking' ? <LoadingResults refreshing={isRefreshing} /> : null}
+          {feedback === 'error' ? <ErrorResults errorKind={errorKind} retryAfterSeconds={retryAfterSeconds} onRetry={onRetry} /> : null}
+          {feedback === 'partial' ? <section aria-live="polite" className="discovery-results-state" role="status">
+            <p className="discovery-state-title">More events may be available.</p>
+            <p>{hasMore ? 'Load more to check for upcoming events.' : 'Refresh to check for events that could not be shown.'}</p>
+          </section> : null}
+          {feedback === 'empty' ? (
             <section aria-live="polite" className="discovery-results-state" role="status">
-              <p className="discovery-state-title">{filtered ? 'No events match these filters.' : 'No events in this map area yet.'}</p>
-              <p>{filtered ? 'Clear the filters to see everything coming up.' : 'Zoom out to explore more of the Bay Area.'}</p>
-              {filters.when === 'today' ? <button className="discovery-state-action" onClick={() => onFiltersChange({ ...filters, when: 'next7' })} type="button">See Next 7 Days</button> : null}
+              <p className="discovery-state-title">{filtered ? 'No events match these filters in this area.' : 'No events in this map area yet.'}</p>
+              <p>{filtered ? 'Try changing the date, category, or admission type.' : 'Zoom out to explore more of the Bay Area.'}</p>
+              {nondefaultFilters ? <div className="discovery-state-actions">
+                <button className="discovery-state-action" onClick={() => changeEmptyFilters(defaultDiscoveryFilters)} type="button">Clear filters</button>
+                {filters.when === 'today' ? <button className="discovery-state-action" onClick={() => changeEmptyFilters({ ...filters, when: 'next7' })} type="button">See Next 7 Days</button> : null}
+              </div> : null}
             </section>
           ) : null}
 
@@ -275,7 +295,7 @@ export function DiscoveryView({
               {isLoadingMore ? 'Loading more events…' : 'Load more'}
             </button>
           ) : null}
-          {status === 'ready' && items.length > 0 && !hasMore && !moreError ? <p className="discovery-end">That’s everything coming up.</p> : null}
+          {status === 'ready' && items.length > 0 && !hasMore && !moreError && invalidItemCount === 0 && !isRefreshing && !isRefreshError ? <p className="discovery-end">That’s everything coming up.</p> : null}
         </section>
         </div>
         </div>

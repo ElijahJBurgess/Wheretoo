@@ -8,7 +8,7 @@ it('switches among isolated visual states without requesting external data', asy
   render(<MemoryRouter><DiscoveryPreview /></MemoryRouter>)
   expect(screen.getByText('Featured')).toBeVisible()
   await userEvent.click(screen.getByRole('button', { name: 'Malformed mix' }))
-  expect(screen.getByText('2 events could not be shown.')).toBeVisible()
+  expect(screen.getByText('2 events could not be shown. More events may be available.')).toBeVisible()
   await userEvent.click(screen.getByRole('button', { name: 'Rate limited' }))
   expect(screen.getByRole('alert')).toHaveTextContent('Try again in 45 seconds')
   await userEvent.click(screen.getByRole('button', { name: 'Unavailable' }))

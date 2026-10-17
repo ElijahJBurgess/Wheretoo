@@ -182,7 +182,7 @@ export function useDiscovery(filters: DiscoveryFilters, bounds?: MapBounds | nul
     items, status: feed ? 'ready' as const : query.isError ? 'error' as const : 'loading' as const,
     highlightItems: items.filter(item => first?.items.some(candidate => candidate.id === item.id)),
     errorKind: failure?.kind === 'invalid_response' ? 'invalid_response' as const : failure?.kind === 'rate_limited' ? 'rate_limited' as const : 'unavailable' as const,
-    hasMore: !obsoleteWeekend && Boolean(feed?.pages.at(-1)?.nextCursor), isLoadingMore: Boolean(activeMore.loading), isRefreshing: query.isFetching && Boolean(feed),
+    hasMore: !obsoleteWeekend && Boolean(feed?.pages.at(-1)?.nextCursor), isLoadingMore: Boolean(activeMore.loading), isRefreshing: query.isFetching && Boolean(feed), isRefreshError: query.isRefetchError,
     moreError: activeMore.error ? (activeMore.error.kind === 'rate_limited' ? 'Please wait before loading more events.' : 'More events could not load. Try again.') : null,
     notice: query.isError && feed ? obsoleteWeekend ? 'Couldn’t refresh events. Try again.' : 'Couldn’t refresh events. Showing the last results we received.' : activeMore.notice ?? (query.isFetching && feed ? 'Refreshing events…' : null),
     invalidItemCount: feed?.pages.reduce((sum, page) => sum + page.invalidItemCount, 0) ?? 0,

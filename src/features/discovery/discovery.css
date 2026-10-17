@@ -515,6 +515,9 @@
   font-size: 12px;
 }
 
+.discovery-state-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.discovery-results__heading h2:focus-visible { outline: 3px solid var(--discovery-purple); outline-offset: 4px; }
+
 .discovery-load-more {
   display: block;
   margin: 24px auto 0;

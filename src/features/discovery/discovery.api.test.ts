@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { getDiscoveryPage } from './discovery.api'
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers() })
 const envelope = { items: [], nextCursor: null, window: { start: '2026-09-13T07:00:00Z', end: '2026-10-13T07:00:00Z', timezone: 'America/Los_Angeles' }, serverNow: '2026-09-13T12:00:00Z' }
 
 it('sends one anonymous bounded collection request with no identity or browser session', async () => {
@@ -14,7 +14,9 @@ it('sends one anonymous bounded collection request with no identity or browser s
   expect(url).toMatch(/\/functions\/v1\/public-discovery$/)
   expect(JSON.parse(init.body as string)).toEqual({ region: 'sf_bay_area', when: 'today', category: 'music', admissionType: 'free', limit: 20 })
   expect(init.credentials).toBe('omit')
-  expect(init.signal).toBe(controller.signal)
+  expect(init.signal?.aborted).toBe(false)
+  controller.abort()
+  expect(init.signal?.aborted).toBe(true)
   expect(new Headers(init.headers).has('authorization')).toBe(false)
 })
 
@@ -41,4 +43,29 @@ it('propagates cancellation so obsolete requests are not presented as failures',
   const controller = new AbortController(); controller.abort()
   vi.stubGlobal('fetch', vi.fn(async () => { throw new DOMException('Aborted', 'AbortError') }))
   await expect(getDiscoveryPage({ when: 'upcoming', category: null, price: null }, { signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' })
+})
+
+it.each(['headers', 'body'] as const)('bounds a stalled %s read to ten seconds and allows a new successful request', async phase => {
+  vi.useFakeTimers()
+  // Native deadline timers are outside Vitest's clock; emulate that browser
+  // primitive while keeping the API's transport/error handling real.
+  vi.spyOn(AbortSignal, 'timeout').mockImplementation(ms => {
+    const controller = new AbortController()
+    setTimeout(() => controller.abort(new DOMException('Timed out', 'TimeoutError')), ms)
+    return controller.signal
+  })
+  vi.stubGlobal('fetch', vi.fn((_url: string, init: RequestInit) => {
+    const stalled = () => new Promise<never>((_resolve, reject) => {
+      init.signal!.addEventListener('abort', () => reject(init.signal!.reason), { once: true })
+    })
+    return phase === 'headers' ? stalled() : Promise.resolve(Object.assign(new Response(''), { json: stalled }))
+  }))
+  let failure: unknown
+  void getDiscoveryPage({ when: 'next7', category: null, price: null }, { cursor: 'next' }).catch(error => { failure = error })
+  await vi.advanceTimersByTimeAsync(9999)
+  expect(failure).toBeUndefined()
+  await vi.advanceTimersByTimeAsync(1)
+  expect(failure).toMatchObject({ kind: 'unavailable', message: 'Discovery is temporarily unavailable' })
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(envelope))))
+  expect(await getDiscoveryPage({ when: 'next7', category: null, price: null })).toMatchObject({ items: [], nextCursor: null })
 })

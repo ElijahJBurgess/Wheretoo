@@ -34,6 +34,24 @@ it('fetches one first page, appends a bounded page, and deduplicates live orderi
   expect(read).toHaveBeenCalledTimes(2)
 })
 
+it('keeps an unconsumed cursor after local expiry and loads the next upcoming page once', async () => {
+  vi.useFakeTimers()
+  const first = page(['soon'], 'next')
+  const now = Date.parse(first.serverNow)
+  first.items[0] = { ...first.items[0], startsAt: new Date(now - 1000).toISOString(), endsAt: new Date(now + 1000).toISOString() }
+  read.mockResolvedValueOnce(first).mockResolvedValueOnce(page(['upcoming']))
+  const view = setup()
+  await act(async () => { await vi.advanceTimersByTimeAsync(10) })
+  expect(view.result.current.items).toHaveLength(1)
+  await act(async () => { await vi.advanceTimersByTimeAsync(1100) })
+  expect(view.result.current.items).toEqual([])
+  expect(view.result.current.hasMore).toBe(true)
+  expect(read).toHaveBeenCalledTimes(1)
+  await act(() => view.result.current.loadMore())
+  expect(view.result.current.items.map(item => item.id)).toEqual(['upcoming'])
+  expect(read).toHaveBeenCalledTimes(2)
+})
+
 it('does not display an old filter or append response after filters change', async () => {
   let finish!: (data: DiscoveryPageData) => void
   read.mockResolvedValueOnce(page(['old'], 'next')).mockImplementationOnce(() => new Promise(resolve => { finish = resolve })).mockResolvedValueOnce(page(['new']))
@@ -70,6 +88,7 @@ it('keeps same-query rows with a stale notice when refresh fails', async () => {
   await waitFor(() => expect(view.result.current.notice).toContain('refresh'))
   expect(view.result.current.items[0].id).toBe('old')
   expect(view.result.current.status).toBe('ready')
+  expect(view.result.current.isRefreshError).toBe(true)
 })
 
 it('restarts once from page one on an expired append cursor', async () => {
