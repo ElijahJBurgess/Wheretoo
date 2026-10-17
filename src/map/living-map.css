@@ -326,3 +326,35 @@
   .living-map .mapboxgl-ctrl-group button + button { border-top: 0; border-left: 1px solid #515865; }
   .living-map__event-status { top: 0.5rem; max-width: calc(100% - 8rem); max-height: calc(100cqh - 1rem); overflow-y: auto; }
 }
+
+/* Cached, offscreen selections may remain open when the visible area is empty.
+   Reserve separate feedback space without resizing the map; only use a side
+   column when it has room for a readable broaden action. */
+.living-map--empty-with-preview .living-map__event-status {
+  top: max(0.5rem, env(safe-area-inset-top));
+  gap: 0.125rem;
+  padding: 0.25rem;
+  overflow-y: auto;
+}
+.living-map--empty-with-preview .living-map__event-status button { white-space: normal; }
+@container map-overlays (width < 26rem) or ((width < 35rem) and (height > 22rem)) {
+  .living-map--empty-with-preview .living-map__masthead { visibility: hidden; }
+  .living-map--empty-with-preview .living-map__event-status { max-height: 5.5rem; }
+  .living-map .event-preview:where(.living-map--empty-with-preview *) {
+    bottom: max(0.75rem, env(safe-area-inset-bottom));
+    max-height: calc(100cqh - 7rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  }
+}
+@container map-overlays (width >= 35rem) or ((width >= 26rem) and (height <= 22rem)) {
+  .living-map .event-preview:where(.living-map--empty-with-preview *) { max-width: min(26rem, 60cqw, calc(100% - 8rem - env(safe-area-inset-left) - env(safe-area-inset-right))); }
+  .living-map--empty-with-preview .living-map__event-status {
+    left: calc(min(26rem, 60cqw) + 1.5rem + env(safe-area-inset-left));
+    right: calc(4.5rem + env(safe-area-inset-right));
+    max-width: 28rem;
+    max-height: calc(100cqh - 1rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  }
+  .living-map .event-chooser:where(.living-map--empty-with-preview *) { right: auto; }
+}
+@container map-overlays (max-height: 26rem) {
+  .living-map--empty-with-preview .living-map__masthead { visibility: hidden; }
+}

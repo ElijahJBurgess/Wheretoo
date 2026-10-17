@@ -270,15 +270,16 @@ export function Component({ embedded = false, onAreaChange, onAuthoritativeRefre
     navigate(to, { state })
   }
 
+  const showEmptyArea = live.hasFreshViewportCoverage && live.complete === true && !live.pending && !live.error && visibleEvents.length === 0
   const eventFeedback = live.error?.message ?? (live.pending
     ? live.complete === null ? 'Loading events…' : 'Updating events…'
     : live.complete === false ? 'Some events may be missing. Zoom in to narrow this area.'
-      : live.complete === true && live.events.length === 0 ? 'No events found in this area.' : null)
+      : showEmptyArea ? 'No events found in this area.' : null)
 
   return (
     <div className={embedded ? undefined : 'map-discovery-shell'}>
     {!embedded ? <div className="map-discovery-filters"><FilterControls filters={filters} onChange={changeFilters} /></div> : null}
-    <Container ref={root} className={`living-map${embedded ? ' living-map--embedded' : ''}`} aria-label="Explore the Bay Area" data-renderer-state={state} onKeyDown={handleKeyDown}>
+    <Container ref={root} className={`living-map${embedded ? ' living-map--embedded' : ''}${showEmptyArea && (selectedEvent || (chooser && chooserEvents.length)) ? ' living-map--empty-with-preview' : ''}`} aria-label="Explore the Bay Area" data-renderer-state={state} onKeyDown={handleKeyDown}>
       <div className="living-map__surface" inert={state !== 'ready' || undefined}>
       {events ? <WheretooMap
         key={`map-${attempt}`}
@@ -299,7 +300,7 @@ export function Component({ embedded = false, onAreaChange, onAuthoritativeRefre
       /> : null}
       </div>
       <header className="living-map__masthead"><span className="living-map__wordmark">wheretoo</span>{state === 'ready' ? <button ref={chooserTrigger} className="living-map__choose" type="button" aria-label="Choose an event on the map" disabled={!visibleEvents.length} onClick={openViewportChooser}>Events in view</button> : null}</header>
-      {!fixtureMode && (state === 'ready' || live.error) && (eventFeedback || live.complete === null) ? <div className="living-map__event-status" role="status"><span>{eventFeedback ?? 'Loading events…'}</span>{live.complete === true && live.events.length === 0 ? <button className="living-map__broaden" type="button" onClick={() => broaden.current?.()} disabled={Boolean(viewport && viewport.zoom <= MAP_MIN_ZOOM)}>Zoom out to search a wider area</button> : null}{!live.pending && (live.error || live.complete === false) ? <button type="button" onClick={live.retry}>Retry events</button> : null}</div> : null}
+      {!fixtureMode && (state === 'ready' || live.error) && (eventFeedback || live.complete === null) ? <div className="living-map__event-status" role="status"><span>{eventFeedback ?? 'Loading events…'}</span>{showEmptyArea ? <button className="living-map__broaden" type="button" onClick={() => broaden.current?.()} disabled={Boolean(viewport && viewport.zoom <= MAP_MIN_ZOOM)}>Zoom out to search a wider area</button> : null}{!live.pending && (live.error || live.complete === false) ? <button type="button" onClick={live.retry}>Retry events</button> : null}</div> : null}
       {selectedEvent ? (
         <div className="living-map__preview-layer">
           <EventPreviewCard
