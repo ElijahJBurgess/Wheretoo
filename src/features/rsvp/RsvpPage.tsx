@@ -14,7 +14,8 @@ import {
   validateAttempt,
   withRsvpLock,
 } from './rsvp.attempt'
-import { type FreeRsvpEvent, rsvpApi } from './rsvp.api'
+import { rsvpApi } from './rsvp.api'
+import { useFreeRsvpEvent } from './rsvp.queries'
 import './rsvp.css'
 export function RsvpProgress({ step }: { step: 1 | 2 | 3 }) {
   return (
@@ -37,10 +38,11 @@ export function RsvpPage() {
   const location = useLocation()
   const images = usePublicEventImages([eventId])
   const navigate = useNavigate()
-  const [event, setEvent] = useState<FreeRsvpEvent | null>()
-  const [eventError, setEventError] = useState(false)
+  const { data: event, isError: eventError, refetch: loadEvent } = useFreeRsvpEvent(eventId)
   const [step, setStep] = useState<1 | 2>(1)
   const [quantity, setQuantity] = useState(1)
+  const quantityUnavailable = !event || eventError || event.availability.status === 'full' ||
+    quantity > Math.min(10, event.availability.remaining ?? 10)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [attempt, setAttempt] = useState<RsvpAttempt | null>(null)
@@ -57,14 +59,6 @@ export function RsvpPage() {
     heading.focus({ preventScroll: true })
     heading.scrollIntoView?.({ block: 'start', behavior: 'instant' })
   }, [eventId, event, step])
-  async function loadEvent() {
-    setEventError(false)
-    try {
-      setEvent(await rsvpApi.event(eventId))
-    } catch {
-      setEventError(true)
-    }
-  }
   function acceptResult(saved: RsvpAttempt, result: FreeAttemptResult) {
     const next = recordResult(saved, result)
     setAttempt(next)
@@ -138,7 +132,6 @@ export function RsvpPage() {
         setBlocked(true)
         setError(e instanceof Error ? e.message : 'Private RSVP recovery unavailable.')
       }
-      await loadEvent()
     })
     const changed = (e: StorageEvent) => {
       if (e.key === null || e.key === 'wheretoo.rsvp.v1:' + eventId) {
@@ -166,6 +159,7 @@ export function RsvpPage() {
   }, [eventId])
   async function submit(e: React.FormEvent) {
     e.preventDefault()
+    if (busy || quantityUnavailable) return
     setError('')
     let submission
     try {
@@ -394,7 +388,7 @@ export function RsvpPage() {
                     Edit quantity
                   </button>
                 </section>
-                <button className='ui-button buyer-primary' disabled={busy} type='submit'>
+                <button className='ui-button buyer-primary' disabled={busy || quantityUnavailable} type='submit'>
                   Confirm RSVP
                 </button>
               </form>

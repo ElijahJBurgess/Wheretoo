@@ -1,3 +1,4 @@
+import type { MapAuthoritativeRefresh } from '../../map/data/mapEvents.query'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { DiscoveryReadError, getDiscoveryPage } from './discovery.api'
@@ -85,6 +86,17 @@ export function useDiscovery(filters: DiscoveryFilters, bounds?: MapBounds | nul
     await query.refetch()
   }
 
+  async function refreshAfterMap(refresh: MapAuthoritativeRefresh) {
+    if (!bounds || serializeDiscoveryFilters(refresh.filters) !== publicSearch || !(['west', 'east', 'south', 'north'] as const).every(edge => refresh.bounds[edge] === bounds[edge]) || Date.now() < blockedUntil) return
+    const state = client.getQueryState<Feed>(queryKey)
+    // Focus/reconnect can already have started or completed this list read.
+    // Reuse that work, and leave initial loading to the enabled query.
+    if (!state?.data || state.fetchStatus !== 'idle' || state.dataUpdatedAt >= refresh.startedAt) return
+    append.current?.controller.abort(); append.current = null
+    setMore({ search })
+    await query.refetch({ cancelRefetch: false })
+  }
+
   const feed = query.data
   const first = feed?.pages[0]
   const serverNow = first && feed ? Date.parse(first.serverNow) + Math.max(0, clock - feed.receivedAt) : 0
@@ -159,6 +171,6 @@ export function useDiscovery(filters: DiscoveryFilters, bounds?: MapBounds | nul
     moreError: activeMore.error ? (activeMore.error.kind === 'rate_limited' ? 'Please wait before loading more events.' : 'More events could not load. Try again.') : null,
     notice: query.isError && feed ? obsoleteWeekend ? 'Couldn’t refresh events. Try again.' : 'Couldn’t refresh events. Showing the last results we received.' : activeMore.notice ?? (query.isFetching && feed ? 'Refreshing events…' : null),
     invalidItemCount: feed?.pages.reduce((sum, page) => sum + page.invalidItemCount, 0) ?? 0,
-    retryAfterSeconds, refresh, loadMore,
+    retryAfterSeconds, refresh, refreshAfterMap, loadMore,
   }
 }

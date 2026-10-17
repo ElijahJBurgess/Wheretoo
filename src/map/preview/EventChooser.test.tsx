@@ -11,7 +11,7 @@ describe('EventChooser', () => {
     expect(events.map(({ id }) => id)).toEqual(['a-event', 'z-event'])
     render(<EventChooser events={events} onSelect={vi.fn()} onClose={vi.fn()} />)
     expect(screen.getByRole('region', { name: '2 events here' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Open Vinyl Night event preview' })).toHaveTextContent('From $15')
+    expect(screen.getByRole('button', { name: 'Open Vinyl Night event preview' })).toHaveTextContent('Availability unknown')
   })
 
   it('shows twenty rows initially and Show more makes every member reachable', () => {

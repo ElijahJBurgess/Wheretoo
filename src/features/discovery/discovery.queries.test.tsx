@@ -1,3 +1,5 @@
+import { usePublicMapEvents } from '../../map/data/mapEvents.query'
+import type { MapViewportSnapshot } from '../../map/core/map.types'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { PropsWithChildren } from 'react'
@@ -6,7 +8,8 @@ import { DiscoveryReadError } from './discovery.api'
 import { useDiscovery } from './discovery.queries'
 import type { DiscoveryFilters, DiscoveryPageData } from './discovery.types'
 
-const read = vi.hoisted(() => vi.fn())
+const { read, readMap } = vi.hoisted(() => ({ read: vi.fn(), readMap: vi.fn() }))
+vi.mock('../../map/data/mapEvents.api', () => ({ getFilteredPublicMapEvents: readMap }))
 vi.mock('./discovery.api', async importOriginal => ({ ...await importOriginal<typeof import('./discovery.api')>(), getDiscoveryPage: read }))
 const filters: DiscoveryFilters = { when: 'upcoming', category: null, price: null }
 function page(ids: string[], cursor: string | null = null): DiscoveryPageData {
@@ -199,4 +202,78 @@ it('does not present an ongoing prior-weekend event as next-weekend after a fail
   await act(async () => { await vi.advanceTimersByTimeAsync(10025) })
   expect(read).toHaveBeenCalledTimes(2)
   expect(view.result.current.items).toEqual([])
+})
+
+const refreshArea = { west: -122.3, south: 37.7, east: -122.2, north: 37.9 }
+function scopedSetup() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  function Wrapper({ children }: PropsWithChildren) { return <QueryClientProvider client={client}>{children}</QueryClientProvider> }
+  return { client, ...renderHook(() => useDiscovery(filters, refreshArea), { wrapper: Wrapper }) }
+}
+const mapRefresh = () => ({ filters, bounds: refreshArea, startedAt: Date.now() + 1 })
+
+it('refreshes edited/cancelled list rows through 122 seconds of accepted map revalidation, including partial maps', async () => {
+  vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-13T12:00:00Z'))
+  readMap.mockReset(); readMap.mockResolvedValue({ events: [], complete: false })
+  const updated = page(['still-listed'])
+  updated.items[0].title = 'Edited authoritative title'
+  read.mockResolvedValueOnce(page(['cancelled', 'still-listed'])).mockResolvedValue(updated)
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  function Wrapper({ children }: PropsWithChildren) { return <QueryClientProvider client={client}>{children}</QueryClientProvider> }
+  const viewport: MapViewportSnapshot = { bounds: refreshArea, center: { longitude: -122.25, latitude: 37.8 }, zoom: 14 }
+  const view = renderHook(() => {
+    const list = useDiscovery(filters, refreshArea)
+    usePublicMapEvents(viewport, null, true, { discovery: filters, onAuthoritativeRefresh: refresh => { void list.refreshAfterMap(refresh) } })
+    return list
+  }, { wrapper: Wrapper })
+  await act(async () => { await vi.advanceTimersByTimeAsync(301) })
+  expect(read).toHaveBeenCalledTimes(1); expect(readMap).toHaveBeenCalledTimes(1)
+  // Omission from the initial capped map cannot remove a valid list row.
+  expect(view.result.current.items.map(item => item.id)).toEqual(['cancelled', 'still-listed'])
+  await act(async () => { await vi.advanceTimersByTimeAsync(122000) })
+  expect(view.result.current.items.map(item => item.id)).toEqual(['still-listed'])
+  expect(view.result.current.items[0].title).toBe('Edited authoritative title')
+  expect(readMap).toHaveBeenCalledTimes(3); expect(read).toHaveBeenCalledTimes(3)
+  expect(read.mock.calls.every(call => !call[1].cursor && JSON.stringify(call[1].bounds) === JSON.stringify(refreshArea))).toBe(true)
+  await act(async () => {
+    window.dispatchEvent(new Event('focus')); document.dispatchEvent(new Event('visibilitychange'))
+    await vi.advanceTimersByTimeAsync(1)
+  })
+  expect(readMap).toHaveBeenCalledTimes(4); expect(read).toHaveBeenCalledTimes(4)
+})
+
+it('coalesces accepted map notifications with a pending/fresher list refresh and rejects other areas/filters', async () => {
+  let finish!: (data: DiscoveryPageData) => void
+  read.mockResolvedValueOnce(page(['first'])).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  const view = scopedSetup()
+  await waitFor(() => expect(view.result.current.items[0]?.id).toBe('first'))
+  const refresh = mapRefresh()
+  await act(() => view.result.current.refreshAfterMap({ ...refresh, bounds: { ...refreshArea, west: -122.4 } }))
+  await act(() => view.result.current.refreshAfterMap({ ...refresh, filters: { ...filters, price: 'free' } }))
+  expect(read).toHaveBeenCalledTimes(1)
+  let pending!: Promise<void>
+  act(() => { pending = view.result.current.refreshAfterMap(refresh) })
+  await act(() => view.result.current.refreshAfterMap(refresh))
+  expect(read).toHaveBeenCalledTimes(2)
+  await act(async () => { finish(page(['new'])); await pending })
+  await act(() => view.result.current.refreshAfterMap({ ...refresh, startedAt: refresh.startedAt - 1 }))
+  expect(read).toHaveBeenCalledTimes(2)
+})
+
+it('does not resurrect a pending append after map refresh and honors the list rate-limit cooldown', async () => {
+  let finish!: (data: DiscoveryPageData) => void
+  read.mockResolvedValueOnce(page(['first'], 'next')).mockImplementationOnce(() => new Promise(resolve => { finish = resolve })).mockResolvedValueOnce(page(['fresh'])).mockRejectedValueOnce(new DiscoveryReadError('rate_limited', 30))
+  const view = scopedSetup()
+  await waitFor(() => expect(view.result.current.items[0]?.id).toBe('first'))
+  let pending!: Promise<void>
+  act(() => { pending = view.result.current.loadMore() })
+  const signal = read.mock.calls[1][1].signal as AbortSignal
+  await act(() => view.result.current.refreshAfterMap(mapRefresh()))
+  await act(async () => { finish(page(['obsolete'])); await pending })
+  expect(signal.aborted).toBe(true)
+  expect(view.result.current.items.map(item => item.id)).toEqual(['fresh'])
+  await act(() => view.result.current.refreshAfterMap(mapRefresh()))
+  await waitFor(() => expect(view.result.current.retryAfterSeconds).toBeGreaterThan(0))
+  await act(() => view.result.current.refreshAfterMap(mapRefresh()))
+  expect(read).toHaveBeenCalledTimes(4)
 })

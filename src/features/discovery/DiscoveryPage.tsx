@@ -113,7 +113,7 @@ export function DiscoveryPage() {
     event.preventDefault()
     navigate(href, { state })
   }}>
-    <DiscoveryView mapPreview={<DiscoveryMapPreview onAreaChange={areaChanged} onContextReady={contextReady} onUnavailable={mapUnavailable} />}
+    <DiscoveryView mapPreview={<DiscoveryMapPreview onAuthoritativeRefresh={refresh => void discovery.refreshAfterMap(refresh)} onAreaChange={areaChanged} onContextReady={contextReady} onUnavailable={mapUnavailable} />}
       onBroadenArea={() => mapHandle.current?.broaden()} canBroadenArea={canBroaden} regionFallback={scope.fallback} {...discovery} items={discovery.items.map(withImage)} highlightItems={discovery.highlightItems.map(withImage)} filters={filters} publicSearch={search}
       onFiltersChange={changeFilters} onRefresh={() => void discovery.refresh()}
       onRetry={() => void discovery.refresh()} onLoadMore={() => void discovery.loadMore()} />

@@ -24,12 +24,18 @@ export function formatEventDateTime(event: WheretooMapEvent) {
   }
 }
 
-export function formatEventPrice(event: WheretooMapEvent) {
+export type PreviewAvailability = { status: 'available' | 'sold_out'; minimumPriceMinor: number | null }
+
+export function formatEventPrice(event: WheretooMapEvent, availability?: PreviewAvailability | null) {
   if (event.admissionType === 'free') return 'Free'
-  if (event.minimumPriceMinor === null || event.minimumPriceMinor < 0) return 'Price unavailable'
+  if (availability === undefined) return 'Availability unknown'
+  if (availability === null) return 'Currently unavailable'
+  if (availability.status === 'sold_out') return 'Sold out'
+  const amount = availability.minimumPriceMinor
+  if (amount === null || !Number.isSafeInteger(amount) || amount < 0) return 'Availability unknown'
   return `From ${new Intl.NumberFormat('en-US', {
-    style: 'currency', currency: 'USD', maximumFractionDigits: event.minimumPriceMinor % 100 === 0 ? 0 : 2,
-  }).format(event.minimumPriceMinor / 100)}`
+    style: 'currency', currency: 'USD', maximumFractionDigits: amount % 100 === 0 ? 0 : 2,
+  }).format(amount / 100)}`
 }
 
 export function resolvePublicArtworkUrl(reference: string | null) {

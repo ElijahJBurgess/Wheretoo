@@ -22,6 +22,10 @@ export function publicMapBounds(bounds: MapBounds): MapBounds {
   return { west: west < -180 || east > 180 ? -180 : west, east: west < -180 || east > 180 ? 180 : east, south, north }
 }
 
+// A successful network revalidation, independent of marker revisions or coverage
+// completeness. Consumers must read their own authoritative list endpoint.
+export type MapAuthoritativeRefresh = { filters: DiscoveryFilters; bounds: MapBounds; startedAt: number }
+
 type Result = { events: WheretooMapEvent[]; generation: number; pending: boolean; error: Error | null; complete: boolean | null; identity?: string; serverOffset?: number; windowEnd?: number; bounds?: MapBounds }
 const FRESH_MS = 60000
 
@@ -55,10 +59,12 @@ function covers(outer: MapBounds, inner: MapBounds) {
   return outer.west <= inner.west && outer.east >= inner.east && outer.south <= inner.south && outer.north >= inner.north
 }
 
-export function usePublicMapEvents(viewport: MapViewportSnapshot | null, filters: readonly EventCategory[] | null, enabled: boolean, options?: { discovery: DiscoveryFilters; onSettledBounds?(bounds: MapBounds): void }) {
+export function usePublicMapEvents(viewport: MapViewportSnapshot | null, filters: readonly EventCategory[] | null, enabled: boolean, options?: { discovery: DiscoveryFilters; onSettledBounds?(bounds: MapBounds): void; onAuthoritativeRefresh?(refresh: MapAuthoritativeRefresh): void }) {
   const [result, setResult] = useState<Result>({ events: [], generation: 0, pending: false, error: null, complete: null })
   const observer = useRef(options?.onSettledBounds)
   useLayoutEffect(() => { observer.current = options?.onSettledBounds }, [options?.onSettledBounds])
+  const refreshObserver = useRef(options?.onAuthoritativeRefresh)
+  useLayoutEffect(() => { refreshObserver.current = options?.onAuthoritativeRefresh }, [options?.onAuthoritativeRefresh])
   const generation = useRef(0)
   const refresh = useRef<() => void>(() => {})
   const cache = useRef<Coverage[]>([])
@@ -115,6 +121,9 @@ export function usePublicMapEvents(viewport: MapViewportSnapshot | null, filters
           ? [{ bounds: queryBounds, filters: filterKey, expiresAt, events, serverOffset, windowEnd }, ...previousCoverage]
           : []
         setResult(previous => ({ events: sameEvents(previous.events, events) ? previous.events : events, generation: previous.generation + 1, pending: false, error: null, complete: snapshot.complete === true, identity: filterKey, serverOffset, windowEnd, bounds: queryBounds }))
+        // Initial/new-area reads already start the matching list query. Cached
+        // coverage and local expiry must never masquerade as network refreshes.
+        if (!retainPrevious && input.discovery) refreshObserver.current?.({ filters: input.discovery, bounds: discoveryBounds(bounds), startedAt: now })
       } catch {
         if (!disposed && !signal.aborted && request === generation.current) {
           cache.current = []

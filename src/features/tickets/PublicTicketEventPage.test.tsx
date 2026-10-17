@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 vi.mock('../waitlist/waitlist.queries', () => ({ useWaitlistCapability: () => ({isError:false,data:{enabled:false,eligible:false}}) }))
 vi.mock('../event-images/publicEventImages', () => ({ usePublicEventImages: () => ({ data: [{position: 2, url: 'https://example.invalid/secondary.png'}, {position: 1, url: 'https://example.invalid/flyer.png'}], isError: false, isPending: false }) }))
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
@@ -78,7 +79,7 @@ function renderPage(search = '') {
     { path: '/events/:eventId', element: <PublicTicketEventPage /> },
     { path: '/events/:eventId/checkout', element: <p>Checkout destination</p> },
   ], { initialEntries: [`/events/${eventId}${search}`] })
-  return { router, ...render(<RouterProvider router={router} />) }
+  return { router, ...render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><RouterProvider router={router} /></QueryClientProvider>) }
 }
 
 describe('PublicTicketEventPage', () => {
@@ -426,7 +427,7 @@ it('preserves public map/filter context and quantity draft through ticket naviga
     { path: '/events/:eventId', element: <PublicTicketEventPage /> },
     { path: '/events/:eventId/tickets', element: <PublicTicketSelectionPage /> },
   ], { initialEntries: [{ pathname: `/events/${eventId}`, state }] })
-  render(<RouterProvider router={router} />)
+  render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><RouterProvider router={router} /></QueryClientProvider>)
   expect(screen.getByRole('link', { name: 'Return to map' })).toHaveAttribute('href', '/map')
   fireEvent.change(screen.getByLabelText('General admission quantity'), { target: { value: '2' } })
   expect(router.state.location.state.mapReturn).toEqual(state.mapReturn)

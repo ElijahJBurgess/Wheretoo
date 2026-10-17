@@ -1,8 +1,9 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render as rtlRender, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useEffect, type ReactElement } from 'react'
 import { MemoryRouter, createMemoryRouter, RouterProvider } from 'react-router-dom'
-const render = (ui: ReactElement) => rtlRender(ui, { wrapper: MemoryRouter })
+const render = (ui: ReactElement) => rtlRender(ui, { wrapper: ({ children }) => <QueryClientProvider client={new QueryClient()}><MemoryRouter>{children}</MemoryRouter></QueryClientProvider> })
 import { getDevelopmentMapEvents } from './data/developmentMapEvents'
 const { query, mounted } = vi.hoisted(() => ({ query: vi.fn(), mounted: vi.fn() }))
 const { images } = vi.hoisted(() => ({ images: vi.fn() }))
@@ -183,7 +184,7 @@ describe('LivingMapPage', () => {
     const events = [{ ...getDevelopmentMapEvents()[0], id, endsAt: status === 'expired' ? '2020-01-01T00:00:00Z' : '2027-07-01T00:00:00Z' }]
     query.mockReturnValue({ events: status === 'removed' ? [] : events, complete: status === 'offline' ? null : true, generation: 1, pending: false, error: status === 'offline' ? new Error('offline') : null, retry: vi.fn() })
     const router = createMemoryRouter([{ path: '/map', element: <Component /> }], { initialEntries: [{ pathname: '/map', state: { mapReturn: { version: 1, path: '/map', camera: { center: [-122.264, 37.803], zoom: 16.25, pitch: 25, bearing: 0 }, selectedEventId: id, chooser: null } } }] })
-    rtlRender(<RouterProvider router={router} />)
+    rtlRender(<QueryClientProvider client={new QueryClient()}><RouterProvider router={router} /></QueryClientProvider>)
     const map = await screen.findByLabelText('map test double')
     if (status === 'available') expect(map).toHaveAttribute('data-selected-event-id', id)
     else expect(map).toHaveAttribute('data-selected-event-id', '')
@@ -201,7 +202,7 @@ describe('LivingMapPage', () => {
   it('shares standalone URL filters without remounting or scrolling when changed', async () => {
     const scroll = vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
     const router = createMemoryRouter([{ path: '/map', element: <Component /> }], { initialEntries: ['/map?when=weekend&category=music&price=paid'] })
-    rtlRender(<RouterProvider router={router} />)
+    rtlRender(<QueryClientProvider client={new QueryClient()}><RouterProvider router={router} /></QueryClientProvider>)
     fireEvent.change(screen.getByRole('combobox', { name: 'Admission' }), { target: { value: 'free' } })
     expect(router.state.location.search).toBe('?when=weekend&category=music&price=free')
     expect(query).toHaveBeenLastCalledWith(null, null, true, expect.objectContaining({ discovery: { when: 'weekend', category: 'music', price: 'free' } }))
