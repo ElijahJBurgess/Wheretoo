@@ -36,7 +36,22 @@ async function ready(page: Page) {
   await expect(page.locator('.living-map__canvas')).toHaveAttribute('data-wheretoo-event-count', '2')
 }
 async function camera(page: Page) {
-  return page.evaluate(() => { const m = window.__phase4Map; return { center: m.getCenter().toArray(), zoom: m.getZoom(), pitch: m.getPitch(), bearing: m.getBearing() } })
+  return page.evaluate(async () => {
+    await document.fonts.ready
+    const m = window.__phase4Map
+    let previous = '', stableFrames = 0
+    // Preview camera fitting starts on an animation frame. A single isMoving()
+    // read can precede that frame and capture an intermediate return position.
+    for (let frame = 0; frame < 300; frame++) {
+      await new Promise(requestAnimationFrame)
+      const snapshot = { center: m.getCenter().toArray(), zoom: m.getZoom(), pitch: m.getPitch(), bearing: m.getBearing() }
+      const key = JSON.stringify(snapshot)
+      stableFrames = !m.isMoving() && key === previous ? stableFrames + 1 : 0
+      if (stableFrames >= 6) return snapshot
+      previous = key
+    }
+    throw new Error('Camera did not settle')
+  })
 }
 async function select(page: Page) {
   const trigger = page.getByRole('button', { name: 'Choose an event on the map' })
@@ -60,6 +75,7 @@ test('map camera, selection, keyboard focus, browser history and paid ticket lan
   const before = await camera(page)
   expect(await originalCanvas!.evaluate(n => n === document.querySelector('.mapboxgl-canvas'))).toBe(true)
   await page.getByRole('link', { name: 'View event', exact: true }).click()
+  const savedCamera = await page.evaluate(() => window.history.state?.usr?.mapReturn?.camera)
   await expect(page.getByRole('link', { name: 'Return to map', exact: true })).toHaveAttribute('href', '/map')
   const action = page.getByRole('link', { name: 'Get tickets', exact: true })
   await expect(action).toBeInViewport()
@@ -73,6 +89,7 @@ test('map camera, selection, keyboard focus, browser history and paid ticket lan
   await page.goBack(); await ready(page)
   await expect(page.locator('.living-map__canvas')).toHaveAttribute('data-selected-event-id', id)
   const after = await camera(page)
+  expect(savedCamera).toEqual(before)
   expect(after.zoom).toBeCloseTo(before.zoom, 4); expect(after.pitch).toBeCloseTo(before.pitch, 4); expect(after.bearing).toBeCloseTo(before.bearing, 4)
   expect(after.center[0]).toBeCloseTo(before.center[0], 5); expect(after.center[1]).toBeCloseTo(before.center[1], 5)
   await page.getByRole('button', { name: 'Close event preview', exact: true }).click()

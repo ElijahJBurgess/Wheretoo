@@ -66,6 +66,15 @@ test.describe('unified viewport filters', () => {
     expect(await page.evaluate(() => scrollY)).toBe(0)
     const actualIds = await page.evaluate(() => ((window.__phase4Map.getSource('wheretoo-events') as unknown as { serialize(): { data: { features: Array<{ properties: { eventId: string } }> } } }).serialize().data.features.map(f => f.properties.eventId)))
     expect(actualIds.every(id => rows.find(row => row.event_id === id)?.admission_type === 'free')).toBe(true)
+    // Serialized input alone missed the icon-bearing stale-tile defect. Check
+    // visible individuals and cluster sizes after the superseded responses settle.
+    await expect.poll(() => page.evaluate(({ maximum, allowed }) => {
+      const map = window.__phase4Map
+      const layers = map.getStyle().layers?.filter(layer => 'source' in layer && ['wheretoo-events', 'wheretoo-selected-event'].includes(String(layer.source))).map(layer => layer.id) ?? []
+      return map.queryRenderedFeatures({ layers }).every(feature => feature.properties?.point_count
+        ? Number(feature.properties.point_count) <= maximum
+        : allowed.includes(String(feature.properties?.eventId)))
+    }, { maximum: Math.ceil(size / 2), allowed: rows.filter(row => row.admission_type === 'free').map(row => row.event_id) })).toBe(true)
     const after = await page.evaluate(() => ({ center: window.__phase4Map.getCenter().toArray(), zoom: window.__phase4Map.getZoom() }))
     expect(after).toEqual(before)
     await page.getByRole('button', { name: 'Clear filters', exact: true }).click()

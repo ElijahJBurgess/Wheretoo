@@ -1,3 +1,4 @@
+import type { EventSourceWriter } from './eventSourceUpdates'
 import type { FilterSpecification, LayerSpecification } from 'mapbox-gl/esm'
 import { toEventFeatureCollection } from '../data/eventGeoJson'
 import type { WheretooMapEvent } from '../data/wheretooMapEvents'
@@ -14,11 +15,12 @@ type EventLayerRenderer = {
 }
 
 const sourceSnapshots = new WeakMap<GeoJsonDataSource, string>()
-function setSourceData(target: GeoJsonDataSource | undefined, data: ReturnType<typeof toEventFeatureCollection>) {
+function setSourceData(target: GeoJsonDataSource | undefined, data: ReturnType<typeof toEventFeatureCollection>, write?: EventSourceWriter, id?: string) {
   if (!target) return
   const snapshot = JSON.stringify(data)
   if (sourceSnapshots.get(target) === snapshot) return
-  target.setData(data)
+  if (write && id) write(id, data)
+  else target.setData(data)
   sourceSnapshots.set(target, snapshot)
 }
 
@@ -52,12 +54,12 @@ export function hasCompleteEventLayerInstallation(map: EventLayerRenderer) {
 
 function source(map: EventLayerRenderer, id: string) { return map.getSource(id) as GeoJsonDataSource | undefined }
 
-export function updateEventCollection(map: EventLayerRenderer, events: readonly WheretooMapEvent[]) {
-  setSourceData(source(map, EVENT_SOURCE_ID), toEventFeatureCollection(events))
+export function updateEventCollection(map: EventLayerRenderer, events: readonly WheretooMapEvent[], write?: EventSourceWriter) {
+  setSourceData(source(map, EVENT_SOURCE_ID), toEventFeatureCollection(events), write, EVENT_SOURCE_ID)
 }
 
 // The selected source is a bounded 0/1 presentation overlay; inventory remains canonical and clustered.
-export function updateEventSelection(map: EventLayerRenderer, selectedEvent: WheretooMapEvent | null, readyVersions: readonly string[] = []) {
+export function updateEventSelection(map: EventLayerRenderer, selectedEvent: WheretooMapEvent | null, readyVersions: readonly string[] = [], write?: EventSourceWriter) {
   const selectedEventId = selectedEvent?.id ?? null
   map.setFilter(EVENT_LAYER_IDS.hit, createUnselectedFilter(selectedEventId))
   const visibleFilter = createVisibleUnselectedFilter(selectedEventId, readyVersions)
@@ -68,7 +70,7 @@ export function updateEventSelection(map: EventLayerRenderer, selectedEvent: Whe
   for (const layerId of [EVENT_LAYER_IDS.selectedTail, EVENT_LAYER_IDS.selectedCircle, EVENT_LAYER_IDS.selectedGlyph]) {
     map.setFilter(layerId, selectedFilter)
   }
-  setSourceData(source(map, SELECTED_EVENT_SOURCE_ID), selectedEvent ? toEventFeatureCollection([selectedEvent]) : emptyCollection)
+  setSourceData(source(map, SELECTED_EVENT_SOURCE_ID), selectedEvent ? toEventFeatureCollection([selectedEvent]) : emptyCollection, write, SELECTED_EVENT_SOURCE_ID)
 }
 
 export function updateEventMarkerSizing(map: EventLayerRenderer, mobile: boolean, selectedEventId: string | null) {

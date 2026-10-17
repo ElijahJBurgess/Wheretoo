@@ -1,3 +1,4 @@
+import { createEventSourceUpdates } from './eventSourceUpdates'
 import { describeStartupError } from './mapStartupErrors'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -105,6 +106,7 @@ export function WheretooMap({
   const currentEvents = useRef(events)
   const mapRef = useRef<ReturnType<typeof createMapboxMap> | null>(null)
   const layersInstalled = useRef(false)
+  const sourceUpdates = useRef<ReturnType<typeof createEventSourceUpdates> | null>(null)
   const icons = useRef<MapIconController | null>(null)
   const refreshIconViewport = useRef<(() => void) | null>(null)
   const manifest = useRef<{ descriptors: IconDescriptor[]; expiresAt: number }>({ descriptors: [], expiresAt: 0 })
@@ -152,8 +154,8 @@ export function WheretooMap({
     if (mapRef.current && layersInstalled.current) {
       interactionGuard.current.advanceSourceRevision()
       try {
-        updateEventCollection(mapRef.current, events)
-        updateEventSelection(mapRef.current, events.find(({ id }) => id === selection.current) ?? null)
+        updateEventCollection(mapRef.current, events, sourceUpdates.current?.write)
+        updateEventSelection(mapRef.current, events.find(({ id }) => id === selection.current) ?? null, [], sourceUpdates.current?.write)
         icons.current?.setEvents(events)
         refreshIconViewport.current?.()
       } catch { callbacks.current.onRendererError(rendererError('DATA_INVALID')) }
@@ -163,7 +165,7 @@ export function WheretooMap({
   useEffect(() => {
     selection.current = selectedEventId
     if (mapRef.current && layersInstalled.current) updateEventSelection(
-      mapRef.current, currentEvents.current.find(({ id }) => id === selectedEventId) ?? null,
+      mapRef.current, currentEvents.current.find(({ id }) => id === selectedEventId) ?? null, [], sourceUpdates.current?.write,
     )
     icons.current?.setSelection(selectedEventId)
   }, [selectedEventId])
@@ -206,6 +208,8 @@ export function WheretooMap({
       return
     }
     mapRef.current = map
+    const updates = createEventSourceUpdates(map, () => callbacks.current.onRendererError(rendererError('DATA_INVALID')))
+    sourceUpdates.current = updates
     callbacks.current.onBroadenReady?.(() => { map.zoomOut({ duration: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 0 : 300 }) })
     callbacks.current.onSnapshotReady?.(() => readViewport(map))
     callbacks.current.onRestoreReady?.(camera => { map.stop(); map.jumpTo(camera) })
@@ -370,6 +374,8 @@ export function WheretooMap({
 
     return () => {
       disposed = true
+      updates.dispose()
+      sourceUpdates.current = null
       iconController.dispose()
       icons.current = null
       refreshIconViewport.current = null

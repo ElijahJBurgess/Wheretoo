@@ -43,6 +43,7 @@ export function Component({ embedded = false, onAreaChange, onContextReady, onUn
   const origin = (location.pathname === '/discover' ? '/discover' : '/map') + search
   const [initialReturn] = useState(() => { const saved = readMapReturn(location.state); return saved?.path === origin ? saved : null })
   const pendingReturn = useRef(initialReturn)
+  const preserveReturnedCamera = useRef<string | null>(null)
   const root = useRef<HTMLElement | null>(null)
   const chooserTrigger = useRef<HTMLButtonElement | null>(null)
   const returnFocus = useRef<'map' | 'viewport' | null>(null)
@@ -101,9 +102,16 @@ export function Component({ embedded = false, onAreaChange, onContextReady, onUn
       const saved = pendingReturn.current
       pendingReturn.current = null
       const eligible = new Set(live.events.filter(event => Date.parse(event.endsAt) > Date.now() + (live.serverOffset ?? 0)).map(event => event.id))
-      setSelectedEventId(saved.selectedEventId && eligible.has(saved.selectedEventId) ? saved.selectedEventId : null)
+      const selected = saved.selectedEventId && eligible.has(saved.selectedEventId) ? saved.selectedEventId : null
+      setSelectedEventId(selected)
       const ids = saved.chooser?.eventIds.filter(id => eligible.has(id)) ?? []
       setChooser(saved.chooser && ids.length ? { ...saved.chooser, eventIds: ids } : null)
+      // The saved preview already fitted this view. Repeating a pitched panBy
+      // on return can nudge that exact camera again. Keep resize fitting armed.
+      const savedArea = saved.area
+      const currentArea = viewport ? discoveryBounds(viewport.bounds) : null
+      const sameArea = savedArea && currentArea && (Object.keys(savedArea) as (keyof MapBounds)[]).every(key => Math.abs(savedArea[key] - currentArea[key]) < 0.000002)
+      preserveReturnedCamera.current = sameArea ? selected ?? (ids.length ? 'chooser' : null) : null
       returnFocus.current = saved.chooser?.trigger ?? 'map'
       setFocusRequest(value => value + 1)
     }
@@ -129,9 +137,10 @@ export function Component({ embedded = false, onAreaChange, onContextReady, onUn
   const publicArtworkUrl = publicImages.data?.find(image => image.eventId === selectedEventId && image.position === 1)?.url ?? null
   const chooserAnchor = chooser?.anchor ?? null
   useLayoutEffect(() => {
-    if (selectedEvent && preview.current) cameraController.current?.reveal(selectedEvent, preview.current)
-    else if (chooserAnchor && preview.current) cameraController.current?.reveal(chooserAnchor, preview.current)
+    if (selectedEvent && preview.current) cameraController.current?.reveal(selectedEvent, preview.current, { preserveCamera: preserveReturnedCamera.current === selectedEvent.id })
+    else if (chooserAnchor && preview.current) cameraController.current?.reveal(chooserAnchor, preview.current, { preserveCamera: preserveReturnedCamera.current === 'chooser' })
     else cameraController.current?.cancel()
+    preserveReturnedCamera.current = null
   }, [selectedEvent, chooserAnchor])
   const handleReady = useCallback((initialViewport: MapViewportSnapshot) => {
     if (activeAttempt.current !== attempt) return
@@ -288,7 +297,7 @@ export function Component({ embedded = false, onAreaChange, onContextReady, onUn
       /> : null}
       </div>
       <header className="living-map__masthead"><span className="living-map__wordmark">wheretoo</span>{state === 'ready' ? <button ref={chooserTrigger} className="living-map__choose" type="button" aria-label="Choose an event on the map" disabled={!visibleEvents.length} onClick={openViewportChooser}>Events in view</button> : null}</header>
-      {!fixtureMode && (state === 'ready' || live.error) && (eventFeedback || live.complete === null) ? <div className="living-map__event-status" role="status"><span>{eventFeedback ?? 'Loading events…'}</span>{live.complete === true && live.events.length === 0 ? <button type="button" onClick={() => broaden.current?.()} disabled={Boolean(viewport && viewport.zoom <= MAP_MIN_ZOOM)}>Zoom out to search a wider area</button> : null}{!live.pending && (live.error || live.complete === false) ? <button type="button" onClick={live.retry}>Retry events</button> : null}</div> : null}
+      {!fixtureMode && (state === 'ready' || live.error) && (eventFeedback || live.complete === null) ? <div className="living-map__event-status" role="status"><span>{eventFeedback ?? 'Loading events…'}</span>{live.complete === true && live.events.length === 0 ? <button className="living-map__broaden" type="button" onClick={() => broaden.current?.()} disabled={Boolean(viewport && viewport.zoom <= MAP_MIN_ZOOM)}>Zoom out to search a wider area</button> : null}{!live.pending && (live.error || live.complete === false) ? <button type="button" onClick={live.retry}>Retry events</button> : null}</div> : null}
       {selectedEvent ? (
         <div className="living-map__preview-layer">
           <EventPreviewCard

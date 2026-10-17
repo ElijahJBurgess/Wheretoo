@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import { discoveryRows, fulfillMap } from './support/discoveryFixtures'
 import { mapReference } from './support/combinedMapObservations'
 
-test('loading, initial failure, retained refresh, empty and partial results stay interactive', async ({ page }) => {
+test('loading, initial failure, retained refresh, empty and partial results stay interactive', async ({ page }, info) => {
   let mode: 'failure' | 'rows' | 'empty' | 'partial' = 'failure'
   let delay = 0
   let seed: Array<Record<string, unknown>> = []
@@ -24,11 +24,45 @@ test('loading, initial failure, retained refresh, empty and partial results stay
   await expect(page.locator('.living-map__surface')).not.toHaveAttribute('inert')
   await expect(page.locator('.living-map__canvas')).toHaveAttribute('data-wheretoo-event-count', '9')
   await expect(page.getByText('Loading events…')).toHaveCount(0)
+  await page.waitForFunction(() => {
+    const map = window.__phase4Map
+    const layers = map.getStyle().layers?.filter(layer => 'source' in layer && layer.source === 'wheretoo-events' && !layer.id.includes('hit-area')).map(layer => layer.id) ?? []
+    return layers.length > 0 && map.queryRenderedFeatures({ layers }).length > 0
+  })
+  await page.waitForFunction(expected => window.__phase4Map.listImages().filter(id => id.startsWith('wheretoo-icon-')).length === expected, info.project.name === 'mobile' ? 8 : 9)
+  await page.getByRole('button', { name: 'Choose an event on the map', exact: true }).click()
+  await page.getByRole('button', { name: `Open ${seed[0].title} event preview`, exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Close event preview', exact: true })).toBeVisible()
+  await page.waitForFunction(() => {
+    const map = window.__phase4Map
+    const layers = map.getStyle().layers?.filter(layer => 'source' in layer && layer.source === 'wheretoo-selected-event').map(layer => layer.id) ?? []
+    return map.queryRenderedFeatures({ layers }).length > 0
+  })
   mode = 'empty'
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
   await expect(page.getByText('Updating events…')).toBeVisible()
   await expect(page.locator('.living-map__canvas')).toHaveAttribute('data-wheretoo-event-count', '9')
   await expect(page.getByText('No events found in this area.')).toBeVisible()
+  const emptyCopy = await page.locator('.living-map__event-status > span').boundingBox()
+  const broaden = await page.getByRole('button', { name: 'Zoom out to search a wider area', exact: true }).boundingBox()
+  expect(emptyCopy && broaden && emptyCopy.width >= 160 && broaden.y >= emptyCopy.y + emptyCopy.height).toBe(true)
+  // Read actual rendered event layers, rather than the React inventory count.
+  // A cleared source must not leave old event markers visible as matches.
+  await expect.poll(() => page.evaluate(() => {
+    const map = window.__phase4Map
+    const source = map.getSource('wheretoo-events') as unknown as { serialize(): { data: { features: unknown[] } } }
+    const layers = map.getStyle().layers?.filter(layer => 'source' in layer && layer.source === 'wheretoo-events' && !layer.id.includes('hit-area')).map(layer => layer.id) ?? []
+    if (!layers.length) throw new Error('Event rendering layers are unavailable')
+    return { serialized: source.serialize().data.features.length, rendered: map.queryRenderedFeatures({ layers }).length }
+  }), { timeout: 5000 }).toEqual({ serialized: 0, rendered: 0 })
+  await expect(page.getByRole('button', { name: 'Close event preview', exact: true })).toHaveCount(0)
+  await expect(page.locator('.living-map__canvas')).toHaveAttribute('data-selected-event-id', '')
+  await expect.poll(() => page.evaluate(() => {
+    const map = window.__phase4Map
+    const layers = map.getStyle().layers?.filter(layer => 'source' in layer && layer.source === 'wheretoo-selected-event').map(layer => layer.id) ?? []
+    return map.queryRenderedFeatures({ layers }).length
+  })).toBe(0)
+  await page.screenshot({ path: test.info().outputPath('empty-results.png') })
   mode = 'partial'; delay = 100
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
   await expect(page.getByText('Some events may be missing. Zoom in to narrow this area.')).toBeVisible()
@@ -42,6 +76,29 @@ test('loading, initial failure, retained refresh, empty and partial results stay
   await page.getByRole('button', { name: 'Retry events', exact: true }).click()
   await expect(page.locator('.living-map__canvas')).toHaveAttribute('data-wheretoo-event-count', '9')
   await expect(page.getByText('Some events may be missing. Zoom in to narrow this area.')).toHaveCount(0)
+  // Repeat at cluster zoom, then continue rendering to catch late icon/tile callbacks.
+  await page.evaluate(() => { window.__phase4Map.jumpTo({ center: [-122.263, 37.804], zoom: 11.5 }) })
+  await page.waitForFunction(() => window.__phase4Map.queryRenderedFeatures({ layers: ['wheretoo-cluster-circle'] }).length > 0)
+  mode = 'empty'
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(page.getByText('No events found in this area.')).toBeVisible()
+  await expect.poll(() => page.evaluate(() => window.__phase4Map.querySourceFeatures('wheretoo-events').length)).toBe(0)
+  await expect.poll(() => page.evaluate(() => {
+    const map = window.__phase4Map
+    const layers = map.getStyle().layers?.filter(layer => 'source' in layer && ['wheretoo-events', 'wheretoo-selected-event'].includes(String(layer.source))).map(layer => layer.id) ?? []
+    return map.queryRenderedFeatures({ layers }).length
+  }), { timeout: 5000 }).toBe(0)
+  const largestAfterClear = await page.evaluate(async () => {
+    const map = window.__phase4Map
+    let largest = 0
+    for (let i = 0; i < 90; i++) {
+      await new Promise(requestAnimationFrame)
+      const layers = map.getStyle().layers?.filter(layer => 'source' in layer && ['wheretoo-events', 'wheretoo-selected-event'].includes(String(layer.source))).map(layer => layer.id) ?? []
+      largest = Math.max(largest, map.queryRenderedFeatures({ layers }).length)
+    }
+    return largest
+  })
+  expect(largestAfterClear).toBe(0)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   await expect(page.locator('.mapboxgl-canvas')).toHaveCount(1)
 })
