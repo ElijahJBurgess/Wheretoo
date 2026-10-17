@@ -5,25 +5,32 @@ import { useEffect, type ReactElement } from 'react'
 import { MemoryRouter, createMemoryRouter, RouterProvider } from 'react-router-dom'
 const render = (ui: ReactElement) => rtlRender(ui, { wrapper: ({ children }) => <QueryClientProvider client={new QueryClient()}><MemoryRouter>{children}</MemoryRouter></QueryClientProvider> })
 import { getDevelopmentMapEvents } from './data/developmentMapEvents'
-const { query, mounted } = vi.hoisted(() => ({ query: vi.fn(), mounted: vi.fn() }))
+const { query, mounted, broaden } = vi.hoisted(() => ({ query: vi.fn(), mounted: vi.fn(), broaden: vi.fn() }))
 const { images } = vi.hoisted(() => ({ images: vi.fn() }))
 vi.mock('../features/event-images/publicEventImages', () => ({ usePublicEventImages: images }))
 vi.mock('./data/mapEvents.query', () => ({ usePublicMapEvents: query }))
 import { Component } from './LivingMapPage'
+import type { MapViewportSnapshot } from './core/map.types'
 
 vi.mock('./core/WheretooMap', () => ({
-  WheretooMap: ({ selectedEventId, onSelectEvent, onChooseEvents, onReady, onRendererError }: {
+  WheretooMap: ({ selectedEventId, onSelectEvent, onChooseEvents, onReady, onRendererError, onMoveEnd, onBroadenReady }: {
     selectedEventId: string | null
     onSelectEvent(eventId: string | null): void
     onChooseEvents(eventIds: string[], anchor: { longitude: number; latitude: number }): void
-    onReady(): void
+    onReady(viewport: MapViewportSnapshot): void
+    onMoveEnd(viewport: MapViewportSnapshot): void
+    onBroadenReady?(action: (() => void) | null): void
     onRendererError(error: { code: 'STYLE_LOAD_FAILED'; message: string }): void
   }) => {
     useEffect(() => { mounted({ onReady, onRendererError }) }, [onReady, onRendererError])
+    useEffect(() => { onBroadenReady?.(broaden); return () => onBroadenReady?.(null) }, [onBroadenReady])
+    const populated = { bounds: { west: -122.3, east: -122.2, south: 37.7, north: 37.9 }, center: { longitude: -122.26, latitude: 37.8 }, zoom: 14.6 }
     return (
     <div aria-label="map test double" data-selected-event-id={selectedEventId ?? ''}>
       <canvas className="mapboxgl-canvas" aria-label="test map canvas" tabIndex={0} />
-      <button onClick={onReady}>ready</button>
+      <button onClick={() => onReady(populated)}>ready</button>
+      <button onClick={() => onMoveEnd({ ...populated, bounds: { west: -122.295, east: -122.285, south: 37.71, north: 37.72 } })}>pan to empty coverage</button>
+      <button onClick={() => onMoveEnd(populated)}>return to populated coverage</button>
       <button onClick={() => onRendererError({ code: 'STYLE_LOAD_FAILED', message: 'The map style could not load.' })}>fail</button>
       <button onClick={() => onSelectEvent('oakland-day-party')}>select day party</button>
       <button onClick={() => onSelectEvent('oakland-vinyl-night')}>select vinyl night</button>
@@ -256,7 +263,7 @@ describe('event result feedback', () => {
     { complete: true, events: [], pending: false, text: 'No events found in this area.' },
     { complete: false, events: getDevelopmentMapEvents(), pending: false, text: 'Some events may be missing. Zoom in to narrow this area.' },
   ])('shows non-blocking feedback: $text', data => {
-    query.mockReturnValue({ ...data, generation: 1, error: null, retry: vi.fn() })
+    query.mockReturnValue({ ...data, hasFreshViewportCoverage: data.complete === true, generation: 1, error: null, retry: vi.fn() })
     render(<Component />)
     fireEvent.click(screen.getByRole('button', { name: 'ready' }))
     expect(screen.getByText(data.text)).toBeInTheDocument()
@@ -271,5 +278,42 @@ describe('event result feedback', () => {
     view.rerender(<Component />)
     expect(screen.queryByRole('region', { name: 'Day Party' })).not.toBeInTheDocument()
     expect(mounted).toHaveBeenCalledTimes(1)
+  })
+})
+
+
+describe('current viewport empty feedback', () => {
+  beforeEach(() => { images.mockReturnValue({ data: [] }); mounted.mockClear(); broaden.mockClear() })
+  const inventory = getDevelopmentMapEvents()
+  it('shows the existing empty action for covered empty space and clears it on return without remounting', () => {
+    query.mockReturnValue({ events: inventory, generation: 1, pending: false, complete: true, hasFreshViewportCoverage: true, error: null, retry: vi.fn() })
+    render(<Component />)
+    fireEvent.click(screen.getByRole('button', { name: 'ready' }))
+    const canvas = screen.getByLabelText('test map canvas')
+    expect(screen.queryByText('No events found in this area.')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'pan to empty coverage' }))
+    expect(screen.getByText('No events found in this area.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom out to search a wider area' }))
+    expect(broaden).toHaveBeenCalledOnce()
+    expect(screen.getByLabelText('map test double').closest('[inert]')).toBeNull()
+    expect(screen.queryByRole('button', { name: /search this area/i })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'return to populated coverage' }))
+    expect(screen.queryByText('No events found in this area.')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Zoom out to search a wider area' })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('test map canvas')).toBe(canvas)
+    expect(mounted).toHaveBeenCalledOnce()
+  })
+  it.each([
+    { pending: false, complete: true, hasFreshViewportCoverage: false, error: null, text: null },
+    { pending: true, complete: true, hasFreshViewportCoverage: true, error: null, text: 'Updating events…' },
+    { pending: false, complete: false, hasFreshViewportCoverage: false, error: null, text: 'Some events may be missing. Zoom in to narrow this area.' },
+    { pending: false, complete: true, hasFreshViewportCoverage: true, error: new Error('offline'), text: 'offline' },
+  ])('does not claim an empty area without usable complete coverage: $text', state => {
+    query.mockReturnValue({ events: [], generation: 1, ...state, retry: vi.fn() })
+    render(<Component />)
+    fireEvent.click(screen.getByRole('button', { name: 'ready' }))
+    expect(screen.queryByText('No events found in this area.')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Zoom out to search a wider area' })).not.toBeInTheDocument()
+    if (state.text) expect(screen.getByText(state.text)).toBeInTheDocument()
   })
 })

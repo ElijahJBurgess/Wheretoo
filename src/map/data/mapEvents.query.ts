@@ -26,7 +26,7 @@ export function publicMapBounds(bounds: MapBounds): MapBounds {
 // completeness. Consumers must read their own authoritative list endpoint.
 export type MapAuthoritativeRefresh = { filters: DiscoveryFilters; bounds: MapBounds; startedAt: number }
 
-type Result = { events: WheretooMapEvent[]; generation: number; pending: boolean; error: Error | null; complete: boolean | null; identity?: string; serverOffset?: number; windowEnd?: number; bounds?: MapBounds }
+type Result = { events: WheretooMapEvent[]; generation: number; pending: boolean; error: Error | null; complete: boolean | null; identity?: string; serverOffset?: number; windowEnd?: number; bounds?: MapBounds; coverageFresh?: boolean }
 const FRESH_MS = 60000
 
 function sameEvents(previous: readonly WheretooMapEvent[], next: readonly WheretooMapEvent[]) {
@@ -97,13 +97,16 @@ export function usePublicMapEvents(viewport: MapViewportSnapshot | null, filters
     const schedule = (delay: number, retainPrevious = false) => { clearTimeout(timer); timer = setTimeout(() => { void run(retainPrevious) }, delay) }
     const run = async (retainPrevious = false) => {
       if (disposed || inFlight) return
-      if (document.visibilityState === 'hidden') { schedule(FRESH_MS); return }
+      if (document.visibilityState === 'hidden') {
+        setResult(previous => previous.coverageFresh ? { ...previous, coverageFresh: false } : previous)
+        schedule(FRESH_MS); return
+      }
       inFlight = true
       if (!retainPrevious) cache.current = []
       controller = new AbortController()
       const request = ++generation.current, signal = controller.signal, now = Date.now()
       let nextRefreshAt = now + FRESH_MS
-      setResult(previous => ({ ...previous, pending: true, error: null }))
+      setResult(previous => ({ ...previous, pending: true, error: null, coverageFresh: false }))
       try {
         const queryBounds = input.discovery ? discoveryBounds(publicMapBounds(bounds)) : publicMapBounds(bounds)
         const snapshot = input.discovery
@@ -120,7 +123,7 @@ export function usePublicMapEvents(viewport: MapViewportSnapshot | null, filters
         cache.current = snapshot.complete === true
           ? [{ bounds: queryBounds, filters: filterKey, expiresAt, events, serverOffset, windowEnd }, ...previousCoverage]
           : []
-        setResult(previous => ({ events: sameEvents(previous.events, events) ? previous.events : events, generation: previous.generation + 1, pending: false, error: null, complete: snapshot.complete === true, identity: filterKey, serverOffset, windowEnd, bounds: queryBounds }))
+        setResult(previous => ({ events: sameEvents(previous.events, events) ? previous.events : events, generation: previous.generation + 1, pending: false, error: null, complete: snapshot.complete === true, identity: filterKey, serverOffset, windowEnd, bounds: queryBounds, coverageFresh: snapshot.complete === true }))
         // Initial/new-area reads already start the matching list query. Cached
         // coverage and local expiry must never masquerade as network refreshes.
         if (!retainPrevious && input.discovery) refreshObserver.current?.({ filters: input.discovery, bounds: discoveryBounds(bounds), startedAt: now })
@@ -147,11 +150,14 @@ export function usePublicMapEvents(viewport: MapViewportSnapshot | null, filters
       const events = unexpired(cached.events, Date.now() + (cached.serverOffset ?? 0))
       setResult(previous => {
         const unchanged = sameEvents(previous.events, events)
-        if (unchanged && !previous.pending && !previous.error && previous.complete === true) return previous
-        return { ...previous, events: unchanged ? previous.events : events, generation: previous.generation + (unchanged ? 0 : 1), pending: false, error: null, complete: true, identity: filterKey, serverOffset: cached.serverOffset, windowEnd: cached.windowEnd, bounds: cached.bounds }
+        if (unchanged && !previous.pending && !previous.error && previous.complete === true && previous.coverageFresh && previous.bounds === cached.bounds) return previous
+        return { ...previous, events: unchanged ? previous.events : events, generation: previous.generation + (unchanged ? 0 : 1), pending: false, error: null, complete: true, identity: filterKey, serverOffset: cached.serverOffset, windowEnd: cached.windowEnd, bounds: cached.bounds, coverageFresh: true }
       })
       schedule(cached.expiresAt - Date.now())
-    } else schedule(300, true)
+    } else {
+      setResult(previous => previous.coverageFresh ? { ...previous, coverageFresh: false } : previous)
+      schedule(300, true)
+    }
     refresh.current = () => { void run() }
     window.addEventListener('focus', foreground)
     document.addEventListener('visibilitychange', foreground)
@@ -164,5 +170,11 @@ export function usePublicMapEvents(viewport: MapViewportSnapshot | null, filters
   }, [key, enabled])
   const retry = useCallback(() => refresh.current(), [])
   const matchesFilters = !options?.discovery || result.identity === identity
-  return { ...result, ...(matchesFilters ? {} : { events: [], complete: null, error: null, pending: Boolean(viewport) }), matchesFilters, retry }
+  // Padded inventory can be nonempty while this viewport is empty. Only an
+  // unexpired, complete snapshot can establish that absence; timers/revalidation
+  // withdraw the proof without revising marker data or changing request timing.
+  const hasFreshViewportCoverage = Boolean(enabled && matchesFilters && result.coverageFresh
+    && result.complete === true && !result.pending && !result.error && viewport && result.bounds
+    && covers(result.bounds, options?.discovery ? discoveryBounds(viewport.bounds) : viewport.bounds))
+  return { ...result, hasFreshViewportCoverage, ...(matchesFilters ? {} : { events: [], complete: null, error: null, pending: Boolean(viewport) }), matchesFilters, retry }
 }

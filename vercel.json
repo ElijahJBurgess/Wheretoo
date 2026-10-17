@@ -34,7 +34,8 @@
       "codex/unified-filters-verification-fix": false,
       "codex/mobile-discovery-ux": false,
       "codex/event-accuracy-availability": false,
-      "codex/event-preview-polish": false
+      "codex/event-preview-polish": false,
+      "codex/automatic-area-feedback": false
     }
   }
 }

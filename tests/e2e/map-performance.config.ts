@@ -8,5 +8,6 @@ export default defineConfig({
   projects: [
     { name: 'desktop', use: { viewport: { width: 1280, height: 720 } } },
     { name: 'mobile', use: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } },
+    ...[416, 430].map(width => ({ name: `compact-${width}`, testMatch: 'smart-event-loading.spec.ts', grep: /9 events: cached empty/, metadata: { longPreview: true }, use: { viewport: { width, height: 520 }, isMobile: true, hasTouch: true } })),
   ],
 })
