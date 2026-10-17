@@ -12,10 +12,14 @@ export class DiscoveryReadError extends Error {
 }
 
 export async function getDiscoveryPage(filters: DiscoveryFilters, options: { cursor?: string; signal?: AbortSignal; bounds?: MapBounds } = {}): Promise<DiscoveryPageData> {
+  // Match the map read deadline, including a stalled response body. A timeout
+  // is a recoverable transport failure; caller cancellation stays silent.
+  const deadline = AbortSignal.timeout(10000)
+  const signal = options.signal ? AbortSignal.any([options.signal, deadline]) : deadline
   let response: Response
   try {
     response = await fetch(`${publicEnv.supabaseUrl}/functions/v1/public-discovery`, {
-      method: 'POST', credentials: 'omit', signal: options.signal,
+      method: 'POST', credentials: 'omit', signal,
       headers: { 'content-type': 'application/json', apikey: publicEnv.supabasePublishableKey },
       body: JSON.stringify(discoveryRequest(filters, options.cursor, options.bounds)),
     })
@@ -30,7 +34,7 @@ export async function getDiscoveryPage(filters: DiscoveryFilters, options: { cur
   let payload: unknown
   try { payload = await response.json() } catch (error) {
     if (options.signal?.aborted) throw error
-    throw new DiscoveryReadError(response.ok ? 'invalid_response' : 'unavailable')
+    throw new DiscoveryReadError(deadline.aborted || !response.ok ? 'unavailable' : 'invalid_response')
   }
   if (!response.ok) {
     if (response.status === 400 && typeof payload === 'object' && payload !== null && 'error' in payload) {

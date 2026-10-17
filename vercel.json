@@ -36,7 +36,8 @@
       "codex/event-accuracy-availability": false,
       "codex/event-preview-polish": false,
       "codex/automatic-area-feedback": false,
-      "codex/discovery-map-list": false
+      "codex/discovery-map-list": false,
+      "codex/discovery-empty-states": false
     }
   }
 }

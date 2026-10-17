@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
@@ -38,6 +38,64 @@ function renderView(input: DiscoveryViewProps) {
 }
 
 describe('DiscoveryView', () => {
+  it('offers more results instead of claiming an empty area when a cursor remains', async () => {
+    const onLoadMore = vi.fn()
+    renderView(props({ items: [], hasMore: true, onLoadMore }))
+    expect(screen.queryByText(/No events/)).toBeNull()
+    expect(screen.getByText('More events may be available.')).toBeVisible()
+    await userEvent.click(screen.getByRole('button', { name: 'Load more' }))
+    expect(onLoadMore).toHaveBeenCalledOnce()
+  })
+
+  it('checks cached empty results without announcing a confirmed absence', () => {
+    renderView(props({ items: [], isRefreshing: true, notice: 'Refreshing events…' }))
+    expect(screen.queryByText(/No events/)).toBeNull()
+    expect(screen.getByText('Checking for events…')).toBeVisible()
+    expect(screen.queryByText('Refreshing events…')).toBeNull()
+    expect(screen.queryByRole('status', { name: 'Discovery results' })).toBeNull()
+  })
+
+  it('offers retry instead of an empty banner after an empty refresh fails', async () => {
+    const onRetry = vi.fn()
+    renderView(props({ items: [], isRefreshError: true, notice: 'Couldn’t refresh events. Showing the last results we received.', onRetry }))
+    expect(screen.queryByText(/No events/)).toBeNull()
+    expect(screen.getByRole('alert')).toHaveTextContent('We couldn’t load events.')
+    expect(screen.queryByText('Couldn’t refresh events. Showing the last results we received.')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(onRetry).toHaveBeenCalledOnce()
+  })
+
+  it('retains usable rows on refresh failure without claiming current completeness', () => {
+    renderView(props({ isRefreshError: true, notice: 'Couldn’t refresh events. Showing the last results we received.' }))
+    expect(screen.getByText('Sunset Rooftop Sessions')).toBeVisible()
+    expect(screen.getByText('Couldn’t refresh events. Showing the last results we received.')).toBeVisible()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByText('That’s everything coming up.')).toBeNull()
+  })
+
+  it.each([true, false])('never claims completeness after excluding malformed results; usable rows=%s', usable => {
+    renderView(props({ items: usable ? [item()] : [], invalidItemCount: 1 }))
+    expect(screen.getByText(/1 event could not be shown/)).toHaveTextContent('More events may be available.')
+    expect(screen.queryByText('That’s everything coming up.')).toBeNull()
+    expect(screen.queryByText(/No events/)).toBeNull()
+  })
+
+  it('offers inline reset with the established defaults for filtered empty results', async () => {
+    const onFiltersChange = vi.fn()
+    renderView(props({ items: [], filters: { when: 'weekend', category: 'music', price: 'free' }, onFiltersChange }))
+    const feedback = screen.getByText('No events match these filters in this area.').closest('section')!
+    await userEvent.click(within(feedback).getByRole('button', { name: 'Clear filters' }))
+    expect(onFiltersChange).toHaveBeenCalledWith({ when: 'next7', category: null, price: null })
+    expect(screen.getByRole('heading', { name: 'Events in this area' })).toHaveFocus()
+  })
+
+  it('does not describe a legacy thirty-day search as a restrictive date filter', () => {
+    renderView(props({ items: [], filters: { when: 'upcoming', category: null, price: null } }))
+    expect(screen.getByText('No events in this map area yet.')).toBeVisible()
+    expect(screen.queryByText(/Clear the filters to see everything/)).toBeNull()
+    expect(document.querySelector('.discovery-results__heading')).toHaveTextContent('Next 30 Days')
+  })
+
   it('keeps discovery and organizer navigation usable when the map fails', async () => {
     const logging = vi.spyOn(console, 'error').mockImplementation(() => {})
     preview.fail = true
@@ -119,8 +177,8 @@ describe('DiscoveryView', () => {
     loading.unmount()
 
     const empty = renderView(props({ filters: { when: 'today', category: 'music', price: 'free' }, items: [], onFiltersChange }))
-    expect(screen.getByText('No events match these filters.')).toBeVisible()
-    await userEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
+    expect(screen.getByText('No events match these filters in this area.')).toBeVisible()
+    await userEvent.click(within(screen.getByText('No events match these filters in this area.').closest('section')!).getByRole('button', { name: 'Clear filters' }))
     expect(onFiltersChange).toHaveBeenCalledWith(filters)
     empty.unmount()
 

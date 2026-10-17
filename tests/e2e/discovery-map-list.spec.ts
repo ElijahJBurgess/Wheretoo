@@ -181,14 +181,16 @@ test('active List refresh invalidates map coverage; empty/error/retry and rapid 
   await page.getByRole('button', { name: 'List', exact: true }).click()
   f.state.failList = true
   await page.getByRole('button', { name: 'Refresh', exact: true }).click()
-  await expect(page.getByText('Couldn’t refresh events. Showing the last results we received.', { exact: true })).toBeVisible()
+  await expect(page.getByRole('alert')).toContainText('We couldn’t load events.')
+  await expect(page.getByText('No events in this map area yet.', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('Couldn’t refresh events. Showing the last results we received.', { exact: true })).toHaveCount(0)
   f.state.failList = false; f.state.empty = false
-  await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+  await page.getByRole('button', { name: 'Try again', exact: true }).click()
   await expect(page.getByRole('status', { name: 'Discovery results', exact: true })).toHaveText('9 events')
   f.state.slowMusic = true
   await page.getByRole('combobox', { name: 'Category', exact: true }).selectOption('music')
   await page.getByRole('combobox', { name: 'Category', exact: true }).selectOption('fitness')
-  await expect(page.getByText('No events match these filters.', { exact: true })).toBeVisible()
+  await expect(page.getByText('No events match these filters in this area.', { exact: true })).toBeVisible()
   await page.waitForTimeout(900)
   await expect(page.getByRole('status', { name: 'Discovery results', exact: true })).toHaveText('0 events')
   await page.getByRole('button', { name: 'Map', exact: true }).click()
