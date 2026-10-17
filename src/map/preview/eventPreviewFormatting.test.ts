@@ -24,7 +24,7 @@ const baseEvent: WheretooMapEvent = {
 describe('event preview formatting', () => {
   it('formats fixed timestamps in the event timezone instead of the browser timezone', () => {
     expect(formatEventDateTime(baseEvent)).toEqual({
-      date: 'Saturday, June 12, 2027',
+      date: 'Sat, Jun 12',
       time: '2:00 PM – 7:00 PM PDT',
     })
   })
@@ -35,9 +35,17 @@ describe('event preview formatting', () => {
       startsAt: '2027-06-13T06:00:00.000Z',
       endsAt: '2027-06-13T08:00:00.000Z',
     })).toEqual({
-      date: 'Saturday, June 12, 2027 – Sunday, June 13, 2027',
+      date: 'Jun 12 – 13',
       time: '11:00 PM – 1:00 AM PDT',
     })
+  })
+
+  it('keeps both months in a compact overnight range', () => {
+    expect(formatEventDateTime({ ...baseEvent, startsAt: '2027-07-01T06:00:00Z', endsAt: '2027-07-01T08:00:00Z' }).date).toBe('Jun 30 – Jul 1')
+  })
+
+  it('keeps years when the event crosses a year boundary', () => {
+    expect(formatEventDateTime({ ...baseEvent, startsAt: '2026-12-31T23:00:00-08:00', endsAt: '2027-01-01T01:00:00-08:00' })).toEqual({ date: 'Dec 31, 2026 – Jan 1, 2027', time: '11:00 PM – 1:00 AM PST' })
   })
 
   it('distinguishes free, known paid, and unavailable paid prices', () => {

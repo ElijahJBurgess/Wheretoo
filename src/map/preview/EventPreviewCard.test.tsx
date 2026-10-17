@@ -24,7 +24,7 @@ describe('EventPreviewCard', () => {
     expect(screen.getByRole('heading', { name: event.title })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Close event preview' })).toBeInTheDocument()
     expect(screen.getByLabelText('Event artwork unavailable')).toBeInTheDocument()
-    expect(screen.getByText('Availability unknown')).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'Admission' })).toHaveTextContent('Availability unknown')
   })
 
   it('falls back without leaving a broken image after artwork fails', () => {

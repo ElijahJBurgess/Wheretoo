@@ -30,7 +30,8 @@ function ArtworkFallback() {
 // query cache; bulk map queries never perform per-marker inventory reads.
 function LivePaidAdmission({ event }: { event: WheretooMapEvent }) {
   const query = usePublicTicketingEvent(event.id)
-  if (query.isError || query.isPending || query.isFetching) return <>{formatEventPrice(event)}</>
+  if (query.isFetching || query.isPending) return <>Checking availability…</>
+  if (query.isError) return <>{formatEventPrice(event)}</>
   const current = query.data
   if (!current || current.event.admission_type !== 'paid') {
     return <>{formatEventPrice(event, null)}</>
@@ -53,26 +54,23 @@ export const EventPreviewCard = forwardRef<HTMLElement, EventPreviewCardProps>(f
 
   return (
     <article ref={ref} className="event-preview" tabIndex={-1} role="region" aria-labelledby={titleId} aria-live="polite">
+      <button className="event-preview__close" type="button" aria-label="Close event preview" onClick={onClose}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" /></svg>
+      </button>
       <div className="event-preview__scroll">
-        <div className="event-preview__topline">
-          <p className="event-preview__eyebrow">wheretoo event</p>
-          <button className="event-preview__close" type="button" aria-label="Close event preview" onClick={onClose}>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" /></svg>
-          </button>
-        </div>
         <div className="event-preview__identity">
           {artworkUrl && failedArtworkUrl !== artworkUrl ? (
             <img key={artworkUrl} className="event-preview__artwork" src={artworkUrl} alt={`${event.title} artwork`} onError={() => setFailedArtworkUrl(artworkUrl)} />
           ) : <ArtworkFallback />}
           <div className="event-preview__copy">
             <h2 id={titleId}>{event.title}</h2>
+            <div className="event-preview__admission" role="group" aria-label="Admission">{event.admissionType === 'paid' && navigation.kind === 'enabled' ? <LivePaidAdmission event={event} /> : formatEventPrice(event)}</div>
             {navigation.kind === 'disabled' ? <p className="event-preview__indication">{navigation.indication}</p> : null}
           </div>
         </div>
         <dl className="event-preview__details">
-          <div className="event-preview__when"><dt>When</dt><dd><span>{schedule.date}</span><span>{schedule.time}</span></dd></div>
-          <div><dt>Venue</dt><dd>{event.venueLabel}</dd></div>
-          <div><dt>Admission</dt><dd>{event.admissionType === 'paid' && navigation.kind === 'enabled' ? <LivePaidAdmission event={event} /> : formatEventPrice(event)}</dd></div>
+          <div className="event-preview__when"><dt>When</dt><dd><time dateTime={event.startsAt}>{schedule.date}</time><span>{schedule.time}</span></dd></div>
+          <div><dt>Venue</dt><dd>{event.venueLabel || 'Venue details on event page'}</dd></div>
         </dl>
       </div>
       <div className="event-preview__footer">
