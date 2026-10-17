@@ -42,8 +42,8 @@ describe('event preview formatting', () => {
 
   it('distinguishes free, known paid, and unavailable paid prices', () => {
     expect(formatEventPrice({ ...baseEvent, admissionType: 'free', minimumPriceMinor: null })).toBe('Free')
-    expect(formatEventPrice(baseEvent)).toBe('From $20')
-    expect(formatEventPrice({ ...baseEvent, minimumPriceMinor: null })).toBe('Price unavailable')
+    expect(formatEventPrice(baseEvent, { status: 'available', minimumPriceMinor: 2000 })).toBe('From $20')
+    expect(formatEventPrice({ ...baseEvent, minimumPriceMinor: null })).toBe('Availability unknown')
   })
 
   it('accepts public HTTPS artwork but rejects executable or local protocols', () => {

@@ -253,3 +253,29 @@ it('refreshes at weekend rollover and cannot retain the prior weekend on failure
   expect(filteredEvents).toHaveBeenCalledTimes(2)
   expect(result.current.events).toEqual([])
 })
+
+it('signals accepted refreshes independently of marker changes, never initial/cache/failed/stale reads', async () => {
+  const accepted = vi.fn()
+  const discovery = { when: 'upcoming', category: null, price: null } as const
+  filteredEvents.mockResolvedValue({ events, complete: true })
+  const options = { discovery, onAuthoritativeRefresh: accepted }
+  const { result, rerender } = renderHook(({ v }) => usePublicMapEvents(v, null, true, options), { initialProps: { v: viewport } })
+  await settle(); expect(accepted).not.toHaveBeenCalled()
+  const smaller = { ...viewport, bounds: { west: -122.29, east: -122.21, south: 37.72, north: 37.88 } }
+  rerender({ v: smaller }); await settle()
+  expect(filteredEvents).toHaveBeenCalledTimes(1); expect(accepted).not.toHaveBeenCalled()
+  await settle(60000)
+  expect(accepted).toHaveBeenCalledOnce()
+  expect(accepted.mock.calls[0][0]).toMatchObject({ filters: discovery, bounds: smaller.bounds, startedAt: expect.any(Number) })
+  filteredEvents.mockRejectedValueOnce(new Error('offline'))
+  act(() => result.current.retry()); await settle(0)
+  expect(accepted).toHaveBeenCalledOnce()
+  filteredEvents.mockResolvedValueOnce({ events: [], complete: false })
+  act(() => result.current.retry()); await settle(0)
+  expect(accepted).toHaveBeenCalledTimes(2)
+  let finish!: () => void
+  filteredEvents.mockReturnValueOnce(new Promise(resolve => { finish = () => resolve({ events: [], complete: true }) }))
+  act(() => result.current.retry()); await settle(0)
+  rerender({ v: shifted }); await act(async () => finish())
+  expect(accepted).toHaveBeenCalledTimes(2)
+})

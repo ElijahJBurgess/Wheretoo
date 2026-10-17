@@ -1,4 +1,5 @@
 import { forwardRef, useId, useState } from 'react'
+import { usePublicTicketingEvent } from '../../features/tickets/publicTicketing.queries'
 import { Link } from 'react-router-dom'
 import type { WheretooMapEvent } from '../data/wheretooMapEvents'
 import { formatEventDateTime, formatEventPrice, resolvePublicArtworkUrl } from './eventPreviewFormatting'
@@ -23,6 +24,22 @@ function ArtworkFallback() {
       </svg>
     </span>
   )
+}
+
+// One selected event uses the existing bounded, authoritative public read and
+// query cache; bulk map queries never perform per-marker inventory reads.
+function LivePaidAdmission({ event }: { event: WheretooMapEvent }) {
+  const query = usePublicTicketingEvent(event.id)
+  if (query.isError || query.isPending || query.isFetching) return <>{formatEventPrice(event)}</>
+  const current = query.data
+  if (!current || current.event.admission_type !== 'paid') {
+    return <>{formatEventPrice(event, null)}</>
+  }
+  const available = current.tiers.filter(tier => tier.availability_status === 'available')
+  return <>{formatEventPrice(event, {
+    status: available.length ? 'available' : 'sold_out',
+    minimumPriceMinor: available.length ? Math.min(...available.map(tier => tier.unit_amount_minor)) : null,
+  })}</>
 }
 
 export const EventPreviewCard = forwardRef<HTMLElement, EventPreviewCardProps>(function EventPreviewCard(
@@ -55,7 +72,7 @@ export const EventPreviewCard = forwardRef<HTMLElement, EventPreviewCardProps>(f
         <dl className="event-preview__details">
           <div className="event-preview__when"><dt>When</dt><dd><span>{schedule.date}</span><span>{schedule.time}</span></dd></div>
           <div><dt>Venue</dt><dd>{event.venueLabel}</dd></div>
-          <div><dt>Admission</dt><dd>{formatEventPrice(event)}</dd></div>
+          <div><dt>Admission</dt><dd>{event.admissionType === 'paid' && navigation.kind === 'enabled' ? <LivePaidAdmission event={event} /> : formatEventPrice(event)}</dd></div>
         </dl>
       </div>
       <div className="event-preview__footer">

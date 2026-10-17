@@ -1,10 +1,11 @@
 vi.mock('../event-images/publicEventImages', () => ({ usePublicEventImages: () => ({ data: [{eventId: 'first', position: 2, url: 'https://example.invalid/secondary.png'}, {eventId: 'first', position: 1, url: 'https://example.invalid/flyer.png'}], isError: false, isPending: false }) }))
 import { useEffect } from 'react'
 import type { DiscoveryMapProps } from '../../map/LivingMapPage'
-const mockContext = vi.hoisted(() => ({ value: null as unknown }))
-vi.mock('./DiscoveryMapPreview', () => ({ DiscoveryMapPreview: ({ onAreaChange, onContextReady }: DiscoveryMapProps) => {
+const mockContext = vi.hoisted(() => ({ value: null as unknown, refreshed: undefined as DiscoveryMapProps['onAuthoritativeRefresh'] }))
+vi.mock('./DiscoveryMapPreview', () => ({ DiscoveryMapPreview: ({ onAreaChange, onContextReady, onAuthoritativeRefresh }: DiscoveryMapProps) => {
   useEffect(() => { onAreaChange?.({ west: -122.5, south: 37.7, east: -122.1, north: 37.9 }) }, [onAreaChange])
   useEffect(() => { if (mockContext.value) onContextReady?.({ state: () => mockContext.value as ReturnType<import('../../map/LivingMapPage').DiscoveryMapHandle['state']>, broaden: () => {} }) }, [onContextReady])
+  mockContext.refreshed = onAuthoritativeRefresh
   return <section aria-label="Test map" />
 } }))
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
@@ -73,4 +74,21 @@ it('does not pull the buyer back to saved scroll after interaction during a pend
   await act(async () => finish(page('returned')))
   await screen.findByText('Event returned')
   expect(scroll).not.toHaveBeenCalled()
+})
+
+it('replaces a stale paginated list after an accepted map refresh without an extra initial read', async () => {
+  vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
+  read.mockResolvedValueOnce(page('first', 'cursor')).mockResolvedValueOnce(page('second')).mockResolvedValueOnce(page('changed'))
+  const router = createMemoryRouter([{ path: '/discover', element: <DiscoveryPage /> }], { initialEntries: ['/discover'] })
+  render(<QueryClientProvider client={new QueryClient()}><RouterProvider router={router} /></QueryClientProvider>)
+  await screen.findByText('Event first')
+  expect(read).toHaveBeenCalledTimes(1)
+  await userEvent.click(screen.getByRole('button', { name: 'Load more' }))
+  await screen.findByText('Event second')
+  await act(async () => mockContext.refreshed?.({ filters: { when: 'next7', category: null, price: null }, bounds: { west: -122.5, south: 37.7, east: -122.1, north: 37.9 }, startedAt: Date.now() + 1 }))
+  await screen.findByText('Event changed')
+  expect(screen.queryByText('Event first')).not.toBeInTheDocument()
+  expect(screen.queryByText('Event second')).not.toBeInTheDocument()
+  expect(read).toHaveBeenCalledTimes(3)
+  expect(read.mock.calls[2][1].cursor).toBeUndefined()
 })

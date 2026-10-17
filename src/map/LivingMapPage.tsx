@@ -1,3 +1,4 @@
+import type { MapAuthoritativeRefresh } from './data/mapEvents.query'
 import { useLocation, useNavigate, useNavigationType } from 'react-router-dom'
 import { DiscoveryFilters as FilterControls } from '../features/discovery/DiscoveryFilters'
 import type { DiscoveryFilters } from '../features/discovery/discovery.types'
@@ -26,8 +27,8 @@ import './living-map.css'
 type ChooserContext = MapChooserContext
 
 export type DiscoveryMapHandle = { state(): ReturnType<typeof publicReturnState>; broaden(): void }
-export type DiscoveryMapProps = { embedded?: boolean; onAreaChange?(bounds: MapBounds): void; onContextReady?(handle: DiscoveryMapHandle | null): void; onUnavailable?(): void }
-export function Component({ embedded = false, onAreaChange, onContextReady, onUnavailable }: DiscoveryMapProps = {}) {
+export type DiscoveryMapProps = { embedded?: boolean; onAreaChange?(bounds: MapBounds): void; onAuthoritativeRefresh?(refresh: MapAuthoritativeRefresh): void; onContextReady?(handle: DiscoveryMapHandle | null): void; onUnavailable?(): void }
+export function Component({ embedded = false, onAreaChange, onAuthoritativeRefresh, onContextReady, onUnavailable }: DiscoveryMapProps = {}) {
   const Container = embedded ? 'section' : 'main'
   const location = useLocation()
   const navigate = useNavigate()
@@ -59,7 +60,7 @@ export function Component({ embedded = false, onAreaChange, onContextReady, onUn
   const [inventory, setEvents] = useState<WheretooMapEvent[]>([])
   const [viewport, setViewport] = useState<MapViewportSnapshot | null>(null)
   const fixtureMode = useMemo(() => import.meta.env.DEV && ['standard', 'dense', 'colocated'].includes(new URLSearchParams(window.location.search).get('mapFixture') ?? ''), [])
-  const live = usePublicMapEvents(viewport, null, !fixtureMode, { discovery: filters, onSettledBounds: onAreaChange })
+  const live = usePublicMapEvents(viewport, null, !fixtureMode, { discovery: filters, onSettledBounds: onAreaChange, onAuthoritativeRefresh })
   const events = useMemo(() => live.matchesFilters === false ? [] : inventory, [live.matchesFilters, inventory])
   const broaden = useRef<(() => void) | null>(null)
   const handleBroadenReady = useCallback((next: (() => void) | null) => { broaden.current = next }, [])
