@@ -59,7 +59,7 @@ function covers(outer: MapBounds, inner: MapBounds) {
   return outer.west <= inner.west && outer.east >= inner.east && outer.south <= inner.south && outer.north >= inner.north
 }
 
-export function usePublicMapEvents(viewport: MapViewportSnapshot | null, filters: readonly EventCategory[] | null, enabled: boolean, options?: { discovery: DiscoveryFilters; onSettledBounds?(bounds: MapBounds): void; onAuthoritativeRefresh?(refresh: MapAuthoritativeRefresh): void }) {
+export function usePublicMapEvents(viewport: MapViewportSnapshot | null, filters: readonly EventCategory[] | null, enabled: boolean, options?: { discovery: DiscoveryFilters; active?: boolean; onSettledBounds?(bounds: MapBounds): void; onAuthoritativeRefresh?(refresh: MapAuthoritativeRefresh): void }) {
   const [result, setResult] = useState<Result>({ events: [], generation: 0, pending: false, error: null, complete: null })
   const observer = useRef(options?.onSettledBounds)
   useLayoutEffect(() => { observer.current = options?.onSettledBounds }, [options?.onSettledBounds])
@@ -83,13 +83,20 @@ export function usePublicMapEvents(viewport: MapViewportSnapshot | null, filters
   const key = JSON.stringify({ bounds: viewport?.bounds ?? null, filters: normalizedFilters, discovery: options?.discovery ?? null })
   const identity = JSON.stringify({ categories: normalizedFilters, discovery: options?.discovery ?? null })
   if (options?.discovery && result.identity !== identity) setResult({ events: [], generation: result.generation + 1, pending: Boolean(viewport), complete: null, error: null, identity, serverOffset: result.serverOffset })
+  // Area publication is needed by List/direct links even while map reads pause.
+  useLayoutEffect(() => {
+    const bounds = (JSON.parse(key) as { bounds: MapBounds | null }).bounds
+    if (!enabled || !bounds) return
+    const timer = setTimeout(() => observer.current?.(discoveryBounds(bounds)), 300)
+    return () => clearTimeout(timer)
+  }, [enabled, key])
+  const active = options?.active !== false
   useLayoutEffect(() => {
     ++generation.current
-    if (!enabled) return
+    if (!enabled || !active) return
     const input = JSON.parse(key) as { bounds: MapBounds | null; filters: EventCategory[] | null; discovery: DiscoveryFilters | null }
     if (!input.bounds) return
     const bounds = input.bounds, filterKey = JSON.stringify({ categories: input.filters, discovery: input.discovery })
-    const areaTimer = setTimeout(() => { observer.current?.(discoveryBounds(bounds)) }, 300)
     if (cache.current.some(snapshot => snapshot.filters !== filterKey)) cache.current = []
     let disposed = false, inFlight = false, lastForeground = -Infinity
     let controller: AbortController | null = null
@@ -162,12 +169,16 @@ export function usePublicMapEvents(viewport: MapViewportSnapshot | null, filters
     window.addEventListener('focus', foreground)
     document.addEventListener('visibilitychange', foreground)
     return () => {
-      disposed = true; controller?.abort(); clearTimeout(timer); clearTimeout(areaTimer)
+      disposed = true; controller?.abort(); clearTimeout(timer)
       window.removeEventListener('focus', foreground)
       document.removeEventListener('visibilitychange', foreground)
       refresh.current = () => {}
     }
-  }, [key, enabled])
+  }, [key, enabled, active])
+  const invalidate = useCallback(() => {
+    cache.current = []
+    setResult(previous => previous.coverageFresh ? { ...previous, coverageFresh: false } : previous)
+  }, [])
   const retry = useCallback(() => refresh.current(), [])
   const matchesFilters = !options?.discovery || result.identity === identity
   // Padded inventory can be nonempty while this viewport is empty. Only an
@@ -176,5 +187,5 @@ export function usePublicMapEvents(viewport: MapViewportSnapshot | null, filters
   const hasFreshViewportCoverage = Boolean(enabled && matchesFilters && result.coverageFresh
     && result.complete === true && !result.pending && !result.error && viewport && result.bounds
     && covers(result.bounds, options?.discovery ? discoveryBounds(viewport.bounds) : viewport.bounds))
-  return { ...result, hasFreshViewportCoverage, ...(matchesFilters ? {} : { events: [], complete: null, error: null, pending: Boolean(viewport) }), matchesFilters, retry }
+  return { ...result, hasFreshViewportCoverage, ...(matchesFilters ? {} : { events: [], complete: null, error: null, pending: Boolean(viewport) }), matchesFilters, retry, invalidate }
 }

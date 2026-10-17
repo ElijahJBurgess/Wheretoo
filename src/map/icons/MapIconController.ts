@@ -27,6 +27,7 @@ export class MapIconController {
   private reservedBytes = 0
   private styleReady = false
   private disposed = false
+  private enabled = true
   private lease = 0
   private ready: string[] = []
   private rankedIds: string[] | null = null
@@ -35,6 +36,8 @@ export class MapIconController {
   private leaseTimer?: ReturnType<typeof setTimeout>
   private pending = new Set<() => void>()
   constructor(private map: Renderer, private requestImage: IconImageRequest = loadIconImage) {}
+
+  setActive(active: boolean) { if (this.enabled === active) return; this.enabled = active; if (active) this.reconcile() }
 
   setEvents(events: readonly WheretooMapEvent[]) { if (events === this.events) return; this.events = events; this.rankedIds = null; this.applied = ''; this.reconcile() }
   setSelection(id: string | null) { if (id === this.selected) return; this.selected = id; this.rankedIds = null; this.reconcile() }
@@ -48,6 +51,8 @@ export class MapIconController {
     this.viewport = viewport; this.reconcile()
   }
   setDescriptors(descriptors: readonly IconDescriptor[], expiresAt: number) {
+    if (expiresAt === this.lease && Date.now() < expiresAt && descriptors.length === this.descriptors.size
+      && descriptors.every(descriptor => this.descriptors.get(descriptor.versionId) === descriptor)) return
     if (expiresAt > this.lease) {
       for (const entry of this.entries.values()) {
         if (entry.state === 'failed' && descriptors.some(d => d.versionId === entry.descriptor.versionId && d.packageHash === entry.descriptor.packageHash)) {
@@ -124,10 +129,10 @@ export class MapIconController {
         || ![ids.canonical, ids.body, ids.selected, ids.selectedBody].every(id => this.map.getLayer(id)))) {
         this.hideFallbackFirst(); entry.state = 'decoded'
       }
-      if (entry.state === 'decoded' && entry.image) this.install(entry)
+      if (this.enabled && entry.state === 'decoded' && entry.image) this.install(entry)
       const bytes = entry.descriptor.metadata.widthPx * entry.descriptor.metadata.heightPx * 4
       const decodedBytes = [...this.entries.values()].reduce((sum, e) => sum + (e.image ? e.descriptor.metadata.widthPx * e.descriptor.metadata.heightPx * 4 : 0), 0)
-      if ((entry.state === 'queued' || (entry.state === 'failed' && entry.attempts < 3 && Date.now() >= entry.retryAt))
+      if (this.enabled && (entry.state === 'queued' || (entry.state === 'failed' && entry.attempts < 3 && Date.now() >= entry.retryAt))
         && this.eligible(entry.descriptor) && this.active < 4
         && decodedBytes + this.reservedBytes + bytes <= (this.viewport.mobile ? 32 : 64) * 1048576) this.load(entry)
     }

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import type { DiscoveryMode } from '../features/discovery/discovery.location'
 import { DiscoveryView } from '../features/discovery/DiscoveryView'
 import { defaultDiscoveryFilters, serializeDiscoveryFilters } from '../features/discovery/discovery.filters'
 import type { DiscoveryFilters } from '../features/discovery/discovery.types'
@@ -37,6 +38,7 @@ function previewMatches(filters: DiscoveryFilters) {
 
 export function DiscoveryPreview() {
   const [filters, setFilters] = useState<DiscoveryFilters>(defaultDiscoveryFilters)
+  const [discoveryMode, setDiscoveryMode] = useState<DiscoveryMode>('list')
   const [mode, setMode] = useState<PreviewMode>('ready')
   const [expanded, setExpanded] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
@@ -59,6 +61,9 @@ export function DiscoveryPreview() {
         ))}</div>
       </aside>
       <DiscoveryView
+        mode={discoveryMode}
+        onModeChange={setDiscoveryMode}
+        mapPreview={<p>Isolated map preview</p>}
         errorKind={mode === 'rate-limited' ? 'rate_limited' : mode === 'malformed' ? 'invalid_response' : mode === 'unavailable' ? 'unavailable' : undefined}
         eventHref={() => '/preview/event-page'}
         filters={filters}

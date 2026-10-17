@@ -21,7 +21,7 @@ const item = (overrides: Partial<DiscoveryDisplayItem> = {}): DiscoveryDisplayIt
 
 function props(overrides: Partial<DiscoveryViewProps> = {}): DiscoveryViewProps {
   return {
-    filters, items: [item()], status: 'ready', hasMore: false, isLoadingMore: false,
+    mode: 'list', filters, items: [item()], status: 'ready', hasMore: false, isLoadingMore: false,
     onFiltersChange: vi.fn(), onRefresh: vi.fn(), onLoadMore: vi.fn(), onRetry: vi.fn(), publicSearch: '',
     ...overrides,
   }
@@ -42,11 +42,11 @@ describe('DiscoveryView', () => {
     const logging = vi.spyOn(console, 'error').mockImplementation(() => {})
     preview.fail = true
     try {
-      renderView(props({ items: [] }))
+      renderView(props({ items: [], mode: 'map' }))
       expect(await screen.findByText('We couldn’t load the map.')).toBeVisible()
-      expect(screen.getByText('No events in this map area yet.')).toBeVisible()
+      expect(screen.getByText('No events in this map area yet.').closest('[hidden]')).not.toBeNull()
       expect(screen.getByRole('link', { name: 'Organize' })).toHaveAttribute('href', '/organizer/events')
-      await userEvent.click(screen.getByRole('link', { name: /Explore the map/ }))
+      await userEvent.click(screen.getByRole('link', { name: /Expand map/ }))
       expect(await screen.findByRole('heading', { name: 'Full city map' })).toBeVisible()
     } finally {
       preview.fail = false
@@ -57,7 +57,7 @@ describe('DiscoveryView', () => {
   it.each(['ready', 'loading', 'error'] as const)('opens the map from discovery when events are %s', async (status) => {
     renderView(props({ status, items: [] }))
     expect(screen.getByRole('link', { name: 'Map' })).toHaveAttribute('href', '/map')
-    await userEvent.click(screen.getByRole('link', { name: /Explore the map/ }))
+    await userEvent.click(screen.getByRole('link', { name: /Expand map/ }))
     expect(await screen.findByRole('heading', { name: 'Full city map' })).toBeVisible()
   })
 

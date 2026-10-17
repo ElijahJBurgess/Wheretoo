@@ -1,7 +1,7 @@
 import { createEventSourceUpdates } from './eventSourceUpdates'
 import { describeStartupError } from './mapStartupErrors'
 import 'mapbox-gl/dist/mapbox-gl.css'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { GeoJSONSource, MapMouseEvent } from 'mapbox-gl/esm'
 import { requirePublicMapboxAccessToken } from '../../config/browserEnv'
 import { MapIconController } from '../icons/MapIconController'
@@ -19,6 +19,7 @@ import type { MapCamera, MapRendererError, MapViewportSnapshot } from './map.typ
 import type { VisualScene } from './visualScenes'
 
 export type WheretooMapProps = {
+  active?: boolean
   onBroadenReady?(broaden: (() => void) | null): void
   initialCamera?: MapCamera | null
   onRestoreReady?(restore: ((camera: MapCamera) => void) | null): void
@@ -96,7 +97,7 @@ function readClusterFeature(feature: unknown) {
 }
 
 export function WheretooMap({
-  visualScene, events = EMPTY_EVENTS, selectedEventId = null, onSelectEvent = () => undefined, onCameraControllerReady = () => undefined,
+  active = true, visualScene, events = EMPTY_EVENTS, selectedEventId = null, onSelectEvent = () => undefined, onCameraControllerReady = () => undefined,
   onChooseEvents = () => undefined, onClusterError = () => undefined,
   onReady, onMoveEnd, onRendererError, initialCamera, onSnapshotReady, onBroadenReady, onRestoreReady,
 }: WheretooMapProps) {
@@ -109,7 +110,11 @@ export function WheretooMap({
   const sourceUpdates = useRef<ReturnType<typeof createEventSourceUpdates> | null>(null)
   const icons = useRef<MapIconController | null>(null)
   const refreshIconViewport = useRef<(() => void) | null>(null)
-  const manifest = useRef<{ descriptors: IconDescriptor[]; expiresAt: number }>({ descriptors: [], expiresAt: 0 })
+  const manifest = useRef<{ descriptors: IconDescriptor[]; expiresAt: number; key?: string }>({ descriptors: [], expiresAt: 0 })
+  const manifestRequest = useRef<{ key: string; startedAt: number; promise: Promise<IconDescriptor[] | null> } | null>(null)
+  const activity = useRef(active)
+  const resizeMap = useRef<(() => void) | null>(null)
+  useLayoutEffect(() => { activity.current = active }, [active])
   const iconIdsKey = JSON.stringify([...new Set(events.flatMap(e => e.mapIconVersionId ? [e.mapIconVersionId] : []))].sort())
   const selection = useRef(selectedEventId)
   const interactionGuard = useRef(new ClusterInteractionGuard())
@@ -121,20 +126,45 @@ export function WheretooMap({
   }, [onReady, onMoveEnd, onRendererError, onSelectEvent, onChooseEvents, onClusterError, onCameraControllerReady, onSnapshotReady, onBroadenReady, onRestoreReady])
 
   useEffect(() => {
+    if (!active) return
     let disposed = false, generation = 0, inFlight = false, lastForeground = -Infinity
-    const refresh = async () => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const schedule = (expiresAt: number) => {
+      clearTimeout(timer)
+      timer = setTimeout(() => { void refresh() }, Math.max(1, expiresAt - Date.now() - 15000))
+    }
+    const refresh = async (): Promise<void> => {
       if (document.visibilityState === 'hidden' || inFlight) return
       inFlight = true
       const token = ++generation
-      const started = Date.now()
-      const descriptors = await fetchMapIconDescriptors(JSON.parse(iconIdsKey) as string[]).catch(() => []).finally(() => { inFlight = false })
+      // Mode changes share the one outstanding registry read; its original
+      // start time remains the hard lease origin, including hidden completion.
+      const pending = manifestRequest.current
+      const request = pending?.key === iconIdsKey ? pending : {
+        key: iconIdsKey, startedAt: Date.now(),
+        promise: fetchMapIconDescriptors(JSON.parse(iconIdsKey) as string[]).catch(() => null),
+      }
+      manifestRequest.current = request
+      const response = await request.promise.finally(() => { inFlight = false })
+      const next = { descriptors: response ?? [], expiresAt: request.startedAt + 60000, key: response === null ? undefined : request.key }
+      if (manifestRequest.current === request) {
+        manifest.current = next
+        manifestRequest.current = null
+        // Paused controllers may retire revoked resources but cannot start loads.
+        if (!activity.current) icons.current?.setDescriptors(next.descriptors, next.expiresAt)
+      }
       if (disposed || token !== generation) return
-      manifest.current = { descriptors, expiresAt: started + 60000 }
-      icons.current?.setDescriptors(descriptors, manifest.current.expiresAt)
+      icons.current?.setDescriptors(next.descriptors, next.expiresAt)
+      if (next.expiresAt <= Date.now()) void refresh()
+      else schedule(next.expiresAt)
     }
-    void refresh()
-    // Renew ahead of the hard lease deadline; a failed renewal still expires at 60s.
-    const timer = setInterval(() => { void refresh() }, 45000)
+    // A view switch is not an invalidation or an extension of the hard lease.
+    const reuse = manifest.current.key === iconIdsKey && manifest.current.expiresAt - Date.now() > 15000
+    if (!reuse) void refresh()
+    else {
+      icons.current?.setDescriptors(manifest.current.descriptors, manifest.current.expiresAt)
+      schedule(manifest.current.expiresAt)
+    }
     const foreground = () => {
       if (document.visibilityState !== 'visible' || inFlight || Date.now() - lastForeground < 250) return
       lastForeground = Date.now(); void refresh()
@@ -143,11 +173,17 @@ export function WheretooMap({
     window.addEventListener('online', foreground)
     document.addEventListener('visibilitychange', foreground)
     return () => {
-      disposed = true; clearInterval(timer)
+      disposed = true; clearTimeout(timer)
       window.removeEventListener('focus', foreground); window.removeEventListener('online', foreground)
       document.removeEventListener('visibilitychange', foreground)
     }
-  }, [iconIdsKey])
+  }, [iconIdsKey, active])
+
+  useLayoutEffect(() => {
+    icons.current?.setActive(active)
+    if (!active) mapRef.current?.stop()
+    else resizeMap.current?.()
+  }, [active])
 
   useEffect(() => {
     currentEvents.current = events
@@ -191,6 +227,8 @@ export function WheretooMap({
       accessToken,
       mobile: container.clientWidth < MOBILE_MAP_BREAKPOINT,
     })
+    // ResizeObserver owns resizing so an inactive map cannot alter List geography.
+    options.trackResize = false
     if (initialScene.current) {
       const scene = initialScene.current
       Object.assign(options, { center: scene.center, zoom: scene.zoom, pitch: scene.pitch, bearing: scene.bearing })
@@ -221,6 +259,7 @@ export function WheretooMap({
     let diagnosticCount = 0
     const iconController = new MapIconController(map)
     icons.current = iconController
+    iconController.setActive(activity.current)
     iconController.setEvents(currentEvents.current)
     iconController.setSelection(selection.current)
     iconController.setDescriptors(manifest.current.descriptors, manifest.current.expiresAt)
@@ -342,9 +381,8 @@ export function WheretooMap({
       if (diagnosticCount++ < 3) console.warn('[Wheretoo map] Startup resource error', diagnostic)
       if (diagnostic.fatal) callbacks.current.onRendererError(rendererError(diagnostic.fatal))
     }
-    const observer = new ResizeObserver((entries) => {
-      if (disposed) return
-      const width = entries[0]?.contentRect.width ?? container.clientWidth
+    const resize = (width = container.clientWidth) => {
+      if (disposed || !activity.current) return
       const nextDensity = width < MOBILE_MAP_BREAKPOINT ? 2 : 3
       const nextMobile = width < MOBILE_MAP_BREAKPOINT
       map.resize()
@@ -358,7 +396,9 @@ export function WheretooMap({
       }
       reconcileIcons()
       cameraController.remeasure()
-    })
+    }
+    resizeMap.current = resize
+    const observer = new ResizeObserver(entries => resize(entries[0]?.contentRect.width))
 
     map.on('style.load', handleStyleLoad)
     map.on('click', handleMapClick)
@@ -398,6 +438,7 @@ export function WheretooMap({
       callbacks.current.onSnapshotReady?.(null)
       callbacks.current.onRestoreReady?.(null)
       callbacks.current.onBroadenReady?.(null)
+      resizeMap.current = null
       mapRef.current = null
       layersInstalled.current = false
     }

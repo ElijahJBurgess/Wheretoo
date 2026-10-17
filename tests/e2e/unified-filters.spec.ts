@@ -34,7 +34,8 @@ test.describe('unified viewport filters', () => {
     // The existing instrumentation only assumed a main; use the same reference for embedded maps.
     await mapReference(page)
     await expect(page.locator('.living-map__canvas')).toHaveAttribute('data-wheretoo-event-count', String(Math.min(size, 1000)))
-    await expect(page.getByRole('heading', { name: 'Events in this area', exact: true })).toBeVisible()
+    await expect(page.locator('#discovery-results-heading')).toHaveText('Events in this area')
+    await expect(page.locator('#discovery-list-panel')).toBeHidden()
     expect(reads.filter(r => r.api === 'map')).toHaveLength(1)
     expect(reads.filter(r => r.api === 'list')).toHaveLength(1)
     expect(reads.find(r => r.api === 'list')?.filters.bounds).toBeTruthy()
@@ -82,9 +83,11 @@ test.describe('unified viewport filters', () => {
     await expect(page.locator('.living-map__canvas')).toHaveAttribute('data-wheretoo-event-count', String(Math.min(size, 1000)))
     await expect(page.getByRole('combobox', { name: 'Date', exact: true })).toHaveValue('next7')
     if (size > 20) {
+      await page.getByRole('button', { name: 'List', exact: true }).click()
       await page.getByRole('button', { name: 'Load more', exact: true }).click()
       await expect(page.getByRole('status', { name: 'Discovery results' })).toHaveText('40 events')
       expect(reads.filter(r => r.api === 'list').at(-1)?.filters.cursor).toBe('20')
+      await page.getByRole('button', { name: 'Map', exact: true }).click()
     }
     const frames = await page.evaluate(async () => {
       const times: number[] = []; let last = performance.now()

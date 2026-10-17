@@ -338,3 +338,37 @@ it('updates coverage bounds when returning to identical rows without revising ma
   expect(result.current.events).toBe(inventory)
   expect(fetchEvents).toHaveBeenCalledTimes(2)
 })
+
+it('pauses hidden-map reads but publishes its settled area and resumes fresh coverage without renewal', async () => {
+  const filters = { when: 'next7' as const, category: null, price: null }
+  filteredEvents.mockResolvedValue({ events, complete: true })
+  const area = vi.fn()
+  const { result, rerender } = renderHook(({ active }) => usePublicMapEvents(viewport, null, true, { discovery: filters, active, onSettledBounds: area }), { initialProps: { active: false } })
+  await settle(300)
+  expect(area).toHaveBeenCalledTimes(1)
+  expect(filteredEvents).not.toHaveBeenCalled()
+  rerender({ active: true }); await settle(300)
+  expect(filteredEvents).toHaveBeenCalledTimes(1)
+  rerender({ active: false }); await settle(10000)
+  act(() => { window.dispatchEvent(new Event('focus')); result.current.retry() })
+  await settle(0); expect(filteredEvents).toHaveBeenCalledTimes(1)
+  rerender({ active: true }); await settle(300)
+  expect(filteredEvents).toHaveBeenCalledTimes(1)
+  rerender({ active: false }); await settle(60000)
+  rerender({ active: true }); await settle(300)
+  expect(filteredEvents).toHaveBeenCalledTimes(2)
+})
+
+it('invalidates coverage after an authoritative List refresh without hidden reads or inferring removals', async () => {
+  const filters = { when: 'next7' as const, category: null, price: null }
+  filteredEvents.mockResolvedValue({ events, complete: true })
+  const view = renderHook(({ active }) => usePublicMapEvents(viewport, null, true, { discovery: filters, active }), { initialProps: { active: true } })
+  await settle()
+  view.rerender({ active: false })
+  act(() => view.result.current.invalidate())
+  await settle(300)
+  expect(filteredEvents).toHaveBeenCalledTimes(1)
+  expect(view.result.current.events).toEqual(events)
+  view.rerender({ active: true }); await settle(300)
+  expect(filteredEvents).toHaveBeenCalledTimes(2)
+})

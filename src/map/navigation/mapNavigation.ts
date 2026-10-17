@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { discoveryMode, discoverySearch } from '../../features/discovery/discovery.location'
 import { parseDiscoverySearch, serializeDiscoveryFilters } from '../../features/discovery/discovery.filters'
 import { MAP_MAX_ZOOM, MAP_MIN_ZOOM, SERVICE_BOUNDS } from '../core/map.constants'
 
@@ -14,7 +15,7 @@ const chooser = z.object({
 })
 const schema = z.object({
   version: z.literal(1),
-  path: z.string().max(2048).refine(path => ['/map', '/discover'].some(base => path.startsWith(base) && path === base + serializeDiscoveryFilters(parseDiscoverySearch(path.slice(base.length))))),
+  path: z.string().max(2048).refine(path => ['/map', '/discover'].some(base => path.startsWith(base) && path === base + (base === '/discover' ? discoverySearch(parseDiscoverySearch(path.slice(base.length)), discoveryMode(path.slice(base.length))) : serializeDiscoveryFilters(parseDiscoverySearch(path.slice(base.length)))))),
   camera: z.object({ center: z.tuple([longitude, latitude]), zoom: z.number().finite().min(MAP_MIN_ZOOM).max(MAP_MAX_ZOOM), pitch: z.number().finite().min(0).max(85), bearing: z.number().finite().min(-180).max(180) }),
   area: z.object({ west: longitude, south: latitude, east: longitude, north: latitude }).refine(b => b.west < b.east && b.south < b.north).optional(),
   selectedEventId: z.uuid().nullable(),

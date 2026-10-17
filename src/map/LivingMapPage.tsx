@@ -6,6 +6,7 @@ import { discoveryBounds } from '../features/discovery/discovery.scope'
 import type { MapCamera, MapBounds } from './core/map.types'
 import { captureDiscoveryScroll, publicReturnState } from '../features/discovery/discovery.navigation'
 import { parseDiscoverySearch, serializeDiscoveryFilters } from '../features/discovery/discovery.filters'
+import { discoveryMode, discoverySearch } from '../features/discovery/discovery.location'
 import { readMapReturn, type MapChooserContext } from './navigation/mapNavigation'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { MAP_MIN_ZOOM } from './core/map.constants'
@@ -26,9 +27,9 @@ import './living-map.css'
 
 type ChooserContext = MapChooserContext
 
-export type DiscoveryMapHandle = { state(): ReturnType<typeof publicReturnState>; broaden(): void }
-export type DiscoveryMapProps = { embedded?: boolean; onAreaChange?(bounds: MapBounds): void; onAuthoritativeRefresh?(refresh: MapAuthoritativeRefresh): void; onContextReady?(handle: DiscoveryMapHandle | null): void; onUnavailable?(): void }
-export function Component({ embedded = false, onAreaChange, onAuthoritativeRefresh, onContextReady, onUnavailable }: DiscoveryMapProps = {}) {
+export type DiscoveryMapHandle = { state(): ReturnType<typeof publicReturnState>; broaden(): void; invalidateEvents?(): void }
+export type DiscoveryMapProps = { embedded?: boolean; active?: boolean; onAreaChange?(bounds: MapBounds): void; onAuthoritativeRefresh?(refresh: MapAuthoritativeRefresh): void; onContextReady?(handle: DiscoveryMapHandle | null): void; onUnavailable?(): void }
+export function Component({ embedded = false, active = true, onAreaChange, onAuthoritativeRefresh, onContextReady, onUnavailable }: DiscoveryMapProps = {}) {
   const Container = embedded ? 'section' : 'main'
   const location = useLocation()
   const navigate = useNavigate()
@@ -41,10 +42,11 @@ export function Component({ embedded = false, onAreaChange, onAuthoritativeRefre
   const { when, category, price } = filters
   useLayoutEffect(() => { if (navigationType === 'POP') submittedFilters.current = { when, category, price } }, [navigationType, when, category, price])
   const search = serializeDiscoveryFilters(filters)
-  const origin = (location.pathname === '/discover' ? '/discover' : '/map') + search
+  const origin = location.pathname === '/discover' ? '/discover' + discoverySearch(filters, discoveryMode(location.search)) : '/map' + search
   const [initialReturn] = useState(() => { const saved = readMapReturn(location.state); return saved?.path === origin ? saved : null })
   const pendingReturn = useRef(initialReturn)
   const preserveReturnedCamera = useRef<string | null>(null)
+  const suppressPreviewFocus = useRef(!active)
   const root = useRef<HTMLElement | null>(null)
   const chooserTrigger = useRef<HTMLButtonElement | null>(null)
   const returnFocus = useRef<'map' | 'viewport' | null>(null)
@@ -60,7 +62,7 @@ export function Component({ embedded = false, onAreaChange, onAuthoritativeRefre
   const [inventory, setEvents] = useState<WheretooMapEvent[]>([])
   const [viewport, setViewport] = useState<MapViewportSnapshot | null>(null)
   const fixtureMode = useMemo(() => import.meta.env.DEV && ['standard', 'dense', 'colocated'].includes(new URLSearchParams(window.location.search).get('mapFixture') ?? ''), [])
-  const live = usePublicMapEvents(viewport, null, !fixtureMode, { discovery: filters, onSettledBounds: onAreaChange, onAuthoritativeRefresh })
+  const live = usePublicMapEvents(viewport, null, !fixtureMode, { discovery: filters, active, onSettledBounds: onAreaChange, onAuthoritativeRefresh })
   const events = useMemo(() => live.matchesFilters === false ? [] : inventory, [live.matchesFilters, inventory])
   const broaden = useRef<(() => void) | null>(null)
   const handleBroadenReady = useCallback((next: (() => void) | null) => { broaden.current = next }, [])
@@ -89,9 +91,11 @@ export function Component({ embedded = false, onAreaChange, onAuthoritativeRefre
     entry.current = location.key
     const saved = readMapReturn(location.state)
     // Synchronize the external history entry and mounted WebGL camera before paint.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (navigationType === 'POP' && saved?.path === origin) restoreEntry(saved)
-  }, [location.key, location.state, navigationType, origin, restoreEntry])
+    if (navigationType === 'POP' && saved?.path === origin) {
+      const current = readSnapshot.current?.()
+      if (JSON.stringify(current?.camera) !== JSON.stringify(saved.camera) || saved.selectedEventId !== selectedEventId) restoreEntry(saved)
+    }
+  }, [location.key, location.state, navigationType, origin, restoreEntry, selectedEventId])
   useLayoutEffect(() => {
     if (fixtureMode) return
     if (live.generation > appliedGeneration.current) {
@@ -134,15 +138,20 @@ export function Component({ embedded = false, onAreaChange, onAuthoritativeRefre
     return chooser.eventIds.flatMap((id) => byId.get(id) ?? [])
   }, [chooser, events])
   // Images enrich this bounded selection; they are never an event-inventory authority.
-  const publicImages = usePublicEventImages(!fixtureMode && selectedEvent ? [selectedEvent.id] : [])
+  const publicImages = usePublicEventImages(!fixtureMode && active && selectedEvent ? [selectedEvent.id] : [])
   const publicArtworkUrl = publicImages.data?.find(image => image.eventId === selectedEventId && image.position === 1)?.url ?? null
   const chooserAnchor = chooser?.anchor ?? null
   useLayoutEffect(() => {
+    if (!active) {
+      preserveReturnedCamera.current = selectedEvent?.id ?? (chooserAnchor ? 'chooser' : null)
+      cameraController.current?.cancel()
+      return
+    }
     if (selectedEvent && preview.current) cameraController.current?.reveal(selectedEvent, preview.current, { preserveCamera: preserveReturnedCamera.current === selectedEvent.id })
     else if (chooserAnchor && preview.current) cameraController.current?.reveal(chooserAnchor, preview.current, { preserveCamera: preserveReturnedCamera.current === 'chooser' })
     else cameraController.current?.cancel()
     preserveReturnedCamera.current = null
-  }, [selectedEvent, chooserAnchor])
+  }, [selectedEvent, chooserAnchor, active])
   const handleReady = useCallback((initialViewport: MapViewportSnapshot) => {
     if (activeAttempt.current !== attempt) return
     setViewport(initialViewport)
@@ -167,6 +176,7 @@ export function Component({ embedded = false, onAreaChange, onAuthoritativeRefre
     if (controller && selectedEvent && preview.current) controller.reveal(selectedEvent, preview.current)
   }, [selectedEvent])
   const closePreview = useCallback(() => {
+    suppressPreviewFocus.current = false
     pendingReturn.current = null
     returnFocus.current ??= 'map'
     setFocusRequest(value => value + 1)
@@ -176,6 +186,7 @@ export function Component({ embedded = false, onAreaChange, onAuthoritativeRefre
     // Focus is restored after the preview/chooser has unmounted, below.
   }, [])
   const handleSelectEvent = useCallback((eventId: string | null) => {
+    suppressPreviewFocus.current = false
     pendingReturn.current = null
     returnFocus.current = 'map'
     setSelectedEventId(reconcileSelectedEventId(eventId, events ?? []))
@@ -183,6 +194,7 @@ export function Component({ embedded = false, onAreaChange, onAuthoritativeRefre
     setInteractionError(null)
   }, [events])
   const handleChooseEvents = useCallback((eventIds: string[], anchor: { longitude: number; latitude: number }) => {
+    suppressPreviewFocus.current = false
     pendingReturn.current = null
     returnFocus.current = 'map'
     const available = new Set((events ?? []).map(({ id }) => id))
@@ -193,10 +205,11 @@ export function Component({ embedded = false, onAreaChange, onAuthoritativeRefre
     if (valid.length === 1) setSelectedEventId(valid[0])
   }, [events])
   const handleChooserSelect = useCallback((eventId: string) => {
+    suppressPreviewFocus.current = false
     setChooser(current => current ? { ...current, focusedId: eventId } : null)
     setSelectedEventId(reconcileSelectedEventId(eventId, events ?? []))
   }, [events])
-  const handleBack = useCallback(() => setSelectedEventId(null), [])
+  const handleBack = useCallback(() => { suppressPreviewFocus.current = false; setSelectedEventId(null) }, [])
   const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLElement>) => {
     if (event.key !== 'Escape' || (!selectedEventId && !chooser && !interactionError)) return
     event.preventDefault()
@@ -208,6 +221,7 @@ export function Component({ embedded = false, onAreaChange, onAuthoritativeRefre
     && event.latitude >= viewport.bounds.south && event.latitude <= viewport.bounds.north
   )), [events, viewport])
   const openViewportChooser = () => {
+    suppressPreviewFocus.current = false
     pendingReturn.current = null
     returnFocus.current = 'viewport'
     setSelectedEventId(null)
@@ -217,6 +231,8 @@ export function Component({ embedded = false, onAreaChange, onAuthoritativeRefre
   const chooserKey = chooser?.eventIds.join(',') ?? ''
   const focusSelectionId = selectedEvent?.id ?? null
   useLayoutEffect(() => {
+    if (!active) suppressPreviewFocus.current = true
+    if (!active || suppressPreviewFocus.current) return
     if (focusSelectionId) preview.current?.focus({ preventScroll: true })
     else if (chooserKey) {
       const row = Array.from(preview.current?.querySelectorAll<HTMLElement>('[data-event-id]') ?? []).find(node => node.dataset.eventId === chooser?.focusedId)
@@ -227,21 +243,21 @@ export function Component({ embedded = false, onAreaChange, onAuthoritativeRefre
       target?.focus({ preventScroll: true })
       returnFocus.current = null
     }
-  }, [focusSelectionId, chooserKey, chooser?.focusedId, focusRequest])
+  }, [focusSelectionId, chooserKey, chooser?.focusedId, focusRequest, active])
 
   const navigationState = useCallback(() => {
     const snapshot = readSnapshot.current?.() ?? viewport
     const camera = snapshot?.camera
     const savedState = publicReturnState(window.location.pathname === location.pathname ? window.history.state?.usr : location.state)
     const currentState = embedded && window.location.pathname === '/discover' ? captureDiscoveryScroll(savedState) : savedState
-    const mapReturn = camera ? readMapReturn({ mapReturn: { version: 1, path: origin, camera, area: snapshot?.bounds ? discoveryBounds(snapshot.bounds) : undefined, selectedEventId, chooser } }) : null
-    const state = { ...currentState, ...(location.pathname === '/discover' ? { discoverySearch: serializeDiscoveryFilters(parseDiscoverySearch(location.search)) } : {}), ...(mapReturn ? { mapReturn } : {}) }
+    const mapReturn = camera ? readMapReturn({ mapReturn: { version: 1, path: origin, camera, area: snapshot?.bounds ? discoveryBounds(snapshot.bounds) : undefined, selectedEventId: pendingReturn.current?.selectedEventId ?? selectedEventId, chooser: pendingReturn.current?.chooser ?? chooser } }) : null
+    const state = { ...currentState, ...(location.pathname === '/discover' ? { discoverySearch: discoverySearch(parseDiscoverySearch(location.search), discoveryMode(location.search)) } : {}), ...(mapReturn ? { mapReturn } : {}) }
     return state
   }, [viewport, location.pathname, location.state, location.search, origin, selectedEventId, chooser, embedded])
   useLayoutEffect(() => {
-    onContextReady?.({ state: navigationState, broaden: () => broaden.current?.() })
+    onContextReady?.({ state: navigationState, broaden: () => broaden.current?.(), invalidateEvents: live.invalidate })
     return () => onContextReady?.(null)
-  }, [onContextReady, navigationState])
+  }, [onContextReady, navigationState, live.invalidate])
   const changeFilters = (next: DiscoveryFilters) => {
     if (serializeDiscoveryFilters(next) === search) return
     pendingReturn.current = null
@@ -251,7 +267,12 @@ export function Component({ embedded = false, onAreaChange, onAuthoritativeRefre
     const mapReturn = state.mapReturn ? { ...state.mapReturn, path: '/map' + nextSearch } : undefined
     navigate({ pathname: '/map', search: nextSearch }, { state: { ...state, ...(mapReturn ? { mapReturn } : {}) } })
   }
-  useEffect(() => { if (pendingReturn.current?.path !== origin) pendingReturn.current = null }, [origin])
+  useEffect(() => {
+    const saved = pendingReturn.current
+    if (!saved || saved.path === origin) return
+    const oldSearch = saved.path.slice(saved.path.indexOf('?') < 0 ? saved.path.length : saved.path.indexOf('?'))
+    pendingReturn.current = serializeDiscoveryFilters(parseDiscoverySearch(oldSearch)) === search ? { ...saved, path: origin } : null
+  }, [origin, search])
   useEffect(() => {
     if (!viewport || pendingReturn.current || window.location.pathname !== location.pathname) return
     const entryKey: unknown = window.history.state?.key
@@ -284,6 +305,7 @@ export function Component({ embedded = false, onAreaChange, onAuthoritativeRefre
       {events ? <WheretooMap
         key={`map-${attempt}`}
         visualScene={scene}
+        active={active}
         initialCamera={initialReturn?.camera}
         onSnapshotReady={handleSnapshotReady}
         onRestoreReady={handleRestoreReady}
@@ -301,7 +323,7 @@ export function Component({ embedded = false, onAreaChange, onAuthoritativeRefre
       </div>
       <header className="living-map__masthead"><span className="living-map__wordmark">wheretoo</span>{state === 'ready' ? <button ref={chooserTrigger} className="living-map__choose" type="button" aria-label="Choose an event on the map" disabled={!visibleEvents.length} onClick={openViewportChooser}>Events in view</button> : null}</header>
       {!fixtureMode && (state === 'ready' || live.error) && (eventFeedback || live.complete === null) ? <div className="living-map__event-status" role="status"><span>{eventFeedback ?? 'Loading events…'}</span>{showEmptyArea ? <button className="living-map__broaden" type="button" onClick={() => broaden.current?.()} disabled={Boolean(viewport && viewport.zoom <= MAP_MIN_ZOOM)}>Zoom out to search a wider area</button> : null}{!live.pending && (live.error || live.complete === false) ? <button type="button" onClick={live.retry}>Retry events</button> : null}</div> : null}
-      {selectedEvent ? (
+      {active && selectedEvent ? (
         <div className="living-map__preview-layer">
           <EventPreviewCard
             onOpenEvent={openEvent}
@@ -313,7 +335,7 @@ export function Component({ embedded = false, onAreaChange, onAuthoritativeRefre
             onBack={chooser ? handleBack : undefined}
           />
         </div>
-      ) : chooser && chooserEvents.length > 0 ? (
+      ) : active && chooser && chooserEvents.length > 0 ? (
         <div className="living-map__preview-layer">
           <EventChooser
             ref={preview}
