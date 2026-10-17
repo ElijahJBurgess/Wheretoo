@@ -61,6 +61,7 @@ function fakeMap({ initialZoom = 14.6 } = {}) {
     off: vi.fn((name: string, layerOrListener: string | Listener, maybeListener?: Listener) => {
       listeners.get(listenerKey(name, layerOrListener))?.delete(maybeListener ?? layerOrListener as Listener); return map
     }),
+    isSourceLoaded: vi.fn(() => true), triggerRepaint: vi.fn(),
     jumpTo: vi.fn(), zoomOut: vi.fn(), remove: vi.fn(), addControl: vi.fn(), removeControl: vi.fn(), resize: vi.fn(), stop: vi.fn(), easeTo: vi.fn(),
     project: vi.fn(() => ({ x: 720, y: 450 })), panBy: vi.fn(),
     addSource: vi.fn((id: string) => { sources.set(id, id === EVENT_SOURCE_ID ? clusterSource : { setData: vi.fn() }) }),
