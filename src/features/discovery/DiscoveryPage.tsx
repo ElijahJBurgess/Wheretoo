@@ -10,7 +10,8 @@ import { BAY_AREA_BOUNDS, discoveryBounds } from './discovery.scope'
 import { DiscoveryMapPreview } from './DiscoveryMapPreview'
 import { DiscoveryView } from './DiscoveryView'
 import { parseDiscoverySearch, serializeDiscoveryFilters } from './discovery.filters'
-import { publicReturnPath, publicReturnState, captureDiscoveryScroll, discoveryScrollPosition, discoveryCardScrollPosition } from './discovery.navigation'
+import { discoveryMode, discoverySearch, type DiscoveryMode } from './discovery.location'
+import { discoveryFocusEventId, discoveryViewScroll, publicReturnPath, publicReturnState, captureDiscoveryScroll, discoveryScrollPosition, discoveryCardScrollPosition } from './discovery.navigation'
 import { useDiscovery } from './discovery.queries'
 import type { DiscoveryFilters } from './discovery.types'
 
@@ -19,11 +20,16 @@ export function DiscoveryPage() {
   const navigate = useNavigate()
   const client = useQueryClient()
   const navigationType = useNavigationType()
+  const mode = discoveryMode(location.search)
   const filters = parseDiscoverySearch(location.search)
   const submittedFilters = useRef(filters)
   const { when, category, price } = filters
   useLayoutEffect(() => { if (navigationType === 'POP') submittedFilters.current = { when, category, price } }, [navigationType, when, category, price])
-  const search = serializeDiscoveryFilters(filters)
+  const filterSearch = serializeDiscoveryFilters(filters)
+  const search = discoverySearch(filters, mode)
+  const viewScroll = useRef(discoveryViewScroll(location.state))
+  const lastMode = useRef(mode)
+  const visitedModes = useRef(new Set<DiscoveryMode>(location.state?.discoveryViewScroll ? ['map', 'list'] : [mode]))
   const mapHandle = useRef<DiscoveryMapHandle | null>(null)
   const [scope, setScope] = useState(() => ({ bounds: readMapReturn(location.state)?.area ?? null as MapBounds | null, fallback: false }))
   const [canBroaden, setCanBroaden] = useState(false)
@@ -40,7 +46,7 @@ export function DiscoveryPage() {
     setCanBroaden((mapHandle.current?.state().mapReturn?.camera.zoom ?? MAP_MIN_ZOOM) > MAP_MIN_ZOOM + 0.01)
   }, [])
   const mapUnavailable = useCallback(() => setScope(previous => previous.bounds ? previous : { bounds: BAY_AREA_BOUNDS, fallback: true }), [])
-  const discovery = useDiscovery(filters, scope.bounds)
+  const discovery = useDiscovery(filters, scope.bounds, { activeList: mode === 'list', onAuthoritativeListRefresh: () => mapHandle.current?.invalidateEvents?.() })
   const firstPageIds = new Set(discovery.highlightItems.map(item => item.id))
   // Keep first-page artwork independent of appended IDs: a new image query must
   // not temporarily replace the feature with the first no-artwork fallback.
@@ -71,26 +77,47 @@ export function DiscoveryPage() {
   useLayoutEffect(() => {
     if (discovery.status === 'loading' || restored.current === location.key) return
     restored.current = location.key
-    if (navigationType === 'POP' || (mountedEntry.current === location.key && location.state?.mapReturn && publicReturnPath(location.state) === '/discover' + search)) {
+    if (lastMode.current !== mode || navigationType === 'POP' || (mountedEntry.current === location.key && location.state?.mapReturn && publicReturnPath(location.state) === '/discover' + search)) {
+      viewScroll.current = discoveryViewScroll(location.state)
       window.scrollTo({ top: discoveryScrollPosition(location.state), behavior: 'instant' })
-      document.querySelector('.discovery-event-list')?.scrollTo({ left: discoveryCardScrollPosition(location.state), behavior: 'instant' })
+      const cards = document.querySelector('.discovery-event-list')
+      if (cards) cards.scrollLeft = discoveryCardScrollPosition(location.state)
+      const focusedEvent = discoveryFocusEventId(location.state)
+      if (mode === 'list' && mountedEntry.current === location.key && focusedEvent) {
+        const link = document.querySelector<HTMLAnchorElement>(`#discovery-list-panel a[href="/events/${focusedEvent}"]`)
+        const target = link ?? document.querySelector<HTMLButtonElement>('.discovery-mode-toggle button[aria-pressed="true"]')
+        target?.focus({ preventScroll: true })
+      }
     }
-  }, [discovery.status, location.key, location.state, navigationType, search])
+    lastMode.current = mode
+  }, [discovery.status, location.key, location.state, navigationType, search, mode])
 
   function captureState() {
     const saved = mapHandle.current?.state() ?? publicReturnState(window.history.state?.usr ?? location.state)
-    return { ...captureDiscoveryScroll(saved), discoverySearch: search }
+    viewScroll.current = { ...viewScroll.current, [mode]: Math.min(1_000_000, Math.max(0, window.scrollY)) }
+    return { ...captureDiscoveryScroll(saved), discoverySearch: search, discoveryViewScroll: viewScroll.current }
   }
   function changeFilters(requested: DiscoveryFilters, field?: keyof DiscoveryFilters) {
     const next = field ? { ...submittedFilters.current, [field]: requested[field] } : requested
     submittedFilters.current = next
-    const nextSearch = serializeDiscoveryFilters(next)
+    const nextSearch = discoverySearch(next, mode)
     if (search === nextSearch) return
     const previous = captureState()
     window.history.replaceState({ ...window.history.state, usr: previous }, '')
-    client.removeQueries({ queryKey: ['public-discovery', 'v1', nextSearch] })
+    client.removeQueries({ queryKey: ['public-discovery', 'v1', serializeDiscoveryFilters(next)] })
     const mapReturn = previous.mapReturn ? { ...previous.mapReturn, path: '/discover' + nextSearch } : undefined
     navigate({ pathname: '/discover', search: nextSearch }, { state: { ...previous, ...(mapReturn ? { mapReturn } : {}) } })
+  }
+
+  function changeMode(next: DiscoveryMode) {
+    if (next === mode) return
+    const previous = captureState()
+    window.history.replaceState({ ...window.history.state, usr: previous }, '')
+    if (!visitedModes.current.has(next)) viewScroll.current[next] = viewScroll.current[mode]
+    visitedModes.current.add(next)
+    const nextSearch = discoverySearch(filters, next)
+    const mapReturn = previous.mapReturn ? { ...previous.mapReturn, path: '/discover' + nextSearch } : undefined
+    navigate({ pathname: '/discover', search: nextSearch }, { state: { ...previous, discoveryViewScroll: viewScroll.current, discoverySearch: nextSearch, discoveryScroll: viewScroll.current[next], ...(mapReturn ? { mapReturn } : {}) } })
   }
 
   return <div onClickCapture={event => {
@@ -99,22 +126,21 @@ export function DiscoveryPage() {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
     if (href && (href === '/discover' || href.startsWith('/discover?')) && event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
       const next = parseDiscoverySearch(href.slice('/discover'.length))
-      if (serializeDiscoveryFilters(next) !== search) {
-        event.preventDefault()
-        changeFilters(next)
-      }
+      event.preventDefault()
+      if (serializeDiscoveryFilters(next) !== filterSearch) changeFilters(next)
       return
     }
     if (!href || !(href.startsWith('/events/') || href === '/map' || href.startsWith('/map?'))) return
     if (link?.closest('.living-map')) return // The map owns its preview navigation.
-    const previous = captureState()
+    const saved = captureState()
+    const previous = href.startsWith('/events/') ? publicReturnState({ ...saved, discoveryFocusEventId: href.slice('/events/'.length) }) : saved
     window.history.replaceState({ ...window.history.state, usr: previous }, '')
     const state = href.startsWith('/map') && previous.mapReturn ? { ...previous, mapReturn: { ...previous.mapReturn, path: href } } : previous
     event.preventDefault()
     navigate(href, { state })
   }}>
-    <DiscoveryView mapPreview={<DiscoveryMapPreview onAuthoritativeRefresh={refresh => void discovery.refreshAfterMap(refresh)} onAreaChange={areaChanged} onContextReady={contextReady} onUnavailable={mapUnavailable} />}
-      onBroadenArea={() => mapHandle.current?.broaden()} canBroadenArea={canBroaden} regionFallback={scope.fallback} {...discovery} items={discovery.items.map(withImage)} highlightItems={discovery.highlightItems.map(withImage)} filters={filters} publicSearch={search}
+    <DiscoveryView mode={mode} onModeChange={changeMode} mapPreview={<DiscoveryMapPreview active={mode === 'map'} onAuthoritativeRefresh={refresh => void discovery.refreshAfterMap(refresh)} onAreaChange={areaChanged} onContextReady={contextReady} onUnavailable={mapUnavailable} />}
+      onBroadenArea={() => mapHandle.current?.broaden()} canBroadenArea={canBroaden} regionFallback={scope.fallback} {...discovery} items={discovery.items.map(withImage)} highlightItems={[]} filters={filters} publicSearch={filterSearch}
       onFiltersChange={changeFilters} onRefresh={() => void discovery.refresh()}
       onRetry={() => void discovery.refresh()} onLoadMore={() => void discovery.loadMore()} />
   </div>

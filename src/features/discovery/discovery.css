@@ -879,3 +879,22 @@
   .discovery-map-entry__action { align-self: flex-start; }
   .discovery-map-entry__preview, .discovery-map-entry .living-map--embedded { height: 300px; }
 }
+
+/* Inactive map keeps real dimensions: display:none would resize its WebGL camera. */
+.discovery-workspace { position: relative; min-width: 0; }
+.discovery-mode-bar { position: sticky; top: 0; z-index: 6; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; background: var(--discovery-ink); }
+.discovery-mode-toggle { display: inline-flex; padding: 4px; gap: 4px; border: 1px solid var(--discovery-line); border-radius: 12px; background: var(--discovery-panel); }
+.discovery-mode-toggle button { min-width: 76px; min-height: 44px; border: 0; border-radius: 8px; background: transparent; color: var(--discovery-muted); font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+.discovery-mode-toggle button[aria-pressed="true"] { background: #7952e8; color: white; }
+.discovery-mode-toggle button:focus-visible, .discovery-full-map:focus-visible { outline: 2px solid #c3b0ff; outline-offset: 3px; }
+.discovery-full-map { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-size: 13px; color: #c3b0ff; }
+.discovery-full-map svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; }
+.discovery-panels { position: relative; }
+.discovery-map-panel--inactive { position: absolute; inset: 0 0 auto; visibility: hidden; pointer-events: none; }
+.discovery-workspace--list .discovery-event-list { scroll-snap-type: none; }
+@media (max-width: 767px) {
+  .discovery-workspace--list .discovery-event-list { display: grid; grid-template-columns: minmax(0, 1fr); overflow: visible; padding-bottom: 0; }
+  .discovery-workspace--list .discovery-event-row { scroll-snap-align: none; }
+  .discovery-workspace--list .discovery-event-row__art { aspect-ratio: 16/9; }
+}
+@media (min-width: 768px) { .discovery-page .discovery-filters { grid-template-columns: repeat(4, minmax(0, 1fr)); } }

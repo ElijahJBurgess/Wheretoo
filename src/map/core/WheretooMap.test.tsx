@@ -124,6 +124,7 @@ describe('WheretooMap', () => {
     broadener.mock.calls[0][0]()
     expect(fake.map.zoomOut).toHaveBeenCalledOnce()
     expect(createMapboxMap).toHaveBeenCalledOnce()
+    expect(vi.mocked(createMapboxMap).mock.calls[0][0].trackResize).toBe(false)
     view.unmount(); expect(broadener).toHaveBeenLastCalledWith(null)
   })
 
@@ -160,6 +161,84 @@ describe('WheretooMap', () => {
     } finally {
       view.unmount(); vi.useRealTimers(); vi.mocked(fetchMapIconDescriptors).mockResolvedValue([descriptor])
     }
+  })
+
+  it('keeps the map and cached images while inactive, and renews against the original lease on resume', async () => {
+    vi.useFakeTimers()
+    const fake = fakeMap(); vi.mocked(createMapboxMap).mockReturnValue(fake.map as never)
+    const props = { visualScene: null, events: getDevelopmentMapEvents(), onReady: vi.fn(), onMoveEnd: vi.fn(), onRendererError: vi.fn() }
+    const view = render(<WheretooMap {...props} />)
+    try {
+      fake.emit('style.load')
+      await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+      expect(fetchMapIconDescriptors).toHaveBeenCalledTimes(1)
+      view.rerender(<WheretooMap {...props} active={false} />)
+      await act(async () => { await vi.advanceTimersByTimeAsync(30000) })
+      act(() => window.dispatchEvent(new Event('focus')))
+      expect(fetchMapIconDescriptors).toHaveBeenCalledTimes(1)
+      view.rerender(<WheretooMap {...props} active />)
+      expect(fetchMapIconDescriptors).toHaveBeenCalledTimes(1)
+      await act(async () => { await vi.advanceTimersByTimeAsync(15000) })
+      expect(fetchMapIconDescriptors).toHaveBeenCalledTimes(2)
+      expect(createMapboxMap).toHaveBeenCalledTimes(1)
+      expect(fake.map.remove).not.toHaveBeenCalled()
+      expect(fake.map.removeImage).not.toHaveBeenCalled()
+    } finally { view.unmount(); vi.useRealTimers() }
+  })
+
+  it('coalesces a descriptor read across rapid mode changes and retains its original lease', async () => {
+    vi.useFakeTimers()
+    const fake = fakeMap(); vi.mocked(createMapboxMap).mockReturnValue(fake.map as never)
+    let finish!: (value: typeof descriptor[]) => void
+    vi.mocked(fetchMapIconDescriptors).mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    const props = { visualScene: null, events: getDevelopmentMapEvents(), onReady: vi.fn(), onMoveEnd: vi.fn(), onRendererError: vi.fn() }
+    const view = render(<WheretooMap {...props} />)
+    try {
+      expect(fetchMapIconDescriptors).toHaveBeenCalledTimes(1)
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+      view.rerender(<WheretooMap {...props} active={false} />)
+      view.rerender(<WheretooMap {...props} active />)
+      expect(fetchMapIconDescriptors).toHaveBeenCalledTimes(1)
+      await act(async () => { finish([descriptor]); await vi.advanceTimersByTimeAsync(0) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(40000) })
+      expect(fetchMapIconDescriptors).toHaveBeenCalledTimes(2)
+      view.rerender(<WheretooMap {...props} active={false} />)
+      await act(async () => { await vi.advanceTimersByTimeAsync(20000) })
+      view.rerender(<WheretooMap {...props} active />)
+      expect(fetchMapIconDescriptors).toHaveBeenCalledTimes(2)
+      await act(async () => { await vi.advanceTimersByTimeAsync(25000) })
+      expect(fetchMapIconDescriptors).toHaveBeenCalledTimes(3)
+    } finally { view.unmount(); vi.useRealTimers(); vi.mocked(fetchMapIconDescriptors).mockResolvedValue([descriptor]) }
+  })
+
+  it('revalidates a coalesced response that arrives after its original hard lease', async () => {
+    vi.useFakeTimers()
+    const fake = fakeMap(); vi.mocked(createMapboxMap).mockReturnValue(fake.map as never)
+    let finish!: (value: typeof descriptor[]) => void
+    vi.mocked(fetchMapIconDescriptors).mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    const props = { visualScene: null, onReady: vi.fn(), onMoveEnd: vi.fn(), onRendererError: vi.fn() }
+    const view = render(<WheretooMap {...props} />)
+    try {
+      view.rerender(<WheretooMap {...props} active={false} />)
+      await act(async () => { await vi.advanceTimersByTimeAsync(65000) })
+      view.rerender(<WheretooMap {...props} active />)
+      await act(async () => { finish([descriptor]); await vi.advanceTimersByTimeAsync(0) })
+      expect(fetchMapIconDescriptors).toHaveBeenCalledTimes(2)
+    } finally { view.unmount(); vi.useRealTimers(); vi.mocked(fetchMapIconDescriptors).mockResolvedValue([descriptor]) }
+  })
+
+  it('does not treat a failed descriptor read as fresh complete availability on resume', async () => {
+    vi.useFakeTimers()
+    const fake = fakeMap(); vi.mocked(createMapboxMap).mockReturnValue(fake.map as never)
+    vi.mocked(fetchMapIconDescriptors).mockRejectedValueOnce(new Error('offline'))
+    const props = { visualScene: null, onReady: vi.fn(), onMoveEnd: vi.fn(), onRendererError: vi.fn() }
+    const view = render(<WheretooMap {...props} />)
+    try {
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      view.rerender(<WheretooMap {...props} active={false} />)
+      view.rerender(<WheretooMap {...props} active />)
+      expect(fetchMapIconDescriptors).toHaveBeenCalledTimes(2)
+    } finally { view.unmount(); vi.useRealTimers() }
   })
 
   it('coalesces paired foreground descriptor refreshes', async () => {

@@ -1,4 +1,5 @@
-import { useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
+import type { DiscoveryMode } from './discovery.location'
 import { DiscoveryMapPreview } from './DiscoveryMapPreview'
 import { Link } from 'react-router-dom'
 import { DiscoveryFilters as FilterControls } from './DiscoveryFilters'
@@ -14,6 +15,8 @@ import '../../components/layout/platform-brand.css'
 import discoveryHero from './assets/bay-bridge-night.jpg'
 
 export type DiscoveryViewProps = {
+  mode?: DiscoveryMode
+  onModeChange?(mode: DiscoveryMode): void
   filters: DiscoveryFilters
   items: readonly DiscoveryDisplayItem[]
   highlightItems?: readonly DiscoveryDisplayItem[]
@@ -169,8 +172,9 @@ function ErrorResults({ errorKind, retryAfterSeconds, onRetry }: Pick<DiscoveryV
 export function DiscoveryView({
   filters, items, highlightItems, status, errorKind, retryAfterSeconds, hasMore, isLoadingMore,
   mapPreview, onBroadenArea, canBroadenArea = true, regionFallback = false, moreError, notice, invalidItemCount = 0, onFiltersChange, onRefresh, onLoadMore, onRetry, publicSearch,
-  eventHref,
+  eventHref, mode = 'map', onModeChange,
 }: DiscoveryViewProps) {
+  const modeButtons = useRef<Partial<Record<DiscoveryMode, HTMLButtonElement>>>({})
   const highlightCandidate = status === 'ready' ? selectDiscoveryHighlight(highlightItems ?? items) : null
   const highlight = highlightCandidate ? items.find((item) => item.id === highlightCandidate.id) ?? null : null
   const rows = highlight ? items.filter((item) => item.id !== highlight.id) : items
@@ -197,18 +201,35 @@ export function DiscoveryView({
           <img className="discovery-intro__media" src={discoveryHero} width="2103" height="748" alt="" fetchPriority="high" />
         </section>
 
-        <FilterControls filters={filters} onChange={onFiltersChange}><a className="discovery-explore" href="#discovery-results">Explore events <ArrowMark /></a></FilterControls>
+        <FilterControls filters={filters} onChange={onFiltersChange} />
 
+        <div className={`discovery-workspace discovery-workspace--${mode}`}>
+        <div className="discovery-mode-bar">
+          <div className="discovery-mode-toggle" role="group" aria-label="Discovery view" onKeyDown={event => {
+            if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+            event.preventDefault()
+            const next = event.key === 'Home' || event.key === 'ArrowLeft' ? 'map' : 'list'
+            modeButtons.current[next]?.focus({ preventScroll: true })
+            onModeChange?.(next)
+          }}>
+            {(['map', 'list'] as const).map(option => <button key={option} ref={node => { modeButtons.current[option] = node ?? undefined }} type="button" aria-pressed={mode === option} aria-controls={`discovery-${option}-panel`} onClick={() => onModeChange?.(option)}>{option === 'map' ? 'Map' : 'List'}</button>)}
+          </div>
+          <Link className="discovery-full-map" to={'/map' + publicSearch}>Expand map <ArrowMark /></Link>
+        </div>
+        <div className="discovery-panels">
+        <div id="discovery-map-panel" className={`discovery-map-panel${mode === 'list' ? ' discovery-map-panel--inactive' : ''}`} inert={mode !== 'map' || undefined} aria-hidden={mode !== 'map' || undefined}>
         <section aria-labelledby="discovery-map-heading" className="discovery-map-entry">
           <div className="discovery-map-entry__heading">
             <div><h2 id="discovery-map-heading">Find your next stop.</h2><p>Explore events around the Bay.</p></div>
-            <Link className="discovery-map-entry__action" to={'/map' + publicSearch}>Explore the map <ArrowMark /></Link>
+
           </div>
           <div className="discovery-map-entry__preview">
             {mapPreview ?? <DiscoveryMapPreview />}
           </div>
         </section>
 
+        </div>
+        <div id="discovery-list-panel" hidden={mode !== 'list'} inert={mode !== 'list' || undefined}>
         {regionFallback ? <p className="discovery-notice" role="status">The map is unavailable. Showing Bay Area results.</p> : null}
         <section aria-labelledby="discovery-results-heading" className="discovery-results" id="discovery-results">
           {highlight ? <div className="discovery-feature-row">
@@ -256,6 +277,9 @@ export function DiscoveryView({
           ) : null}
           {status === 'ready' && items.length > 0 && !hasMore && !moreError ? <p className="discovery-end">That’s everything coming up.</p> : null}
         </section>
+        </div>
+        </div>
+        </div>
         <nav aria-label="Explore more events" className="discovery-shortcuts">
           {shortcuts.map(([title, description, destination]) => <Link key={title} to={destination}>
             <span><strong>{title}</strong><span>{description}</span></span><ArrowMark />

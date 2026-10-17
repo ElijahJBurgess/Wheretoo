@@ -170,7 +170,8 @@ for (const count of [9, 500, 2000]) test(`${count} events: cached empty viewport
     slow = false; requests.length = 0
     await page.goto(path + '?category=music&price=free'); await mapReference(page)
     await expect(page.locator('.living-map__canvas')).toHaveAttribute('data-wheretoo-event-count', String(Math.min(count, 1000)))
-    if (path === '/discover') await expect(page.getByRole('status', { name: 'Discovery results', exact: true })).toHaveText(`${Math.min(count, 20)} events`)
+    // Map mode keeps the List cache synchronized while its panel stays inaccessible.
+    if (path === '/discover') await expect(page.locator('#discovery-list-panel [aria-label="Discovery results"]')).toHaveText(`${Math.min(count, 20)} events`)
     await page.locator('.living-map').scrollIntoViewIfNeeded()
     const canvas = await page.locator('.mapboxgl-canvas').elementHandle()
     const original = await page.evaluate(() => {
@@ -193,7 +194,7 @@ for (const count of [9, 500, 2000]) test(`${count} events: cached empty viewport
       await expect(page.locator('.living-map__broaden')).toHaveCount(0)
     }
     await expect(page.getByText('No events found in this area.', { exact: true })).toBeVisible()
-    if (path === '/discover') await expect(page.getByRole('status', { name: 'Discovery results', exact: true })).toHaveText('0 events')
+    if (path === '/discover') await expect(page.locator('#discovery-list-panel [aria-label="Discovery results"]')).toHaveText('0 events')
     expect(requests.filter(r => r.api === 'map')).toHaveLength(count === 2000 ? 2 : 1)
     expect(requests.filter(r => r.api === 'list')).toHaveLength(path === '/discover' ? 2 : 0)
     await expect.poll(() => page.evaluate(() => window.__areaSourceUpdates)).toBe(count === 2000 ? 1 : 0)
@@ -209,7 +210,7 @@ for (const count of [9, 500, 2000]) test(`${count} events: cached empty viewport
     await page.evaluate(v => { window.__phase4Map.jumpTo({ center: v.center, zoom: v.zoom }) }, original)
     await expect(page.getByRole('button', { name: 'Choose an event on the map', exact: true })).toBeEnabled()
     await expect(page.getByText('No events found in this area.', { exact: true })).toHaveCount(0)
-    if (path === '/discover') await expect(page.getByRole('status', { name: 'Discovery results', exact: true })).toHaveText(`${Math.min(count, 20)} events`)
+    if (path === '/discover') await expect(page.locator('#discovery-list-panel [aria-label="Discovery results"]')).toHaveText(`${Math.min(count, 20)} events`)
     expect(requests.filter(r => r.api === 'map')).toHaveLength(count === 2000 ? 3 : 1)
     expect(requests.filter(r => r.api === 'list')).toHaveLength(path === '/discover' ? 2 : 0)
     expect(requests.every(r => r.api === 'map' ? r.query.p_when === 'next7' && r.query.p_admission_type === 'free' && JSON.stringify(r.query.p_categories) === '["music"]' : r.query.when === 'next7' && r.query.admissionType === 'free' && r.query.category === 'music')).toBe(true)

@@ -39,7 +39,7 @@ async function readFirstPage(filters: DiscoveryFilters, signal: AbortSignal, rec
   }
 }
 
-export function useDiscovery(filters: DiscoveryFilters, bounds?: MapBounds | null) {
+export function useDiscovery(filters: DiscoveryFilters, bounds?: MapBounds | null, options?: { activeList?: boolean; onAuthoritativeListRefresh?(): void }) {
   const client = useQueryClient()
   const publicSearch = serializeDiscoveryFilters(filters)
   const areaKey = bounds === null ? 'pending-area' : JSON.stringify(bounds ?? null)
@@ -56,6 +56,11 @@ export function useDiscovery(filters: DiscoveryFilters, bounds?: MapBounds | nul
     queryKey,
     queryFn: ({ signal }) => readFirstPage(filters, signal, setClock, setBlockedUntil, bounds ?? undefined),
     enabled: bounds !== null,
+    // The visible List takes over the map's bounded freshness cadence. Failures
+    // wait a full interval, rather than turning an already-stale cache into a loop.
+    refetchInterval: current => options?.activeList && !blocked && bounds !== null && current.state.fetchStatus === 'idle'
+      ? Math.max(1, Math.max(current.state.dataUpdatedAt, current.state.errorUpdatedAt) + 60_000 - Date.now()) : false,
+    refetchIntervalInBackground: false,
     staleTime: 60_000, gcTime: 600_000, retry: false,
     // A cached chain is replaced by a fresh first page. Never refetch every cursor.
     refetchOnMount: !blocked, refetchOnWindowFocus: !blocked, refetchOnReconnect: !blocked,
@@ -98,6 +103,16 @@ export function useDiscovery(filters: DiscoveryFilters, bounds?: MapBounds | nul
   }
 
   const feed = query.data
+  const activeList = options?.activeList
+  const onAuthoritativeListRefresh = options?.onAuthoritativeListRefresh
+  const observedRead = useRef<number | undefined>(undefined)
+  useEffect(() => {
+    if (feed?.readId === undefined || observedRead.current === feed.readId) return
+    observedRead.current = feed.readId
+    // A paginated List is not a complete map inventory. Invalidate coverage;
+    // never remove individual markers based on absence from a bounded page.
+    if (activeList) onAuthoritativeListRefresh?.()
+  }, [feed?.readId, activeList, onAuthoritativeListRefresh])
   const first = feed?.pages[0]
   const serverNow = first && feed ? Date.parse(first.serverNow) + Math.max(0, clock - feed.receivedAt) : 0
   const obsoleteWeekend = filters.when === 'weekend' && Boolean(first && serverNow >= Date.parse(first.window.end))
