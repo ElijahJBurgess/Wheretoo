@@ -3,7 +3,7 @@ import { DiscoveryFilters as FilterControls } from '../features/discovery/Discov
 import type { DiscoveryFilters } from '../features/discovery/discovery.types'
 import { discoveryBounds } from '../features/discovery/discovery.scope'
 import type { MapCamera, MapBounds } from './core/map.types'
-import { publicReturnState } from '../features/discovery/discovery.navigation'
+import { captureDiscoveryScroll, publicReturnState } from '../features/discovery/discovery.navigation'
 import { parseDiscoverySearch, serializeDiscoveryFilters } from '../features/discovery/discovery.filters'
 import { readMapReturn, type MapChooserContext } from './navigation/mapNavigation'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -231,11 +231,12 @@ export function Component({ embedded = false, onAreaChange, onContextReady, onUn
   const navigationState = useCallback(() => {
     const snapshot = readSnapshot.current?.() ?? viewport
     const camera = snapshot?.camera
-    const currentState = publicReturnState(window.location.pathname === location.pathname ? window.history.state?.usr : location.state)
+    const savedState = publicReturnState(window.location.pathname === location.pathname ? window.history.state?.usr : location.state)
+    const currentState = embedded && window.location.pathname === '/discover' ? captureDiscoveryScroll(savedState) : savedState
     const mapReturn = camera ? readMapReturn({ mapReturn: { version: 1, path: origin, camera, area: snapshot?.bounds ? discoveryBounds(snapshot.bounds) : undefined, selectedEventId, chooser } }) : null
     const state = { ...currentState, ...(location.pathname === '/discover' ? { discoverySearch: serializeDiscoveryFilters(parseDiscoverySearch(location.search)) } : {}), ...(mapReturn ? { mapReturn } : {}) }
     return state
-  }, [viewport, location.pathname, location.state, location.search, origin, selectedEventId, chooser])
+  }, [viewport, location.pathname, location.state, location.search, origin, selectedEventId, chooser, embedded])
   useLayoutEffect(() => {
     onContextReady?.({ state: navigationState, broaden: () => broaden.current?.() })
     return () => onContextReady?.(null)

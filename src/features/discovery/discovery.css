@@ -873,7 +873,6 @@
 .discovery-map-entry__preview { position: relative; height: 360px; border-top: 1px solid var(--discovery-line); }
 .discovery-map-entry__loading { display: grid; height: 100%; margin: 0; place-items: center; color: var(--discovery-muted); }
 .discovery-map-entry .living-map--embedded { height: 360px; min-height: 0; }
-.discovery-map-entry .event-preview { max-height: calc(100% - 70px); }
 @media (max-width: 640px) {
   .discovery-map-entry__heading { align-items: stretch; flex-direction: column; gap: 16px; padding: 18px; }
   .discovery-map-entry h2 { font-size: 23px; }

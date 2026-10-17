@@ -9,20 +9,20 @@ const description = 'Join local artists, musicians and neighbors for performance
 function event(admission: 'paid' | 'free') {
   return { id, title, description, category: 'music', starts_at: new Date(Date.now() + 3600000).toISOString(), ends_at: new Date(Date.now() + 7200000).toISOString(), timezone: 'America/Los_Angeles', venue_name: 'Community hall', address_line1: '123 Broadway', address_line2: null, city: 'Oakland', region: 'CA', postal_code: '94612', country_code: 'US', latitude: 37.804, longitude: -122.263, artwork_path: null, animation_preset: 'generic', minimum_age: 'all_ages', advisories: [], organizer: { id: second, display_name: 'Community organizer' }, admission_type: admission }
 }
-async function fixtures(page: Page, admission: 'paid' | 'free' = 'paid') {
-  const state = { available: true, expired: false, brokenImage: false, soldOut: false, mapReads: 0 }
+async function fixtures(page: Page, admission: 'paid' | 'free' = 'paid', previewTitle = title) {
+  const state = { available: true, expired: false, brokenImage: false, hasImage: false, soldOut: false, mapReads: 0 }
   await page.route('**/rest/v1/rpc/**', async route => {
     const rpc = new URL(route.request().url()).pathname.split('/').pop()
     const e = event(admission)
     if (rpc === 'get_public_filtered_map_events') {
       state.mapReads++
-      const rows = !state.available ? [] : [id, second].map((event_id, i) => ({ event_id, title: i ? 'Second community gathering' : title, category: e.category, starts_at: state.expired ? new Date(Date.now() - 7200000).toISOString() : e.starts_at, ends_at: state.expired ? new Date(Date.now() - 1000).toISOString() : e.ends_at, timezone: e.timezone, latitude: e.latitude, longitude: e.longitude, animation_preset: e.animation_preset, venue_label: e.venue_name, admission_type: admission, minimum_price_minor: admission === 'paid' ? 1200 : null, minimum_age: e.minimum_age, advisories: [], artwork_reference: null, map_icon_version_id: null }))
+      const rows = !state.available ? [] : [id, second].map((event_id, i) => ({ event_id, title: i ? 'Second community gathering' : previewTitle, category: e.category, starts_at: state.expired ? new Date(Date.now() - 7200000).toISOString() : e.starts_at, ends_at: state.expired ? new Date(Date.now() - 1000).toISOString() : e.ends_at, timezone: e.timezone, latitude: e.latitude, longitude: e.longitude, animation_preset: e.animation_preset, venue_label: e.venue_name, admission_type: admission, minimum_price_minor: admission === 'paid' ? 1200 : null, minimum_age: e.minimum_age, advisories: [], artwork_reference: null, map_icon_version_id: null }))
       return route.fulfill({ json: rows, headers: { 'access-control-expose-headers': 'content-range, X-Wheretoo-Discovery', 'X-Wheretoo-Discovery': JSON.stringify({ serverNow: new Date().toISOString(), window: { start: new Date().toISOString(), end: new Date(Date.now() + 168 * 3600000).toISOString(), timezone: 'America/Los_Angeles' } }), 'content-range': rows.length ? '0-1/2' : '*/0' } })
     }
     if (rpc === 'get_public_event_ticketing') return route.fulfill({ json: state.available ? [{ event: e, tiers: admission === 'free' ? [] : [{ id: tier, name: 'General admission', description: null, unit_amount_minor: 1200, currency: 'usd', availability_status: state.soldOut ? 'sold_out' : 'available' }] }] : [] })
     if (rpc === 'get_public_event') return route.fulfill({ json: state.available ? [e] : [] })
     if (rpc === 'get_public_free_rsvp') return route.fulfill({ json: { event: e, availability: { status: 'available', remaining: 20, maxQuantity: 10 } } })
-    if (rpc === 'list_event_images') return route.fulfill({ json: state.brokenImage ? [{ id: image, eventId: id, path: id + '/missing.png', position: 1, owned: null }] : [] })
+    if (rpc === 'list_event_images') return route.fulfill({ json: state.brokenImage || state.hasImage ? [{ id: image, eventId: id, path: id + '/missing.png', position: 1, owned: null }] : [] })
     if (rpc === 'get_public_waitlist_capability') return route.fulfill({ json: { enabled: false, eligible: false } })
     if (rpc === 'get_public_map_icon_versions') return route.fulfill({ json: [] })
     return route.abort()
@@ -55,6 +55,7 @@ async function camera(page: Page) {
 }
 async function select(page: Page) {
   const trigger = page.getByRole('button', { name: 'Choose an event on the map' })
+  await expect(trigger).toBeEnabled()
   await trigger.focus(); await page.keyboard.press('Enter')
   const choice = page.getByRole('button', { name: `Open ${title} event preview`, exact: true })
   await choice.focus(); await page.keyboard.press('Enter')
@@ -115,8 +116,11 @@ test('free RSVP action precedes long copy and retains map return context', async
   const before = await camera(page)
   await page.getByRole('link', { name: 'View event', exact: true }).click()
   const action = page.getByRole('link', { name: 'RSVP for free', exact: true })
-  await expect(action).toBeInViewport(); await action.click()
-  await expect(page.getByRole('button', { name: 'Increase quantity', exact: true })).toBeVisible()
+  await expect(action).toBeInViewport()
+  await page.screenshot({ path: info.outputPath('free-event-primary-action.png') })
+  await action.click()
+  await expect(page.getByRole('button', { name: 'Increase quantity', exact: true })).toBeInViewport({ ratio: 1 })
+  await expect(page.getByRole('heading', { name: 'Choose your RSVP', exact: true })).toBeFocused()
   await page.screenshot({ path: info.outputPath('rsvp-entry.png') })
   await page.getByRole('link', { name: 'Return to event', exact: true }).click()
   await page.getByRole('link', { name: 'Return to map', exact: true }).click(); await ready(page)
@@ -160,4 +164,130 @@ test('embedded discovery preserves canonical filters, scroll and map context', a
   await expect(page.locator('.living-map__canvas')).toHaveAttribute('data-selected-event-id', id)
   await expect(page.getByRole('combobox', { name: 'Date', exact: true })).toHaveValue('weekend')
   expect(await page.evaluate(() => scrollY)).toBeCloseTo(scrollBefore, 0)
+})
+
+async function expectTouchHit(page: Page, selector: string) {
+  const hit = await page.locator(selector).evaluate(node => {
+    const r = node.getBoundingClientRect()
+    const owner = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)
+    return Boolean(owner && node.contains(owner))
+  })
+  expect(hit, `${selector} must receive a touch at its visible center`).toBe(true)
+}
+
+test('mobile overlays fit the map, expose chooser rows and keep long titles clear of close controls', async ({ page }, info) => {
+  test.skip(!info.project.use.hasTouch, 'Mobile touch layout regression')
+  const longTitle = 'Oakland community night: live music, local food and an evening by the lake'
+  const state = await fixtures(page, 'paid', longTitle)
+  for (const route of ['/map', '/discover']) {
+    state.available = true
+    await page.goto(route); await ready(page)
+    await page.locator('.living-map').scrollIntoViewIfNeeded()
+    const canvas = await page.locator('.mapboxgl-canvas').elementHandle()
+    await page.getByRole('button', { name: 'Choose an event on the map' }).tap()
+    const chooser = page.getByRole('region', { name: '2 events here' })
+    await expect(chooser).toBeVisible()
+    const fits = await chooser.evaluate(node => {
+      const panel = node.getBoundingClientRect(), map = node.closest('.living-map')!.getBoundingClientRect()
+      return panel.top >= map.top && panel.bottom <= map.bottom && panel.left >= map.left && panel.right <= map.right
+    })
+    expect(fits, `${route} chooser must stay inside its map container`).toBe(true)
+    await expectTouchHit(page, '.event-preview__close')
+    await page.getByRole('button', { name: `Open ${longTitle} event preview`, exact: true }).tap()
+    await expect(page.locator('.event-preview__artwork-fallback')).toBeVisible()
+    const overlap = await page.locator('.event-preview').evaluate(node => {
+      const a = node.querySelector('h2')!.getBoundingClientRect(), b = node.querySelector('.event-preview__close')!.getBoundingClientRect()
+      return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
+    })
+    expect(overlap, 'Event title must not intersect its close button').toBe(false)
+    await expectTouchHit(page, '.event-preview__close')
+    await expectTouchHit(page, '.event-preview__action')
+    await expectTouchHit(page, '.mapboxgl-ctrl-zoom-in')
+    await expectTouchHit(page, '.mapboxgl-ctrl-zoom-out')
+    expect(await page.locator('.event-preview__action').evaluate(node => {
+      const r = node.getBoundingClientRect(), panel = node.closest('.event-preview')!.getBoundingClientRect()
+      return r.top >= panel.top && r.bottom <= panel.bottom
+    })).toBe(true)
+    await page.screenshot({ path: info.outputPath(route.slice(1) + '-usable-preview.png') })
+    await page.getByRole('button', { name: 'Close event preview', exact: true }).tap()
+    await expect(page.getByRole('button', { name: 'Choose an event on the map' })).toBeFocused()
+    const zoom = await page.locator('.mapboxgl-ctrl-zoom-in').boundingBox()
+    expect(zoom!.width).toBeGreaterThanOrEqual(44); expect(zoom!.height).toBeGreaterThanOrEqual(44)
+    await expectTouchHit(page, '.mapboxgl-ctrl-zoom-in')
+    const masthead = await page.locator('.living-map__masthead').boundingBox()
+    expect(masthead!.x + masthead!.width <= zoom!.x || masthead!.y >= zoom!.y + zoom!.height).toBe(true)
+    state.available = false
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await expect(page.getByText('No events found in this area.', { exact: true })).toBeVisible()
+    const feedback = await page.locator('.living-map__event-status').boundingBox()
+    const controls = await page.locator('.mapboxgl-ctrl-top-right').boundingBox()
+    expect(feedback!.x + feedback!.width <= controls!.x || feedback!.y >= controls!.y + controls!.height).toBe(true)
+    await expectTouchHit(page, '.mapboxgl-ctrl-zoom-in')
+    expect(await canvas!.evaluate(node => node === document.querySelector('.mapboxgl-canvas'))).toBe(true)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  }
+})
+
+test('selected mobile overlays adapt to dynamic height and reduced motion without replacing the map', async ({ page }, info) => {
+  test.skip(!info.project.use.hasTouch, 'Mobile touch layout regression')
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await fixtures(page); await page.goto('/map'); await ready(page)
+  const filtered = page.waitForResponse(response => response.url().endsWith('/rpc/get_public_filtered_map_events') && response.request().postDataJSON()?.p_when === 'today')
+  await page.getByRole('combobox', { name: 'Date', exact: true }).selectOption('today')
+  await filtered
+  await expect(page.locator('.living-map__canvas')).toHaveAttribute('data-wheretoo-event-count', '2')
+  await select(page)
+  const canvas = await page.locator('.mapboxgl-canvas').elementHandle()
+  const viewport = page.viewportSize()!
+  await page.setViewportSize({ width: viewport.width, height: Math.max(280, viewport.height - 80) })
+  // Container query sizes and Mapbox's ResizeObserver settle on the next frame.
+  await expect.poll(() => page.locator('.event-preview').evaluate(node => {
+    const p = node.getBoundingClientRect(), m = node.closest('.living-map')!.getBoundingClientRect()
+    return p.top >= m.top && p.bottom <= m.bottom
+  }), { timeout: 1000, intervals: [16, 32, 64] }).toBe(true)
+  const mapBox = (await page.locator('.living-map').boundingBox())!
+  if (mapBox.height >= 124) {
+    const scrollPane = await page.locator('.event-preview__scroll').boundingBox()
+    expect(scrollPane!.height, 'The scrolling event pane must leave readable space below its close header').toBeGreaterThanOrEqual(100)
+  }
+  // A full-height header is impossible in the smallest map. Verify actual readable
+  // text through internal scrolling instead of merely accepting a clipped pane.
+  const readable = await page.locator('.event-preview h2').evaluate(async node => {
+    node.scrollIntoView({ block: 'start', behavior: 'instant' })
+    const scroll = node.closest('.event-preview__scroll')!
+    if (node.closest('.living-map')!.getBoundingClientRect().height >= 124) {
+      scroll.scrollTop -= node.closest('.event-preview')!.querySelector('.event-preview__topline')!.getBoundingClientRect().height + 8
+    }
+    await new Promise(requestAnimationFrame)
+    const text = node.firstChild!
+    const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 5)
+    const r = range.getBoundingClientRect(), pane = node.closest('.event-preview__scroll')!.getBoundingClientRect()
+    const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)
+    return r.top >= pane.top && r.bottom <= pane.bottom && Boolean(hit && node.contains(hit))
+  })
+  expect(readable, 'An event title line must be readable after deliberate internal scrolling').toBe(true)
+  await page.locator('.event-preview__scroll').evaluate(node => { node.scrollTop = 0 })
+  await expectTouchHit(page, '.event-preview__close')
+  await expectTouchHit(page, '.event-preview__action')
+  await expectTouchHit(page, '.mapboxgl-ctrl-zoom-in')
+  await expectTouchHit(page, '.mapboxgl-ctrl-zoom-out')
+  expect(await canvas!.evaluate(node => node === document.querySelector('.mapboxgl-canvas'))).toBe(true)
+  expect(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true)
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('button', { name: 'Choose an event on the map' })).toBeFocused()
+})
+
+test('short landscape event artwork keeps RSVP entry and quantity controls reachable', async ({ page }, info) => {
+  const size = page.viewportSize()!
+  test.skip(!info.project.use.hasTouch || size.width <= size.height, 'Touch landscape regression')
+  const state = await fixtures(page, 'free'); state.hasImage = true
+  await page.route('**/functions/v1/event-images?*', route => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="500"><rect width="400" height="500" fill="#30264f"/></svg>' }))
+  await page.goto(`/events/${id}`)
+  await expect(page.locator('.buyer-event-hero__image')).toBeVisible()
+  const action = page.getByRole('link', { name: 'RSVP for free', exact: true })
+  await expect(action).toBeInViewport({ ratio: 1 })
+  await page.screenshot({ path: info.outputPath('landscape-rsvp-with-artwork.png') })
+  await action.tap()
+  await expect(page.getByRole('button', { name: 'Increase quantity', exact: true })).toBeInViewport({ ratio: 1 })
+  await expect(page.getByRole('heading', { name: 'Choose your RSVP', exact: true })).toBeFocused()
 })
