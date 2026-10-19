@@ -48,6 +48,7 @@ export function Component({ embedded = false, active = true, onAreaChange, onAut
   const pendingReturn = useRef(initialReturn)
   const preserveReturnedCamera = useRef<string | null>(null)
   const suppressPreviewFocus = useRef(!active)
+  const revealUserSelection = useRef(false)
   const root = useRef<HTMLElement | null>(null)
   const chooserTrigger = useRef<HTMLButtonElement | null>(null)
   const returnFocus = useRef<'map' | 'viewport' | null>(null)
@@ -84,6 +85,7 @@ export function Component({ embedded = false, active = true, onAreaChange, onAut
   }, [])
   const restoreEntry = useCallback((saved: NonNullable<ReturnType<typeof readMapReturn>>) => {
     pendingReturn.current = saved
+    revealUserSelection.current = false
     setSelectedEventId(null); setChooser(null)
     restoreCamera.current?.(saved.camera)
   }, [])
@@ -187,6 +189,7 @@ export function Component({ embedded = false, active = true, onAreaChange, onAut
     // Focus is restored after the preview/chooser has unmounted, below.
   }, [])
   const handleSelectEvent = useCallback((eventId: string | null) => {
+    revealUserSelection.current = Boolean(eventId)
     suppressPreviewFocus.current = false
     pendingReturn.current = null
     returnFocus.current = 'map'
@@ -200,12 +203,14 @@ export function Component({ embedded = false, active = true, onAreaChange, onAut
     returnFocus.current = 'map'
     const available = new Set((events ?? []).map(({ id }) => id))
     const valid = [...new Set(eventIds)].filter((id) => available.has(id))
+    revealUserSelection.current = valid.length === 1
     setSelectedEventId(null)
     setInteractionError(null)
     setChooser(valid.length > 1 ? { eventIds: valid, anchor, scrollTop: 0, visibleCount: 20, trigger: 'map', focusedId: null } : null)
     if (valid.length === 1) setSelectedEventId(valid[0])
   }, [events])
   const handleChooserSelect = useCallback((eventId: string) => {
+    revealUserSelection.current = true
     suppressPreviewFocus.current = false
     setChooser(current => current ? { ...current, focusedId: eventId } : null)
     setSelectedEventId(reconcileSelectedEventId(eventId, events ?? []))
@@ -234,7 +239,17 @@ export function Component({ embedded = false, active = true, onAreaChange, onAut
   useLayoutEffect(() => {
     if (!active) suppressPreviewFocus.current = true
     if (!active || suppressPreviewFocus.current) return
-    if (focusSelectionId) preview.current?.focus({ preventScroll: true })
+    if (focusSelectionId) {
+      preview.current?.focus({ preventScroll: true })
+      // A chooser tap can leave the embedded map behind Discovery's sticky bar
+      // in short landscape windows. Reveal only a new, user-selected preview;
+      // restored history and Map/List handoffs keep their existing scroll.
+      const reveal = revealUserSelection.current
+      revealUserSelection.current = false
+      if (reveal && embedded && window.matchMedia?.('(max-height: 500px) and (orientation: landscape)').matches) {
+        preview.current?.scrollIntoView({ block: 'nearest', behavior: 'instant' })
+      }
+    }
     else if (chooserKey) {
       const row = Array.from(preview.current?.querySelectorAll<HTMLElement>('[data-event-id]') ?? []).find(node => node.dataset.eventId === chooser?.focusedId)
       ;(row ?? preview.current)?.focus({ preventScroll: true })
@@ -244,7 +259,7 @@ export function Component({ embedded = false, active = true, onAreaChange, onAut
       target?.focus({ preventScroll: true })
       returnFocus.current = null
     }
-  }, [focusSelectionId, chooserKey, chooser?.focusedId, focusRequest, active])
+  }, [focusSelectionId, chooserKey, chooser?.focusedId, focusRequest, active, embedded])
 
   const navigationState = useCallback(() => {
     const snapshot = readSnapshot.current?.() ?? viewport

@@ -199,9 +199,141 @@
   color: #f7f6fb; background: #20232b; font-size: .8rem; font-weight: 700; text-decoration: none;
 }
 .living-map__home:focus-visible { outline: 3px solid #b7a5ff; outline-offset: 3px; }
-@container map-overlays (max-height: 22rem) {
-  .living-map .event-preview.event-preview--invitation {
-    top: .75rem; bottom: .75rem; max-height: calc(100cqh - 1.5rem);
-    height: auto; display: flex;
+
+/* Leave room for the facts when the standalone map is shorter than a full
+   poster opening, without turning its artwork into a thumbnail. */
+@container map-overlays (min-height: 38rem) and (max-height: 50rem) {
+  .living-map .event-preview--invitation .event-preview__artwork {
+    max-height: calc(100cqh - 30rem);
+  }
+}
+
+/* A short map cannot fit a poster above the facts. Keep its artwork as a
+   contained thumbnail and reserve the first scroll view for the decision. */
+@container map-overlays (max-height: 38rem) {
+  .living-map .event-preview.event-preview--invitation,
+  .living-map.living-map--embedded .event-preview.event-preview--invitation {
+    top: .75rem;
+    bottom: .75rem;
+    height: auto;
+    max-height: calc(100cqh - 1.5rem);
+  }
+  .living-map .event-preview--invitation .event-preview__scroll {
+    display: grid;
+    grid-template-columns: 3.5rem minmax(0, 1fr);
+    align-content: start;
+    gap: .4rem .75rem;
+    padding: .5rem .625rem;
+  }
+  .living-map .event-preview--invitation .event-invitation__hero {
+    grid-column: 1;
+    grid-row: 1;
+    padding: 0;
+    border-radius: .6rem;
+  }
+  .living-map .event-preview--invitation .event-preview__artwork,
+  .living-map .event-preview--invitation .event-preview__artwork-fallback {
+    width: 3.5rem;
+    height: 4.375rem;
+    min-height: 0;
+    max-height: none;
+    padding: 0;
+    border-radius: .6rem;
+  }
+  .living-map .event-preview--invitation .event-preview__artwork-fallback {
+    align-items: center;
+  }
+  .living-map .event-preview--invitation .event-preview__artwork-fallback strong,
+  .living-map .event-preview--invitation .event-invitation__fallback-label,
+  .living-map .event-preview--invitation .event-preview__eyebrow { display: none; }
+  .living-map .event-preview--invitation .event-invitation__body { display: contents; }
+  .living-map .event-preview--invitation .event-preview__copy {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: center;
+  }
+  .living-map .event-preview.event-preview--invitation h2 {
+    font-size: 1.125rem;
+    line-height: 1.15;
+  }
+  .living-map .event-preview--invitation .event-preview__details {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    gap: .25rem;
+    margin: 0;
+  }
+  .living-map .event-preview.event-preview--invitation dd { font-size: .8rem; line-height: 1.35; }
+  .living-map .event-preview--invitation .event-invitation__description {
+    grid-column: 1 / -1;
+    grid-row: 3;
+  }
+  .living-map .event-preview--invitation .event-preview__close {
+    top: .5rem;
+    right: .5rem;
+    left: auto;
+  }
+  .living-map .event-preview--invitation .event-preview__footer {
+    display: flex;
+    grid-template-columns: none;
+    gap: .5rem;
+    padding: .4rem .625rem .5rem;
+  }
+  .living-map .event-preview--invitation .event-preview__action,
+  .living-map .event-preview--invitation .event-preview__back {
+    min-height: 44px;
+    padding-inline: .75rem;
+    font-size: .8rem;
+  }
+}
+
+/* Discovery's sticky mode bar can cover the top of a landscape map. Anchor
+   compact embedded cards lower, leaving its fixed close control reachable. */
+@container map-overlays (max-height: 38rem) {
+  .living-map.living-map--embedded .event-preview.event-preview--invitation {
+    top: auto;
+    scroll-margin-block: 5.5rem .75rem;
+    max-height: calc(100cqh - 4.5rem);
+  }
+}
+@container map-overlays (max-height: 38rem) and (min-width: 26rem) {
+  .living-map.living-map--embedded .event-preview.event-preview--invitation {
+    max-height: calc(100cqh - 7rem);
+  }
+}
+
+/* Retained selections must leave the empty-area feedback independently usable. */
+@container map-overlays (width < 26rem) or ((width < 35rem) and (height > 22rem)) {
+  .living-map.living-map--empty-with-preview .event-preview.event-preview--invitation {
+    top: auto;
+    bottom: .75rem;
+    max-height: calc(100cqh - 7rem);
+  }
+}
+@container map-overlays (width >= 35rem) or ((width >= 26rem) and (height <= 22rem)) {
+  .living-map.living-map--empty-with-preview .event-preview.event-preview--invitation {
+    left: .75rem;
+    right: auto;
+    max-width: min(26rem, 60cqw, calc(100% - 8rem));
+  }
+}
+
+/* Keep the existing zoom controls usable beside a selected mobile preview. */
+@media (max-width: 767px) and (orientation: portrait) {
+  .living-map:not(.living-map--embedded) .event-preview.event-preview--invitation {
+    top: 7rem;
+    max-height: calc(100cqh - 7.75rem);
+  }
+  @container map-overlays (min-height: 38rem) and (max-height: 50rem) {
+    .living-map:not(.living-map--embedded) .event-preview--invitation .event-preview__artwork {
+      max-height: calc(100cqh - 32rem);
+    }
+  }
+}
+@container map-overlays (width < 26rem) {
+  .living-map.living-map--embedded:has(.event-preview--invitation) .living-map__choose { visibility: hidden; }
+  .living-map.living-map--embedded:has(.event-preview--invitation) .mapboxgl-ctrl-group { display: flex; }
+  .living-map.living-map--embedded:has(.event-preview--invitation) .mapboxgl-ctrl-group button + button {
+    border-top: 0;
+    border-left: 1px solid #515865;
   }
 }

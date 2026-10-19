@@ -197,6 +197,29 @@ describe('LivingMapPage', () => {
     else expect(map).toHaveAttribute('data-selected-event-id', '')
   })
 
+  it('reveals explicit embedded landscape selections without scrolling restored previews', async () => {
+    const scroll = vi.fn()
+    const original = HTMLElement.prototype.scrollIntoView
+    HTMLElement.prototype.scrollIntoView = scroll
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true })))
+    try {
+      const id = '3d000000-0000-4000-8000-000000000001'
+      query.mockReturnValue({ events: [{ ...getDevelopmentMapEvents()[0], id, endsAt: '2027-07-01T00:00:00Z' }], complete: true, generation: 1, pending: false, error: null, retry: vi.fn() })
+      const router = createMemoryRouter([{ path: '/discover', element: <Component embedded /> }], { initialEntries: [{ pathname: '/discover', state: { mapReturn: { version: 1, path: '/discover', camera: { center: [-122.264, 37.803], zoom: 16.25, pitch: 25, bearing: 0 }, selectedEventId: id, chooser: null } } }] })
+      const restored = rtlRender(<QueryClientProvider client={new QueryClient()}><RouterProvider router={router} /></QueryClientProvider>)
+      expect(await screen.findByRole('region', { name: 'Day Party' })).toHaveFocus()
+      expect(scroll).not.toHaveBeenCalled()
+      restored.unmount()
+      query.mockReturnValue({ events: getDevelopmentMapEvents(), generation: 1, pending: false, error: null, retry: vi.fn() })
+      render(<Component embedded />)
+      fireEvent.click(await screen.findByRole('button', { name: 'select day party' }))
+      expect(scroll).toHaveBeenCalledOnce()
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('does not present a previous-filter selection while its replacement is pending', () => {
     const view = render(<Component />)
     fireEvent.click(screen.getByRole('button', { name: 'select day party' }))
