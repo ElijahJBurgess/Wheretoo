@@ -1,0 +1,207 @@
+/* Keep invitation styling inside the map: organizer previews share the base class. */
+.living-map .event-preview.event-preview--invitation {
+  --invitation-surface: #20232b;
+  --invitation-text: #f4f3fa;
+  --invitation-muted: #b8b2c3;
+  --invitation-purple: #7955ed;
+  --invitation-accent: #c5b5ff;
+  top: max(1rem, env(safe-area-inset-top));
+  right: calc(5rem + env(safe-area-inset-right));
+  bottom: auto;
+  left: auto;
+  width: min(440px, 42vw);
+  max-height: min(calc(100dvh - 4.5rem - env(safe-area-inset-bottom)), calc(100cqh - 4.5rem));
+  color: var(--invitation-text);
+  border: 1px solid rgb(220 224 240 / 18%);
+  border-radius: 1.75rem;
+  background: var(--invitation-surface);
+  box-shadow: 0 16px 64px rgb(15 15 25 / 25%);
+  animation: event-invitation-reveal 220ms ease-out both;
+}
+.living-map .event-preview--invitation .event-preview__scroll {
+  display: block;
+  flex: 1 1 auto;
+  padding: 0;
+  scrollbar-width: thin;
+  scrollbar-color: #585461 transparent;
+}
+.living-map .event-preview--invitation .event-invitation__hero {
+  padding: .75rem .75rem 0;
+  background: #17191f;
+}
+.living-map .event-preview--invitation .event-preview__artwork {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: min(420px, 46dvh);
+  border-radius: 1.15rem;
+  object-fit: contain;
+}
+.living-map .event-preview--invitation .event-preview__artwork-fallback {
+  position: relative;
+  display: flex;
+  width: 100%;
+  height: auto;
+  min-height: 245px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1.5rem;
+  overflow: hidden;
+  padding: 4.25rem 1.5rem 2rem;
+  color: #f8f4ff;
+  border-radius: 1.15rem;
+  background: #30264f;
+}
+.living-map .event-preview--invitation .event-preview__artwork-fallback strong {
+  max-width: 12ch;
+  overflow-wrap: anywhere;
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 3vw, 3rem);
+  line-height: 1.02;
+  letter-spacing: -.055em;
+}
+.living-map .event-preview--invitation .event-invitation__fallback-label {
+  font-size: .7rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+.living-map .event-preview--invitation .event-preview__artwork-fallback svg { width: 1.75rem; }
+.living-map .event-preview--invitation .event-invitation__body {
+  position: relative;
+  display: grid;
+  gap: .85rem;
+  padding: 1.5rem;
+  border-radius: 1.75rem 1.75rem 0 0;
+  background: var(--invitation-surface);
+}
+.living-map .event-preview--invitation .event-preview__eyebrow {
+  color: var(--invitation-accent);
+  font-size: .72rem;
+  letter-spacing: .06em;
+}
+.living-map .event-preview.event-preview--invitation h2 {
+  font-size: clamp(1.65rem, 2.2vw, 2rem);
+  line-height: 1.08;
+  letter-spacing: -.045em;
+}
+.living-map .event-preview--invitation .event-preview__details { gap: .85rem; margin-top: .35rem; }
+.living-map .event-preview--invitation .event-preview__details > div { gap: .75rem; }
+.living-map .event-preview.event-preview--invitation dt { color: var(--invitation-muted); font-size: .75rem; }
+.living-map .event-preview.event-preview--invitation dd { color: var(--invitation-text); font-size: .85rem; line-height: 1.5; }
+.living-map .event-preview--invitation .event-preview__close {
+  position: absolute;
+  z-index: 1;
+  top: 1.25rem;
+  right: auto;
+  left: 1.25rem;
+  width: 44px;
+  height: 44px;
+  color: var(--invitation-text);
+  background: #30343e;
+  box-shadow: 0 2px 12px rgb(0 0 0 / 30%);
+}
+.living-map .event-preview--invitation .event-preview__footer {
+  display: grid;
+  grid-template-columns: none;
+  gap: .5rem;
+  padding: .85rem 1.5rem 1.15rem;
+  border-top: 1px solid #3b3d48;
+  background: var(--invitation-surface);
+}
+.living-map .event-preview--invitation .event-preview__action {
+  min-height: 3.25rem;
+  border-radius: 999px;
+  background: var(--invitation-purple);
+}
+.living-map .event-preview--invitation .event-preview__action:hover { background: #8b65ff; }
+.living-map .event-preview--invitation .event-preview__action:disabled { color: #aeb4c1; background: #333740; }
+.living-map .event-preview--invitation .event-preview__explanation { color: var(--invitation-muted); }
+.living-map .event-preview--invitation .event-preview__back { color: var(--invitation-accent); background: #30343e; }
+.living-map .event-preview--invitation .event-preview__indication { color: var(--invitation-accent); background: #30264f; }
+.living-map.living-map--embedded .event-preview.event-preview--invitation {
+  top: .75rem;
+  max-height: calc(100% - 3.25rem);
+}
+@media (max-width: 1099px) and (min-width: 768px) {
+  .living-map .event-preview.event-preview--invitation { top: 136px; width: 390px; max-height: calc(100% - 170px); }
+}
+@media (max-width: 767px) {
+  .living-map--event-open .living-map__filters { visibility: hidden; }
+  .living-map .event-preview.event-preview--invitation {
+    top: 78px;
+    right: calc(.5rem + env(safe-area-inset-right));
+    bottom: calc(2rem + env(safe-area-inset-bottom));
+    left: calc(.5rem + env(safe-area-inset-left));
+    width: auto;
+    height: auto;
+    max-height: none;
+    border-radius: 1.5rem;
+  }
+  .living-map .event-preview--invitation .event-invitation__hero { padding: .5rem .5rem 0; }
+  .living-map .event-preview--invitation .event-preview__artwork { max-height: 40dvh; border-radius: 1rem; }
+  .living-map .event-preview--invitation .event-invitation__body { padding: 1.25rem; }
+  .living-map .event-preview--invitation .event-preview__footer { padding: .75rem 1.25rem 1rem; }
+  .living-map .event-preview--invitation .event-preview__close { top: 1rem; left: 1rem; }
+  .living-map.living-map--embedded .event-preview.event-preview--invitation { top: 76px; bottom: 28px; max-height: none; }
+}
+@media (max-height: 500px) and (orientation: landscape) {
+  .living-map .event-preview.event-preview--invitation { top: 1rem; right: 5rem; bottom: 2rem; left: auto; width: 45%; max-height: none; }
+}
+@keyframes event-invitation-reveal {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .living-map .event-preview.event-preview--invitation { animation: none; }
+}
+.living-map .event-preview--invitation .event-invitation__description {
+  margin-top: .4rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid #3b3d48;
+}
+.living-map .event-preview--invitation .event-invitation__description h3 {
+  margin: 0 0 .65rem;
+  color: var(--invitation-text);
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 650;
+  letter-spacing: -.02em;
+}
+.living-map .event-preview--invitation .event-invitation__description p {
+  margin: 0;
+  color: var(--invitation-muted);
+  font-size: .85rem;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.living-map .event-preview--invitation .event-invitation__description-error button {
+  min-height: 44px;
+  padding: .4rem 0;
+  color: var(--invitation-accent);
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: .8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.living-map .event-preview--invitation .event-invitation__description-error button:focus-visible {
+  outline: 3px solid #b7a5ff;
+  outline-offset: 2px;
+}
+
+.living-map__home {
+  pointer-events: auto;
+  display: inline-flex; min-height: 44px; align-items: center;
+  padding: .5rem .85rem; border: 1px solid #585461; border-radius: .7rem;
+  color: #f7f6fb; background: #20232b; font-size: .8rem; font-weight: 700; text-decoration: none;
+}
+.living-map__home:focus-visible { outline: 3px solid #b7a5ff; outline-offset: 3px; }
+@container map-overlays (max-height: 22rem) {
+  .living-map .event-preview.event-preview--invitation {
+    top: .75rem; bottom: .75rem; max-height: calc(100cqh - 1.5rem);
+    height: auto; display: flex;
+  }
+}
