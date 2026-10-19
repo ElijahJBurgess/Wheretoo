@@ -177,6 +177,11 @@ async function expectTouchHit(page: Page, selector: string) {
     const owner = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)
     return Boolean(owner && node.contains(owner))
   })
+  if (!hit) console.log('touch-hit diagnostic', await page.locator(selector).evaluate(node => {
+    const r = node.getBoundingClientRect(), map = node.closest('.living-map')!.getBoundingClientRect()
+    const owner = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)
+    return { control: r.toJSON(), map: map.toJSON(), viewport: [innerWidth, innerHeight], scrollY, owner: owner?.className }
+  }))
   expect(hit, `${selector} must receive a touch at its visible center`).toBe(true)
 }
 
@@ -333,6 +338,18 @@ test('compact preview exposes essential facts, contains artwork and leaves lands
     await expectTouchHit(page, '.event-preview__close')
     await expectTouchHit(page, '.event-preview__action')
     await expectTouchHit(page, '.event-preview__back')
+    for (const selector of ['.mapboxgl-ctrl-zoom-in', '.mapboxgl-ctrl-zoom-out']) {
+      const control = await page.locator(selector).evaluate(node => {
+        const r = node.getBoundingClientRect(), card = node.closest('.living-map')!.querySelector('.event-preview')!.getBoundingClientRect()
+        const x = r.x + r.width / 2, y = r.y + r.height / 2
+        const barBottom = document.querySelector('.discovery-mode-bar')?.getBoundingClientRect().bottom ?? 0
+        return { covered: x >= card.left && x <= card.right && y >= card.top && y <= card.bottom, onScreen: r.top >= barBottom && r.bottom <= innerHeight }
+      })
+      expect(control.covered, 'The preview must leave zoom controls clear').toBe(false)
+      // Short landscape maps extend behind the sticky mode bar. Their offscreen
+      // controls become reachable by scrolling, not by shrinking the preview.
+      if (control.onScreen) await expectTouchHit(page, selector)
+    }
     await page.screenshot({ path: info.outputPath(`compact-${path.slice(1)}.png`) })
   }
 })
@@ -424,6 +441,17 @@ test('photo previews stay compact across embedded and standalone maps', async ({
     const image = page.locator('.event-preview__artwork')
     await expect.poll(() => image.evaluate(node => (node as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
     expect(await image.evaluate(node => getComputedStyle(node).objectFit)).toBe('contain')
+    const geometry = await page.locator('.event-preview').evaluate(node => {
+      const pane = node.querySelector('.event-preview__scroll')!.getBoundingClientRect()
+      const facts = [node.querySelector('h2')!, ...node.querySelectorAll('.event-preview__details')]
+      return {
+        factsVisible: facts.every(el => { const r = el.getBoundingClientRect(); return r.top >= pane.top && r.bottom <= pane.bottom }),
+        mapHeight: node.closest('.living-map')!.getBoundingClientRect().height,
+        artworkHeight: node.querySelector('img')!.getBoundingClientRect().height,
+      }
+    })
+    if (page.viewportSize()!.height >= 568) expect(geometry.factsVisible, `${path}: photo must not push essential facts below the first scroll view`).toBe(true)
+    if (geometry.mapHeight > 608) expect(geometry.artworkHeight, 'taller maps retain the artwork-led opening').toBeGreaterThan(120)
     await expectTouchHit(page, '.event-preview__close')
     await expectTouchHit(page, '.event-preview__action')
     await page.screenshot({ path: info.outputPath(`photo-${path.slice(1)}.png`) })
